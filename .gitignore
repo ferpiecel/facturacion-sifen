@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+# Certificados y claves: nunca al repo
+*.p12
+*.pfx
+*.pem
+*.key
+.DS_Store
+Thumbs.db

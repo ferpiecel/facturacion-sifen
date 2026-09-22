@@ -514,7 +514,9 @@ Sin cambios respecto de la v1.0, más:
 
 > ⚠️ **Conflicto a resolver:** el MT v150 (D105, validación 1263) y el ejemplo oficial xml_DE exigen el literal "DE generado en ambiente de prueba - sin valor comercial ni fiscal". La Guía 2026 pide otro. Se parametriza por ambiente y se confirma con el Prevalidador o con la mesa de ayuda de la DNIT antes de la homologación.
 
-### 15.3 Batería mínima de homologación (Guía de Pruebas 2026)
+### 15.3 Batería mínima de pruebas (Guía de Pruebas 2026)
+
+> La Guía la presenta como pruebas mínimas **sugeridas**, no como una homologación que la DNIT aprueba formalmente. Si se exige evidencia para habilitar producción, está pendiente de confirmar (PRD, D1).
 
 | Escenario | Cantidad |
 |---|---|
@@ -537,6 +539,8 @@ Si el RUC no queda habilitado para el servicio síncrono, se consulta con la DNI
 
 ## 16. Roadmap por fases (ajustado)
 
+> **Reemplazada por [`docs/roadmap.md`](../roadmap.md)**, que define el MVP, la v1.0 estable y la v1.1 con gates de salida. Esta sección se conserva como referencia.
+
 ### Fase 0 — Preparación y PoC (2–3 semanas)
 - Monorepo, CI/CD, infraestructura base, plantilla de módulo hexagonal y regla de dependencias.
 - Habilitación como facturador electrónico en test (SGTM), certificado y CSC.
@@ -555,7 +559,7 @@ Si el RUC no queda habilitado para el servicio síncrono, se consulta con la DNI
 - Auditoría base.
 - **Batería de homologación completa (§15.3).**
 
-**Salida:** homologación aprobada y alta en producción con un cliente piloto (el sistema de restaurantes).
+**Salida:** batería mínima completada (con evidencia archivada) y alta en producción con un cliente piloto (el sistema de restaurantes).
 
 ### Fase 2 — Producción y SaaS (6 semanas)
 - Pilotos en producción (3–5 clientes).

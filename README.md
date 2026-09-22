@@ -6,14 +6,18 @@ Plataforma SaaS multi-tenant para emitir documentos electrónicos ante SIFEN (DN
 
 ## Estado
 
-Fase 0: diseño. Todavía no hay código.
+Fase 0 (fundaciones y PoC). Todavía no hay código. Ver [roadmap](docs/roadmap.md).
 
 ## Documentación
 
-| Documento | Descripción |
+| Documento | Responde |
 |---|---|
-| [`docs/plan/plan-desarrollo-v1.1.md`](docs/plan/plan-desarrollo-v1.1.md) | **Plan vigente.** Corrige la v1.0 contra la documentación oficial (la sección 0 lista los cambios). |
-| [`docs/plan/plan-desarrollo-v1.0.md`](docs/plan/plan-desarrollo-v1.0.md) | Plan original, se conserva como referencia histórica. |
+| [`docs/prd/prd.md`](docs/prd/prd.md) | **Qué** se construye y para quién: actores, modelos comerciales, flujos, RF/RNF por release, preguntas abiertas |
+| [`docs/roadmap.md`](docs/roadmap.md) | **Cuándo**: MVP (4 fases) → v1.0 estable (2 fases) → v1.1 (1 fase), con gates de salida |
+| [`docs/backlog/mvp.md`](docs/backlog/mvp.md) | Historias del MVP por épica, con criterios y trazabilidad a SIFEN |
+| [`docs/adr/`](docs/adr/README.md) | **Por qué**: decisiones de arquitectura |
+| [`docs/plan/plan-desarrollo-v1.1.md`](docs/plan/plan-desarrollo-v1.1.md) | **Cómo**: diseño técnico (arquitectura, modelo de datos, flujos SIFEN, pruebas) |
+| [`docs/plan/plan-desarrollo-v1.0.md`](docs/plan/plan-desarrollo-v1.0.md) | Plan original, referencia histórica |
 
 ### Referencia oficial (DNIT)
 

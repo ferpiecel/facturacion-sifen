@@ -47,7 +47,7 @@ Sem:  1   3   5   7   9   11  13  15  17  19  21  23  25  27  29
 **Gate de salida:**
 - [ ] FE de la PoC aprobada en `sifen-test` y QR verificable en e-kuatia.
 - [ ] ADR de las librerías de TIPS confirmado o modificado (qué se usa y qué se reemplaza).
-- [ ] Contradicciones D2 y D3 resueltas (por respuesta de la DNIT o por el Prevalidador).
+- [ ] D3 (canonicalización/KeyInfo de la firma) resuelto por NT 016; confirmar con el Prevalidador. D2 (literal de ambiente de test) resuelto en papel por la Guía de Pruebas 2026 §2; confirmar con el Prevalidador.
 - [ ] CI en verde con la regla de dependencias activa.
 
 ### F1 — Núcleo de emisión de FE (semanas 4–8)

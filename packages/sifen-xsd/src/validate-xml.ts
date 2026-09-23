@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import {
   XmlBufferInputProvider,
   XmlDocument,
-  XmlValidateError,
+  XmlLibError,
   XsdValidator,
   xmlRegisterInputProvider,
 } from 'libxml2-wasm';
@@ -65,7 +65,8 @@ export interface ValidationResult {
 }
 
 function toXsdErrors(error: unknown): XsdError[] {
-  if (error instanceof XmlValidateError && error.details.length > 0) {
+  // Parse and validation errors both carry libxml2 details; line/col 0 means "unknown".
+  if (error instanceof XmlLibError && error.details.length > 0) {
     return error.details.map((detail) => ({
       message: detail.message.trim(),
       line: detail.line || null,

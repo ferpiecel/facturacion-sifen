@@ -6,7 +6,31 @@ Plataforma SaaS multi-tenant para emitir documentos electrónicos ante SIFEN (DN
 
 ## Estado
 
-Fase 0 (fundaciones y PoC). Todavía no hay código. Ver [roadmap](docs/roadmap.md).
+Fase 0 (fundaciones y PoC). Ya están el monorepo con CI (HU-E0-01), la API de referencia con el módulo `health` (HU-E0-03) y la validación de XML contra los XSD oficiales de SIFEN (HU-E0-06). Ver [roadmap](docs/roadmap.md).
+
+## Desarrollo local
+
+Requisitos: Node.js 22 y pnpm 12.5.1 (`corepack enable` con corepack ≥ 0.36). Si el corepack de tu Node es más viejo, usá `npx pnpm@12.5.1`.
+
+```bash
+pnpm install
+pnpm check            # lint, typecheck, depcruise y tests
+docker compose up -d  # PostgreSQL 16 y Redis 7
+pnpm --filter @sifen/api build && pnpm --filter @sifen/api start
+```
+
+### Variables de entorno
+
+Todas tienen un valor por defecto, así que el entorno local funciona sin un archivo `.env`. Para cambiarlas, exportalas en tu shell o creá un `.env` local, que nunca se sube al repositorio.
+
+| Variable | Default | Usada por | Descripción |
+|---|---|---|---|
+| `PORT` | `3000` | `apps/api` | Puerto HTTP de la API. Solo acepta enteros entre 1 y 65535. |
+| `POSTGRES_USER` | `sifen` | `docker-compose.yml` | Usuario de PostgreSQL. |
+| `POSTGRES_PASSWORD` | `sifen` | `docker-compose.yml` | Contraseña de PostgreSQL. Es solo para desarrollo local. |
+| `POSTGRES_DB` | `sifen` | `docker-compose.yml` | Base de datos. |
+| `POSTGRES_PORT` | `5432` | `docker-compose.yml` | Puerto de PostgreSQL en el host. |
+| `REDIS_PORT` | `6379` | `docker-compose.yml` | Puerto de Redis en el host. |
 
 ## Documentación
 

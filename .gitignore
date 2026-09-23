@@ -11,3 +11,5 @@ dist/
 .DS_Store
 Thumbs.db
 *:Zone.Identifier
+# Local gentle-ai skill registry (machine-specific paths)
+.atl/

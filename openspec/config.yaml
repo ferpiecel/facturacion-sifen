@@ -1,0 +1,50 @@
+# openspec/config.yaml
+schema: spec-driven
+
+context: |
+  Project: facturacion-sifen (Paraguay e-invoicing / SIFEN integration platform).
+  Stack (planned, per accepted ADRs, no code yet): Node.js 22 + TypeScript,
+  NestJS with Fastify adapter, hexagonal architecture (domain/application
+  framework-free, enforced by dependency-cruiser), pnpm workspaces +
+  Turborepo monorepo (apps/api, apps/workers, apps/portal, packages/*),
+  PostgreSQL 16 + Drizzle ORM with FORCE RLS (multi-tenant), BullMQ + Redis 7.
+  Source docs: docs/prd/prd.md, docs/roadmap.md, docs/backlog/mvp.md,
+  docs/plan/plan-desarrollo-v1.1.md, docs/adr/0001-0014.
+
+strict_tdd: false # planned true, pending test runner setup (first change scaffolds it)
+
+testing:
+  status: planned-not-installed
+  note: >
+    No package.json / test runner exists yet. The first implementation
+    change (monorepo + CI scaffolding, per roadmap F0) must set up the
+    test runner. Strict TDD is intended to become true once a runner exists.
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes
+    - Reference the relevant ADR(s) under docs/adr/ when a decision is already fixed
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+  design:
+    - Preserve hexagonal architecture: domain/application layers stay framework-free
+    - Document architecture decisions with rationale; cross-reference existing ADRs
+    - Include sequence diagrams for complex flows (e.g. SIFEN lote/sync transmission)
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+    - Align with roadmap phases (F0-F6) and backlog epics where applicable
+  apply:
+    guidelines:
+      - Follow hexagonal architecture; keep domain/application free of NestJS/Fastify/Drizzle imports
+      - Enforce boundaries with dependency-cruiser
+      - Multi-tenant isolation via PostgreSQL RLS (FORCE RLS) must be respected in all data access code
+    tdd: false # flip to true once the workspace test runner is scaffolded
+    test_command: ""
+  verify:
+    test_command: ""
+    build_command: ""
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas

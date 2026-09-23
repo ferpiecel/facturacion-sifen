@@ -27,11 +27,24 @@ jobs:
         with:
           node-version-file: .nvmrc
 
-      - run: corepack enable
+      # The corepack bundled with Node 22 cannot shim pnpm 12's native binary; 0.36+ can.
+      - run: npm install --global corepack@0.36.0 && corepack enable
+
+      - id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
 
       - uses: actions/cache@v6
         with:
-          path: ~/.local/share/pnpm/store
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-store-${{ runner.os }}-
+
+      - uses: actions/cache@v6
+        with:
+          path: .turbo/cache
           key: turbo-${{ matrix.task }}-${{ github.sha }}
           restore-keys: |
             turbo-${{ matrix.task }}-

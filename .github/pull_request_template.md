@@ -55,6 +55,7 @@ No aplica
 
 **Realizadas**
 
+- [ ] Revisión de código por agente sin hallazgos bloqueantes (ver comentario en el PR)
 - [x]
 
 **Pendientes**

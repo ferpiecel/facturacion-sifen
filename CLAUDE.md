@@ -4,8 +4,8 @@ Instrucciones para cualquier persona o agente que trabaje en este repositorio. L
 
 ## Reglas de oro
 
-1. **Una tarea, una rama, un PR.** Cada tarea nueva (historia del backlog, cambio SDD o slice de un cambio) se trabaja en su propia rama creada desde `main`.
-2. **Todo PR apunta a `main`.** Nunca se mergea sin revisión humana. El merge lo hace el dueño del producto.
+1. **Una tarea, una rama, un PR.** Cada tarea nueva (historia del backlog, cambio SDD o slice de un cambio) se trabaja en su propia rama, creada desde `main` o, si depende de un PR sin mergear, desde la rama de ese PR (ver [PRs encadenados](#prs-encadenados)).
+2. **Todo PR apunta a `main` y pasa una revisión de código antes del merge.** Un agente revisa el diff y publica sus hallazgos como comentario en el PR. Se mergea solo con el CI en verde y sin hallazgos bloqueantes abiertos. El líder técnico (humano o agente autorizado por el dueño del producto) hace el merge con *squash*.
 3. **Nada se pushea directo a `main`**, salvo commits de solo documentación de planificación (`docs:`) autorizados por el líder técnico.
 4. **Commits convencionales, sin atribución de IA.** Nunca `Co-Authored-By` ni menciones a herramientas de IA en commits ni PRs.
 5. **La descripción del PR va en español** y sigue la plantilla [`.github/pull_request_template.md`](.github/pull_request_template.md). Las secciones que no apliquen se completan con "No aplica", no se borran.
@@ -30,7 +30,14 @@ Cuando una tarea depende de otra que todavía no se mergeó:
 
 1. La rama nueva sale de la rama anterior, no de `main`.
 2. El PR se abre contra `main` **como borrador**, con `Depende de #<número>` en la descripción.
-3. Cuando el PR anterior se mergea, se rebasea la rama sobre `main` y el PR pasa a "listo para revisión".
+3. Cuando el PR anterior se mergea, se rebasea la rama sobre `main` (`git rebase --onto main <rama-anterior>`, porque el squash cambia los commits) y el PR pasa a "listo para revisión".
+
+## Revisión de código
+
+1. Con el PR abierto, un agente revisa el diff completo buscando bugs reales: condiciones invertidas, validaciones faltantes, errores no manejados, violaciones de los ADRs y de las reglas de SIFEN.
+2. Los hallazgos se publican como comentario en el PR, con archivo, línea, escenario de falla y severidad.
+3. Los hallazgos bloqueantes se corrigen en la misma rama y se vuelve a revisar. Los no bloqueantes se corrigen o se registran como deuda en la sección "Validaciones pendientes".
+4. El merge se hace solo con el CI en verde y la revisión sin bloqueantes.
 
 ## Commits
 

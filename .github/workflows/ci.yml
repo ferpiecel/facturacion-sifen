@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-gates:
+    name: ${{ matrix.task }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # `test` joins the matrix once the workspace test runner exists (HU-E0-03).
+        task: [format:check, lint, typecheck, depcruise]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      # The corepack bundled with Node 22 cannot shim pnpm 12's native binary; 0.36+ can.
+      - run: npm install --global corepack@0.36.0 && corepack enable
+
+      - id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+
+      - uses: actions/cache@v6
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-store-${{ runner.os }}-
+
+      - uses: actions/cache@v6
+        with:
+          path: .turbo/cache
+          key: turbo-${{ matrix.task }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ matrix.task }}-
+
+      - run: pnpm install --frozen-lockfile
+
+      # Turbo exits 0 when no package defines the task; fail instead of passing vacuously.
+      - name: Ensure ${{ matrix.task }} has runnable tasks
+        run: |
+          count=$(pnpm turbo run ${{ matrix.task }} --dry=json \
+            | jq '[.tasks[] | select(.command != "<NONEXISTENT>")] | length')
+          echo "Runnable ${{ matrix.task }} tasks: $count"
+          test "$count" -gt 0
+
+      - run: pnpm turbo run ${{ matrix.task }}

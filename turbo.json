@@ -22,6 +22,9 @@
     "test": {
       "dependsOn": ["transit"]
     },
+    "verify-vendor": {
+      "inputs": ["vendor/**", "scripts/**"]
+    },
     "dev": {
       "cache": false,
       "persistent": true

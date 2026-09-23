@@ -25,31 +25,31 @@ Chain strategy: stacked-to-main
 
 ## Phase 1: Package Skeleton (PR1)
 
-- [ ] 1.1 Create `packages/sifen-xsd/package.json` (`type: module`, exports `./dist/index.js`, scripts `build/typecheck/lint/depcruise/test/verify-vendor/refresh-xsd`, `libxml2-wasm` pinned exact `0.7.2`)
-- [ ] 1.2 Create `packages/sifen-xsd/tsconfig.json` and `tsconfig.build.json` extending `@sifen/config` (`module: nodenext`, `erasableSyntaxOnly`, `rewriteRelativeImportExtensions`)
-- [ ] 1.3 Create `packages/sifen-xsd/eslint.config.js` extending shared config; ignore `dist/**`, `vendor/**`
-- [ ] 1.4 Create `packages/sifen-xsd/vitest.config.ts` mirroring `apps/api`
-- [ ] 1.5 Create `packages/sifen-xsd/src/index.ts` as an empty placeholder module (real exports land in 6.9)
+- [x] 1.1 Create `packages/sifen-xsd/package.json` (`type: module`, exports `./dist/index.js`, scripts `build/typecheck/lint/depcruise/test/verify-vendor/refresh-xsd`, `libxml2-wasm` pinned exact `0.7.2`)
+- [x] 1.2 Create `packages/sifen-xsd/tsconfig.json` and `tsconfig.build.json` extending `@sifen/config` (`module: nodenext`, `erasableSyntaxOnly`, `rewriteRelativeImportExtensions`)
+- [x] 1.3 Create `packages/sifen-xsd/eslint.config.js` extending shared config; ignore `dist/**`, `vendor/**`
+- [x] 1.4 Create `packages/sifen-xsd/vitest.config.ts` mirroring `apps/api`
+- [x] 1.5 Create `packages/sifen-xsd/src/index.ts` as an empty placeholder module (real exports land in 6.9)
 
 ## Phase 2: Checksum Scripts — RED/GREEN (PR1)
 
-- [ ] 2.1 RED: `packages/sifen-xsd/test/verify-checksums.spec.ts` — tampered byte, missing file, extra file each produce non-zero exit and name the mismatched file (design test 5)
-- [ ] 2.2 GREEN: create `packages/sifen-xsd/scripts/checksums.ts` (shared sha256/manifest helpers)
-- [ ] 2.3 GREEN: create `packages/sifen-xsd/scripts/verify-checksums.ts` (CI integrity check) to pass 2.1
-- [ ] 2.4 Wire `verify-vendor` script in `package.json` to run `verify-checksums.ts`
+- [x] 2.1 RED: `packages/sifen-xsd/test/verify-checksums.spec.ts` — tampered byte, missing file, extra file each produce non-zero exit and name the mismatched file (design test 5)
+- [x] 2.2 GREEN: create `packages/sifen-xsd/scripts/checksums.ts` (shared sha256/manifest helpers)
+- [x] 2.3 GREEN: create `packages/sifen-xsd/scripts/verify-checksums.ts` (CI integrity check) to pass 2.1
+- [x] 2.4 Wire `verify-vendor` script in `package.json` to run `verify-checksums.ts`
 
 ## Phase 3: Vendor Refresh Workflow (PR1)
 
-- [ ] 3.1 Create `packages/sifen-xsd/scripts/refresh-xsd.ts` — download with redirect-follow, transitive `xsd:include`/`xsd:import` closure (regex tolerant of whitespace around `=`), abort on drift unless `--update`
-- [ ] 3.2 Run `refresh-xsd.ts --update` to populate `packages/sifen-xsd/vendor/*.xsd` with the verified 8-file `siRecepDE_v150` closure and generate `vendor/checksums.json`
-- [ ] 3.3 Create `packages/sifen-xsd/vendor/README.md` documenting source URLs and fetch date
+- [x] 3.1 Create `packages/sifen-xsd/scripts/refresh-xsd.ts` — download with redirect-follow, transitive `xsd:include`/`xsd:import` closure (regex tolerant of whitespace around `=`), abort on drift unless `--update`
+- [x] 3.2 Run `refresh-xsd.ts --update` to populate `packages/sifen-xsd/vendor/*.xsd` with the verified 8-file `siRecepDE_v150` closure and generate `vendor/checksums.json`
+- [x] 3.3 Create `packages/sifen-xsd/vendor/README.md` documenting source URLs and fetch date
 
 ## Phase 4: CI / Turbo Wiring (PR1)
 
-- [ ] 4.1 Modify `turbo.json`: add `verify-vendor` task, no `dependsOn`, `inputs: ["vendor/**", "scripts/**"]`
-- [ ] 4.2 Modify `.github/workflows/ci.yml`: add `verify-vendor` to the quality-gate matrix
-- [ ] 4.3 Modify `.prettierignore`: add `packages/sifen-xsd/vendor/`
-- [ ] 4.4 Verify: `pnpm turbo run verify-vendor lint typecheck test --filter=@sifen/sifen-xsd`
+- [x] 4.1 Modify `turbo.json`: add `verify-vendor` task, no `dependsOn`, `inputs: ["vendor/**", "scripts/**"]`
+- [x] 4.2 Modify `.github/workflows/ci.yml`: add `verify-vendor` to the quality-gate matrix
+- [x] 4.3 Modify `.prettierignore`: add `packages/sifen-xsd/vendor/`
+- [x] 4.4 Verify: `pnpm turbo run verify-vendor lint typecheck test --filter=@sifen/sifen-xsd`
 
 ## Phase 5: Schema Map & Fixture Helper (PR2, draft, depends on PR1)
 

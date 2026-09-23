@@ -1,5 +1,6 @@
 docs/
 openspec/
 pnpm-lock.yaml
+packages/sifen-xsd/vendor/
 # Prose documentation is not auto-formatted
 *.md

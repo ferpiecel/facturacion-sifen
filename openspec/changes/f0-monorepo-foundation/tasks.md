@@ -52,12 +52,12 @@ Chain strategy: stacked-to-main
 
 ## Phase 4: API Reference Module — `health` (PR2, TDD red→green)
 
-- [ ] 4.1 RED: write `application/get-health.use-case.spec.ts` (fake port). Verify: fails (no source).
-- [ ] 4.2 GREEN: create `domain/health-report.ts`, `application/ports/health-check.port.ts`, `application/get-health.use-case.ts`. Verify: spec passes.
-- [ ] 4.3 RED: write `infrastructure/health.module.spec.ts` (DI: `Test.createTestingModule` resolves `HealthCheckPort`). Verify: fails.
-- [ ] 4.4 GREEN: create `infrastructure/adapters/process-health-check.adapter.ts`, `infrastructure/controllers/health.controller.ts`, `src/modules/health/{health.module.ts, health.tokens.ts}`. Verify: DI spec passes.
-- [ ] 4.5 RED: write `test/health.e2e.spec.ts` (`GET /health` → 200 via Fastify `inject()`). Verify: fails.
-- [ ] 4.6 GREEN: create `src/main.ts`, `src/app.module.ts` wiring `HealthModule`. Verify: e2e spec passes.
+- [x] 4.1 RED: write `application/get-health.use-case.spec.ts` (fake port). Verify: fails (no source).
+- [x] 4.2 GREEN: create `domain/health-report.ts`, `application/ports/health-check.port.ts`, `application/get-health.use-case.ts`. Verify: spec passes.
+- [x] 4.3 RED: write `infrastructure/health.module.spec.ts` (DI: `Test.createTestingModule` resolves `HealthCheckPort`). Verify: fails.
+- [x] 4.4 GREEN: create `infrastructure/adapters/process-health-check.adapter.ts`, `infrastructure/controllers/health.controller.ts`, `src/modules/health/{health.module.ts, health.tokens.ts}`. Verify: DI spec passes.
+- [x] 4.5 RED: write `test/health.e2e.spec.ts` (`GET /health` → 200 via Fastify `inject()`). Verify: fails.
+- [x] 4.6 GREEN: create `src/main.ts`, `src/app.module.ts` wiring `HealthModule`. Verify: e2e spec passes.
 
 ## Phase 5: Finalize (PR2)
 

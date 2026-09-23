@@ -61,6 +61,6 @@ Chain strategy: stacked-to-main
 
 ## Phase 5: Finalize (PR2)
 
-- [ ] 5.1 Run `pnpm turbo run lint typecheck depcruise test build`; confirm all gates green. Verify: same command, exit 0.
-- [ ] 5.2 Flip `openspec/config.yaml`: `strict_tdd: true`, `apply.tdd: true`, `apply.test_command`/`verify.test_command: "pnpm turbo run test"`, `verify.build_command: "pnpm turbo run build"`. Verify: file inspection matches spec `test-runner`.
+- [x] 5.1 Run `pnpm turbo run lint typecheck depcruise test build`; confirm all gates green. Verify: same command, exit 0.
+- [x] 5.2 Flip `openspec/config.yaml`: `strict_tdd: true`, `apply.tdd: true`, `apply.test_command`/`verify.test_command: "pnpm turbo run test"`, `verify.build_command: "pnpm turbo run build"`. Verify: file inspection matches spec `test-runner`.
 - [ ] 5.3 Commit PR2 as scoped work-unit commits; open PR2 targeting PR1's branch (stacked-to-main); confirm diff excludes PR1 content. Verify: `git diff <PR1-branch>...HEAD --stat`.

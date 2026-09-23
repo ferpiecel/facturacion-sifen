@@ -11,7 +11,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "depcruise": "depcruise --config ../../.dependency-cruiser.cjs src",
+    "depcruise": "depcruise --config .dependency-cruiser.cjs src",
     "test": "vitest run"
   },
   "devDependencies": {

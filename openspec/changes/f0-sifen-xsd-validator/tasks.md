@@ -40,16 +40,16 @@ Chain strategy: stacked-to-main
 
 ## Phase 3: Vendor Refresh Workflow (PR1)
 
-- [ ] 3.1 Create `packages/sifen-xsd/scripts/refresh-xsd.ts` — download with redirect-follow, transitive `xsd:include`/`xsd:import` closure (regex tolerant of whitespace around `=`), abort on drift unless `--update`
-- [ ] 3.2 Run `refresh-xsd.ts --update` to populate `packages/sifen-xsd/vendor/*.xsd` with the verified 8-file `siRecepDE_v150` closure and generate `vendor/checksums.json`
-- [ ] 3.3 Create `packages/sifen-xsd/vendor/README.md` documenting source URLs and fetch date
+- [x] 3.1 Create `packages/sifen-xsd/scripts/refresh-xsd.ts` — download with redirect-follow, transitive `xsd:include`/`xsd:import` closure (regex tolerant of whitespace around `=`), abort on drift unless `--update`
+- [x] 3.2 Run `refresh-xsd.ts --update` to populate `packages/sifen-xsd/vendor/*.xsd` with the verified 8-file `siRecepDE_v150` closure and generate `vendor/checksums.json`
+- [x] 3.3 Create `packages/sifen-xsd/vendor/README.md` documenting source URLs and fetch date
 
 ## Phase 4: CI / Turbo Wiring (PR1)
 
-- [ ] 4.1 Modify `turbo.json`: add `verify-vendor` task, no `dependsOn`, `inputs: ["vendor/**", "scripts/**"]`
-- [ ] 4.2 Modify `.github/workflows/ci.yml`: add `verify-vendor` to the quality-gate matrix
-- [ ] 4.3 Modify `.prettierignore`: add `packages/sifen-xsd/vendor/`
-- [ ] 4.4 Verify: `pnpm turbo run verify-vendor lint typecheck test --filter=@sifen/sifen-xsd`
+- [x] 4.1 Modify `turbo.json`: add `verify-vendor` task, no `dependsOn`, `inputs: ["vendor/**", "scripts/**"]`
+- [x] 4.2 Modify `.github/workflows/ci.yml`: add `verify-vendor` to the quality-gate matrix
+- [x] 4.3 Modify `.prettierignore`: add `packages/sifen-xsd/vendor/`
+- [x] 4.4 Verify: `pnpm turbo run verify-vendor lint typecheck test --filter=@sifen/sifen-xsd`
 
 ## Phase 5: Schema Map & Fixture Helper (PR2, draft, depends on PR1)
 

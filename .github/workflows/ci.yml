@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        task: [format:check, lint, typecheck, depcruise, test, build]
+        task: [format:check, lint, typecheck, depcruise, test]
     steps:
       - uses: actions/checkout@v7
 

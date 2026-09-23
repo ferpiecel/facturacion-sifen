@@ -53,22 +53,22 @@ Chain strategy: stacked-to-main
 
 ## Phase 5: Schema Map & Fixture Helper (PR2, draft, depends on PR1)
 
-- [ ] 5.1 Create `packages/sifen-xsd/src/schemas.ts` — `SifenSchema = 'siRecepDE'` → root file map, `vendorDir` from `import.meta.url`
-- [ ] 5.2 Create `packages/sifen-xsd/test/fixtures/patch-example.ts` — patches `docs/referencia/ejemplos/ejemplo-de-firmado-v150.xml` (read-only): RUCs `80000001`/`80000002`, `<dBasExe>0</dBasExe>` in each `gCamIVA`, dummy base64 certificate
+- [x] 5.1 Create `packages/sifen-xsd/src/schemas.ts` — `SifenSchema = 'siRecepDE'` → root file map, `vendorDir` from `import.meta.url`
+- [x] 5.2 Create `packages/sifen-xsd/test/fixtures/patch-example.ts` — patches `docs/referencia/ejemplos/ejemplo-de-firmado-v150.xml` (read-only): RUCs `80000001`/`80000002`, `<dBasExe>0</dBasExe>` in each `gCamIVA`, dummy base64 certificate
 
 ## Phase 6: Validator Core — RED/GREEN per Scenario (PR2)
 
-- [ ] 6.1 RED: `test/validate-xml.spec.ts` — untouched official example is invalid (asserts the 3 documented failures: RUC pattern, missing `dBasExe`, non-base64 cert)
-- [ ] 6.2 RED: patched valid fixture → `validateXml(..., 'siRecepDE')` returns `valid: true`, `errors: []` (spec: Official signed example validates)
-- [ ] 6.3 GREEN: create `packages/sifen-xsd/src/validate-xml.ts` — register `XmlBufferInputProvider` per vendored file (absolute URL + bare name), `XsdValidator.fromDoc` cached per schema, `dispose()` every parsed doc
-- [ ] 6.4 RED: remove `dVerFor` from the patched fixture → `valid: false`, error names the missing element (spec: Missing required element)
-- [ ] 6.5 RED: set `iTipEmi` to `9` on the patched fixture → `valid: false`, actionable enum error (spec: Wrong enum value)
-- [ ] 6.6 RED: malformed XML string → `valid: false`, no throw (design test 4)
-- [ ] 6.7 GREEN: extend `validate-xml.ts` error normalization (`XsdError { message, line, column, path }`) to pass 6.4–6.6
-- [ ] 6.8 RED: assert `validate-xml.ts` makes no outbound network call during validation (spec: Validation runs without network access)
-- [ ] 6.9 Update `src/index.ts`: export `validateXml`, `SifenSchema`, `XsdError`, `ValidationResult`
+- [x] 6.1 RED: `test/validate-xml.spec.ts` — untouched official example is invalid (asserts the 3 documented failures: RUC pattern, missing `dBasExe`, non-base64 cert)
+- [x] 6.2 RED: patched valid fixture → `validateXml(..., 'siRecepDE')` returns `valid: true`, `errors: []` (spec: Official signed example validates)
+- [x] 6.3 GREEN: create `packages/sifen-xsd/src/validate-xml.ts` — register `XmlBufferInputProvider` per vendored file (absolute URL + bare name), `XsdValidator.fromDoc` cached per schema, `dispose()` every parsed doc
+- [x] 6.4 RED: remove `dVerFor` from the patched fixture → `valid: false`, error names the missing element (spec: Missing required element)
+- [x] 6.5 RED: set `iTipEmi` to `9` on the patched fixture → `valid: false`, actionable enum error (spec: Wrong enum value)
+- [x] 6.6 RED: malformed XML string → `valid: false`, no throw (design test 4)
+- [x] 6.7 GREEN: extend `validate-xml.ts` error normalization (`XsdError { message, line, column, path }`) to pass 6.4–6.6
+- [x] 6.8 RED: assert `validate-xml.ts` makes no outbound network call during validation (spec: Validation runs without network access)
+- [x] 6.9 Update `src/index.ts`: export `validateXml`, `SifenSchema`, `XsdError`, `ValidationResult`
 
 ## Phase 7: Cleanup (PR2)
 
-- [ ] 7.1 Final pass on `package.json` exports/deps; confirm `libxml2-wasm` stays pinned exact `0.7.2`
-- [ ] 7.2 Run `pnpm turbo run lint typecheck test verify-vendor --filter=@sifen/sifen-xsd`; note `pnpm-lock.yaml` diff for `libxml2-wasm` (gentle-ai budget: lockfile changes grow the diff but are excluded from the 400-line count)
+- [x] 7.1 Final pass on `package.json` exports/deps; confirm `libxml2-wasm` stays pinned exact `0.7.2`
+- [x] 7.2 Run `pnpm turbo run lint typecheck test verify-vendor --filter=@sifen/sifen-xsd`; note `pnpm-lock.yaml` diff for `libxml2-wasm` (gentle-ai budget: lockfile changes grow the diff but are excluded from the 400-line count)

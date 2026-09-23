@@ -58,7 +58,7 @@ The system MUST expose a framework-free `SifenGateway` port in `packages/sifen-g
 
 ### Requirement: consultarDE scenarios
 
-`FakeSifenGateway.consultarDE` MUST return code 0422 when the CDC is configured as found, and code 0420 when the CDC is unknown or not permitted.
+`FakeSifenGateway.consultarDE` MUST return code 0422 when the CDC is configured as found, code 0420 when the CDC is unknown, and code 0421 when the RUC of the querying certificate lacks permission to consult that DE.
 
 #### Scenario: CDC found
 
@@ -71,6 +71,12 @@ The system MUST expose a framework-free `SifenGateway` port in `packages/sifen-g
 - GIVEN a `FakeSifenGateway` with no scenario configured for a CDC
 - WHEN `consultarDE` is called with that CDC
 - THEN it MUST resolve with `dCodRes` equal to `"0420"`
+
+#### Scenario: RUC not permitted to consult the DE
+
+- GIVEN a `FakeSifenGateway` configured with the `0421` scenario for a CDC
+- WHEN `consultarDE` is called with that CDC
+- THEN it MUST resolve with `dCodRes` equal to `"0421"`
 
 ### Requirement: enviarDESincronico scenario
 

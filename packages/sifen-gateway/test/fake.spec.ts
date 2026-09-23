@@ -42,13 +42,13 @@ describe('FakeSifenGateway defaults', () => {
 
   it('enviarEventos rejects when unscripted (no verified default)', async () => {
     await expect(gateway.enviarEventos({ dId, eventos: ['<evento/>'] })).rejects.toThrow(
-      /no response configured/,
+      /No response configured/,
     );
   });
 
   it('consultarRUC rejects when unscripted (no verified default)', async () => {
     await expect(gateway.consultarRUC({ dId, ruc: '80012345-6' })).rejects.toThrow(
-      /no response configured/,
+      /No response configured/,
     );
   });
 });
@@ -107,7 +107,7 @@ describe('FakeSifenGateway enviarEventos batch limit', () => {
   it('rejects a call with more than 15 events without consuming the scripted response', async () => {
     const gateway = new FakeSifenGateway();
     gateway.enqueue('enviarEventos', { dCodRes: '0000', dMsgRes: 'never used', resultados: [] });
-    const eventos = Array.from({ length: 16 }, (_, index) => `<evento id="${index}"/>`);
+    const eventos = Array.from({ length: 16 }, (_, index) => `<evento id="${String(index)}"/>`);
 
     await expect(gateway.enviarEventos({ dId, eventos })).rejects.toThrow(RangeError);
     expect(gateway.callsTo('enviarEventos')).toHaveLength(1);

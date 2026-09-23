@@ -24,6 +24,11 @@ function builtInDefaults(): Defaults {
 const MIN_EVENTOS = 1;
 const MAX_EVENTOS = 15;
 
+/** Copies scripted results so callers cannot mutate them after scripting; errors keep their identity. */
+function snapshot<T>(response: Scripted<T>): Scripted<T> {
+  return response instanceof Error ? response : structuredClone(response);
+}
+
 /** Deterministic, scripted, in-process test double for `SifenGateway`. Never waits on real timers. */
 export class FakeSifenGateway implements SifenGateway {
   private queue: Queue = {};
@@ -32,17 +37,17 @@ export class FakeSifenGateway implements SifenGateway {
 
   enqueue<K extends SifenOperation>(op: K, ...responses: Scripted<SifenResultOf<K>>[]): this {
     const existing = this.queue[op] ?? [];
-    this.queue[op] = [...existing, ...responses];
+    this.queue[op] = [...existing, ...responses.map(snapshot)];
     return this;
   }
 
   setDefault<K extends SifenOperation>(op: K, response: Scripted<SifenResultOf<K>>): this {
-    this.defaults[op] = response;
+    this.defaults[op] = snapshot(response);
     return this;
   }
 
   get calls(): readonly SifenCall[] {
-    return this.recordedCalls;
+    return [...this.recordedCalls];
   }
 
   callsTo<K extends SifenOperation>(op: K): Parameters<SifenGateway[K]>[] {
@@ -106,7 +111,9 @@ export class FakeSifenGateway implements SifenGateway {
       return Promise.reject(new Error(`No response configured for SIFEN operation "${op}"`));
     }
 
-    return response instanceof Error ? Promise.reject(response) : Promise.resolve(response);
+    return response instanceof Error
+      ? Promise.reject(response)
+      : Promise.resolve(structuredClone(response));
   }
 
   private record<K extends SifenOperation>(operation: K, args: Parameters<SifenGateway[K]>): void {

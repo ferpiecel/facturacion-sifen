@@ -45,10 +45,10 @@ Chain strategy: stacked-to-main
 
 ## Phase 3: Test Runner Setup (PR2)
 
-- [ ] 3.1 Create `apps/api/{package.json, tsconfig.json (extends tsconfig.nest.json), tsconfig.build.json, eslint.config.js, vitest.config.ts (unplugin-swc)}`. Verify: `pnpm --filter api typecheck`.
-- [ ] 3.2 Create `test/fixtures/boundaries/modules/sample/{domain,application,infrastructure}/*.ts` (6 files: one per forbidden rule + one allowed infra→application import).
-- [ ] 3.3 RED: write `test/architecture/boundaries.spec.ts` asserting the 3 layering violations and that the allowed import is not flagged. Verify: `pnpm --filter api test test/architecture/boundaries.spec.ts` fails.
-- [ ] 3.4 GREEN: wire `.dependency-cruiser.cjs` rules against fixtures. Verify: same command passes.
+- [x] 3.1 Create `apps/api/{package.json, tsconfig.json (extends tsconfig.nest.json), tsconfig.build.json, eslint.config.js, vitest.config.ts (unplugin-swc)}`. Verify: `pnpm --filter api typecheck`.
+- [x] 3.2 Create `test/fixtures/boundaries/modules/sample/{domain,application,infrastructure}/*.ts` (6 files: one per forbidden rule + one allowed infra→application import).
+- [x] 3.3 RED: write `test/architecture/boundaries.spec.ts` asserting the 3 layering violations and that the allowed import is not flagged. Verify: `pnpm --filter api test test/architecture/boundaries.spec.ts` fails.
+- [x] 3.4 GREEN: wire `.dependency-cruiser.cjs` rules against fixtures. Verify: same command passes.
 
 ## Phase 4: API Reference Module — `health` (PR2, TDD red→green)
 

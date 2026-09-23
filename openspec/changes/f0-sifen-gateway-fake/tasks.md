@@ -42,11 +42,11 @@ Chain strategy: stacked-to-main
 
 ## Phase 3: Framework-isolation boundary (TDD, PR 1)
 
-- [ ] 3.1 Add root rule `sifen-gateway-framework-free` to `.dependency-cruiser.cjs` (`from: (^|/)packages/sifen-gateway/src/`, `to: FW`); commit `feat(architecture): add sifen-gateway framework-isolation rule`.
-- [ ] 3.2 Create `apps/api/test/fixtures/boundaries/packages/sifen-gateway/src/framework-import.ts` importing `@nestjs/common`.
-- [ ] 3.3 RED: add case to `apps/api/test/architecture/boundaries.spec.ts` asserting the fixture triggers `sifen-gateway-framework-free` via `pnpm depcruise --config ../../.dependency-cruiser.cjs --base-dir ../..`; run, confirm it fails (proves rule fires / catches `--base-dir` regressions); commit `test(architecture): add sifen-gateway boundary spec (red)`.
-- [ ] 3.4 GREEN: fix config/base-dir until the case passes (fallback per design: package-local config `extends` root, `from: ^src/`, if base-dir path resolution fails); commit `fix(architecture): wire sifen-gateway boundary check`.
-- [ ] 3.5 Verify: `pnpm --filter @sifen/api test -- boundaries.spec.ts`.
+- [x] 3.1 Add root rule `sifen-gateway-framework-free` to `.dependency-cruiser.cjs` (`from: (^|/)packages/sifen-gateway/src/`, `to: FW`); commit `feat(architecture): add sifen-gateway framework-isolation rule`.
+- [x] 3.2 Create `apps/api/test/fixtures/boundaries/packages/sifen-gateway/src/framework-import.ts` importing `@nestjs/common`.
+- [x] 3.3 RED: add case to `apps/api/test/architecture/boundaries.spec.ts` asserting the fixture triggers `sifen-gateway-framework-free`; run, confirm it fails; commit `test(architecture): add sifen-gateway boundary spec (red)`.
+- [x] 3.4 GREEN: `--base-dir` does not exist in dependency-cruiser 18.4.0 CLI, confirmed via manual proof; applied documented fallback (package-local `.dependency-cruiser.cjs` that `extends` root, `from: ^src/`); commit `fix(architecture): wire sifen-gateway boundary check`.
+- [x] 3.5 Verify: `pnpm --filter @sifen/api test -- boundaries.spec.ts`.
 
 ## Phase 4: Fake gateway (TDD, PR 2, stacked on PR 1)
 

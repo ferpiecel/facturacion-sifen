@@ -23,10 +23,11 @@ Fase 0 (fundaciones y PoC). Todavía no hay código. Ver [roadmap](docs/roadmap.
 
 | Archivo | Fecha | Contenido |
 |---|---|---|
-| `docs/referencia/dnit/Manual-Tecnico-v150.pdf` | Sep/2019 | **Pendiente de agregar.** MD5 esperado: `25EB165A8506EFA3A255B863ABCCAE95` |
+| [`Manual-Tecnico-v150.pdf`](docs/referencia/dnit/Manual-Tecnico-v150.pdf) | Sep/2019 | Manual Técnico v150. MD5 `F48D7C820A14723EC14E66BFCB02E0DF`, idéntico al publicado hoy en el portal de la DNIT (republicado en 2023). No coincide con el MD5 del listado de checksums de 2019, que quedó desactualizado. |
+| [`notas-tecnicas/`](docs/referencia/dnit/notas-tecnicas/) | Oct/2019 – Mar/2026 | Notas técnicas NT 001 a NT 027 sobre el MT v150. Tienen precedencia sobre el Manual ([ADR-0012](docs/adr/0012-precedencia-documentacion-oficial.md)). |
 | [`guia-de-pruebas-e-kuatia-2026-02.pdf`](docs/referencia/dnit/guia-de-pruebas-e-kuatia-2026-02.pdf) | Feb/2026 | Datos del ambiente de test y batería mínima de homologación |
 | [`guia-mejores-practicas-envio-de-2024-10.pdf`](docs/referencia/dnit/guia-mejores-practicas-envio-de-2024-10.pdf) | Oct/2024 | Lotes, consulta de lotes y bloqueos por RUC |
-| [`checksum-md5-manual-tecnico.pdf`](docs/referencia/dnit/checksum-md5-manual-tecnico.pdf) | — | Checksums MD5 de cada versión del Manual Técnico |
+| [`checksum-md5-manual-tecnico.pdf`](docs/referencia/dnit/checksum-md5-manual-tecnico.pdf) | 2019 | Checksums MD5 de las versiones del Manual Técnico. No refleja la republicación de 2023. |
 
 ### Ejemplos
 
@@ -37,5 +38,7 @@ Fase 0 (fundaciones y PoC). Todavía no hay código. Ver [roadmap](docs/roadmap.
 
 ## Pendientes antes de codificar
 
-- Revisar las notas técnicas vigentes del portal e-kuatia.
-- Resolver con el Prevalidador o la mesa de ayuda de la DNIT tres contradicciones entre documentos oficiales: el literal del ambiente de test, la canonicalización y el uso de `X509IssuerSerial` (ver plan v1.1, §18).
+- Analizar el impacto de las notas técnicas NT 001–027 sobre el plan v1.1 y el backlog.
+- Contradicciones entre documentos oficiales (ver plan v1.1, §18):
+  - **Canonicalización y `KeyInfo`: resuelto por la NT 016.** Se aceptan c14n inclusiva y exclusiva, con o sin comentarios. `KeyInfo/X509Data` define solo `X509Certificate`, así que no se envía `X509IssuerSerial`.
+  - **Literal del ambiente de test: resuelto en papel, falta confirmar con el Prevalidador.** La Guía de Pruebas 2026 (§2) pide `DOCUMENTO ELECTRÓNICO SIN VALOR COMERCIAL NI FISCAL - GENERADO EN AMBIENTE DE PRUEBA`, y por ADR-0012 prevalece sobre el MT.

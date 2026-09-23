@@ -19,8 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # `test` joins the matrix once the workspace test runner exists (HU-E0-03).
-        task: [format:check, lint, typecheck, depcruise]
+        task: [format:check, lint, typecheck, depcruise, test]
     steps:
       - uses: actions/checkout@v7
 

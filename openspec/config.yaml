@@ -11,14 +11,15 @@ context: |
   Source docs: docs/prd/prd.md, docs/roadmap.md, docs/backlog/mvp.md,
   docs/plan/plan-desarrollo-v1.1.md, docs/adr/0001-0014.
 
-strict_tdd: false # planned true, pending test runner setup (first change scaffolds it)
+strict_tdd: true
 
 testing:
-  status: planned-not-installed
+  status: installed
+  runner: vitest (unplugin-swc for NestJS decorator metadata)
   note: >
-    No package.json / test runner exists yet. The first implementation
-    change (monorepo + CI scaffolding, per roadmap F0) must set up the
-    test runner. Strict TDD is intended to become true once a runner exists.
+    Tests are written before production code (red, then green). Unit and
+    DI tests live next to the code as *.spec.ts; e2e tests use Fastify
+    inject() under apps/*/test.
 
 rules:
   proposal:
@@ -40,11 +41,11 @@ rules:
       - Follow hexagonal architecture; keep domain/application free of NestJS/Fastify/Drizzle imports
       - Enforce boundaries with dependency-cruiser
       - Multi-tenant isolation via PostgreSQL RLS (FORCE RLS) must be respected in all data access code
-    tdd: false # flip to true once the workspace test runner is scaffolded
-    test_command: ""
+    tdd: true
+    test_command: "pnpm turbo run test"
   verify:
-    test_command: ""
-    build_command: ""
+    test_command: "pnpm turbo run test"
+    build_command: "pnpm turbo run build"
     coverage_threshold: 0
   archive:
     - Warn before merging destructive deltas

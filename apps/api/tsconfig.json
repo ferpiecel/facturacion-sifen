@@ -1,0 +1,8 @@
+{
+  "extends": "@sifen/config/tsconfig.nest.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "."
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

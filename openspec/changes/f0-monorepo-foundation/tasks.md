@@ -45,22 +45,22 @@ Chain strategy: stacked-to-main
 
 ## Phase 3: Test Runner Setup (PR2)
 
-- [ ] 3.1 Create `apps/api/{package.json, tsconfig.json (extends tsconfig.nest.json), tsconfig.build.json, eslint.config.js, vitest.config.ts (unplugin-swc)}`. Verify: `pnpm --filter api typecheck`.
-- [ ] 3.2 Create `test/fixtures/boundaries/modules/sample/{domain,application,infrastructure}/*.ts` (6 files: one per forbidden rule + one allowed infra→application import).
-- [ ] 3.3 RED: write `test/architecture/boundaries.spec.ts` asserting the 3 layering violations and that the allowed import is not flagged. Verify: `pnpm --filter api test test/architecture/boundaries.spec.ts` fails.
-- [ ] 3.4 GREEN: wire `.dependency-cruiser.cjs` rules against fixtures. Verify: same command passes.
+- [x] 3.1 Create `apps/api/{package.json, tsconfig.json (extends tsconfig.nest.json), tsconfig.build.json, eslint.config.js, vitest.config.ts (unplugin-swc)}`. Verify: `pnpm --filter api typecheck`.
+- [x] 3.2 Create `test/fixtures/boundaries/modules/sample/{domain,application,infrastructure}/*.ts` (6 files: one per forbidden rule + one allowed infra→application import).
+- [x] 3.3 RED: write `test/architecture/boundaries.spec.ts` asserting the 3 layering violations and that the allowed import is not flagged. Verify: `pnpm --filter api test test/architecture/boundaries.spec.ts` fails.
+- [x] 3.4 GREEN: wire `.dependency-cruiser.cjs` rules against fixtures. Verify: same command passes.
 
 ## Phase 4: API Reference Module — `health` (PR2, TDD red→green)
 
-- [ ] 4.1 RED: write `application/get-health.use-case.spec.ts` (fake port). Verify: fails (no source).
-- [ ] 4.2 GREEN: create `domain/health-report.ts`, `application/ports/health-check.port.ts`, `application/get-health.use-case.ts`. Verify: spec passes.
-- [ ] 4.3 RED: write `infrastructure/health.module.spec.ts` (DI: `Test.createTestingModule` resolves `HealthCheckPort`). Verify: fails.
-- [ ] 4.4 GREEN: create `infrastructure/adapters/process-health-check.adapter.ts`, `infrastructure/controllers/health.controller.ts`, `src/modules/health/{health.module.ts, health.tokens.ts}`. Verify: DI spec passes.
-- [ ] 4.5 RED: write `test/health.e2e.spec.ts` (`GET /health` → 200 via Fastify `inject()`). Verify: fails.
-- [ ] 4.6 GREEN: create `src/main.ts`, `src/app.module.ts` wiring `HealthModule`. Verify: e2e spec passes.
+- [x] 4.1 RED: write `application/get-health.use-case.spec.ts` (fake port). Verify: fails (no source).
+- [x] 4.2 GREEN: create `domain/health-report.ts`, `application/ports/health-check.port.ts`, `application/get-health.use-case.ts`. Verify: spec passes.
+- [x] 4.3 RED: write `infrastructure/health.module.spec.ts` (DI: `Test.createTestingModule` resolves `HealthCheckPort`). Verify: fails.
+- [x] 4.4 GREEN: create `infrastructure/adapters/process-health-check.adapter.ts`, `infrastructure/controllers/health.controller.ts`, `src/modules/health/{health.module.ts, health.tokens.ts}`. Verify: DI spec passes.
+- [x] 4.5 RED: write `test/health.e2e.spec.ts` (`GET /health` → 200 via Fastify `inject()`). Verify: fails.
+- [x] 4.6 GREEN: create `src/main.ts`, `src/app.module.ts` wiring `HealthModule`. Verify: e2e spec passes.
 
 ## Phase 5: Finalize (PR2)
 
-- [ ] 5.1 Run `pnpm turbo run lint typecheck depcruise test build`; confirm all gates green. Verify: same command, exit 0.
-- [ ] 5.2 Flip `openspec/config.yaml`: `strict_tdd: true`, `apply.tdd: true`, `apply.test_command`/`verify.test_command: "pnpm turbo run test"`, `verify.build_command: "pnpm turbo run build"`. Verify: file inspection matches spec `test-runner`.
-- [ ] 5.3 Commit PR2 as scoped work-unit commits; open PR2 targeting PR1's branch (stacked-to-main); confirm diff excludes PR1 content. Verify: `git diff <PR1-branch>...HEAD --stat`.
+- [x] 5.1 Run `pnpm turbo run lint typecheck depcruise test build`; confirm all gates green. Verify: same command, exit 0.
+- [x] 5.2 Flip `openspec/config.yaml`: `strict_tdd: true`, `apply.tdd: true`, `apply.test_command`/`verify.test_command: "pnpm turbo run test"`, `verify.build_command: "pnpm turbo run build"`. Verify: file inspection matches spec `test-runner`.
+- [x] 5.3 Commit PR2 as scoped work-unit commits; open PR2 targeting PR1's branch (stacked-to-main); confirm diff excludes PR1 content. Verify: `git diff <PR1-branch>...HEAD --stat`.

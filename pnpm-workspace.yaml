@@ -9,6 +9,10 @@ allowBuilds:
   esbuild: true
 
 minimumReleaseAgeExclude:
+  - '@nestjs/common@12.1.0'
+  - '@nestjs/core@12.1.0'
+  - '@nestjs/platform-fastify@12.1.0'
+  - '@nestjs/testing@12.1.0'
   - '@turbo/darwin-64@2.11.3'
   - '@turbo/darwin-arm64@2.11.3'
   - '@turbo/linux-64@2.11.3'

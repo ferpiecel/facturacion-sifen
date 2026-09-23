@@ -1,0 +1,17 @@
+import sharedConfig from '@sifen/config/eslint.config.js';
+
+// Extends the shared workspace config, then overrides `tsconfigRootDir` so
+// typed linting resolves `apps/api/tsconfig.json` instead of `packages/config`.
+export default [
+  ...sharedConfig,
+  {
+    languageOptions: {
+      parserOptions: {
+        tsconfigRootDir: import.meta.dirname,
+        projectService: {
+          allowDefaultProject: ['eslint.config.js', 'vitest.config.ts'],
+        },
+      },
+    },
+  },
+];

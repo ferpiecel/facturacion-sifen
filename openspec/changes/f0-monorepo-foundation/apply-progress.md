@@ -169,3 +169,81 @@ None beyond the expected `apps/api#depcruise` failure (task 4.x will create `src
 ### Status (PR2 Phase 3)
 
 PR1: 12/16 subtasks complete (blocked items unchanged, see above). PR2 Phase 3: **4/4 tasks complete** (3.1-3.4). Overall: 20/27 total tasks across both PRs complete. Ready for the next apply batch (Phase 4).
+
+---
+
+## PR2 — Phase 4: API Reference Module — `health` (this run)
+
+Branch `feat/hu-e0-03-api-health-module`. Scope of this run: tasks 4.1-4.6 only (strict TDD, RED→GREEN pairs).
+
+### Mode
+
+Strict TDD (three RED→GREEN pairs, each RED captured before the corresponding GREEN).
+
+### Completed Tasks
+
+- [x] 4.1 RED: `src/modules/health/application/get-health.use-case.spec.ts` (fake `HealthCheckPort`). Verify: `pnpm --filter api test .../get-health.use-case.spec.ts` → fails, `Cannot find module './get-health.use-case.js'`.
+- [x] 4.2 GREEN: created `src/modules/health/domain/health-report.ts`, `application/ports/health-check.port.ts`, `application/get-health.use-case.ts`. Verify: same command → 2 passed (2).
+- [x] 4.3 RED: `src/modules/health/infrastructure/health.module.spec.ts` (`Test.createTestingModule` resolves `HEALTH_CHECK_PORT`). Verify: fails, `Cannot find module '../health.module.js'`.
+- [x] 4.4 GREEN: created `infrastructure/adapters/process-health-check.adapter.ts`, `infrastructure/controllers/health.controller.ts`, `health.module.ts`, `health.tokens.ts`. Verify: same command → 1 passed (1).
+- [x] 4.5 RED: `test/health.e2e.spec.ts` (Fastify `inject()` on `GET /health`). Verify: fails, `Cannot find module '../src/app.module.js'`.
+- [x] 4.6 GREEN: created `src/main.ts` (top-level `await NestFactory.create` + `FastifyAdapter`, `listen(process.env.PORT ?? 3000, '0.0.0.0')`), `src/app.module.ts` (imports `HealthModule`). Verify: same command → 1 passed (1).
+
+### TDD Cycle Evidence
+
+| Task | RED | GREEN | REFACTOR |
+|---|---|---|---|
+| 4.1/4.2 use case | `pnpm --filter api test src/modules/health/application/get-health.use-case.spec.ts` → 1 failed suite, `Cannot find module './get-health.use-case.js'` | Same command → 2 passed (2) | None needed |
+| 4.3/4.4 DI wiring | `pnpm --filter api test src/modules/health/infrastructure/health.module.spec.ts` → 1 failed suite, `Cannot find module '../health.module.js'` | Same command → 1 passed (1) | None needed |
+| 4.5/4.6 e2e | `pnpm --filter api test test/health.e2e.spec.ts` → 1 failed suite, `Cannot find module '../src/app.module.js'` | Same command → 1 passed (1) | Fixed 2 lint errors post-GREEN: `String(port)` in template literal (`main.ts`), typed `moduleRef.get<ProcessHealthCheckAdapter>(HEALTH_CHECK_PORT)` (`health.module.spec.ts`) — no behavior change |
+
+### Files Changed (this run)
+
+| File | Action |
+|---|---|
+| `apps/api/src/modules/health/domain/health-report.ts` | Created |
+| `apps/api/src/modules/health/application/ports/health-check.port.ts` | Created |
+| `apps/api/src/modules/health/application/get-health.use-case.ts` | Created |
+| `apps/api/src/modules/health/application/get-health.use-case.spec.ts` | Created |
+| `apps/api/src/modules/health/infrastructure/adapters/process-health-check.adapter.ts` | Created |
+| `apps/api/src/modules/health/infrastructure/controllers/health.controller.ts` | Created |
+| `apps/api/src/modules/health/infrastructure/health.module.spec.ts` | Created |
+| `apps/api/src/modules/health/health.module.ts` | Created |
+| `apps/api/src/modules/health/health.tokens.ts` | Created |
+| `apps/api/src/app.module.ts` | Created |
+| `apps/api/src/main.ts` | Created |
+| `apps/api/test/health.e2e.spec.ts` | Created |
+| `openspec/changes/f0-monorepo-foundation/tasks.md` | Modified — 4.1-4.6 marked `[x]` |
+
+### Work Unit Evidence
+
+| Evidence | Value |
+|---|---|
+| Focused test command and exact result | `pnpm --filter api test` (4 files, 8 tests) → all pass; see per-pair RED/GREEN evidence above |
+| Runtime harness command/scenario and exact result | `test/health.e2e.spec.ts` boots a real Nest+Fastify app (`app.init()` + Fastify `.ready()`) and calls `inject({ method: 'GET', url: '/health' })` → 200, `{ status: 'up', ... }`. No real port bound. |
+| Rollback boundary | Revert the 3 commits on `feat/hu-e0-03-api-health-module` (`test(api): add health use case...`, `feat(api): wire health module...`, `feat(api): bootstrap NestFactory...`) plus the tasks.md checkbox commit; no runtime state, no migrations |
+
+### Verification (this run)
+
+1. RED/GREEN evidence lines: see TDD Cycle Evidence table above (3 pairs, all captured).
+2. `pnpm turbo run lint typecheck depcruise test build` → 8/8 tasks successful (3 cached from `@sifen/config`/prior work, 5 fresh); `@sifen/api:test` 4 files / 8 tests passed; `@sifen/api:depcruise` → "no dependency violations found (16 modules, 25 dependencies cruised)".
+3. `pnpm exec prettier --check .` → "All matched files use Prettier code style!"
+4. `git diff main...HEAD --shortstat -- . ':(exclude)pnpm-lock.yaml' ':(exclude)openspec'` → 26 files changed, 354 insertions(+), 2 deletions(-) — within the 400-line budget (cumulative PR2 Phase 3 + Phase 4).
+
+### Deviations from Design
+
+1. `HealthController.getHealth()` throws `HttpException(report, HttpStatus.SERVICE_UNAVAILABLE)` on `status: 'down'` instead of manually setting a Fastify `@Res()` reply — avoids an explicit `fastify` type import not listed in `apps/api`'s own dependencies (available only transitively via `@nestjs/platform-fastify`). Same observable behavior (200 up / 503 down), smaller surface.
+2. `main.ts` wraps `port` in `String(port)` for the startup log template literal — `@typescript-eslint/restrict-template-expressions` rejects the `string | number` union from `process.env.PORT ?? 3000` directly; no behavior change.
+3. `health.module.spec.ts` types the DI resolution as `moduleRef.get<ProcessHealthCheckAdapter>(HEALTH_CHECK_PORT)` instead of an untyped `.get(...)` — required by `@typescript-eslint/no-unsafe-assignment`; same runtime assertion (`toBeInstanceOf`).
+
+### Issues Found
+
+None.
+
+### Remaining Tasks
+
+- [ ] Phase 5 (finalize PR2): full green gate run, `strict_tdd: true` flip in `openspec/config.yaml`, open PR2 — **out of this run's scope** ("Stop after 4.6").
+
+### Status (PR2 Phase 4)
+
+PR2 Phase 4: **6/6 tasks complete** (4.1-4.6), strict TDD evidence captured for all 3 RED→GREEN pairs. Overall: 26/27 total tasks across both PRs complete (only Phase 5 finalize remains). Ready for the next apply batch (Phase 5) or `sdd-verify`.

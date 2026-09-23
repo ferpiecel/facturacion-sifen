@@ -4,17 +4,14 @@ import { cdcInexistente, deAutorizado, loteInexistente, loteRecibido } from './s
 /** A response to script: a resolved value, or an `Error` to reject the call with. */
 export type Scripted<T> = T | Error;
 
-// Keyed by operation but intentionally untyped per-value: `SifenResultOf<K>` does not
-// distribute cleanly over a generic mapped-type index, so the typed boundary lives in
-// `enqueue`/`setDefault`/`respond` instead of in these internal maps.
+type Req<K extends SifenOperation> = Parameters<SifenGateway[K]>[0];
+
+// Untyped per-value on purpose: `SifenResultOf<K>` does not distribute over a generic
+// mapped-type index. The typed boundary lives in `enqueue`/`setDefault`/`respond`.
 type Queue = Partial<Record<SifenOperation, unknown[]>>;
 type Defaults = Partial<Record<SifenOperation, unknown>>;
 
-/**
- * Built-in defaults for the operations with a verified success/failure code
- * when the test scripts nothing. `enviarEventos` and `consultarRUC` have no
- * verified code, so they reject with "no response configured" instead.
- */
+/** Built-in defaults when nothing is scripted. `enviarEventos`/`consultarRUC` have no verified code. */
 function builtInDefaults(): Defaults {
   return {
     enviarLote: loteRecibido('1'),
@@ -60,46 +57,33 @@ export class FakeSifenGateway implements SifenGateway {
     this.recordedCalls = [];
   }
 
-  enviarLote(
-    request: Parameters<SifenGateway['enviarLote']>[0],
-  ): ReturnType<SifenGateway['enviarLote']> {
+  enviarLote(request: Req<'enviarLote'>) {
     return this.dispatch('enviarLote', [request]);
   }
 
-  consultarLote(
-    request: Parameters<SifenGateway['consultarLote']>[0],
-  ): ReturnType<SifenGateway['consultarLote']> {
+  consultarLote(request: Req<'consultarLote'>) {
     return this.dispatch('consultarLote', [request]);
   }
 
-  enviarDESincronico(
-    request: Parameters<SifenGateway['enviarDESincronico']>[0],
-  ): ReturnType<SifenGateway['enviarDESincronico']> {
+  enviarDESincronico(request: Req<'enviarDESincronico'>) {
     return this.dispatch('enviarDESincronico', [request]);
   }
 
-  consultarDE(
-    request: Parameters<SifenGateway['consultarDE']>[0],
-  ): ReturnType<SifenGateway['consultarDE']> {
+  consultarDE(request: Req<'consultarDE'>) {
     return this.dispatch('consultarDE', [request]);
   }
 
-  consultarRUC(
-    request: Parameters<SifenGateway['consultarRUC']>[0],
-  ): ReturnType<SifenGateway['consultarRUC']> {
+  consultarRUC(request: Req<'consultarRUC'>) {
     return this.dispatch('consultarRUC', [request]);
   }
 
-  enviarEventos(
-    request: Parameters<SifenGateway['enviarEventos']>[0],
-  ): ReturnType<SifenGateway['enviarEventos']> {
+  enviarEventos(request: Req<'enviarEventos'>) {
     this.record('enviarEventos', [request]);
 
     if (request.eventos.length < MIN_EVENTOS || request.eventos.length > MAX_EVENTOS) {
+      const count = String(request.eventos.length);
       return Promise.reject(
-        new RangeError(
-          `enviarEventos accepts 1 to 15 events, received ${String(request.eventos.length)}`,
-        ),
+        new RangeError(`enviarEventos accepts 1 to 15 events, received ${count}`),
       );
     }
 
@@ -122,11 +106,7 @@ export class FakeSifenGateway implements SifenGateway {
       return Promise.reject(new Error(`No response configured for SIFEN operation "${op}"`));
     }
 
-    if (response instanceof Error) {
-      return Promise.reject(response);
-    }
-
-    return Promise.resolve(response);
+    return response instanceof Error ? Promise.reject(response) : Promise.resolve(response);
   }
 
   private record<K extends SifenOperation>(operation: K, args: Parameters<SifenGateway[K]>): void {

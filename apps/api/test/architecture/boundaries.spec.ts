@@ -78,8 +78,8 @@ describe('architecture boundaries (dependency-cruiser rules on fixtures)', () =>
   it('flags a sifen-gateway source file importing a framework package', async () => {
     const result = await cruiseFixtures();
 
-    expect(
-      violatedRuleNames(result, 'packages/sifen-gateway/src/framework-import.ts'),
-    ).toContain('sifen-gateway-framework-free');
+    expect(violatedRuleNames(result, 'packages/sifen-gateway/src/framework-import.ts')).toContain(
+      'sifen-gateway-framework-free',
+    );
   });
 });

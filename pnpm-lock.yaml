@@ -239,6 +239,24 @@ importers:
 
   packages/config: {}
 
+  packages/sifen-gateway:
+    devDependencies:
+      '@sifen/config':
+        specifier: workspace:*
+        version: link:../config
+      '@types/node':
+        specifier: 22.20.4
+        version: 22.20.4
+      dependency-cruiser:
+        specifier: 18.4.0
+        version: 18.4.0
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: 5.0.1
+        version: 5.0.1(@types/node@22.20.4)(vite@8.3.0(@types/node@22.20.4))
+
   packages/sifen-xsd:
     dependencies:
       libxml2-wasm:

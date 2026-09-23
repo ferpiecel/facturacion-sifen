@@ -1,3 +1,7 @@
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { extractSchemaLocationNames } from '../scripts/refresh-xsd.ts';
+import { vendorDir } from '../src/schemas.ts';
 import { describe, expect, it } from 'vitest';
 import { validateXml } from '../src/validate-xml.ts';
 import { readOfficialExample, readPatchedExample } from './fixtures/patch-example.ts';
@@ -49,21 +53,17 @@ describe('validateXml', () => {
 
     expect(result.valid).toBe(false);
     expect(result.errors.length).toBeGreaterThan(0);
-    expect(result.errors[0]?.line).not.toBeUndefined();
+    expect(result.errors[0]).toMatchObject({ line: 1, column: 16 });
+    expect(result.errors[0]?.message).toMatch(/Premature end of data/);
   });
 
-  it('never issues an outbound network call while validating', async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = () => {
-      throw new Error('unexpected network call during validation');
-    };
+  it('resolves every schemaLocation reference from the vendored files, never the network', () => {
+    const vendored = readdirSync(vendorDir).filter((name) => name.endsWith('.xsd'));
+    const references = vendored.flatMap((name) =>
+      extractSchemaLocationNames(readFileSync(join(vendorDir, name), 'utf8')),
+    );
 
-    try {
-      const xml = await readPatchedExample();
-      const result = validateXml(xml, 'siRecepDE');
-      expect(result.valid).toBe(true);
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    expect(references.length).toBeGreaterThan(0);
+    expect(references.filter((name) => !vendored.includes(name))).toEqual([]);
   });
 });

@@ -8,5 +8,10 @@
     "tsconfig.nest.json",
     "eslint.config.js",
     "prettier.config.js"
-  ]
+  ],
+  "scripts": {
+    "lint": "eslint --print-config eslint.config.js > /dev/null",
+    "typecheck": "tsc -p tsconfig.base.json --noEmit && tsc -p tsconfig.nest.json --noEmit",
+    "depcruise": "depcruise --config ../../.dependency-cruiser.cjs ."
+  }
 }

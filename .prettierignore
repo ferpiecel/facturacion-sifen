@@ -1,3 +1,5 @@
 docs/
 openspec/
 pnpm-lock.yaml
+# Prose documentation is not auto-formatted
+*.md

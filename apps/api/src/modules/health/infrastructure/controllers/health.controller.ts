@@ -1,0 +1,18 @@
+import { Controller, Get, HttpException, HttpStatus } from '@nestjs/common';
+import { GetHealthUseCase } from '../../application/get-health.use-case.js';
+
+@Controller('health')
+export class HealthController {
+  constructor(private readonly getHealthUseCase: GetHealthUseCase) {}
+
+  @Get()
+  async getHealth() {
+    const report = await this.getHealthUseCase.execute();
+
+    if (report.status === 'down') {
+      throw new HttpException(report, HttpStatus.SERVICE_UNAVAILABLE);
+    }
+
+    return report;
+  }
+}

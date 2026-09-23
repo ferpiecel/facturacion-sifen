@@ -13,8 +13,7 @@
     "lint": "eslint .",
     "depcruise": "depcruise --config ../../.dependency-cruiser.cjs src",
     "test": "vitest run",
-    "verify-vendor": "node scripts/verify-checksums.ts",
-    "refresh-xsd": "node scripts/refresh-xsd.ts"
+    "verify-vendor": "node scripts/verify-checksums.ts"
   },
   "dependencies": {
     "libxml2-wasm": "0.7.2"

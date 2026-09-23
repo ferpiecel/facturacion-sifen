@@ -144,3 +144,36 @@ describe('FakeSifenGateway reset', () => {
     expect(de.dCodRes).toBe(SIFEN_CODES.CDC_INEXISTENTE);
   });
 });
+
+describe('FakeSifenGateway isolation between calls', () => {
+  const dId = 1n;
+
+  it('returns an independent copy of the default response on every call', async () => {
+    const gateway = new FakeSifenGateway().setDefault('consultarLote', scenarios.loteConcluido([]));
+
+    const first = await gateway.consultarLote({ dId, dProtConsLote: '1' });
+    (first.resultados as unknown[]).push('mutated by a test');
+    const second = await gateway.consultarLote({ dId, dProtConsLote: '1' });
+
+    expect(second.resultados).toEqual([]);
+  });
+
+  it('snapshots enqueued responses so later caller mutations do not leak', async () => {
+    const scripted = scenarios.loteConcluido([]);
+    const gateway = new FakeSifenGateway().enqueue('consultarLote', scripted);
+
+    (scripted.resultados as unknown[]).push('mutated after enqueue');
+    const result = await gateway.consultarLote({ dId, dProtConsLote: '1' });
+
+    expect(result.resultados).toEqual([]);
+  });
+
+  it('exposes recorded calls as a copy that callers cannot corrupt', async () => {
+    const gateway = new FakeSifenGateway();
+    await gateway.enviarLote({ dId, des: ['<rDE/>'] });
+
+    (gateway.calls as unknown[]).length = 0;
+
+    expect(gateway.calls).toHaveLength(1);
+  });
+});

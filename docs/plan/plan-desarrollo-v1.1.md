@@ -427,8 +427,8 @@ XmlSigner (XMLDSig enveloped):
   ├─ DigestMethod SHA-256/384/512; SignatureMethod RSA-SHA-256/384/512 (NT 016);
   │    se usa SHA-256 / RSA-SHA256 (RSA 2048, o 4096 por hardware)
   ├─ <Signature xmlns="http://www.w3.org/2000/09/xmldsig#"> dentro de <rDE>, después de <DE>
-  └─ KeyInfo: solo <X509Data><X509Certificate> (NT 016 confirma que no se acepta X509IssuerSerial,
-       X509SubjectName ni KeyValue; resuelve D3)
+  └─ KeyInfo: solo <X509Data><X509Certificate> (NT 016 define X509Certificate como único hijo
+       de X509Data, ocurrencia 1-1; no se envían X509IssuerSerial, X509SubjectName ni KeyValue; resuelve D3)
 ```
 
 **Reglas de formato del XML (MT §7.2.4):** sin espacios ni saltos de línea entre etiquetas, sin prefijos de namespace, sin etiquetas vacías (salvo las obligatorias), sin negativos, nombres sensibles a mayúsculas. `<gCamFuFD><dCarQR>` va después de `<Signature>`, con `&` escapado como `&amp;`.

@@ -36,11 +36,9 @@ async function fetchClosure(): Promise<Map<string, string>> {
   const closure = new Map<string, string>();
   const queue = [ROOT_URL];
 
-  let url = queue.shift();
-  while (url !== undefined) {
+  for (let url = queue.shift(); url !== undefined; url = queue.shift()) {
     const name = url.slice(url.lastIndexOf('/') + 1);
     if (closure.has(name)) {
-      url = queue.shift();
       continue;
     }
     const content = await fetchText(url);
@@ -50,7 +48,6 @@ async function fetchClosure(): Promise<Map<string, string>> {
         queue.push(`${BASE_URL}${refName}`);
       }
     }
-    url = queue.shift();
   }
   return closure;
 }
@@ -63,24 +60,16 @@ async function writeVendorFiles(closure: Map<string, string>, vendorDir: string)
     await writeFile(join(vendorDir, name), buffer);
     manifest[name] = sha256Hex(buffer);
   }
-  await writeFile(
-    join(vendorDir, 'checksums.json'),
-    `${JSON.stringify(manifest, null, 2)}\n`,
-    'utf8',
-  );
+  const manifestJson = `${JSON.stringify(manifest, null, 2)}\n`;
+  await writeFile(join(vendorDir, 'checksums.json'), manifestJson, 'utf8');
 }
 
 async function main(): Promise<void> {
-  const update = process.argv.includes('--update');
+  if (!process.argv.includes('--update')) {
+    throw new Error('refresh-xsd: pass --update to write vendor/ (drift check not implemented)');
+  }
   const vendorDir = fileURLToPath(new URL('../vendor/', import.meta.url));
   const closure = await fetchClosure();
-
-  if (!update) {
-    throw new Error(
-      'refresh-xsd: pass --update to write vendor/ (drift check without --update is not implemented)',
-    );
-  }
-
   await writeVendorFiles(closure, vendorDir);
   console.log(`refresh-xsd: wrote ${String(closure.size)} files to ${vendorDir}`);
 }

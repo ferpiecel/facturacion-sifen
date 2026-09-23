@@ -39,15 +39,18 @@ describe('GET /health (e2e)', () => {
     await downApp.init();
     await downApp.getHttpAdapter().getInstance().ready();
 
-    const response = await downApp.getHttpAdapter().getInstance().inject({
-      method: 'GET',
-      url: '/health',
-    });
-    await downApp.close();
+    try {
+      const response = await downApp.getHttpAdapter().getInstance().inject({
+        method: 'GET',
+        url: '/health',
+      });
 
-    expect(response.statusCode).toBe(503);
+      expect(response.statusCode).toBe(503);
 
-    const body = JSON.parse(response.payload) as { status: string };
-    expect(body.status).toBe('down');
+      const body = JSON.parse(response.payload) as { status: string };
+      expect(body.status).toBe('down');
+    } finally {
+      await downApp.close();
+    }
   });
 });

@@ -1,5 +1,6 @@
 const DEFAULT_PORT = 3000;
 const MAX_PORT = 65535;
+const DECIMAL_DIGITS = /^\d+$/;
 
 export function parsePort(value: string | undefined): number {
   if (value === undefined) {
@@ -7,7 +8,7 @@ export function parsePort(value: string | undefined): number {
   }
 
   const port = Number(value);
-  if (value.trim() === '' || !Number.isInteger(port) || port < 1 || port > MAX_PORT) {
+  if (!DECIMAL_DIGITS.test(value) || port < 1 || port > MAX_PORT) {
     throw new Error(`Invalid PORT value: ${JSON.stringify(value)}`);
   }
 

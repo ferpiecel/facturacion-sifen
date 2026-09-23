@@ -10,7 +10,10 @@ describe('parsePort', () => {
     expect(parsePort('8080')).toBe(8080);
   });
 
-  it.each(['', 'abc', '0', '65536', '80.5', '-1'])('rejects invalid PORT value %j', (value) => {
-    expect(() => parsePort(value)).toThrow(/Invalid PORT/);
-  });
+  it.each(['', 'abc', '0', '65536', '80.5', '-1', '0x50', '1e3', ' 80 ', '+80'])(
+    'rejects invalid PORT value %j',
+    (value) => {
+      expect(() => parsePort(value)).toThrow(/Invalid PORT/);
+    },
+  );
 });

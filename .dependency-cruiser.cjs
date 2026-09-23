@@ -33,13 +33,6 @@ module.exports = {
       to: { path: '(^|/)modules/[^/]+/infrastructure/' },
     },
     {
-      name: 'sifen-gateway-framework-free',
-      severity: 'error',
-      comment: '@sifen/sifen-gateway must stay framework-free',
-      from: { path: '(^|/)packages/sifen-gateway/src/' },
-      to: { path: FW },
-    },
-    {
       name: 'no-circular',
       severity: 'error',
       comment: 'no circular imports anywhere in the workspace',

@@ -25,23 +25,23 @@ Chain strategy: stacked-to-main
 
 ## Phase 1: Workspace Foundation (PR1)
 
-- [ ] 1.1 Confirm pnpm 12.5.1 setting keys (`allowBuilds` vs `onlyBuiltDependencies`, `engineStrict`) against official pnpm docs before writing config. Verify: docs check, no command.
-- [ ] 1.2 Create root `package.json` (`engines`, `packageManager: pnpm@12.5.1`) and `.nvmrc` (`22`). Verify: `pnpm -v`.
-- [ ] 1.3 Create `pnpm-workspace.yaml` (`apps/*`, `packages/*`, confirmed settings from 1.1). Verify: `pnpm install --frozen-lockfile`.
-- [ ] 1.4 Create `turbo.json` (transit/build/lint/typecheck/depcruise/test/dev per design). Verify: `pnpm turbo run lint --dry`.
-- [ ] 1.5 Create `packages/config/{package.json, tsconfig.base.json, tsconfig.nest.json}`; document composition `tsconfig.base.json → tsconfig.nest.json → apps/api/tsconfig.json`. Verify: `tsc --showConfig -p packages/config/tsconfig.base.json`.
-- [ ] 1.6 Resolve exact `eslint-config-prettier` version via `npm view eslint-config-prettier version`, pin it, create `packages/config/eslint.config.js` (flat + `typescript-eslint` strictTypeChecked). Verify: `npx eslint --print-config packages/config/eslint.config.js`.
-- [ ] 1.7 Create `packages/config/prettier.config.js` (shared) and root `prettier.config.mjs` that re-exports it (root is the sole entry Prettier resolves; package config is the shared source). Verify: `pnpm exec prettier --check packages/config`.
-- [ ] 1.8 Create `.dependency-cruiser.cjs` with the 3 layering rules + `no-circular` per design. Verify: `pnpm exec depcruise --validate .dependency-cruiser.cjs`.
+- [x] 1.1 Confirm pnpm 12.5.1 setting keys (`allowBuilds` vs `onlyBuiltDependencies`, `engineStrict`) against official pnpm docs before writing config. Verify: docs check, no command.
+- [x] 1.2 Create root `package.json` (`engines`, `packageManager: pnpm@12.5.1`) and `.nvmrc` (`22`). Verify: `pnpm -v`.
+- [x] 1.3 Create `pnpm-workspace.yaml` (`apps/*`, `packages/*`, confirmed settings from 1.1). Verify: `pnpm install --frozen-lockfile`.
+- [x] 1.4 Create `turbo.json` (transit/build/lint/typecheck/depcruise/test/dev per design). Verify: `pnpm turbo run lint --dry`.
+- [x] 1.5 Create `packages/config/{package.json, tsconfig.base.json, tsconfig.nest.json}`; document composition `tsconfig.base.json → tsconfig.nest.json → apps/api/tsconfig.json`. Verify: `tsc --showConfig -p packages/config/tsconfig.base.json`.
+- [x] 1.6 Resolve exact `eslint-config-prettier` version via `npm view eslint-config-prettier version`, pin it, create `packages/config/eslint.config.js` (flat + `typescript-eslint` strictTypeChecked). Verify: `npx eslint --print-config packages/config/eslint.config.js`.
+- [x] 1.7 Create `packages/config/prettier.config.js` (shared) and root `prettier.config.mjs` that re-exports it (root is the sole entry Prettier resolves; package config is the shared source). Verify: `pnpm exec prettier --check packages/config`.
+- [x] 1.8 Create `.dependency-cruiser.cjs` with the 3 layering rules + `no-circular` per design. Verify: `pnpm exec depcruise --validate .dependency-cruiser.cjs`.
 
 ## Phase 2: CI & Local Dev (PR1)
 
-- [ ] 2.1 Create `.github/workflows/ci.yml`: confirm trigger scope is `push` to `main` + `pull_request` (matches spec `ci-pipeline`); matrix jobs lint/typecheck/depcruise/test; corepack + setup-node + `actions/cache@v6`. Verify: `actionlint .github/workflows/ci.yml`.
-- [ ] 2.2 Create `docker-compose.yml` (`postgres:16-alpine`, `redis:7-alpine`, healthchecks, named volumes). Verify: `docker compose config`.
-- [ ] 2.3 Create `.env.example` (placeholders only, no secrets). Verify: manual review.
-- [ ] 2.4 Update `.gitignore`: add `.turbo/`, `coverage/`, `*.tsbuildinfo` via `git add -p`, staging only this change's hunks (leave pre-existing unrelated hunks untouched). Verify: `git diff --staged .gitignore`.
-- [ ] 2.5 Create `.prettierignore` (`docs/`, `openspec/`, lockfile). Verify: `pnpm exec prettier --check .`.
-- [ ] 2.6 Commit PR1 as scoped work-unit commits; open PR1 targeting `main`. Verify: `pnpm install --frozen-lockfile && pnpm turbo run lint typecheck depcruise`.
+- [x] 2.1 Create `.github/workflows/ci.yml`: confirm trigger scope is `push` to `main` + `pull_request` (matches spec `ci-pipeline`); matrix jobs lint/typecheck/depcruise/test; corepack + setup-node + `actions/cache@v6`. Verify: `actionlint .github/workflows/ci.yml`.
+- [x] 2.2 Create `docker-compose.yml` (`postgres:16-alpine`, `redis:7-alpine`, healthchecks, named volumes). Verify: `docker compose config`.
+- [ ] 2.3 Create `.env.example` (placeholders only, no secrets). Verify: manual review. **BLOCKED**: sandbox permission system denies any write to this exact path; needs manual creation or a permission grant (see apply-progress.md for content).
+- [x] 2.4 Update `.gitignore`: add `.turbo/`, `coverage/`, `*.tsbuildinfo` via `git add -p`, staging only this change's hunks (leave pre-existing unrelated hunks untouched). Verify: `git diff --staged .gitignore`.
+- [x] 2.5 Create `.prettierignore` (`docs/`, `openspec/`, lockfile). Verify: `pnpm exec prettier --check .`.
+- [ ] 2.6 Commit PR1 as scoped work-unit commits; open PR1 targeting `main`. Verify: `pnpm install --frozen-lockfile && pnpm turbo run lint typecheck depcruise`. **PARTIAL**: 4 work-unit commits made and verified on `feat/f0-workspace-foundation`; push rejected (`gh` token missing `workflow` scope, required because the diff touches `.github/workflows/ci.yml`). PR not yet opened.
 
 ## Phase 3: Test Runner Setup (PR2)
 

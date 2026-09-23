@@ -6,7 +6,7 @@ import { type ChecksumManifest, readManifest, sha256Hex } from './checksums.ts';
 const ROOT_URL = 'https://ekuatia.set.gov.py/sifen/xsd/siRecepDE_v150.xsd';
 const BASE_URL = 'https://ekuatia.set.gov.py/sifen/xsd/';
 
-const SCHEMA_LOCATION_PATTERN = /schemaLocation\s*=\s*"([^"]+)"/g;
+const SCHEMA_LOCATION_PATTERN = /schemaLocation\s*=\s*(["'])(.+?)\1/g;
 
 /**
  * Parses `xsd:include`/`xsd:import` `schemaLocation` references out of raw
@@ -17,7 +17,7 @@ const SCHEMA_LOCATION_PATTERN = /schemaLocation\s*=\s*"([^"]+)"/g;
 export function extractSchemaLocationNames(xsdContent: string): string[] {
   const names: string[] = [];
   for (const match of xsdContent.matchAll(SCHEMA_LOCATION_PATTERN)) {
-    const location = match[1];
+    const location = match[2];
     const name = location.includes('/') ? location.slice(location.lastIndexOf('/') + 1) : location;
     names.push(name);
   }
@@ -95,7 +95,13 @@ async function writeVendorFiles(closure: Map<string, Buffer>, vendorDir: string)
 async function main(): Promise<void> {
   const vendorDir = fileURLToPath(new URL('../vendor/', import.meta.url));
   const closure = await fetchClosure();
-  const drift = diffClosure(await readManifest(join(vendorDir, 'checksums.json')), closure);
+  const manifest = await readManifest(join(vendorDir, 'checksums.json')).catch(
+    (error: unknown): ChecksumManifest => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
+      throw error;
+    },
+  );
+  const drift = diffClosure(manifest, closure);
   const report = [
     ...drift.changed.map((name) => `changed: ${name}`),
     ...drift.added.map((name) => `added: ${name}`),
@@ -117,5 +123,8 @@ async function main(): Promise<void> {
 const isDirectInvocation = import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isDirectInvocation) {
-  void main();
+  main().catch((error: unknown) => {
+    process.exitCode = 1;
+    console.error(`refresh-xsd: ${error instanceof Error ? error.message : String(error)}`);
+  });
 }

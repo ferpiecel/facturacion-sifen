@@ -40,6 +40,12 @@ describe('extractSchemaLocationNames', () => {
     ]);
   });
 
+  it('extracts single-quoted schemaLocation values', () => {
+    const xsd = "<xsd:include schemaLocation='DE_Types_v150.xsd'/>";
+
+    expect(extractSchemaLocationNames(xsd)).toEqual(['DE_Types_v150.xsd']);
+  });
+
   it('returns an empty array when there is no schemaLocation reference', () => {
     expect(extractSchemaLocationNames('<xsd:schema/>')).toEqual([]);
   });

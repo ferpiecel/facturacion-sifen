@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readManifest, sha256File } from './checksums.ts';
 
 const MANIFEST_FILE = 'checksums.json';
+const IGNORED_FILES = new Set([MANIFEST_FILE, 'README.md']);
 
 export interface VerifyResult {
   readonly ok: boolean;
@@ -19,7 +20,7 @@ export interface VerifyResult {
  */
 export async function verifyVendorDirectory(vendorDir: string): Promise<VerifyResult> {
   const manifest = await readManifest(join(vendorDir, MANIFEST_FILE));
-  const entries = (await readdir(vendorDir)).filter((name) => name !== MANIFEST_FILE);
+  const entries = (await readdir(vendorDir)).filter((name) => !IGNORED_FILES.has(name));
 
   const expectedNames = new Set(Object.keys(manifest));
   const actualNames = new Set(entries);

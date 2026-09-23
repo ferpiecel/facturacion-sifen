@@ -63,7 +63,14 @@ export function formatVerifyResult(result: VerifyResult): string {
 
 async function main(): Promise<void> {
   const vendorDir = fileURLToPath(new URL('../vendor/', import.meta.url));
-  const result = await verifyVendorDirectory(vendorDir);
+  let result: VerifyResult;
+  try {
+    result = await verifyVendorDirectory(vendorDir);
+  } catch (error) {
+    process.exitCode = 1;
+    console.error(`verify-vendor: cannot read vendor manifest: ${String(error)}`);
+    return;
+  }
   process.exitCode = resultExitCode(result);
   if (!result.ok) {
     console.error(formatVerifyResult(result));

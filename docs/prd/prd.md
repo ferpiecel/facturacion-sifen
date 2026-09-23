@@ -138,6 +138,7 @@ La etiqueta de release indica cuándo entra cada requerimiento. **MVP** = primer
 | RF-24 | SSO empresarial, reportes fiscales y exportaciones | v1.1 |
 | RF-25 | Evento de actualización de datos del transporte (NRE) | v1.1 |
 | RF-26 | FEE, FEI y Comprobante de Retención | v1.1, **condicionado** a que la DNIT los habilite |
+| RF-27 | Nominación de Factura Electrónica: el emisor nombra al comprador de una FE emitida a receptor innominado (NT 014/015/027) | MVP |
 
 ## 7. Requerimientos no funcionales
 
@@ -186,7 +187,7 @@ Autoservicio de onboarding, cobro automático, WhatsApp, emisión manual desde e
 | # | Pregunta |
 |---|---|
 | D1 | ¿La habilitación en producción exige presentar evidencia de la batería de pruebas, o es autogestionada? |
-| D2 | Literal de ambiente de test: el del MT v150 o el de la Guía de Pruebas 2026 |
-| D3 | Canonicalización y `X509IssuerSerial` en la firma (el ejemplo oficial y el MT se contradicen) |
+| D2 | Literal de ambiente de test: resuelto en papel por la Guía de Pruebas 2026 §2 ("DOCUMENTO ELECTRÓNICO SIN VALOR COMERCIAL NI FISCAL - GENERADO EN AMBIENTE DE PRUEBA"); confirmar con el Prevalidador |
+| D3 | Canonicalización y `X509IssuerSerial` en la firma: **resuelto** por NT 016 (c14n inclusiva/exclusiva válidas; KeyInfo solo `X509Certificate`, sin `X509IssuerSerial`) |
 | D4 | Notas técnicas vigentes posteriores a v150 (incluida la contingencia) |
 | D5 | ¿Cómo se habilita el servicio sincrónico para un RUC? |

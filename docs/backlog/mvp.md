@@ -63,7 +63,7 @@ Historias del MVP agrupadas por épica, con la fase en que entran ([roadmap](../
 |---|---|---|---|---|
 | HU-E5-01 | Como integrador, quiero emitir una FE con una llamada | L | `POST /v1/documents` → 202 con `document_id` y CDC de 44 dígitos; p95 < 1,5 s | RF-01, RF-02, RNF-04 |
 | HU-E5-02 | Como integrador, quiero que mis reintentos no dupliquen comprobantes | M | El mismo `Idempotency-Key` devuelve la misma respuesta; un payload distinto con la misma clave devuelve 409 | RF-03, RNF-05 |
-| HU-E5-03 | Como integrador, quiero errores de validación antes de que llegue a SIFEN | M | 422 con la lista de errores (`campo`, `regla`, `código SIFEN` si aplica); cubre redondeo a 50 Gs, receptor innominado ≥ 60 M (1321) y ubicación | RF-04 |
+| HU-E5-03 | Como integrador, quiero errores de validación antes de que llegue a SIFEN | M | 422 con la lista de errores (`campo`, `regla`, `código SIFEN` si aplica); cubre redondeo a 50 Gs, receptor innominado ≥ 7 M configurable (D208c/1321, NT 024), operación B2G obligatoria si el receptor es un OEE (D202b/1332, NT 020; `gCompPub` opcional, NT 026) y ubicación | RF-04 |
 | HU-E5-04 | Como plataforma, quiero generar el XML con xmlgen y validarlo con el XSD | M | Versión SIFEN sin `dInfAdic` (2503) y versión receptor; reglas de formato del MT §7.2.4 | ADR-0002 |
 | HU-E5-05 | Como plataforma, quiero firmar el DE | M | XMLDSig enveloped sobre `<DE>`; RSA-SHA256; KeyInfo según D3 (configurable); `fecha_firma` persistida | §8.7 |
 | HU-E5-06 | Como plataforma, quiero generar el QR | S | Parámetros en hexadecimal donde corresponde; `cHashQR` con el CSC; URL del ambiente; verificable en e-kuatia | §8.8 |
@@ -89,7 +89,7 @@ Historias del MVP agrupadas por épica, con la fase en que entran ([roadmap](../
 |---|---|---|---|---|
 | HU-E7-01 | Como integrador, quiero emitir una NCE asociada a una FE | M | Documento asociado por CDC; suma de NC ≤ total de la FE (2417); misma moneda (2438) | RF-01; batería: 5+5 sync, 5+5 async |
 | HU-E7-02 | Como integrador, quiero emitir una NDE | M | Asociación a la FE; misma moneda | Ídem |
-| HU-E7-03 | Como integrador, quiero emitir una AFE | M | Receptor = emisor; vendedor no contribuyente; documento asociado = constancia | Ídem |
+| HU-E7-03 | Como integrador, quiero emitir una AFE | M | Receptor = emisor; vendedor no contribuyente; moneda PYG (D022/1213, NT 012); documento asociado = constancia | Ídem |
 | HU-E7-04 | Como integrador, quiero emitir una NRE | L | Sin totales; transporte, salida, entrega, vehículo y transportista obligatorios | Ídem |
 
 ## E8 — Rechazos y eventos del emisor · F2
@@ -97,15 +97,16 @@ Historias del MVP agrupadas por épica, con la fase en que entran ([roadmap](../
 | ID | Historia | T | Criterios clave | Traza |
 |---|---|---|---|---|
 | HU-E8-01 | Como integrador, quiero corregir y reenviar un DE rechazado | M | `POST /v1/documents/{id}/correct`; si la corrección no toca campos del CDC, mismo CDC; si los toca, la plataforma inutiliza el número y reemite | RF-07, MT §6.5 |
-| HU-E8-02 | Como integrador, quiero cancelar un DTE | M | FE ≤ 48 h, otros ≤ 168 h desde la aprobación; bloqueado si hay conformidad (4004); DTE asociados del último al primero | RF-08; batería: 5 cancelaciones |
+| HU-E8-02 | Como integrador, quiero cancelar un DTE | M | FE ≤ 48 h, otros ≤ 168 h desde la aprobación; la cancelación procede aunque el receptor haya dado conformidad (NT 025 excluyó GEC002c/4004); DTE asociados del último al primero | RF-08; batería: 5 cancelaciones |
 | HU-E8-03 | Como tenant, quiero inutilizar rangos de numeración | M | ≤ 1000 números; ninguno aprobado; alerta del plazo hasta el día 15 del mes siguiente | RF-09; batería: 2 FE, 1 NCE, 1 NDE, 1 AFE |
 | HU-E8-04 | Como plataforma, quiero enviar eventos en lotes | S | ≤ 15 eventos por envío; cada uno firmado | MT §11 |
+| HU-E8-05 | Como integrador, quiero nominar una FE emitida a receptor innominado | M | Un evento por CDC (GENFE002b/4453); el CDC debe ser una FE del propio emisor (4454/4468) con receptor innominado (D208=5, 4469); campos según naturaleza del receptor (contribuyente o no) | RF-27; NT 014/015/027 |
 
 ## E9 — Eventos del receptor · F2
 
 | ID | Historia | T | Criterios clave | Traza |
 |---|---|---|---|---|
-| HU-E9-01 | Como tenant receptor, quiero registrar conformidad, disconformidad, desconocimiento y notificación de recepción | M | ≤ 45 días desde la emisión; matriz de compatibilidad entre eventos | RF-10; batería: 3 de cada uno |
+| HU-E9-01 | Como tenant receptor, quiero registrar conformidad, disconformidad, desconocimiento y notificación de recepción | M | ≤ 45 días desde `dFecEmi` (DE) o desde la aprobación (DTE), NT 019; matriz de compatibilidad entre eventos | RF-10; batería: 3 de cada uno |
 | HU-E9-02 | Como tenant receptor, quiero corregir un evento | S | ≤ 15 días; una sola corrección por evento | Batería: 3 ajustes de evento |
 
 ## E10 — KuDE · F1 (básico) / F2 (completo)
@@ -155,6 +156,16 @@ Historias del MVP agrupadas por épica, con la fase en que entran ([roadmap](../
 | HU-E15-01 | Como plataforma, quiero las entidades de planes, suscripciones, pagos y facturas del SaaS | M | Tablas y entidades de dominio (plan v1.0 §7.2 Billing); sin cobro todavía | RF-17 |
 | HU-E15-02 | Como plataforma, quiero contar el uso por tenant y período | S | Contador atómico por DE emitido, llamada a la API y notificación | RF-17 |
 
+## Pendientes de priorizar por producto
+
+Recomendación del líder técnico: candidatos a v1.0, no en el MVP.
+
+| Tema | Motivo | Fuente |
+|---|---|---|
+| Obligaciones afectadas RG90 (`gOblAfe`, D030–D032) | Grupo opcional (0-11) sin caso de uso confirmado en el MVP | NT 018, NT 022 |
+| WS consulta masiva de RUC | No lo exige la batería mínima de homologación | NT 011 |
+| RUC fusionado (`dRucFus`, H018) | Campo de uso opcional, sin escenario del MVP que lo requiera | NT 023 |
+
 ---
 
 ## Resumen por fase
@@ -163,9 +174,9 @@ Historias del MVP agrupadas por épica, con la fase en que entran ([roadmap](../
 |---|---|---|---|
 | F0 | E0 | 6 | 3 semanas |
 | F1 | E1, E2, E3 (01–02), E4, E5, E6 (01–04), E10-01, E11-01, E13 | 31 | 5 semanas |
-| F2 | E6 (05–09), E7, E8, E9, E10-02, E11-02, E12 (01–02), E15 | 21 | 5 semanas |
+| F2 | E6 (05–09), E7, E8, E9, E10-02, E11-02, E12 (01–02), E15 | 22 | 5 semanas |
 | F3 | E12 (03–04), E14, E3-03 | 8 | 3 semanas |
-| **MVP** | | **66** | **16 semanas** |
+| **MVP** | | **67** | **16 semanas** |
 
 ## Ejemplo de detalle al tomar una historia (HU-E7-01)
 

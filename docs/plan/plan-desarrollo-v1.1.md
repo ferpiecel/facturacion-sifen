@@ -42,6 +42,27 @@
 | Ejemplo de CDC | 47 dígitos | 44 dígitos | MT §10.1 |
 | Batería de pruebas | Resumen propio | Batería oficial completa (§15) | Guía de Pruebas 2026 |
 
+### 0.3 Notas técnicas incorporadas
+
+| NT | Tema | Impacto | Sección |
+|---|---|---|---|
+| 010 | Elimina `dSisFact` (A005); fija la URL de consulta QR | Ajuste de formato de campos y QR | §8.8 |
+| 011 | Agrega el WS de consulta masiva de RUC | Fuera del MVP (candidato v1.0) | Backlog — Pendientes de priorizar |
+| 012 | AFE debe emitirse en PYG (D022/1213) | Regla de validación de AFE | §8.9; HU-E7-03 |
+| 014 | Agrega el evento Nominación de Factura Electrónica | Nuevo evento del emisor, en el MVP | §2.2, §8.6; HU-E8-05 |
+| 015 | Exige que el documento asociado coincida con el receptor nominado (H004i/2442) | Regla cruzada con Nominación | §8.6; HU-E8-05 |
+| 016 | Confirma algoritmos, canonicalización y KeyInfo de la firma; elimina el transform XPath | Resuelve D3 | §8.7 |
+| 018 | Agrega el grupo `gOblAfe` (RG90) | Fuera del MVP (candidato v1.0) | Backlog — Pendientes de priorizar |
+| 019 | Fija el inicio del plazo de eventos del receptor: DE desde `dFecEmi`, DTE desde la aprobación | Ajuste de plazos | §2.2, §8.6; HU-E9-01 |
+| 020 | Exige tipo de operación B2G si el receptor es un Organismo o Entidad del Estado (D202b/1332) | Nueva regla de validación | §8.9; HU-E5-03 |
+| 021 | Sube el umbral de receptor innominado a 35.000.000 Gs | Histórico, superado por NT 024 | §8.9 |
+| 022 | Valida que `gOblAfe` no repita códigos | Fuera del MVP (candidato v1.0) | Backlog — Pendientes de priorizar |
+| 023 | Agrega `dRucFus`; ajusta validaciones de receptor innominado | Fuera del MVP salvo receptor innominado | §8.9 |
+| 024 | Baja el umbral de receptor innominado a 7.000.000 Gs (vigente 01/01/2025) | Reemplaza el valor anterior | §8.9; HU-E5-03 |
+| 025 | Excluye GEC002c/4004: la cancelación ya no se bloquea por conformidad del receptor | Habilita la cancelación con conformidad previa | §2.2, §8.3; HU-E8-02 |
+| 026 | Vuelve opcional `gCompPub` en operaciones B2G | Ajuste de la regla B2G | §8.9; HU-E5-03 |
+| 027 | Ajusta los códigos de tipo de documento de identidad en Nominación | Ajuste menor de campos | §8.6; HU-E8-05 |
+
 ---
 
 ## 1. Resumen ejecutivo
@@ -76,12 +97,13 @@ Los cinco tipos del MVP están en la batería mínima de la Guía de Pruebas. Si
 ### 2.2 Eventos SIFEN
 
 **Emisor (registro requerido):**
-- **Cancelación**: hasta 48 h (FE) o 168 h (resto) desde la aprobación en SIFEN. No procede si el receptor ya dio conformidad (4004). Si el DTE tiene DTE asociados, se cancela del último al primero.
+- **Cancelación**: hasta 48 h (FE) o 168 h (resto) desde la aprobación en SIFEN. Procede aunque el receptor ya haya dado conformidad: NT 025 (vigente 28/04/2025) excluyó la validación GEC002c/4004 que lo bloqueaba. Si el DTE tiene DTE asociados, se cancela del último al primero.
 - **Inutilización**: rango de hasta 1000 números, sin ningún número aprobado en el rango. Plazo: dentro de los 15 primeros días del mes siguiente, y hasta el fin de validez del timbrado. Motivo obligatorio (5–500 caracteres).
+- **Nominación de Factura Electrónica**: nombra al comprador de una FE emitida a receptor innominado (D208=5). NT 014, ajustada por NT 015 y NT 027. Ver §8.6.
 - Actualización de datos del transporte (NRE): opcional, fuera del MVP.
 
 **Receptor (registro requerido)**, para clientes que también reciben DTE:
-- Notificación de recepción, Conformidad (parcial/total), Disconformidad, Desconocimiento: hasta 45 días desde la emisión.
+- Notificación de recepción, Conformidad (parcial/total), Disconformidad, Desconocimiento: hasta 45 días — desde `dFecEmi` si el documento es DE, desde la fecha de aprobación si es DTE (NT 019).
 - Corrección de evento del receptor: hasta 15 días desde el primer evento; una sola corrección por evento.
 - Respetar la matriz de compatibilidad entre eventos (MT §11, tabla de relaciones).
 
@@ -362,7 +384,6 @@ Solo para tenants cuyo RUC está habilitado para el servicio síncrono (si no, S
 ```
 POST /v1/documents/{cdc}/cancel { motivo (5–500) }
 → Validar estado aprobado y plazo: FE ≤ 48 h, resto ≤ 168 h desde fecha_aprobacion_sifen
-→ Validar que no haya conformidad del receptor
 → Si tiene DTE asociados: exigir cancelar primero los asociados (del último al primero)
 → Generar y firmar evento → EventBatchWorker (≤ 15 por envío)
 ```
@@ -386,9 +407,11 @@ La inutilización también se dispara automáticamente desde el flujo de rechazo
 - **Ventana de fecha de emisión**: hasta 30 días atrasada y hasta 5 días adelantada respecto de la transmisión (1150/1151).
 - **Bloqueo por RUC (10–60 min, Guía 2024)**: lo provocan lotes vacíos o inválidos, CDC repetido en un lote, CDC repetido en lotes en procesamiento o el mismo lote reenviado. Ante un 0301 por bloqueo se pausa ese tenant y se reencola con delay. La mejor defensa son las invariantes del LoteBuilder y la validación XSD previa.
 
-### 8.6 Eventos de receptor
+### 8.6 Eventos de receptor y nominación de FE
 
-Para tenants que también reciben DTE: notificación de recepción, conformidad (parcial → total), disconformidad, desconocimiento y corrección. Se validan plazos (45 días desde la emisión, 15 días para corregir) y la matriz de compatibilidad antes de enviar.
+Para tenants que también reciben DTE: notificación de recepción, conformidad (parcial → total), disconformidad, desconocimiento y corrección. Se validan plazos (45 días — desde `dFecEmi` si es DE, desde la fecha de aprobación si es DTE, NT 019 — y 15 días para corregir) y la matriz de compatibilidad antes de enviar.
+
+**Nominación de Factura Electrónica (evento del emisor):** nombra al comprador de una FE emitida a receptor innominado (D208=5). Campos `GENFE0xx` (NT 014, ajustada por NT 015 y NT 027). Un solo evento por CDC (4453); el CDC debe corresponder a una FE del propio emisor (4454/4468) y el receptor de esa FE debe ser innominado (4469). Si después se asocia una NCE/NDE a esa FE, el receptor del documento asociado debe coincidir con el nominado (H004i/2442, NT 015).
 
 ### 8.7 Firma digital
 
@@ -398,14 +421,14 @@ LoadedCertificate ← CertificateStore.loadForTenant(tenantId)
 
 XmlSigner (XMLDSig enveloped):
   ├─ Firma el nodo <DE> (grupo A001); Reference URI = "#" + CDC
-  ├─ Transforms: enveloped-signature + http://www.w3.org/2001/10/xml-exc-c14n#
-  ├─ CanonicalizationMethod: exc-c14n (así lo usa el ejemplo oficial xml_DE;
-  │    el ejemplo del MT §7.6 muestra c14n inclusivo → confirmar con el Prevalidador)
-  ├─ DigestMethod SHA-256; SignatureMethod RSA-SHA256 (RSA 2048, o 4096 por hardware)
+  ├─ Transform: único, enveloped-signature (NT 016 elimina el transform XPath)
+  ├─ CanonicalizationMethod: c14n inclusiva o exclusiva, con o sin comentarios, son válidas (NT 016);
+  │    se usa exc-c14n (así lo usa el ejemplo oficial xml_DE)
+  ├─ DigestMethod SHA-256/384/512; SignatureMethod RSA-SHA-256/384/512 (NT 016);
+  │    se usa SHA-256 / RSA-SHA256 (RSA 2048, o 4096 por hardware)
   ├─ <Signature xmlns="http://www.w3.org/2000/09/xmldsig#"> dentro de <rDE>, después de <DE>
-  └─ KeyInfo: solo <X509Data><X509Certificate>
-       (el MT §7.6 prohíbe X509IssuerSerial, X509SubjectName, KeyValue, etc.;
-        el ejemplo oficial incluye X509IssuerSerial → seguir el MT y confirmar con el Prevalidador)
+  └─ KeyInfo: solo <X509Data><X509Certificate> (NT 016 define X509Certificate como único hijo
+       de X509Data, ocurrencia 1-1; no se envían X509IssuerSerial, X509SubjectName ni KeyValue; resuelve D3)
 ```
 
 **Reglas de formato del XML (MT §7.2.4):** sin espacios ni saltos de línea entre etiquetas, sin prefijos de namespace, sin etiquetas vacías (salvo las obligatorias), sin negativos, nombres sensibles a mayúsculas. `<gCamFuFD><dCarQR>` va después de `<Signature>`, con `&` escapado como `&amp;`.
@@ -419,16 +442,17 @@ XmlSigner (XMLDSig enveloped):
 
 ### 8.8 QR
 
-URL = base de consulta del ambiente + `nVersion, Id, dFeEmiDE (hex), dRucRec | dNumIDRec, dTotGralOpe, dTotIVA, cItems, DigestValue (hex), IdCSC` + `cHashQR` = SHA-256 hex de los parámetros concatenados con el CSC. El CSC nunca viaja en la URL. Hasta 2 CSC activos por tenant.
+URL de consulta (NT 010): producción `https://ekuatia.set.gov.py/consultas/qr?`, test `https://ekuatia.set.gov.py/consultas-test/qr?`. Se completa con `nVersion, Id, dFeEmiDE (hex), dRucRec | dNumIDRec, dTotGralOpe, dTotIVA, cItems, DigestValue (hex), IdCSC` + `cHashQR` = SHA-256 hex de los parámetros concatenados con el CSC. El CSC nunca viaja en la URL. Hasta 2 CSC activos por tenant.
 
 ### 8.9 Reglas de dominio a validar antes de enviar
 
 - `dCodSeg`: 9 dígitos, aleatorio (CSPRNG), distinto por DE y distinto de `dNumDoc`.
 - `dNumDoc` empieza en 1 por timbrado. La serie se usa **solo** al agotar 9999999, en orden AA…ZZ sin Ñ, respetando la secuencialidad y la fecha de inicio de cada serie (1110).
 - NCE: la suma de los totales de las NC no puede superar el total de la FE (2417). NC/ND en la misma moneda que la FE (2438).
-- Receptor innominado prohibido cuando el total ≥ 60.000.000 Gs (1321).
+- Receptor innominado prohibido cuando el total ≥ 7.000.000 Gs (D208c/1321, NT 024, vigente 01/01/2025; historial: MT 60.000.000 → NT 021 35.000.000 → NT 024 7.000.000). El umbral debe ser configurable (ADR-0012), no hardcodeado.
+- Si el RUC del receptor corresponde a un Organismo o Entidad del Estado (OEE), el tipo de operación debe ser B2G (D202b/1332, NT 020); `gCompPub` es opcional en ese caso (NT 026).
 - Redondeo a múltiplos de 50 Gs (moneda extranjera: 50 céntimos).
-- AFE: receptor = emisor, B2C, contado, documento asociado = constancia electrónica.
+- AFE: receptor = emisor, B2C, contado, moneda PYG (D022/1213, NT 012), documento asociado = constancia electrónica.
 - NRE: sin totales ni valores por ítem; transporte, salida, entrega, vehículo y transportista obligatorios.
 - Validaciones cruzadas departamento/distrito/ciudad y descripción = código (tablas oficiales).
 - Ambiente de test: literales obligatorios (ver §15.2).
@@ -512,7 +536,7 @@ Sin cambios respecto de la v1.0, más:
 | Receptor | Datos reales de clientes |
 | CSC | IdCSC 0001 `ABCD0000000000000000000000000000`; IdCSC 0002 `EFGH0000000000000000000000000000` |
 
-> ⚠️ **Conflicto a resolver:** el MT v150 (D105, validación 1263) y el ejemplo oficial xml_DE exigen el literal "DE generado en ambiente de prueba - sin valor comercial ni fiscal". La Guía 2026 pide otro. Se parametriza por ambiente y se confirma con el Prevalidador o con la mesa de ayuda de la DNIT antes de la homologación.
+> ⚠️ **Resuelto en papel (D2):** el MT v150 (D105, validación 1263) y el ejemplo oficial xml_DE exigen el literal "DE generado en ambiente de prueba - sin valor comercial ni fiscal"; la Guía de Pruebas 2026 §2 pide el de la tabla anterior. Por orden de precedencia (§0.1) rige el de la Guía. Se parametriza por ambiente y queda pendiente confirmarlo con el Prevalidador antes de la homologación.
 
 ### 15.3 Batería mínima de pruebas (Guía de Pruebas 2026)
 
@@ -528,7 +552,7 @@ Sin cambios respecto de la v1.0, más:
 | Asincrónico rechazados | 5 por tipo en 1 lote (se recomiendan 3–5) |
 | Cancelación | 5 (cualquier DE) |
 | Inutilización | 2 de FE, 1 de NCE, 1 de NDE, 1 de AFE |
-| Eventos de receptor | 3 conformidad, 3 disconformidad, 3 desconocimiento, 3 notificación de recepción, 3 ajuste de evento |
+| Eventos de receptor | 3 conformidad, 3 disconformidad, 3 desconocimiento, 3 notificación de recepción, 3 ajuste de evento (corrección de un evento previo, HU-E9-02; distinto del evento automático "Devolución y Ajuste" de §0.2, que no se emite) |
 | Consulta de DTE por CDC | 3 por tipo |
 | KuDE en PDF | 1 por tipo |
 | Consulta de DTE por QR | 2 por tipo |
@@ -544,7 +568,7 @@ Si el RUC no queda habilitado para el servicio síncrono, se consulta con la DNI
 ### Fase 0 — Preparación y PoC (2–3 semanas)
 - Monorepo, CI/CD, infraestructura base, plantilla de módulo hexagonal y regla de dependencias.
 - Habilitación como facturador electrónico en test (SGTM), certificado y CSC.
-- **Revisar las notas técnicas vigentes** y resolver: contingencia, literal de test, canonicalización, `X509IssuerSerial`, tamaño de lote.
+- **Revisar las notas técnicas vigentes** y resolver: contingencia, literal de test, tamaño de lote (canonicalización y `KeyInfo`/`X509IssuerSerial` ya resueltos por NT 016).
 - PoC con TIPS (xmlgen + xmlsign + qrgen + setapi): 1 FE aprobada por lote y 1 por sincrónico contra `sifen-test`. Decidir qué librerías quedan y cuáles se reemplazan.
 
 ### Fase 1 — MVP homologable (8–10 semanas)
@@ -552,7 +576,7 @@ Si el RUC no queda habilitado para el servicio síncrono, se consulta con la DNI
 - **FE, NCE, NDE, AFE y NRE**.
 - Lote asincrónico completo (LoteBuilder, consulta, recuperación, 0364) y sincrónico opcional.
 - Rechazos: corregir y reenviar, o inutilizar.
-- Eventos de emisor (cancelación, inutilización) y de receptor (4 tipos + corrección).
+- Eventos de emisor (cancelación, inutilización, nominación de FE) y de receptor (4 tipos + corrección).
 - KuDE (carta y cinta) + QR.
 - Notificación por email y webhooks básicos.
 - Portal mínimo: login, emisión, listado, detalle, pendientes y rechazos.
@@ -589,7 +613,7 @@ Sin cambios respecto de la v1.0 (unas 8–9 personas). **Supuesto a validar** co
 | Riesgo | Impacto | Mitigación |
 |---|---|---|
 | Notas técnicas posteriores a v150 cambian reglas | Alto | Revisión en Fase 0; adaptadores aislados; suscripción a novedades de la DNIT |
-| Documentación oficial contradictoria (literal de test, c14n, KeyInfo, tamaño de lote) | Medio | Prevalidador en CI; consulta formal a la mesa de ayuda de la DNIT |
+| Documentación oficial contradictoria (literal de test, tamaño de lote) | Medio | Prevalidador en CI; consulta formal a la mesa de ayuda de la DNIT |
 | RUC sin habilitación para sincrónico | Medio | Lote como camino principal |
 | Bloqueo de RUC por errores de envío | Medio | Invariantes del LoteBuilder, validación XSD previa, pausa automática |
 | Lotes que tardan hasta 24 h | Medio | KuDE inmediato (validación posterior); estados visibles; webhooks al aprobar |

@@ -25,18 +25,18 @@ Chain strategy: stacked-to-main
 
 ## Phase 1: Package Skeleton (PR1)
 
-- [ ] 1.1 Create `packages/sifen-xsd/package.json` (`type: module`, exports `./dist/index.js`, scripts `build/typecheck/lint/depcruise/test/verify-vendor/refresh-xsd`, `libxml2-wasm` pinned exact `0.7.2`)
-- [ ] 1.2 Create `packages/sifen-xsd/tsconfig.json` and `tsconfig.build.json` extending `@sifen/config` (`module: nodenext`, `erasableSyntaxOnly`, `rewriteRelativeImportExtensions`)
-- [ ] 1.3 Create `packages/sifen-xsd/eslint.config.js` extending shared config; ignore `dist/**`, `vendor/**`
-- [ ] 1.4 Create `packages/sifen-xsd/vitest.config.ts` mirroring `apps/api`
-- [ ] 1.5 Create `packages/sifen-xsd/src/index.ts` as an empty placeholder module (real exports land in 6.9)
+- [x] 1.1 Create `packages/sifen-xsd/package.json` (`type: module`, exports `./dist/index.js`, scripts `build/typecheck/lint/depcruise/test/verify-vendor/refresh-xsd`, `libxml2-wasm` pinned exact `0.7.2`)
+- [x] 1.2 Create `packages/sifen-xsd/tsconfig.json` and `tsconfig.build.json` extending `@sifen/config` (`module: nodenext`, `erasableSyntaxOnly`, `rewriteRelativeImportExtensions`)
+- [x] 1.3 Create `packages/sifen-xsd/eslint.config.js` extending shared config; ignore `dist/**`, `vendor/**`
+- [x] 1.4 Create `packages/sifen-xsd/vitest.config.ts` mirroring `apps/api`
+- [x] 1.5 Create `packages/sifen-xsd/src/index.ts` as an empty placeholder module (real exports land in 6.9)
 
 ## Phase 2: Checksum Scripts — RED/GREEN (PR1)
 
-- [ ] 2.1 RED: `packages/sifen-xsd/test/verify-checksums.spec.ts` — tampered byte, missing file, extra file each produce non-zero exit and name the mismatched file (design test 5)
-- [ ] 2.2 GREEN: create `packages/sifen-xsd/scripts/checksums.ts` (shared sha256/manifest helpers)
-- [ ] 2.3 GREEN: create `packages/sifen-xsd/scripts/verify-checksums.ts` (CI integrity check) to pass 2.1
-- [ ] 2.4 Wire `verify-vendor` script in `package.json` to run `verify-checksums.ts`
+- [x] 2.1 RED: `packages/sifen-xsd/test/verify-checksums.spec.ts` — tampered byte, missing file, extra file each produce non-zero exit and name the mismatched file (design test 5)
+- [x] 2.2 GREEN: create `packages/sifen-xsd/scripts/checksums.ts` (shared sha256/manifest helpers)
+- [x] 2.3 GREEN: create `packages/sifen-xsd/scripts/verify-checksums.ts` (CI integrity check) to pass 2.1
+- [x] 2.4 Wire `verify-vendor` script in `package.json` to run `verify-checksums.ts`
 
 ## Phase 3: Vendor Refresh Workflow (PR1)
 

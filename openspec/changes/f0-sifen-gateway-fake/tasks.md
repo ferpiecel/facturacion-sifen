@@ -25,20 +25,20 @@ Chain strategy: stacked-to-main
 
 ## Phase 1: Scaffolding (PR 1)
 
-- [ ] 1.1 Create `packages/sifen-gateway/{package.json,tsconfig.json,tsconfig.build.json,eslint.config.js,vitest.config.ts}` mirroring `packages/sifen-xsd` conventions (nodenext, erasableSyntaxOnly, pinned devDependencies).
-- [ ] 1.2 Add `src/index.ts` empty barrel so the package builds.
-- [ ] 1.3 Verify: `pnpm --filter @sifen/sifen-gateway build`.
+- [x] 1.1 Create `packages/sifen-gateway/{package.json,tsconfig.json,tsconfig.build.json,eslint.config.js,vitest.config.ts}` mirroring `packages/sifen-xsd` conventions (nodenext, erasableSyntaxOnly, pinned devDependencies).
+- [x] 1.2 Add `src/index.ts` empty barrel so the package builds.
+- [x] 1.3 Verify: `pnpm --filter @sifen/sifen-gateway build`.
 
 ## Phase 2: Types, codes, errors (TDD, PR 1)
 
-- [ ] 2.1 RED: write `test/codes.spec.ts` asserting `SIFEN_CODES` exact values; run, capture failing line, commit alone as `test(sifen-gateway): add codes catalog spec (red)`.
-- [ ] 2.2 GREEN: implement `src/codes.ts` (`SIFEN_CODES` as const, `SifenCode`); commit `feat(sifen-gateway): add verified code catalog`.
-- [ ] 2.3 RED: write `test/types.spec.ts` for `toCdc` (accepts 44 digits, rejects others); run, capture failing line, commit `test(sifen-gateway): add types spec (red)`.
-- [ ] 2.4 GREEN: implement `src/types.ts` (`Cdc`, `toCdc`, result types); commit `feat(sifen-gateway): add result types and Cdc`.
-- [ ] 2.5 RED: write `test/errors.spec.ts` (`instanceof`, `name`, `operation`, `cause`); run, capture failing line, commit `test(sifen-gateway): add errors spec (red)`.
-- [ ] 2.6 GREEN: implement `src/errors.ts` (`SifenTimeoutError`, `SifenTransportError`); commit `feat(sifen-gateway): add typed gateway errors`.
-- [ ] 2.7 Add `src/port.ts` (`SifenGateway`, `SifenOperation`, `SifenResultOf<K>`); wire barrel `src/index.ts`; commit `feat(sifen-gateway): add SifenGateway port`.
-- [ ] 2.8 Verify: `pnpm --filter @sifen/sifen-gateway test && pnpm --filter @sifen/sifen-gateway typecheck`.
+- [x] 2.1 RED: write `test/codes.spec.ts` asserting `SIFEN_CODES` exact values; run, capture failing line, commit alone as `test(sifen-gateway): add codes catalog spec (red)`.
+- [x] 2.2 GREEN: implement `src/codes.ts` (`SIFEN_CODES` as const, `SifenCode`); commit `feat(sifen-gateway): add verified code catalog`.
+- [x] 2.3 RED: write `test/types.spec.ts` for `toCdc` (accepts 44 digits, rejects others); run, capture failing line, commit `test(sifen-gateway): add types spec (red)`.
+- [x] 2.4 GREEN: implement `src/types.ts` (`Cdc`, `toCdc`, result types); commit `feat(sifen-gateway): add result types and Cdc`.
+- [x] 2.5 RED: write `test/errors.spec.ts` (`instanceof`, `name`, `operation`, `cause`); run, capture failing line, commit `test(sifen-gateway): add errors spec (red)`.
+- [x] 2.6 GREEN: implement `src/errors.ts` (`SifenTimeoutError`, `SifenTransportError`); commit `feat(sifen-gateway): add typed gateway errors`.
+- [x] 2.7 Add `src/port.ts` (`SifenGateway`, `SifenOperation`, `SifenResultOf<K>`); wire barrel `src/index.ts`; commit `feat(sifen-gateway): add SifenGateway port`.
+- [x] 2.8 Verify: `pnpm --filter @sifen/sifen-gateway test && pnpm --filter @sifen/sifen-gateway typecheck`.
 
 ## Phase 3: Framework-isolation boundary (TDD, PR 1)
 

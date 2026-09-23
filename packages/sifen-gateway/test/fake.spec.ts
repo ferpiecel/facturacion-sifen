@@ -36,13 +36,10 @@ describe('FakeSifenGateway defaults', () => {
     expect(result.dCodRes).toBe(SIFEN_CODES.CDC_INEXISTENTE);
   });
 
-  it('enviarEventos rejects when unscripted (no verified default)', async () => {
+  it('enviarEventos and consultarRUC reject when unscripted (no verified default)', async () => {
     await expect(gateway.enviarEventos({ dId, eventos: ['<evento/>'] })).rejects.toThrow(
       /No response configured/,
     );
-  });
-
-  it('consultarRUC rejects when unscripted (no verified default)', async () => {
     await expect(gateway.consultarRUC({ dId, ruc: '80012345-6' })).rejects.toThrow(
       /No response configured/,
     );
@@ -102,17 +99,14 @@ describe('FakeSifenGateway enviarEventos batch limit', () => {
 });
 
 describe('FakeSifenGateway timeout and transport errors', () => {
-  it('rejects with SifenTimeoutError, same tick, with no timers', async () => {
+  it('rejects with the scripted error type, same tick, with no timers', async () => {
     const gateway = new FakeSifenGateway();
     gateway.enqueue('consultarRUC', new SifenTimeoutError('consultarRUC'));
+    gateway.enqueue('enviarLote', new SifenTransportError('enviarLote'));
+
     await expect(gateway.consultarRUC({ dId, ruc: '80012345-6' })).rejects.toBeInstanceOf(
       SifenTimeoutError,
     );
-  });
-
-  it('rejects with SifenTransportError when configured', async () => {
-    const gateway = new FakeSifenGateway();
-    gateway.enqueue('enviarLote', new SifenTransportError('enviarLote'));
     await expect(gateway.enviarLote({ dId, des: [] })).rejects.toBeInstanceOf(SifenTransportError);
   });
 });

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { extractSchemaLocationNames } from '../scripts/refresh-xsd.ts';
+import { sha256Hex } from '../scripts/checksums.ts';
+import {
+  assertXsdContent,
+  diffClosure,
+  extractSchemaLocationNames,
+} from '../scripts/refresh-xsd.ts';
 
 describe('extractSchemaLocationNames', () => {
   it('extracts a relative schemaLocation name', () => {
@@ -37,5 +42,45 @@ describe('extractSchemaLocationNames', () => {
 
   it('returns an empty array when there is no schemaLocation reference', () => {
     expect(extractSchemaLocationNames('<xsd:schema/>')).toEqual([]);
+  });
+});
+
+describe('diffClosure', () => {
+  const manifest = { 'a.xsd': sha256Hex(Buffer.from('A')), 'b.xsd': sha256Hex(Buffer.from('B')) };
+
+  it('reports no drift when fetched bytes match the manifest', () => {
+    const fetched = new Map([
+      ['a.xsd', Buffer.from('A')],
+      ['b.xsd', Buffer.from('B')],
+    ]);
+
+    expect(diffClosure(manifest, fetched)).toEqual({ changed: [], added: [], removed: [] });
+  });
+
+  it('reports changed, added and removed files', () => {
+    const fetched = new Map([
+      ['a.xsd', Buffer.from('A2')],
+      ['c.xsd', Buffer.from('C')],
+    ]);
+
+    expect(diffClosure(manifest, fetched)).toEqual({
+      changed: ['a.xsd'],
+      added: ['c.xsd'],
+      removed: ['b.xsd'],
+    });
+  });
+});
+
+describe('assertXsdContent', () => {
+  it('accepts a schema document', () => {
+    expect(() => {
+      assertXsdContent('a.xsd', Buffer.from('<?xml version="1.0"?>\n<xs:schema xmlns:xs="x"/>'));
+    }).not.toThrow();
+  });
+
+  it('rejects an HTML error page served with status 200', () => {
+    expect(() => {
+      assertXsdContent('a.xsd', Buffer.from('<html><body>Access denied</body></html>'));
+    }).toThrow(/a\.xsd is not an XSD/);
   });
 });

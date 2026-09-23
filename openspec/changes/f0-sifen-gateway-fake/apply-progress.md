@@ -140,3 +140,66 @@ Strict TDD (per `openspec/config.yaml` and orchestrator instruction).
 
 - [ ] Phase 4: Fake gateway (tasks 4.1–4.4)
 - [ ] Phase 5: CI wiring and close-out (tasks 5.1–5.2)
+
+## Batch 3: Phase 4-5 (Fake gateway + CI wiring, PR 2)
+
+### Deviation: consultarLote/consultarDE built-in defaults inverted vs design table
+
+Design's Architecture Decisions table states built-in defaults are `consultarLote 0362 empty` and
+`consultarDE 0422`, but spec.md's executable scenarios ("Unknown lote number" / "CDC not found")
+require the *unscripted* call to resolve `0360` and `0420` respectively — the "not found/unknown"
+codes, not the "found" codes. Implemented per spec.md (the authoritative executable contract):
+built-in defaults are `enviarLote` 0300, `consultarLote` 0360 (loteInexistente), `enviarDESincronico`
+0260, `consultarDE` 0420 (cdcInexistente). `enviarEventos`/`consultarRUC` keep no built-in default.
+
+### Deviation: `xmlMalformado<K>(op)` scenario builder omitted
+
+Design lists a generic `xmlMalformado<K>(op)` scenario builder, but no task 4.1 test coverage or
+spec.md requirement exercises it, and its generic per-operation result shape would add non-trivial
+complexity for no covered behavior. Omitted to stay in budget; flag for a future PR if a spec
+requirement for 0160 is added.
+
+### Addition: `rucCertificadoSinPermiso` scenario (0421) for `consultarDE`
+
+Per orchestrator instruction: `SIFEN_CODES.RUC_CERTIFICADO_SIN_PERMISO` (0421, already in `codes.ts`
+from PR 1) needed a `consultarDE` scenario builder and spec coverage. Added
+`scenarios.rucCertificadoSinPermiso()` and a new spec.md scenario "RUC not permitted to consult the
+DE" under the `consultarDE scenarios` requirement.
+
+### TDD Cycle Evidence
+
+| Task | RED (failing line) | RED commit | GREEN commit |
+|---|---|---|---|
+| 4.1/4.2/4.3 fake | `Cannot find module '../src/fake/fake-sifen-gateway.ts' imported from .../test/fake.spec.ts` at `test/fake.spec.ts:4:1` | `e9bf068` | `f6b85ab` (tightened for line budget in `1c1...` follow-up commits, no behavior change) |
+
+### Completed Tasks
+
+- [x] 4.1 RED `test/fake.spec.ts` — commit `e9bf068`
+- [x] 4.2 GREEN `src/fake/scenarios.ts` (10 builders incl. `rucCertificadoSinPermiso`)
+- [x] 4.3 GREEN `src/fake/fake-sifen-gateway.ts` (`enqueue`, `setDefault`, `calls`, `callsTo`, `reset`, `Scripted<T>`); barrel wired — commit `f6b85ab`
+- [x] 4.4 Verify: `test && lint` — passed
+- [x] 5.1 `pnpm -r list` confirms `@sifen/sifen-gateway` workspace member
+- [x] 5.2 Full `pnpm -r test` (api + sifen-xsd + sifen-gateway) — all green
+
+### Files Changed (this batch)
+
+| File | Action |
+|---|---|
+| `packages/sifen-gateway/src/fake/fake-sifen-gateway.ts` | Created |
+| `packages/sifen-gateway/src/fake/scenarios.ts` | Created |
+| `packages/sifen-gateway/src/index.ts` | Barrel wired (`FakeSifenGateway`, `Scripted`, `sifenScenarios`) |
+| `packages/sifen-gateway/test/fake.spec.ts` | Created |
+| `openspec/changes/f0-sifen-gateway-fake/specs/sifen-gateway-contract/spec.md` | Added 0421 scenario |
+
+### Verification (this batch)
+
+- RED: `Cannot find module '../src/fake/fake-sifen-gateway.ts' imported from .../test/fake.spec.ts` at `test/fake.spec.ts:4:1`; red commit `e9bf068`
+- GREEN: `npx --yes pnpm@12.5.1 --filter @sifen/sifen-gateway test` → 5 test files, 23 tests passed
+- `npx --yes pnpm@12.5.1 turbo run format:check lint typecheck depcruise test build` → 19/19 tasks successful
+- `git log --oneline main..HEAD` → 5 commits (e9bf068..HEAD)
+- `git diff main...HEAD --shortstat -- . ':(exclude)pnpm-lock.yaml' ':(exclude)openspec'` → 4 files changed, 350 insertions(+)
+- Full workspace: `pnpm -r test` → api (5 files/21 tests), sifen-xsd (3 files/20 tests), sifen-gateway (5 files/23 tests) all green
+
+### Remaining Tasks
+
+None — all tasks in tasks.md are complete.

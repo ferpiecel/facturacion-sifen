@@ -50,12 +50,12 @@ Chain strategy: stacked-to-main
 
 ## Phase 4: Fake gateway (TDD, PR 2, stacked on PR 1)
 
-- [ ] 4.1 RED: write `test/fake.spec.ts` covering: defaults per op, queue FIFO then default, each verified code (0300, 0301, 0361/0362, 0360, 0364, 0422, 0420, 0260), 15-event limit rejection with no successful record, timeout/transport rejection same-tick with no timers, missing default for `enviarEventos`/`consultarRUC`, call recording with copied args, `reset()`; run, capture failing line, commit `test(sifen-gateway): add fake scenario spec (red)`.
-- [ ] 4.2 GREEN: implement `src/fake/scenarios.ts` builders (`loteRecibido`, `loteNoEncolado`, `loteInexistente`, `loteEnProcesamiento`, `loteConcluido`, `consultaExtemporanea`, `deAutorizado`, `cdcEncontrado`, `cdcInexistente`).
-- [ ] 4.3 GREEN: implement `src/fake/fake-sifen-gateway.ts` (`enqueue`, `setDefault`, `calls`, `callsTo`, `reset`, `Scripted<T>`); wire barrel; commit `feat(sifen-gateway): add FakeSifenGateway`.
-- [ ] 4.4 Verify: `pnpm --filter @sifen/sifen-gateway test && pnpm --filter @sifen/sifen-gateway lint`.
+- [x] 4.1 RED: write `test/fake.spec.ts` covering: defaults per op, queue FIFO then default, each verified code (0300, 0301, 0361/0362, 0360, 0364, 0422, 0420, 0260), 15-event limit rejection with no successful record, timeout/transport rejection same-tick with no timers, missing default for `enviarEventos`/`consultarRUC`, call recording with copied args, `reset()`; run, capture failing line, commit `test(sifen-gateway): add fake scenario spec (red)`.
+- [x] 4.2 GREEN: implement `src/fake/scenarios.ts` builders (`loteRecibido`, `loteNoEncolado`, `loteInexistente`, `loteEnProcesamiento`, `loteConcluido`, `consultaExtemporanea`, `deAutorizado`, `cdcEncontrado`, `cdcInexistente`).
+- [x] 4.3 GREEN: implement `src/fake/fake-sifen-gateway.ts` (`enqueue`, `setDefault`, `calls`, `callsTo`, `reset`, `Scripted<T>`); wire barrel; commit `feat(sifen-gateway): add FakeSifenGateway`.
+- [x] 4.4 Verify: `pnpm --filter @sifen/sifen-gateway test && pnpm --filter @sifen/sifen-gateway lint`.
 
 ## Phase 5: CI wiring and close-out
 
-- [ ] 5.1 Confirm `pnpm-workspace.yaml` picks up `packages/sifen-gateway` (no change expected; verify with `pnpm -r list`).
-- [ ] 5.2 Confirm CI runs `build/typecheck/lint/depcruise/test` for the new package; verify: full `pnpm -r test`.
+- [x] 5.1 Confirm `pnpm-workspace.yaml` picks up `packages/sifen-gateway` (no change expected; verify with `pnpm -r list`).
+- [x] 5.2 Confirm CI runs `build/typecheck/lint/depcruise/test` for the new package; verify: full `pnpm -r test`.

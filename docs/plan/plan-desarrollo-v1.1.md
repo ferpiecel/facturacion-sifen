@@ -225,14 +225,16 @@ src/modules/emision/
 
 ### 5.1 Puertos principales
 
+El contrato vigente de `SifenGateway` vive en `packages/sifen-gateway/src/port.ts`. Cada operación recibe un objeto con parámetros nombrados, y `dProtConsLote` es el nombre oficial del número de lote en SIFEN.
+
 ```typescript
 export interface SifenGateway {
-  enviarLote(xmlsFirmados: string[], dId: bigint): Promise<SifenLoteReceipt>;       // 0300 / 0301
-  consultarLote(nroLote: string, dId: bigint): Promise<SifenLoteResult>;            // 0360 / 0361 / 0362 / 0364
-  enviarDESincronico(xmlFirmado: string, dId: bigint): Promise<SifenProtocoloDE>;   // solo si el RUC está habilitado
-  consultarDE(cdc: Cdc, dId: bigint): Promise<SifenConsDE>;                         // 0420 / 0422
-  enviarEventos(eventosFirmados: string[], dId: bigint): Promise<SifenEventosResult>; // ≤ 15
-  consultarRUC(ruc: string, dId: bigint): Promise<SifenConsRUC>;
+  enviarLote(req: { dId: bigint; des: readonly string[] }): Promise<SifenLoteReceipt>;             // 0300 / 0301
+  consultarLote(req: { dId: bigint; dProtConsLote: string }): Promise<SifenLoteResult>;            // 0360 / 0361 / 0362 / 0364
+  enviarDESincronico(req: { dId: bigint; de: string }): Promise<SifenProtocoloDE>;                 // 0260; solo si el RUC está habilitado
+  consultarDE(req: { dId: bigint; cdc: Cdc }): Promise<SifenConsDE>;                               // 0420 / 0422
+  enviarEventos(req: { dId: bigint; eventos: readonly string[] }): Promise<SifenEventosResult>;   // ≤ 15
+  consultarRUC(req: { dId: bigint; ruc: string }): Promise<SifenConsRUC>;
 }
 
 export interface DeXmlBuilder {

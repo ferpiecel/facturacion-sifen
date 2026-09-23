@@ -38,10 +38,10 @@ Chain strategy: stacked-to-main
 
 - [x] 2.1 Create `.github/workflows/ci.yml`: confirm trigger scope is `push` to `main` + `pull_request` (matches spec `ci-pipeline`); matrix jobs lint/typecheck/depcruise/test; corepack + setup-node + `actions/cache@v6`. Verify: `actionlint .github/workflows/ci.yml`.
 - [x] 2.2 Create `docker-compose.yml` (`postgres:16-alpine`, `redis:7-alpine`, healthchecks, named volumes). Verify: `docker compose config`.
-- [ ] 2.3 Create `.env.example` (placeholders only, no secrets). Verify: manual review. **BLOCKED**: sandbox permission system denies any write to this exact path; needs manual creation or a permission grant (see apply-progress.md for content).
+- [x] 2.3 ~~Create `.env.example`~~ **DEFERRED** (tech lead decision): local permission policy denies agent writes to `.env*`; docker-compose.yml ships defaults so local dev works without it. Tracked as follow-up for a human to add.
 - [x] 2.4 Update `.gitignore`: add `.turbo/`, `coverage/`, `*.tsbuildinfo` via `git add -p`, staging only this change's hunks (leave pre-existing unrelated hunks untouched). Verify: `git diff --staged .gitignore`.
 - [x] 2.5 Create `.prettierignore` (`docs/`, `openspec/`, lockfile). Verify: `pnpm exec prettier --check .`.
-- [ ] 2.6 Commit PR1 as scoped work-unit commits; open PR1 targeting `main`. Verify: `pnpm install --frozen-lockfile && pnpm turbo run lint typecheck depcruise`. **PARTIAL**: 4 work-unit commits made and verified on `feat/f0-workspace-foundation`; push rejected (`gh` token missing `workflow` scope, required because the diff touches `.github/workflows/ci.yml`). PR not yet opened.
+- [x] 2.6 Commit PR1 as scoped work-unit commits; open PR1 targeting `main`. Done: PR #2 merged as 459e46c (push unblocked after granting `workflow` scope).
 
 ## Phase 3: Test Runner Setup (PR2)
 

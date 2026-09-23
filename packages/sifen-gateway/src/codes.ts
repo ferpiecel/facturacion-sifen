@@ -1,28 +1,28 @@
 /**
- * Verified SIFEN response codes (`dCodRes`) this gateway and its fake
- * currently model. Sources: SIFEN Manual Técnico (MT) and the integration
- * guides (Guía) referenced in `docs/referencia/dnit/`.
+ * Verified SIFEN response codes (`dCodRes`) this gateway and its fake model.
+ * Meanings come from the Manual Técnico v150 (MT) and the Guía de Mejores
+ * Prácticas para la Gestión del Envío de DE (Oct/2024) in `docs/referencia/dnit/`.
  */
 export const SIFEN_CODES = {
-  /** Lote received and queued for processing. MT §12, Guía de Transmisión. */
+  /** Lote recibido con éxito (siRecepLoteDE). */
   LOTE_RECIBIDO: '0300',
-  /** Lote received but not queued (e.g. duplicate). MT §12. */
+  /** Lote no encolado para procesamiento; SIFEN will not process it (siRecepLoteDE). */
   LOTE_NO_ENCOLADO: '0301',
-  /** Lote still being processed. MT §12, Guía de Consulta de Lote. */
-  LOTE_EN_PROCESAMIENTO: '0361',
-  /** Lote processing concluded; results available. MT §12. */
-  LOTE_CONCLUIDO: '0362',
-  /** Queried lote number does not exist. MT §12. */
+  /** Número de lote inexistente (siResultLoteDE). */
   LOTE_INEXISTENTE: '0360',
-  /** Lote query made outside the allowed consultation window. MT §12. */
+  /** Lote en procesamiento (siResultLoteDE). */
+  LOTE_EN_PROCESAMIENTO: '0361',
+  /** Procesamiento de lote concluido; per-DE results are included (siResultLoteDE). */
+  LOTE_CONCLUIDO: '0362',
+  /** Consulta extemporánea: lotes can be queried up to 48 h after sending (siResultLoteDE). */
   CONSULTA_EXTEMPORANEA: '0364',
-  /** Synchronous DE authorized. MT §11, Guía de Transmisión Síncrona. */
+  /** Autorización del DE satisfactoria (siRecepDE, synchronous). */
   DE_AUTORIZADO: '0260',
-  /** Queried CDC found. MT §13, Guía de Consulta de DE. */
+  /** CDC encontrado (siConsDE). */
   CDC_ENCONTRADO: '0422',
-  /** Queried CDC not found or not permitted. MT §13. */
+  /** CDC inexistente, also returned when the certificate RUC lacks permission (siConsDE). */
   CDC_INEXISTENTE: '0420',
-  /** Submitted XML is malformed. MT §11. */
+  /** XML malformado (generic input validation). */
   XML_MALFORMADO: '0160',
 } as const;
 

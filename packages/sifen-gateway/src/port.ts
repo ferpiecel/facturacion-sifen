@@ -1,4 +1,12 @@
-import type { Cdc, SifenConsDE, SifenConsRUC, SifenEventosResult, SifenLoteReceipt, SifenLoteResult, SifenProtocoloDE } from './types.ts';
+import type {
+  Cdc,
+  SifenConsDE,
+  SifenConsRUC,
+  SifenEventosResult,
+  SifenLoteReceipt,
+  SifenLoteResult,
+  SifenProtocoloDE,
+} from './types.ts';
 
 /** Framework-free port to the SIFEN web services. Implementations MUST NOT import NestJS, Fastify, Drizzle, or BullMQ. */
 export interface SifenGateway {

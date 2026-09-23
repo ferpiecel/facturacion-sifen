@@ -18,10 +18,17 @@ export const SIFEN_CODES = {
   CONSULTA_EXTEMPORANEA: '0364',
   /** Autorización del DE satisfactoria (siRecepDE, synchronous). */
   DE_AUTORIZADO: '0260',
-  /** CDC encontrado (siConsDE). */
+  /**
+   * siConsDE codes follow MT v150 §9.4.2 Tabla G. MT §12.3.4.3 contradicts it by
+   * listing 0421 as "CDC encontrado"; per ADR-0012 this stays pending confirmation
+   * in sifen-test.
+   */
+  /** CDC encontrado (siConsDE, Tabla G). */
   CDC_ENCONTRADO: '0422',
-  /** CDC inexistente, also returned when the certificate RUC lacks permission (siConsDE). */
+  /** CDC inexistente (siConsDE). */
   CDC_INEXISTENTE: '0420',
+  /** RUC del certificado sin permiso para consultar el DE (siConsDE, Tabla G). */
+  RUC_CERTIFICADO_SIN_PERMISO: '0421',
   /** XML malformado (generic input validation). */
   XML_MALFORMADO: '0160',
 } as const;

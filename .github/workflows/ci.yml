@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-gates:
+    name: ${{ matrix.task }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [lint, typecheck, depcruise, test]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      - run: corepack enable
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.local/share/pnpm/store
+          key: turbo-${{ matrix.task }}-${{ github.sha }}
+          restore-keys: |
+            turbo-${{ matrix.task }}-
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm turbo run ${{ matrix.task }}

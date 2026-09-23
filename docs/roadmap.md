@@ -48,7 +48,15 @@ Sem:  1   3   5   7   9   11  13  15  17  19  21  23  25  27  29
 - [ ] FE de la PoC aprobada en `sifen-test` y QR verificable en e-kuatia.
 - [ ] ADR de las librerías de TIPS confirmado o modificado (qué se usa y qué se reemplaza).
 - [ ] D3 (canonicalización/KeyInfo de la firma) resuelto por NT 016; confirmar con el Prevalidador. D2 (literal de ambiente de test) resuelto en papel por la Guía de Pruebas 2026 §2; confirmar con el Prevalidador.
-- [ ] CI en verde con la regla de dependencias activa.
+- [x] CI en verde con la regla de dependencias activa.
+
+**Excepción controlada al gate (23/09/2026, decisión del líder técnico con acuerdo del PO).** El gate está bloqueado solo por la PoC real en `sifen-test`, que necesita el certificado cualificado F1 y la habilitación en Marangatu (trámites del PO). Mientras tanto se avanza con lo que **no depende de SIFEN**:
+
+1. PoC **offline**: xmlgen, firma con un certificado de desarrollo autofirmado, QR, validación contra el XSD oficial y envío al simulador `FakeSifenGateway`. Cierra el criterio del ADR de TIPS.
+2. Umbral de cobertura ≥85% en el CI.
+3. Épicas de F1 independientes de SIFEN: E1 (RLS, contexto de tenant, API keys), E2 (configuración fiscal), E4 (numeración) y E13 (auditoría).
+
+La emisión y la transmisión reales (E5 y E6 contra `sifen-test`) y la batería de homologación **siguen bloqueadas** hasta aprobar la PoC real.
 
 ### F1 — Núcleo de emisión de FE (semanas 4–8)
 **Objetivo:** el camino feliz completo de la FE, multi-tenant desde el primer commit.

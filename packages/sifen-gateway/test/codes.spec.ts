@@ -13,6 +13,7 @@ describe('SIFEN_CODES', () => {
       DE_AUTORIZADO: '0260',
       CDC_ENCONTRADO: '0422',
       CDC_INEXISTENTE: '0420',
+      RUC_CERTIFICADO_SIN_PERMISO: '0421',
       XML_MALFORMADO: '0160',
     });
   });

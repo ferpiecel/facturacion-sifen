@@ -38,6 +38,7 @@ Cuando una tarea depende de otra que todavía no se mergeó:
 2. Los hallazgos se publican como comentario en el PR, con archivo, línea, escenario de falla y severidad.
 3. Los hallazgos bloqueantes se corrigen en la misma rama y se vuelve a revisar. Los no bloqueantes se corrigen o se registran como deuda en la sección "Validaciones pendientes".
 4. El merge se hace solo con el CI en verde y la revisión sin bloqueantes.
+5. El mensaje del commit de *squash* sigue la regla de commits (inglés, convencional), no el título en español del PR: `gh pr merge <n> --squash --subject "<type>(<scope>): <summary> (#<n>)"`.
 
 ## Commits
 

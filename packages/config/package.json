@@ -1,0 +1,12 @@
+{
+  "name": "@sifen/config",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "files": [
+    "tsconfig.base.json",
+    "tsconfig.nest.json",
+    "eslint.config.js",
+    "prettier.config.js"
+  ]
+}

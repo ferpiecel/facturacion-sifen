@@ -39,11 +39,28 @@ class ProbeController {
   }
 }
 
+@Controller('class-scoped-probe')
+@RequireScopes('tenant:read')
+class ClassScopedProbeController {
+  @Get('merged')
+  @RequireScopes('documents:write')
+  mergedRoute() {
+    return 'ok';
+  }
+
+  @Get('class-only')
+  classOnlyRoute() {
+    return 'ok';
+  }
+}
+
 function contextFor(
-  handlerName: keyof ProbeController,
+  handlerName: string,
   headers: Record<string, string>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  controllerClass: new () => any = ProbeController as unknown as new () => any,
 ): ExecutionContext {
-  const instance = new ProbeController();
+  const instance = new controllerClass();
   // Reflector reads metadata off the function object itself (SetMetadata),
   // and never invokes it through `this` here, so the bare reference is
   // safe despite the lint rule assuming a call site.
@@ -52,7 +69,7 @@ function contextFor(
   return {
     switchToHttp: () => ({ getRequest: () => ({ headers }) }),
     getHandler: () => handler,
-    getClass: () => ProbeController,
+    getClass: () => controllerClass,
   } as unknown as ExecutionContext;
 }
 
@@ -262,6 +279,63 @@ describe('ApiKeyGuard', () => {
     await expect(
       cls.run(() =>
         guard.canActivate(contextFor('scopedRoute', { authorization: 'Bearer sk_live_x' })),
+      ),
+    ).rejects.toMatchObject({ status: HttpStatus.FORBIDDEN });
+  });
+
+  it('merges class-level and handler-level @RequireScopes (both are required)', async () => {
+    const { useCase } = makeUseCase({
+      ...AUTHENTICATED,
+      scopes: ['tenant:read', 'documents:write'],
+    });
+    const cls = newCls();
+    const guard = new ApiKeyGuard(new Reflector(), useCase, cls, 'production');
+
+    await expect(
+      cls.run(() =>
+        guard.canActivate(
+          contextFor(
+            'mergedRoute',
+            { authorization: 'Bearer sk_live_x' },
+            ClassScopedProbeController,
+          ),
+        ),
+      ),
+    ).resolves.toBe(true);
+  });
+
+  it('rejects with 403 when a key has the handler scope but not the class scope', async () => {
+    const { useCase } = makeUseCase({ ...AUTHENTICATED, scopes: ['documents:write'] });
+    const cls = newCls();
+    const guard = new ApiKeyGuard(new Reflector(), useCase, cls, 'production');
+
+    await expect(
+      cls.run(() =>
+        guard.canActivate(
+          contextFor(
+            'mergedRoute',
+            { authorization: 'Bearer sk_live_x' },
+            ClassScopedProbeController,
+          ),
+        ),
+      ),
+    ).rejects.toMatchObject({ status: HttpStatus.FORBIDDEN });
+  });
+
+  it('enforces a class-level @RequireScopes even when the handler adds none of its own', async () => {
+    const { useCase } = makeUseCase({ ...AUTHENTICATED, scopes: [] });
+    const cls = newCls();
+    const guard = new ApiKeyGuard(new Reflector(), useCase, cls, 'production');
+
+    await expect(
+      cls.run(() =>
+        guard.canActivate(
+          contextFor(
+            'classOnlyRoute',
+            { authorization: 'Bearer sk_live_x' },
+            ClassScopedProbeController,
+          ),
+        ),
       ),
     ).rejects.toMatchObject({ status: HttpStatus.FORBIDDEN });
   });

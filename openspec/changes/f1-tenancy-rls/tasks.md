@@ -26,12 +26,12 @@ Chain strategy: stacked-to-main (every PR targets main; dependent PRs open as dr
 
 ## Phase 1: Foundation — packages/db scaffold (PR 1)
 
-- [ ] 1.1 Create `packages/db/{package.json,tsconfig*.json,vitest.config.ts,.dependency-cruiser.cjs,drizzle.config.ts}` (framework-free, forbid `@nestjs`, `fastify`, `bullmq`, `ioredis`, `reflect-metadata`)
-- [ ] 1.2 Write `packages/db/src/schema.ts` (`tenants`, `tenant_probe`, `TENANT_TABLES`)
-- [ ] 1.3 Write `packages/db/src/client.ts` (`createPgliteDatabase`, `createNodePostgresDatabase` → `DatabaseHandle`)
-- [ ] 1.4 Run `drizzle-kit generate` → `packages/db/migrations/0000_*.sql` + `meta/`
-- [ ] 1.5 Write `packages/db/test/support/{harness.ts,global-setup.ts}` (pglite default, `DB_TEST_DRIVER=postgres` → testcontainers)
-- [ ] 1.6 Verify pin `pg@8.23.0`, `@types/pg@8.23.1`, `@electric-sql/pglite@0.5.8`, `drizzle-orm@0.45.3`, `drizzle-kit@0.31.11`
+- [x] 1.1 Create `packages/db/{package.json,tsconfig*.json,vitest.config.ts,.dependency-cruiser.cjs,drizzle.config.ts}` (framework-free, forbid `@nestjs`, `fastify`, `bullmq`, `ioredis`, `reflect-metadata`)
+- [x] 1.2 Write `packages/db/src/schema.ts` (`tenants`, `tenant_probe`, `TENANT_TABLES`)
+- [x] 1.3 Write `packages/db/src/client.ts` (`createPgliteDatabase`, `createNodePostgresDatabase` → `DatabaseHandle`)
+- [x] 1.4 Run `drizzle-kit generate` → `packages/db/migrations/0000_*.sql` + `meta/`
+- [x] 1.5 Write `packages/db/test/support/{harness.ts,global-setup.ts}` (pglite default, `DB_TEST_DRIVER=postgres` → testcontainers)
+- [x] 1.6 Verify pin `pg@8.23.0`, `@types/pg@8.23.1`, `@electric-sql/pglite@0.5.8`, `drizzle-orm@0.45.3`, `drizzle-kit@0.31.11`
 
 ## Phase 2: RLS enforcement (PR 2)
 

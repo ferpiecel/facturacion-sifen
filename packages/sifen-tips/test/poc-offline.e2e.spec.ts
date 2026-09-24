@@ -1,12 +1,10 @@
+import forge from 'node-forge';
+import { SignedXml } from 'xml-crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FakeSifenGateway, type QrConfig } from '@sifen/sifen-gateway';
+import { FakeSifenGateway, type LoadedCertificate, type QrConfig } from '@sifen/sifen-gateway';
 import { validateXml } from '@sifen/sifen-xsd';
 import { generateDevCertificate } from './support/dev-certificate.ts';
-import {
-  getGuardCallCount,
-  installNoSubprocessGuard,
-  restoreNoSubprocessGuard,
-} from './support/no-subprocess-guard.ts';
+import { getGuardCallCount, restoreNoSubprocessGuard } from './support/no-subprocess-guard.ts';
 import { pocFacturaInput } from './fixtures/poc-factura-input.ts';
 
 const QR_CONFIG: QrConfig = {
@@ -16,23 +14,48 @@ const QR_CONFIG: QrConfig = {
 };
 
 /**
+ * Extracts the dev certificate's X.509 public certificate as PEM, so
+ * xml-crypto can verify against the same key pair that signed the XML.
+ */
+function certPemFrom(cert: LoadedCertificate): string {
+  const binary = Buffer.from(cert.p12).toString('binary');
+  const asn1 = forge.asn1.fromDer(forge.util.createBuffer(binary, 'raw'));
+  const bags = forge.pkcs12
+    .pkcs12FromAsn1(asn1, false, cert.password)
+    .getBags({ bagType: forge.pki.oids.certBag });
+  const certificate = bags[forge.pki.oids.certBag]?.[0]?.cert;
+  if (!certificate) throw new Error('dev certificate PKCS#12 has no X.509 certificate');
+  return forge.pki.certificateToPem(certificate);
+}
+
+/** Verifies the enveloped-signature + exc-c14n XMLDSig `<Signature>` against `cert`'s public key. */
+function signatureVerifies(xml: string, cert: LoadedCertificate): boolean {
+  const signatureXml = xml.match(/<Signature[\s\S]*?<\/Signature>/)?.[0];
+  if (!signatureXml) return false;
+  const sig = new SignedXml({ publicCert: certPemFrom(cert) });
+  sig.loadSignature(signatureXml);
+  return sig.checkSignature(xml);
+}
+
+/**
  * Full offline PoC flow: build → sign (Node-mode) → QR → XSD validate →
- * FakeSifenGateway, entirely offline (ADR-0015, HU-E0-04). The guard is
- * installed before the adapters are dynamically imported (module load
- * happens in `beforeAll`), so any `child_process` reference the TIPS
- * libraries would read at that time is trapped too. The flow runs once;
- * every `it` below asserts on the same resulting document.
+ * FakeSifenGateway, entirely offline (ADR-0015, HU-E0-04). The `e2e` Vitest
+ * project's setupFiles entry installs the no-subprocess guard before this
+ * file (and the TIPS libraries it transitively loads) is imported at all, so
+ * even a `child_process` reference captured at require time is trapped.
+ * The flow runs once; every `it` below asserts on the same resulting document.
  */
 describe('Offline PoC: build → sign → QR → XSD validate → FakeSifenGateway', () => {
+  let signedXml: string;
   let signedXmlWithQr: string;
+  let cert: LoadedCertificate;
 
   beforeAll(async () => {
-    installNoSubprocessGuard();
     const { TipsDeXmlBuilder, TipsQrGenerator, TipsXmlSigner } = await import('../src/index.ts');
 
-    const cert = generateDevCertificate();
+    cert = generateDevCertificate();
     const xml = await new TipsDeXmlBuilder().buildParaSifen(pocFacturaInput);
-    const signedXml = await new TipsXmlSigner().sign(xml, cert);
+    signedXml = await new TipsXmlSigner().sign(xml, cert);
     signedXmlWithQr = await new TipsQrGenerator().addQr(signedXml, QR_CONFIG);
   });
 
@@ -65,6 +88,18 @@ describe('Offline PoC: build → sign → QR → XSD validate → FakeSifenGatew
     // D7 — dSisFact is present; D8 — Reference carries exactly two Transforms.
     expect(signedXmlWithQr).toMatch(/<dSisFact>/);
     expect(signedXmlWithQr.match(/<Transform /g)).toHaveLength(2);
+  });
+
+  it('verifies the XMLDSig signature against the dev certificate public key, and rejects a tampered digit', () => {
+    expect(signatureVerifies(signedXml, cert)).toBe(true);
+
+    // Mutation check: one digit of a signed element's text flips, so this is
+    // not a vacuous "any signature verifies" assertion.
+    const tampered = signedXml.replace(/(<dRucEm>)(\d)/, (_, open: string, digit: string) =>
+      digit === '9' ? `${open}8` : `${open}9`,
+    );
+    expect(tampered).not.toBe(signedXml);
+    expect(signatureVerifies(tampered, cert)).toBe(false);
   });
 
   it('embeds a QR pointing at the test consultas endpoint with IdCSC=0001', () => {

@@ -28,6 +28,7 @@
     "dependency-cruiser": "18.4.0",
     "node-forge": "1.4.0",
     "typescript": "6.0.3",
-    "vitest": "5.0.1"
+    "vitest": "5.0.1",
+    "xml-crypto": "6.3.1"
   }
 }

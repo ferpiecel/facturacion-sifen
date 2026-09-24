@@ -21,7 +21,9 @@ export class InvalidTenantIdError extends Error {
  * docstring for why this check exists.
  */
 export class PrivilegedSessionError extends Error {
-  constructor(session: { rolsuper: boolean; rolbypassrls: boolean; ownsTenantTable: boolean } | undefined) {
+  constructor(
+    session: { rolsuper: boolean; rolbypassrls: boolean; ownsTenantTable: boolean } | undefined,
+  ) {
     super(
       'Refusing to run application queries: the connected session can bypass RLS ' +
         `(rolsuper=${String(session?.rolsuper)}, rolbypassrls=${String(session?.rolbypassrls)}, ` +

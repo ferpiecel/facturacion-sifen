@@ -243,8 +243,10 @@ export interface DeXmlBuilder {
 }
 
 export interface XmlSigner { sign(xml: string, cert: LoadedCertificate): Promise<string>; }
-export interface QrGenerator { buildUrl(xmlFirmado: string, csc: Csc, ambiente: Ambiente): string; }
+export interface QrGenerator { addQr(signedXml: string, config: QrConfig): Promise<string>; }
 ```
+
+`QrGenerator.addQr` reemplaza el `buildUrl(...): string` original (ADR-0015): la librería `qrgen` no solo calcula la URL del QR, devuelve el XML firmado con el elemento `gCamFuFD` ya incluido, que `rDE` exige antes de poder validar contra el XSD.
 
 ---
 

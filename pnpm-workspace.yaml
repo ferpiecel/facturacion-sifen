@@ -6,7 +6,13 @@ engineStrict: true
 
 allowBuilds:
   '@swc/core': true
+  # ssh2/cpu-features/protobufjs are transitive testcontainers deps used only
+  # for remote (SSH) Docker hosts, which this repo does not use. Denying
+  # their install scripts avoids running unneeded native builds.
+  cpu-features: false
   esbuild: true
+  protobufjs: false
+  ssh2: false
 
 minimumReleaseAgeExclude:
   - '@nestjs/common@12.1.0'

@@ -14,3 +14,19 @@ export class InvalidTenantIdError extends Error {
     this.name = 'InvalidTenantIdError';
   }
 }
+
+/**
+ * Thrown by {@link import('./session-guard.js').assertNonPrivilegedSession}
+ * when the connected database session can bypass RLS. See that function's
+ * docstring for why this check exists.
+ */
+export class PrivilegedSessionError extends Error {
+  constructor(session: { rolsuper: boolean; rolbypassrls: boolean; ownsTenantTable: boolean } | undefined) {
+    super(
+      'Refusing to run application queries: the connected session can bypass RLS ' +
+        `(rolsuper=${String(session?.rolsuper)}, rolbypassrls=${String(session?.rolbypassrls)}, ` +
+        `ownsTenantTable=${String(session?.ownsTenantTable)}). Connect as app_login instead.`,
+    );
+    this.name = 'PrivilegedSessionError';
+  }
+}

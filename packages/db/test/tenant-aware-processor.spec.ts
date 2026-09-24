@@ -9,12 +9,22 @@ interface ProbeJob {
   tenantId: string;
 }
 
+function required<T>(value: T | undefined, message: string): T {
+  if (value === undefined) {
+    throw new Error(message);
+  }
+  return value;
+}
+
 class ProbeProcessor extends TenantAwareProcessor<ProbeJob, number> {
   readonly handleSpy = vi.fn(async (_data: ProbeJob, tx: TenantTx) => {
     const rows = await tx.select().from(tenants);
     return rows.length;
   });
 
+  // Re-exposes the protected base constructor (public here) so the test
+  // can instantiate this subclass directly.
+  // eslint-disable-next-line @typescript-eslint/no-useless-constructor
   constructor(db: Database) {
     super(db);
   }
@@ -37,7 +47,7 @@ describe('TenantAwareProcessor', () => {
     const [tenant] = await handle.db.insert(tenants).values({ name: 'Acme SA' }).returning();
     const processor = new ProbeProcessor(handle.db);
 
-    const result = await processor.process({ data: { tenantId: tenant!.id } });
+    const result = await processor.process({ data: { tenantId: required(tenant, 'tenant').id } });
 
     expect(result).toBe(1);
     expect(processor.handleSpy).toHaveBeenCalledTimes(1);

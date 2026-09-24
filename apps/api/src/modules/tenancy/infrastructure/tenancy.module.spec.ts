@@ -3,7 +3,7 @@ import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fa
 import { Test } from '@nestjs/testing';
 import { createPgliteDatabase, tenants, type DatabaseHandle } from '@sifen/db';
 import { ClsModule } from 'nestjs-cls';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { TestTenantHeaderGuard } from './guards/test-tenant-header.guard.js';
 import { TenancyModule } from '../tenancy.module.js';
 import { TenantTransactionRunner } from './tenant-transaction-runner.js';
@@ -17,6 +17,18 @@ class ProbeController {
   async probe() {
     const rows = await this.runner.run((tx) => tx.select().from(tenants));
     return { tenantCount: rows.length };
+  }
+
+  /** Yields before querying, so concurrent requests can interleave in the test. */
+  @Get('tenant-seen')
+  async tenantSeen() {
+    return this.runner.run(async (tx) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      const result = (await tx.execute(
+        "select current_setting('app.current_tenant', true) as tenant_seen",
+      )) as { rows: Array<{ tenant_seen: string }> };
+      return { tenantSeen: result.rows[0]?.tenant_seen };
+    });
   }
 }
 
@@ -44,12 +56,22 @@ function createProbeModule(database: DatabaseHandle) {
 describe('TenancyModule integration', () => {
   let handle: DatabaseHandle | undefined;
   let app: NestFastifyApplication | undefined;
+  const originalFlag = process.env.ENABLE_TEST_TENANT_HEADER;
+
+  beforeEach(() => {
+    process.env.ENABLE_TEST_TENANT_HEADER = 'true';
+  });
 
   afterEach(async () => {
     await app?.close();
     await handle?.close();
     handle = undefined;
     app = undefined;
+    if (originalFlag === undefined) {
+      delete process.env.ENABLE_TEST_TENANT_HEADER;
+    } else {
+      process.env.ENABLE_TEST_TENANT_HEADER = originalFlag;
+    }
   });
 
   async function bootstrap(database: DatabaseHandle): Promise<NestFastifyApplication> {
@@ -91,5 +113,33 @@ describe('TenancyModule integration', () => {
     const response = await app.inject({ method: 'GET', url: '/probe' });
 
     expect(response.statusCode).toBe(401);
+  });
+
+  it('isolates concurrent requests for different tenants (spec: tenant-isolation)', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const inserted = await handle.db
+      .insert(tenants)
+      .values([{ name: 'Tenant A' }, { name: 'Tenant B' }])
+      .returning();
+    const tenantA = required(inserted[0], 'tenant A was not inserted');
+    const tenantB = required(inserted[1], 'tenant B was not inserted');
+    app = await bootstrap(handle);
+
+    const [responseA, responseB] = await Promise.all([
+      app.inject({
+        method: 'GET',
+        url: '/probe/tenant-seen',
+        headers: { 'x-tenant-id': tenantA.id },
+      }),
+      app.inject({
+        method: 'GET',
+        url: '/probe/tenant-seen',
+        headers: { 'x-tenant-id': tenantB.id },
+      }),
+    ]);
+
+    expect(responseA.json()).toEqual({ tenantSeen: tenantA.id });
+    expect(responseB.json()).toEqual({ tenantSeen: tenantB.id });
   });
 });

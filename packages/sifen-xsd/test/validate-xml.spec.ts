@@ -57,6 +57,18 @@ describe('validateXml', () => {
     expect(result.errors[0]?.message).toMatch(/Premature end of data/);
   });
 
+  it('normalizes a non-libxml2 failure (e.g. an unknown schema) into a single generic error', async () => {
+    const xml = await readPatchedExample();
+
+    const result = validateXml(xml, 'unknownSchema' as never);
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toHaveLength(1);
+    const [error] = result.errors;
+    expect(typeof error.message).toBe('string');
+    expect(error).toMatchObject({ line: null, column: null, path: null });
+  });
+
   it('resolves every schemaLocation reference from the vendored files, never the network', () => {
     const vendored = readdirSync(vendorDir).filter((name) => name.endsWith('.xsd'));
     const references = vendored.flatMap((name) =>

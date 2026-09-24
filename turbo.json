@@ -22,6 +22,9 @@
     "test": {
       "dependsOn": ["transit", "^build"]
     },
+    "coverage": {
+      "dependsOn": ["transit", "^build"]
+    },
     "verify-vendor": {
       "inputs": ["vendor/**", "scripts/**"]
     },

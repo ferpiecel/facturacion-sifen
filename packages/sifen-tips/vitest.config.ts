@@ -26,5 +26,23 @@ export default defineConfig({
         },
       },
     ],
+    coverage: {
+      provider: 'v8',
+      all: true,
+      include: ['src/**/*.ts'],
+      exclude: [
+        '**/*.spec.ts',
+        // Test-only support helpers, not shipped package code.
+        'test/support/**',
+        // Type-only declaration output, nothing to execute.
+        '**/*.d.ts',
+      ],
+      thresholds: {
+        lines: 85,
+        branches: 85,
+        functions: 85,
+        statements: 85,
+      },
+    },
   },
 });

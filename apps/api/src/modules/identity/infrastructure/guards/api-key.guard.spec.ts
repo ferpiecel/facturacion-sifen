@@ -200,6 +200,20 @@ describe('ApiKeyGuard', () => {
     ).resolves.toBe(true);
   });
 
+  it('returns 503 with a generic body when the use case throws unexpectedly (DB down, corrupt hash)', async () => {
+    const { useCase, execute } = makeUseCase(undefined);
+    execute.mockRejectedValue(new Error('connection terminated unexpectedly: password for user leaked'));
+    const guard = new ApiKeyGuard(new Reflector(), useCase, newCls(), 'production');
+
+    const error = await guard
+      .canActivate(contextFor('protectedRoute', { authorization: 'Bearer sk_live_x' }))
+      .catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({ status: HttpStatus.SERVICE_UNAVAILABLE });
+    const body = JSON.stringify(getResponseBody(error));
+    expect(body).not.toMatch(/password|leaked|connection terminated/i);
+  });
+
   it('rejects a scoped route with 403 when the key lacks the required scope', async () => {
     const { useCase } = makeUseCase({ ...AUTHENTICATED, scopes: [] });
     const cls = newCls();

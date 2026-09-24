@@ -6,8 +6,7 @@
 // @sifen/db is a plain data-access package: it owns `pg` and `drizzle-orm`
 // as its allowed persistence dependencies but must never depend on the
 // application/worker frameworks that consume it.
-const FW =
-  '(^|node_modules/)((@nestjs|@fastify)/|(fastify|bullmq|ioredis|reflect-metadata)(/|$))';
+const FW = '(^|node_modules/)((@nestjs|@fastify)/|(fastify|bullmq|ioredis|reflect-metadata)(/|$))';
 
 module.exports = {
   extends: '../../.dependency-cruiser.cjs',

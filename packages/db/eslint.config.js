@@ -10,7 +10,7 @@ export default [
       parserOptions: {
         tsconfigRootDir: import.meta.dirname,
         projectService: {
-          allowDefaultProject: ['eslint.config.js', 'vitest.config.ts', 'drizzle.config.ts'],
+          allowDefaultProject: ['eslint.config.js', 'vitest.config.ts'],
         },
       },
     },

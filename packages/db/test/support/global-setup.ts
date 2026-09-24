@@ -4,9 +4,9 @@
  * no-op otherwise, so the default local/CI run (pglite) never touches
  * Docker.
  */
-export default async function setup(): Promise<(() => Promise<void>) | void> {
+export default async function setup(): Promise<(() => Promise<void>) | undefined> {
   if (process.env.DB_TEST_DRIVER !== 'postgres') {
-    return;
+    return undefined;
   }
 
   const { GenericContainer } = await import('testcontainers');
@@ -20,7 +20,8 @@ export default async function setup(): Promise<(() => Promise<void>) | void> {
     .withExposedPorts(5432)
     .start();
 
-  process.env.DB_TEST_POSTGRES_URL = `postgres://sifen:sifen@${container.getHost()}:${container.getMappedPort(5432)}/sifen`;
+  const mappedPort = container.getMappedPort(5432).toString(10);
+  process.env.DB_TEST_POSTGRES_URL = `postgres://sifen:sifen@${container.getHost()}:${mappedPort}/sifen`;
 
   return async () => {
     await container.stop();

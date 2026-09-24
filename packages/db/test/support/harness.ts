@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
-import { createNodePostgresDatabase, createPgliteDatabase, type DatabaseHandle } from '../../src/client.js';
+import {
+  createNodePostgresDatabase,
+  createPgliteDatabase,
+  type DatabaseHandle,
+} from '../../src/client.js';
 
 /**
  * Returns a migrated {@link DatabaseHandle} for the test suite.

@@ -1,6 +1,6 @@
 # ADR-0002: Node.js + TypeScript con el ecosistema de TIPS detrás de puertos
 
-- **Estado:** Aceptado
+- **Estado:** Aceptado (enmendado por ADR-0015)
 - **Fecha:** 2026-09-22
 
 ## Contexto

@@ -1,5 +1,14 @@
 export { SIFEN_CODES } from './codes.ts';
 export type { SifenCode } from './codes.ts';
+export type {
+  Ambiente,
+  DeXmlBuilder,
+  FacturaPocInput,
+  LoadedCertificate,
+  QrConfig,
+  QrGenerator,
+  XmlSigner,
+} from './emission-ports.ts';
 export { SifenTimeoutError, SifenTransportError } from './errors.ts';
 export { FakeSifenGateway } from './fake/fake-sifen-gateway.ts';
 export type { Scripted } from './fake/fake-sifen-gateway.ts';

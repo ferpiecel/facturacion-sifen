@@ -30,14 +30,10 @@ export function getGuardCallCount(): number {
 }
 
 /**
- * Replaces every `node:child_process` spawn/exec entry point with a throwing
- * stub, on the real module object (via `createRequire`, the same binding
- * `facturacionelectronicapy-xmlsign` would resolve), then resyncs the `node:`
- * ESM named exports so both `require` and `import` callers observe it.
- *
- * MUST be installed before a dynamic `import()` of the adapters under test,
- * so references the TIPS libraries read at module-load time are also
- * trapped.
+ * Stubs every `node:child_process` spawn/exec entry point on the real module
+ * object (the same binding `facturacionelectronicapy-xmlsign` would resolve)
+ * and resyncs `node:` ESM named exports. Install before a dynamic `import()`
+ * of the adapters under test, so TIPS-library-time references are trapped too.
  */
 export function installNoSubprocessGuard(): void {
   const require = createRequire(import.meta.url);

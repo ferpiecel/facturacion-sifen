@@ -15,11 +15,18 @@ type GuardedMethod = (typeof GUARDED_METHODS)[number];
 type ChildProcessModule = typeof import('node:child_process');
 
 let originals: Partial<Record<GuardedMethod, ChildProcessModule[GuardedMethod]>> | null = null;
+let callCount = 0;
 
 function throwOnCall(method: GuardedMethod): never {
+  callCount += 1;
   throw new Error(
     `no-subprocess guard: child_process.${method} must not be called (ADR-0015 forbids spawning a JVM)`,
   );
+}
+
+/** Number of guarded `child_process` calls trapped since the last install. */
+export function getGuardCallCount(): number {
+  return callCount;
 }
 
 /**
@@ -37,6 +44,7 @@ export function installNoSubprocessGuard(): void {
   const cp = require('node:child_process') as unknown as Record<GuardedMethod, unknown>;
   const typedCp = cp as unknown as ChildProcessModule;
   originals = {};
+  callCount = 0;
   for (const method of GUARDED_METHODS) {
     originals[method] = typedCp[method];
     cp[method] = () => throwOnCall(method);

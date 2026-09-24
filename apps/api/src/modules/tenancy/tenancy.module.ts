@@ -1,7 +1,6 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 import type { DatabaseHandle } from '@sifen/db';
 import { ClsService } from 'nestjs-cls';
-import { TestTenantHeaderGuard } from './infrastructure/guards/test-tenant-header.guard.js';
 import { TenantTransactionRunner } from './infrastructure/tenant-transaction-runner.js';
 import type { TenancyClsStore } from './infrastructure/tenancy-cls-store.js';
 
@@ -11,9 +10,9 @@ export interface TenancyModuleOptions {
 
 /**
  * Registered directly by callers that already hold a `DatabaseHandle`
- * (tests today). `AppModule` only wires `ClsModule.forRoot(...)` for now;
- * it starts consuming `TenancyModule.register({ database })` once a real
- * handle exists, from HU-E1-04 on (design.md: "DB in AppModule — Later").
+ * (tests today). Tenant resolution comes from `ApiKeyGuard`
+ * (`modules/identity`), which sets the CLS tenant id that
+ * `TenantTransactionRunner` reads (HU-E1-04).
  */
 @Module({})
 export class TenancyModule {
@@ -21,7 +20,6 @@ export class TenancyModule {
     return {
       module: TenancyModule,
       providers: [
-        TestTenantHeaderGuard,
         {
           provide: TenantTransactionRunner,
           useFactory: (cls: ClsService<TenancyClsStore>) =>
@@ -29,7 +27,7 @@ export class TenancyModule {
           inject: [ClsService],
         },
       ],
-      exports: [TestTenantHeaderGuard, TenantTransactionRunner],
+      exports: [TenantTransactionRunner],
     };
   }
 }

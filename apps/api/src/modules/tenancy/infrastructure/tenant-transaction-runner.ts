@@ -7,7 +7,7 @@ import { TENANT_ID_CLS_KEY, type TenancyClsStore } from './tenancy-cls-store.js'
 /**
  * The single point where `apps/api` request/job handling code reaches
  * `withTenantTransaction`. Resolves the tenant id set by the (temporary)
- * `TestTenantHeaderGuard` from CLS, so no repository or controller ever
+ * `ApiKeyGuard` from CLS, so no repository or controller ever
  * calls `withTenantTransaction` directly (design.md: single entry point,
  * no `Scope.REQUEST`, ADR-0006).
  */

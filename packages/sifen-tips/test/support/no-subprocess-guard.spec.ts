@@ -1,6 +1,10 @@
 import { spawn } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
-import { installNoSubprocessGuard, restoreNoSubprocessGuard } from './no-subprocess-guard.ts';
+import {
+  getGuardCallCount,
+  installNoSubprocessGuard,
+  restoreNoSubprocessGuard,
+} from './no-subprocess-guard.ts';
 
 describe('no-subprocess guard', () => {
   afterEach(() => {
@@ -34,5 +38,16 @@ describe('no-subprocess guard', () => {
     restoreNoSubprocessGuard();
 
     expect(() => spawn('true')).not.toThrow();
+  });
+
+  it('records zero calls when nothing guarded is invoked, and counts each trapped call', async () => {
+    installNoSubprocessGuard();
+    expect(getGuardCallCount()).toBe(0);
+
+    const cp = await import('node:child_process');
+    expect(() => cp.spawn('true')).toThrow();
+    expect(() => cp.exec('true')).toThrow();
+
+    expect(getGuardCallCount()).toBe(2);
   });
 });

@@ -32,6 +32,22 @@ describe('withAppRoleTransaction', () => {
     expect(rows[0]?.tenant_seen).toBeNull();
   });
 
+  it('explicitly clears app.current_tenant to the empty string, not merely "never set"', async () => {
+    handle = await createTestDatabase();
+
+    // No `nullif`: an unset custom GUC also reads back as `null` here, so
+    // this asserts the stronger, explicit guarantee — `set_config(...,
+    // '', true)` ran — rather than only "nothing set it yet".
+    const rows = await withAppRoleTransaction(handle.db, (tx) =>
+      queryRows<{ tenant_setting: string }>(
+        tx,
+        sql`select current_setting('app.current_tenant', true) as tenant_setting`,
+      ),
+    );
+
+    expect(rows[0]?.tenant_setting).toBe('');
+  });
+
   it('rolls back when fn throws', async () => {
     handle = await createTestDatabase();
 

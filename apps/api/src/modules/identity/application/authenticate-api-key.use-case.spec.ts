@@ -1,5 +1,7 @@
+import { parseOptions } from '@node-rs/argon2';
 import { describe, expect, it, vi } from 'vitest';
-import { AuthenticateApiKeyUseCase } from './authenticate-api-key.use-case.js';
+import { ARGON2_PARAMS } from '../infrastructure/adapters/argon2-secret-verifier.adapter.js';
+import { AuthenticateApiKeyUseCase, DUMMY_HASH } from './authenticate-api-key.use-case.js';
 import type { ApiKeyLookup, ResolvedApiKeyRecord } from './ports/api-key-lookup.port.js';
 import type { SecretVerifier } from './ports/secret-verifier.port.js';
 
@@ -29,6 +31,10 @@ function makeVerifier(result: boolean) {
 }
 
 describe('AuthenticateApiKeyUseCase', () => {
+  it('DUMMY_HASH is encoded with exactly ARGON2_PARAMS', () => {
+    expect(parseOptions(DUMMY_HASH)).toMatchObject(ARGON2_PARAMS);
+  });
+
   it('returns tenant id, scopes and environment for a valid key', async () => {
     const { lookup, resolveByKeyId, touchLastUsed } = makeLookup(RECORD);
     const { verifier, verify } = makeVerifier(true);

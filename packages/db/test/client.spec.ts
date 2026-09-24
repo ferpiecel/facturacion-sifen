@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
+import type { Pool } from 'pg';
 import { createNodePostgresDatabase, type DatabaseHandle } from '../src/client.js';
 import { tenantProbe, tenants } from '../src/schema.js';
 import { createTestDatabase } from './support/harness.js';
@@ -50,5 +51,20 @@ describe('packages/db scaffold', () => {
     expect(handle.db).toBeDefined();
     // afterEach() below exercises close() so it is never called twice on
     // the same pool.
+  });
+
+  it('logs an idle-client pool error instead of crashing the process', () => {
+    // A real Postgres restart (or network blip) emits 'error' on an idle
+    // client from the pool's internals, not from any query the app made.
+    // Node's EventEmitter throws that error as uncaught unless something
+    // is listening for it, which would crash the whole process.
+    handle = createNodePostgresDatabase('postgres://sifen:sifen@127.0.0.1:1/sifen_unused');
+    const pool = (handle.db as unknown as { $client: Pool }).$client;
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    expect(() => pool.emit('error', new Error('Connection terminated unexpectedly'))).not.toThrow();
+    expect(errorSpy).toHaveBeenCalled();
+
+    errorSpy.mockRestore();
   });
 });

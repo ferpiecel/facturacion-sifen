@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { withAppRoleTransaction, type Database } from '@sifen/db';
 import { sql } from 'drizzle-orm';
 import type {
@@ -5,6 +6,8 @@ import type {
   ResolvedApiKeyRecord,
 } from '../../application/ports/api-key-lookup.port.js';
 import type { ApiKeyEnvironment } from '../../domain/api-key.js';
+
+const VALID_ENVIRONMENTS: readonly string[] = ['live', 'test'] satisfies ApiKeyEnvironment[];
 
 interface ResolveApiKeyRow {
   id: string;
@@ -20,6 +23,8 @@ interface ResolveApiKeyRow {
  * `withAppRoleTransaction` path — never a direct query against `api_keys`.
  */
 export class SqlApiKeyLookupAdapter implements ApiKeyLookup {
+  private readonly logger = new Logger(SqlApiKeyLookupAdapter.name);
+
   constructor(private readonly db: Database) {}
 
   async resolveByKeyId(keyId: string): Promise<ResolvedApiKeyRecord | null> {
@@ -32,6 +37,14 @@ export class SqlApiKeyLookupAdapter implements ApiKeyLookup {
 
     const row = rows.at(0);
     if (!row) {
+      return null;
+    }
+
+    // Defense in depth: the schema constrains `environment` to `live`/`test`
+    // already, but a corrupt or unexpected value here must never be cast
+    // and trusted blindly — treat it exactly like "no matching key".
+    if (!VALID_ENVIRONMENTS.includes(row.environment)) {
+      this.logger.error(`resolve_api_key returned an unrecognized environment: ${row.environment}`);
       return null;
     }
 
@@ -51,7 +64,10 @@ export class SqlApiKeyLookupAdapter implements ApiKeyLookup {
       );
     } catch (error) {
       // Best-effort: never fails the caller's authentication.
-      console.error('touch_api_key_last_used failed', error);
+      this.logger.error(
+        'touch_api_key_last_used failed',
+        error instanceof Error ? error.stack : error,
+      );
     }
   }
 }

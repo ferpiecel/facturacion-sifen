@@ -53,6 +53,14 @@ export function createPgliteDatabase(dataDir?: string): DatabaseHandle {
  */
 export function createNodePostgresDatabase(connectionString: string): DatabaseHandle {
   const pool = new Pool({ connectionString });
+  // An idle pooled client can emit 'error' on its own (e.g. the server
+  // restarts or drops the connection) outside of any query the app made.
+  // Node's EventEmitter rethrows an unhandled 'error' event, which would
+  // otherwise crash the whole process for an error the app never caused
+  // and cannot avoid; log it instead and let the pool recycle the client.
+  pool.on('error', (error) => {
+    console.error('Unexpected error on idle pg Pool client', error);
+  });
   const db = drizzleNodePostgres(pool, { schema });
 
   return {

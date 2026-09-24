@@ -1,4 +1,4 @@
-import { Global, Module } from '@nestjs/common';
+import { Global, Inject, Module, type OnModuleDestroy } from '@nestjs/common';
 import {
   assertNonPrivilegedSession,
   createNodePostgresDatabase,
@@ -16,7 +16,15 @@ async function createHandle(): Promise<DatabaseHandle | null> {
   }
 
   const handle = createNodePostgresDatabase(url);
-  await assertNonPrivilegedSession(handle.db);
+  try {
+    await assertNonPrivilegedSession(handle.db);
+  } catch (error) {
+    // The assertion failed (privileged session, or the check itself
+    // couldn't run): the handle is unusable, so close it here or its pool
+    // leaks forever, since nothing else ever gets a reference to it.
+    await handle.close();
+    throw error;
+  }
   return handle;
 }
 
@@ -39,4 +47,11 @@ async function createHandle(): Promise<DatabaseHandle | null> {
   ],
   exports: [DATABASE_HANDLE, DATABASE],
 })
-export class DatabaseModule {}
+export class DatabaseModule implements OnModuleDestroy {
+  constructor(@Inject(DATABASE_HANDLE) private readonly handle: DatabaseHandle | null) {}
+
+  /** Closes the pool on app shutdown (see `main.ts`'s `enableShutdownHooks()`). */
+  async onModuleDestroy(): Promise<void> {
+    await this.handle?.close();
+  }
+}

@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import type { CanActivate, ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ClsService } from 'nestjs-cls';
@@ -13,8 +13,14 @@ import { REQUIRED_SCOPES_KEY } from '../decorators/require-scopes.decorator.js';
 import { API_KEY_SCOPES_CLS_KEY, type IdentityClsStore } from '../identity-cls-store.js';
 
 const AUTHORIZATION_HEADER = 'authorization';
-const BEARER_PREFIX = 'Bearer ';
 const GENERIC_UNAUTHORIZED = 'Invalid or missing API key';
+const GENERIC_UNAVAILABLE = 'API key authentication is temporarily unavailable';
+
+// RFC 7235: `auth-scheme` is case-insensitive, and credentials take exactly
+// one separating space before a single token68 (no internal whitespace).
+// `\S+` (rather than a looser `.+`) rejects extra whitespace or a
+// multi-token value instead of silently accepting it as part of the key.
+const BEARER_PATTERN = /^bearer (\S+)$/i;
 
 interface RequestWithHeaders {
   headers: Record<string, string | string[] | undefined>;
@@ -32,6 +38,8 @@ interface RequestWithHeaders {
  */
 @Injectable()
 export class ApiKeyGuard implements CanActivate {
+  private readonly logger = new Logger(ApiKeyGuard.name);
+
   constructor(
     private readonly reflector: Reflector,
     private readonly useCase: AuthenticateApiKeyUseCase | null,
@@ -57,14 +65,27 @@ export class ApiKeyGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<RequestWithHeaders>();
     const header = request.headers[AUTHORIZATION_HEADER];
-    const token = typeof header === 'string' ? header : undefined;
+    const match = typeof header === 'string' ? BEARER_PATTERN.exec(header) : null;
 
-    if (!token || !token.startsWith(BEARER_PREFIX)) {
+    if (!match) {
       throw new HttpException(GENERIC_UNAUTHORIZED, HttpStatus.UNAUTHORIZED);
     }
 
-    const rawKey = token.slice(BEARER_PREFIX.length);
-    const authenticated = await this.useCase.execute(rawKey);
+    const rawKey = match[1];
+    let authenticated;
+    try {
+      authenticated = await this.useCase.execute(rawKey);
+    } catch (error) {
+      // A DB outage or a corrupt stored hash must never surface as a 500
+      // with a leaking stack/message, and must never be treated as "no
+      // match" either (that would be a silent-accept-adjacent 401 for a
+      // condition that has nothing to do with the caller's credentials).
+      this.logger.error(
+        'Unexpected error authenticating API key',
+        error instanceof Error ? error.stack : error,
+      );
+      throw new HttpException(GENERIC_UNAVAILABLE, HttpStatus.SERVICE_UNAVAILABLE);
+    }
 
     if (!authenticated) {
       throw new HttpException(GENERIC_UNAUTHORIZED, HttpStatus.UNAUTHORIZED);
@@ -79,11 +100,13 @@ export class ApiKeyGuard implements CanActivate {
     this.cls.set(TENANT_ID_CLS_KEY, authenticated.tenantId);
     this.cls.set(API_KEY_SCOPES_CLS_KEY, authenticated.scopes);
 
-    const requiredScopes =
-      this.reflector.getAllAndOverride<string[] | undefined>(REQUIRED_SCOPES_KEY, [
-        context.getHandler(),
-        context.getClass(),
-      ]) ?? [];
+    // getAllAndMerge (not getAllAndOverride): a class-level @RequireScopes()
+    // is a baseline every handler in it must still satisfy, not a default
+    // that a handler's own @RequireScopes() silently replaces.
+    const requiredScopes = this.reflector.getAllAndMerge<string[]>(REQUIRED_SCOPES_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
     if (requiredScopes.length > 0) {
       const hasAllScopes = requiredScopes.every((scope) => authenticated.scopes.includes(scope));
       if (!hasAllScopes) {

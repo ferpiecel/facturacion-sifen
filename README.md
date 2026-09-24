@@ -31,8 +31,9 @@ Todas tienen un valor por defecto, así que el entorno local funciona sin un arc
 | `POSTGRES_DB` | `sifen` | `docker-compose.yml` | Base de datos. |
 | `POSTGRES_PORT` | `5432` | `docker-compose.yml` | Puerto de PostgreSQL en el host. |
 | `REDIS_PORT` | `6379` | `docker-compose.yml` | Puerto de Redis en el host. |
-| `DATABASE_URL` | *(sin valor)* | `apps/api` | Cadena de conexión a PostgreSQL como `app_login`. Sin ella, la API arranca igual y `/health` funciona, pero toda ruta protegida por `ApiKeyGuard` responde `503`. |
-| `SIFEN_ENVIRONMENT` | `test` | `apps/api` | `test` o `production`. Determina si se aceptan API keys `sk_test_...` o `sk_live_...`. |
+| `DATABASE_URL` | *(sin valor)* | `apps/api` | Cadena de conexión a PostgreSQL como `app_login`. Sin ella, la API arranca igual y `/health` funciona, pero toda ruta protegida por `ApiKeyGuard` responde `503`. Con `DATABASE_URL` configurada pero la base inalcanzable, la API **no arranca** (comportamiento actual e intencional: falla al inicio en vez de arrancar sin poder autenticar). |
+| `SIFEN_ENVIRONMENT` | `test` (o sin valor si `NODE_ENV≠production`) | `apps/api` | `test` o `production`. Determina si se aceptan API keys `sk_test_...` o `sk_live_...`. Con `NODE_ENV=production`, dejarla sin definir hace que la API **falle al arrancar** (fail closed): un despliegue productivo nunca debe arrancar en silencio con `sk_test_...` como aceptación por defecto. |
+| `NODE_ENV` | *(sin valor)* | `apps/api` | Estándar de Node. Solo afecta la validación de `SIFEN_ENVIRONMENT` arriba; en `production` la exige explícita. |
 
 ## Documentación
 

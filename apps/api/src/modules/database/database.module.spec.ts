@@ -52,4 +52,36 @@ describe('DatabaseModule', () => {
       'privileged session',
     );
   });
+
+  it('closes the pool when the privileged-session assertion throws, instead of leaking it', async () => {
+    process.env.DATABASE_URL = 'postgres://app_login:pw@localhost:5432/sifen';
+    const close = vi.fn().mockResolvedValue(undefined);
+    createNodePostgresDatabase.mockReturnValue({ db: {}, migrate: vi.fn(), close });
+    assertNonPrivilegedSession.mockRejectedValue(new Error('privileged session'));
+
+    await expect(Test.createTestingModule({ imports: [DatabaseModule] }).compile()).rejects.toThrow(
+      'privileged session',
+    );
+
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it('closes the handle on onModuleDestroy (app shutdown)', async () => {
+    process.env.DATABASE_URL = 'postgres://app_login:pw@localhost:5432/sifen';
+    const close = vi.fn().mockResolvedValue(undefined);
+    createNodePostgresDatabase.mockReturnValue({ db: {}, migrate: vi.fn(), close });
+    assertNonPrivilegedSession.mockResolvedValue(undefined);
+
+    const moduleRef = await Test.createTestingModule({ imports: [DatabaseModule] }).compile();
+    await moduleRef.close();
+
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it('does not throw on onModuleDestroy when there is no handle (no DATABASE_URL)', async () => {
+    delete process.env.DATABASE_URL;
+    const moduleRef = await Test.createTestingModule({ imports: [DatabaseModule] }).compile();
+
+    await expect(moduleRef.close()).resolves.toBeUndefined();
+  });
 });

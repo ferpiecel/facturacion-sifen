@@ -39,20 +39,37 @@ class ProbeController {
   }
 }
 
+@Controller('class-scoped-probe')
+@RequireScopes('tenant:read')
+class ClassScopedProbeController {
+  @Get('merged')
+  @RequireScopes('documents:write')
+  mergedRoute() {
+    return 'ok';
+  }
+
+  @Get('class-only')
+  classOnlyRoute() {
+    return 'ok';
+  }
+}
+
+type ProbeConstructor = new () => object;
+
 function contextFor(
-  handlerName: keyof ProbeController,
+  handlerName: string,
   headers: Record<string, string>,
+  controllerClass: ProbeConstructor = ProbeController,
 ): ExecutionContext {
-  const instance = new ProbeController();
+  const instance = new controllerClass() as Record<string, () => unknown>;
   // Reflector reads metadata off the function object itself (SetMetadata),
   // and never invokes it through `this` here, so the bare reference is
   // safe despite the lint rule assuming a call site.
-  // eslint-disable-next-line @typescript-eslint/unbound-method
   const handler = instance[handlerName];
   return {
     switchToHttp: () => ({ getRequest: () => ({ headers }) }),
     getHandler: () => handler,
-    getClass: () => ProbeController,
+    getClass: () => controllerClass,
   } as unknown as ExecutionContext;
 }
 
@@ -111,6 +128,46 @@ describe('ApiKeyGuard', () => {
 
     await expect(
       guard.canActivate(contextFor('protectedRoute', { authorization: 'sk_live_x' })),
+    ).rejects.toMatchObject({ status: HttpStatus.UNAUTHORIZED });
+  });
+
+  it('accepts a lowercase "bearer" scheme (RFC 7235 is case-insensitive)', async () => {
+    const { useCase } = makeUseCase(AUTHENTICATED);
+    const cls = newCls();
+    const guard = new ApiKeyGuard(new Reflector(), useCase, cls, 'production');
+
+    await expect(
+      cls.run(() =>
+        guard.canActivate(contextFor('protectedRoute', { authorization: 'bearer sk_live_x' })),
+      ),
+    ).resolves.toBe(true);
+  });
+
+  it('accepts a mixed-case "BeArEr" scheme', async () => {
+    const { useCase } = makeUseCase(AUTHENTICATED);
+    const cls = newCls();
+    const guard = new ApiKeyGuard(new Reflector(), useCase, cls, 'production');
+
+    await expect(
+      cls.run(() =>
+        guard.canActivate(contextFor('protectedRoute', { authorization: 'BeArEr sk_live_x' })),
+      ),
+    ).resolves.toBe(true);
+  });
+
+  it.each([
+    'Bearer  sk_live_x', // two spaces
+    'Bearer\tsk_live_x', // tab instead of space
+    'Bearer sk_live_x ', // trailing space
+    ' Bearer sk_live_x', // leading space
+    'Bearer sk_live_x extra', // extra token
+    'Bearer',
+  ])('rejects a whitespace-malformed header %j with the same 401', async (header) => {
+    const { useCase } = makeUseCase(undefined);
+    const guard = new ApiKeyGuard(new Reflector(), useCase, newCls(), 'production');
+
+    await expect(
+      guard.canActivate(contextFor('protectedRoute', { authorization: header })),
     ).rejects.toMatchObject({ status: HttpStatus.UNAUTHORIZED });
   });
 
@@ -200,6 +257,22 @@ describe('ApiKeyGuard', () => {
     ).resolves.toBe(true);
   });
 
+  it('returns 503 with a generic body when the use case throws unexpectedly (DB down, corrupt hash)', async () => {
+    const { useCase, execute } = makeUseCase(undefined);
+    execute.mockRejectedValue(
+      new Error('connection terminated unexpectedly: password for user leaked'),
+    );
+    const guard = new ApiKeyGuard(new Reflector(), useCase, newCls(), 'production');
+
+    const error = await guard
+      .canActivate(contextFor('protectedRoute', { authorization: 'Bearer sk_live_x' }))
+      .catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({ status: HttpStatus.SERVICE_UNAVAILABLE });
+    const body = JSON.stringify(getResponseBody(error));
+    expect(body).not.toMatch(/password|leaked|connection terminated/i);
+  });
+
   it('rejects a scoped route with 403 when the key lacks the required scope', async () => {
     const { useCase } = makeUseCase({ ...AUTHENTICATED, scopes: [] });
     const cls = newCls();
@@ -208,6 +281,63 @@ describe('ApiKeyGuard', () => {
     await expect(
       cls.run(() =>
         guard.canActivate(contextFor('scopedRoute', { authorization: 'Bearer sk_live_x' })),
+      ),
+    ).rejects.toMatchObject({ status: HttpStatus.FORBIDDEN });
+  });
+
+  it('merges class-level and handler-level @RequireScopes (both are required)', async () => {
+    const { useCase } = makeUseCase({
+      ...AUTHENTICATED,
+      scopes: ['tenant:read', 'documents:write'],
+    });
+    const cls = newCls();
+    const guard = new ApiKeyGuard(new Reflector(), useCase, cls, 'production');
+
+    await expect(
+      cls.run(() =>
+        guard.canActivate(
+          contextFor(
+            'mergedRoute',
+            { authorization: 'Bearer sk_live_x' },
+            ClassScopedProbeController,
+          ),
+        ),
+      ),
+    ).resolves.toBe(true);
+  });
+
+  it('rejects with 403 when a key has the handler scope but not the class scope', async () => {
+    const { useCase } = makeUseCase({ ...AUTHENTICATED, scopes: ['documents:write'] });
+    const cls = newCls();
+    const guard = new ApiKeyGuard(new Reflector(), useCase, cls, 'production');
+
+    await expect(
+      cls.run(() =>
+        guard.canActivate(
+          contextFor(
+            'mergedRoute',
+            { authorization: 'Bearer sk_live_x' },
+            ClassScopedProbeController,
+          ),
+        ),
+      ),
+    ).rejects.toMatchObject({ status: HttpStatus.FORBIDDEN });
+  });
+
+  it('enforces a class-level @RequireScopes even when the handler adds none of its own', async () => {
+    const { useCase } = makeUseCase({ ...AUTHENTICATED, scopes: [] });
+    const cls = newCls();
+    const guard = new ApiKeyGuard(new Reflector(), useCase, cls, 'production');
+
+    await expect(
+      cls.run(() =>
+        guard.canActivate(
+          contextFor(
+            'classOnlyRoute',
+            { authorization: 'Bearer sk_live_x' },
+            ClassScopedProbeController,
+          ),
+        ),
       ),
     ).rejects.toMatchObject({ status: HttpStatus.FORBIDDEN });
   });

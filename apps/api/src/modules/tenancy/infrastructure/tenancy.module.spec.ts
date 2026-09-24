@@ -65,8 +65,11 @@ describe('TenancyModule integration', () => {
   const originalEnvironment = process.env.SIFEN_ENVIRONMENT;
 
   afterEach(async () => {
+    // `app.close()` now runs `DatabaseModule#onModuleDestroy` (backlog
+    // HU-E1-04 connection resilience), which closes the exact same handle
+    // this spec overrides `DATABASE_HANDLE` with; closing it again here
+    // would double-close the underlying pglite instance and throw.
     await app?.close();
-    await handle?.close();
     handle = undefined;
     app = undefined;
     if (originalEnvironment === undefined) {

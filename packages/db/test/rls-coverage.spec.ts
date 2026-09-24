@@ -4,24 +4,37 @@ import type { Database, DatabaseHandle } from '../src/client.js';
 import { TENANT_TABLES } from '../src/schema.js';
 import { createTestDatabase, queryRows } from './support/harness.js';
 
+interface TenantTableAudit {
+  table: string;
+  covered: boolean;
+}
+
 /**
- * Returns every tenant-scoped table that lacks `FORCE ROW LEVEL SECURITY`
- * or a tenant-isolation policy.
+ * Discovers every `public` table with a `tenant_id` column from the catalog
+ * (never from `TENANT_TABLES`) and reports whether it has RLS enabled and
+ * forced plus a `FOR ALL` policy for `app_user` with both USING and WITH
+ * CHECK.
  */
+async function auditTenantTables(db: Database): Promise<TenantTableAudit[]> {
+  return queryRows<TenantTableAudit>(
+    db,
+    sql`select c.relname as "table",
+          c.relrowsecurity and c.relforcerowsecurity and exists (
+            select 1 from pg_policies p
+            where p.schemaname = 'public' and p.tablename = c.relname
+              and 'app_user' = any(p.roles) and p.cmd = 'ALL'
+              and p.qual is not null and p.with_check is not null
+          ) as covered
+        from pg_class c
+        join pg_attribute a on a.attrelid = c.oid and a.attname = 'tenant_id' and not a.attisdropped
+        where c.relnamespace = 'public'::regnamespace and c.relkind in ('r', 'p')
+        order by c.relname`,
+  );
+}
+
 async function findRlsGaps(db: Database): Promise<string[]> {
-  const gaps: string[] = [];
-  for (const table of TENANT_TABLES) {
-    const rows = await queryRows<{ forced: boolean; policies: number }>(
-      db,
-      sql`select c.relforcerowsecurity as forced,
-            (select count(*)::int from pg_policies p where p.tablename = c.relname) as policies
-          from pg_class c where c.relname = ${table}`,
-    );
-    if (!rows[0]?.forced || rows[0].policies === 0) {
-      gaps.push(table);
-    }
-  }
-  return gaps;
+  const audit = await auditTenantTables(db);
+  return audit.filter((row) => !row.covered).map((row) => row.table);
 }
 
 /**
@@ -40,6 +53,8 @@ describe('RLS coverage drift check', () => {
   it('every migrated tenant-scoped table is covered', async () => {
     handle = await createTestDatabase();
 
+    const audit = await auditTenantTables(handle.db);
+    expect(audit.map((row) => row.table)).toEqual([...TENANT_TABLES].sort());
     expect(await findRlsGaps(handle.db)).toEqual([]);
   });
 

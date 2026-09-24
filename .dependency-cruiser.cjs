@@ -39,5 +39,13 @@ module.exports = {
       from: {},
       to: { circular: true },
     },
+    {
+      name: 'tips-libs-confined-to-sifen-tips',
+      severity: 'error',
+      comment:
+        'only packages/sifen-tips may import the facturacionelectronicapy-* (TIPS) libraries (ADR-0015)',
+      from: { pathNot: '(^|/)packages/sifen-tips/' },
+      to: { path: '(^|node_modules/)facturacionelectronicapy-' },
+    },
   ],
 };

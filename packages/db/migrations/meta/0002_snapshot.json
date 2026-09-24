@@ -123,7 +123,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "api_keys_key_id_format": {
+          "name": "api_keys_key_id_format",
+          "value": "\"api_keys\".\"key_id\" ~ '^[A-Za-z0-9]{24,64}$'"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.tenant_probe": {

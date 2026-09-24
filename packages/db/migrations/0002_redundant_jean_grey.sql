@@ -9,7 +9,8 @@ CREATE TABLE "api_keys" (
 	"label" varchar(255),
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"revoked_at" timestamp with time zone,
-	"last_used_at" timestamp with time zone
+	"last_used_at" timestamp with time zone,
+	CONSTRAINT "api_keys_key_id_format" CHECK ("api_keys"."key_id" ~ '^[A-Za-z0-9]{24,64}$')
 );
 --> statement-breakpoint
 ALTER TABLE "api_keys" ADD CONSTRAINT "api_keys_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint

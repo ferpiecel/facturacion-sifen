@@ -1,4 +1,6 @@
+import { sql } from 'drizzle-orm';
 import {
+  check,
   index,
   pgEnum,
   pgTable,
@@ -69,6 +71,7 @@ export const apiKeys = pgTable(
   (table) => [
     index('api_keys_tenant_id_idx').on(table.tenantId),
     uniqueIndex('api_keys_key_id_idx').on(table.keyId),
+    check('api_keys_key_id_format', sql`${table.keyId} ~ '^[A-Za-z0-9]{24,64}$'`),
   ],
 );
 

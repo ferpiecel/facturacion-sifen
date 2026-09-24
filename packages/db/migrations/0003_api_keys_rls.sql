@@ -20,14 +20,54 @@ CREATE POLICY "platform_admin_all" ON "api_keys"
   USING (true)
   WITH CHECK (true);
 --> statement-breakpoint
+-- api_key_resolver owns the two pre-auth functions below, so SECURITY
+-- DEFINER runs as it, never as the migration superuser. It is NOLOGIN, not
+-- superuser, NOBYPASSRLS, not the table owner (so RLS applies to it), has no
+-- members and no memberships, and only the column privileges it needs.
+LOCK TABLE pg_catalog.pg_authid IN SHARE ROW EXCLUSIVE MODE;
+--> statement-breakpoint
+DO $$
+DECLARE
+  membership record;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'api_key_resolver') THEN
+    CREATE ROLE api_key_resolver;
+  END IF;
+  ALTER ROLE api_key_resolver NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE
+    NOREPLICATION NOLOGIN;
+  FOR membership IN
+    SELECT m.roleid::regrole::text AS granted, m.member::regrole::text AS member
+    FROM pg_auth_members m
+    WHERE m.member = 'api_key_resolver'::regrole OR m.roleid = 'api_key_resolver'::regrole
+  LOOP
+    EXECUTE format('REVOKE %s FROM %s', membership.granted, membership.member);
+  END LOOP;
+END
+$$;
+--> statement-breakpoint
+GRANT SELECT (id, tenant_id, key_id, secret_hash, scopes, environment, revoked_at)
+  ON "api_keys" TO api_key_resolver;
+--> statement-breakpoint
+GRANT UPDATE (last_used_at) ON "api_keys" TO api_key_resolver;
+--> statement-breakpoint
+CREATE POLICY "api_key_resolver_read" ON "api_keys"
+  FOR SELECT
+  TO api_key_resolver
+  USING (true);
+--> statement-breakpoint
+CREATE POLICY "api_key_resolver_touch" ON "api_keys"
+  FOR UPDATE
+  TO api_key_resolver
+  USING (revoked_at IS NULL)
+  WITH CHECK (revoked_at IS NULL);
+--> statement-breakpoint
 -- Pre-auth lookup by the public key_id, before any tenant context exists.
--- SECURITY DEFINER runs as the migration owner (never app_user), so it can
--- see rows across tenants; `SET search_path` pins name resolution against a
--- hostile search_path, and only the exact 5 columns the caller needs are
--- returned (never label/created_at/revoked_at). Revoked and unknown keys
--- both return zero rows, so callers cannot distinguish "revoked" from
--- "never existed".
-CREATE FUNCTION resolve_api_key(p_key_id text)
+-- Every object is schema-qualified and search_path puts pg_temp LAST: a
+-- search_path without pg_temp searches it FIRST, so a caller's
+-- `CREATE TEMP TABLE api_keys` would otherwise shadow the real table.
+-- Only the 5 columns the caller needs are returned. Revoked and unknown
+-- keys both return zero rows, so callers cannot tell them apart.
+CREATE FUNCTION public.resolve_api_key(p_key_id text)
 RETURNS TABLE (
   id uuid,
   tenant_id uuid,
@@ -37,29 +77,33 @@ RETURNS TABLE (
 )
 LANGUAGE sql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
-  SELECT api_keys.id, api_keys.tenant_id, api_keys.secret_hash, api_keys.scopes,
-         api_keys.environment::text
-  FROM api_keys
-  WHERE api_keys.key_id = p_key_id AND api_keys.revoked_at IS NULL
+  SELECT k.id, k.tenant_id, k.secret_hash, k.scopes, k.environment::pg_catalog.text
+  FROM public.api_keys AS k
+  WHERE k.key_id OPERATOR(pg_catalog.=) p_key_id AND k.revoked_at IS NULL
 $$;
 --> statement-breakpoint
-REVOKE ALL ON FUNCTION resolve_api_key(text) FROM PUBLIC;
+ALTER FUNCTION public.resolve_api_key(text) OWNER TO api_key_resolver;
 --> statement-breakpoint
-GRANT EXECUTE ON FUNCTION resolve_api_key(text) TO app_user;
+REVOKE ALL ON FUNCTION public.resolve_api_key(text) FROM PUBLIC;
 --> statement-breakpoint
--- Records successful authentication. Updates last_used_at only: no other
--- column, including revoked_at, is reachable through this path.
-CREATE FUNCTION touch_api_key_last_used(p_id uuid)
+GRANT EXECUTE ON FUNCTION public.resolve_api_key(text) TO app_user;
+--> statement-breakpoint
+-- Records successful authentication of an active key. Updates last_used_at
+-- only: no other column, including revoked_at, is reachable through this path.
+CREATE FUNCTION public.touch_api_key_last_used(p_id uuid)
 RETURNS void
 LANGUAGE sql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
-  UPDATE api_keys SET last_used_at = now() WHERE api_keys.id = p_id
+  UPDATE public.api_keys SET last_used_at = pg_catalog.now()
+  WHERE id OPERATOR(pg_catalog.=) p_id AND revoked_at IS NULL
 $$;
 --> statement-breakpoint
-REVOKE ALL ON FUNCTION touch_api_key_last_used(uuid) FROM PUBLIC;
+ALTER FUNCTION public.touch_api_key_last_used(uuid) OWNER TO api_key_resolver;
 --> statement-breakpoint
-GRANT EXECUTE ON FUNCTION touch_api_key_last_used(uuid) TO app_user;
+REVOKE ALL ON FUNCTION public.touch_api_key_last_used(uuid) FROM PUBLIC;
+--> statement-breakpoint
+GRANT EXECUTE ON FUNCTION public.touch_api_key_last_used(uuid) TO app_user;

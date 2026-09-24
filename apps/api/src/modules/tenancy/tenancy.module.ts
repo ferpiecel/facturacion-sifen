@@ -3,6 +3,7 @@ import type { DatabaseHandle } from '@sifen/db';
 import { ClsService } from 'nestjs-cls';
 import { TestTenantHeaderGuard } from './infrastructure/guards/test-tenant-header.guard.js';
 import { TenantTransactionRunner } from './infrastructure/tenant-transaction-runner.js';
+import type { TenancyClsStore } from './infrastructure/tenancy-cls-store.js';
 
 export interface TenancyModuleOptions {
   database: DatabaseHandle;
@@ -23,7 +24,8 @@ export class TenancyModule {
         TestTenantHeaderGuard,
         {
           provide: TenantTransactionRunner,
-          useFactory: (cls: ClsService) => new TenantTransactionRunner(options.database.db, cls),
+          useFactory: (cls: ClsService<TenancyClsStore>) =>
+            new TenantTransactionRunner(options.database.db, cls),
           inject: [ClsService],
         },
       ],

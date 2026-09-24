@@ -4,6 +4,7 @@ import { ClsService, type ClsStore } from 'nestjs-cls';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MissingTenantContextError } from './missing-tenant-context.error.js';
 import { TenantTransactionRunner } from './tenant-transaction-runner.js';
+import type { TenancyClsStore } from './tenancy-cls-store.js';
 
 describe('TenantTransactionRunner', () => {
   let handle: DatabaseHandle | undefined;
@@ -16,7 +17,7 @@ describe('TenantTransactionRunner', () => {
   it('throws MissingTenantContextError when no tenant id is set on the CLS context', async () => {
     handle = createPgliteDatabase();
     await handle.migrate();
-    const cls = new ClsService(new AsyncLocalStorage<ClsStore>());
+    const cls = new ClsService<TenancyClsStore>(new AsyncLocalStorage<ClsStore>());
     const runner = new TenantTransactionRunner(handle.db, cls);
 
     await expect(cls.run(() => runner.run(async (tx) => tx.execute('select 1')))).rejects.toThrow(

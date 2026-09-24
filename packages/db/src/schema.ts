@@ -1,4 +1,4 @@
-import { pgTable, timestamp, uuid, varchar } from 'drizzle-orm/pg-core';
+import { index, pgTable, timestamp, uuid, varchar } from 'drizzle-orm/pg-core';
 
 /**
  * Tenants master table. Not itself RLS-scoped (it has no `tenant_id`
@@ -15,12 +15,19 @@ export const tenants = pgTable('tenants', {
  * suites (Phase 2) to prove the RLS policies without depending on any real
  * domain table.
  */
-export const tenantProbe = pgTable('tenant_probe', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  tenantId: uuid('tenant_id').notNull(),
-  label: varchar('label', { length: 255 }).notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const tenantProbe = pgTable(
+  'tenant_probe',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    label: varchar('label', { length: 255 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  // Every RLS policy filters on tenant_id, so each tenant-scoped table indexes it.
+  (table) => [index('tenant_probe_tenant_id_idx').on(table.tenantId)],
+);
 
 /**
  * Every table that carries a `tenant_id` column and MUST be covered by

@@ -1,5 +1,5 @@
 {
-  "id": "61a55fe1-eb01-403e-a527-8c7e4c521d9e",
+  "id": "20e8747b-6f6e-4e8e-a1dc-1c80b982b2f8",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -35,8 +35,38 @@
           "default": "now()"
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
+      "indexes": {
+        "tenant_probe_tenant_id_idx": {
+          "name": "tenant_probe_tenant_id_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "tenant_probe_tenant_id_tenants_id_fk": {
+          "name": "tenant_probe_tenant_id_tenants_id_fk",
+          "tableFrom": "tenant_probe",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},

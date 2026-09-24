@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
+import type { SQLWrapper } from 'drizzle-orm';
 import {
   createNodePostgresDatabase,
   createPgliteDatabase,
+  type Database,
   type DatabaseHandle,
 } from '../../src/client.js';
 
@@ -48,4 +50,19 @@ async function createPostgresTestDatabase(): Promise<DatabaseHandle> {
   const url = new URL(baseUrl);
   url.pathname = `/${databaseName}`;
   return createNodePostgresDatabase(url.toString());
+}
+
+/**
+ * Runs a raw SQL query and returns its rows, typed as `T[]`.
+ *
+ * `Database.execute` is typed through drizzle's abstract `PgQueryResultHKT`,
+ * so its return type does not resolve to a concrete `{ rows: T[] }` shape
+ * at the `Database` alias level, even though both drivers return exactly
+ * that at runtime. This helper isolates the one intentional cast the
+ * isolation and RLS drift-check specs need to read diagnostic query
+ * results.
+ */
+export async function queryRows<T>(db: Database, query: SQLWrapper): Promise<T[]> {
+  const result = (await db.execute(query)) as { rows: T[] };
+  return result.rows;
 }

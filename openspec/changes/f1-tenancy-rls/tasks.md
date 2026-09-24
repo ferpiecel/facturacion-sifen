@@ -35,18 +35,18 @@ Chain strategy: stacked-to-main (every PR targets main; dependent PRs open as dr
 
 ## Phase 2: RLS enforcement (PR 2)
 
-- [ ] 2.1 RED: write `packages/db/test/isolation.spec.ts` — tenant A cannot read tenant B rows (spec: Tenant A reads only tenant A rows)
-- [ ] 2.2 RED: extend isolation spec — tenant A write to tenant B row affects zero rows (spec: Tenant A cannot write to tenant B rows)
-- [ ] 2.3 RED: extend isolation spec — no tenant context: SELECT returns zero rows, INSERT/UPDATE denied (spec: Deny by default)
-- [ ] 2.4 RED: extend isolation spec — `app.current_tenant` empty after commit and after rollback on pooled connection (spec: no leak across transactions)
-- [ ] 2.5 RED: extend isolation spec — `app_user` has no `BYPASSRLS`/superuser/ownership; policies apply regardless of query shape
-- [ ] 2.6 RED: `packages/db/test/rls-coverage.spec.ts` — every `TENANT_TABLES` entry has `relforcerowsecurity` and a policy (drift check)
-- [ ] 2.7 GREEN: write `packages/db/migrations/0001_rls.sql` (idempotent role creation, `ENABLE`/`FORCE RLS`, `tenant_id = nullif(current_setting('app.current_tenant', true), '')::uuid` policies `USING`+`WITH CHECK` `TO app_user`; explicit `TO platform_admin USING (true)`) and `migrations/rollback/0001_rls.down.sql`
-- [ ] 2.8 GREEN: write `packages/db/src/{tenant-id.ts,tenant-transaction.ts,errors.ts}` implementing `withTenantTransaction` (`BEGIN`; `select set_config('app.current_tenant', $1, true)` bound; `SET LOCAL ROLE app_user`; UUID-validate before `BEGIN`, throw `InvalidTenantIdError`)
-- [ ] 2.9 Export public surface via `packages/db/src/index.ts`
-- [ ] 2.10 Confirm all RED tests from 2.1–2.6 pass on pglite and on `DB_TEST_DRIVER=postgres`
-- [ ] 2.11 Add `db-postgres` job to `.github/workflows/ci.yml` running `pnpm --filter @sifen/db test:postgres`; make it a required check in the quality gate
-- [ ] 2.12 Write `docs/adr/0016-tenant-transaction-runner-sin-plugin-cls.md` (Spanish, short) documenting the deviation from ADR-0006 (deferred `nestjs-cls` transactional plugin, singleton `TenantTransactionRunner` instead)
+- [x] 2.1 RED: write `packages/db/test/isolation.spec.ts` — tenant A cannot read tenant B rows (spec: Tenant A reads only tenant A rows)
+- [x] 2.2 RED: extend isolation spec — tenant A write to tenant B row affects zero rows (spec: Tenant A cannot write to tenant B rows)
+- [x] 2.3 RED: extend isolation spec — no tenant context: SELECT returns zero rows, INSERT/UPDATE denied (spec: Deny by default)
+- [x] 2.4 RED: extend isolation spec — `app.current_tenant` empty after commit and after rollback on pooled connection (spec: no leak across transactions)
+- [x] 2.5 RED: extend isolation spec — `app_user` has no `BYPASSRLS`/superuser/ownership; policies apply regardless of query shape
+- [x] 2.6 RED: `packages/db/test/rls-coverage.spec.ts` — every `TENANT_TABLES` entry has `relforcerowsecurity` and a policy (drift check)
+- [x] 2.7 GREEN: write `packages/db/migrations/0001_rls.sql` (idempotent role creation, `ENABLE`/`FORCE RLS`, `tenant_id = nullif(current_setting('app.current_tenant', true), '')::uuid` policies `USING`+`WITH CHECK` `TO app_user`; explicit `TO platform_admin USING (true)`) and `migrations/rollback/0001_rls.down.sql`
+- [x] 2.8 GREEN: write `packages/db/src/{tenant-id.ts,tenant-transaction.ts,errors.ts}` implementing `withTenantTransaction` (`BEGIN`; `select set_config('app.current_tenant', $1, true)` bound; `SET LOCAL ROLE app_user`; UUID-validate before `BEGIN`, throw `InvalidTenantIdError`)
+- [x] 2.9 Export public surface via `packages/db/src/index.ts`
+- [x] 2.10 Confirm all RED tests from 2.1–2.6 pass on pglite and on `DB_TEST_DRIVER=postgres`
+- [x] 2.11 Add `db-postgres` job to `.github/workflows/ci.yml` running `pnpm --filter @sifen/db test:postgres`; make it a required check in the quality gate
+- [x] 2.12 Write `docs/adr/0016-tenant-transaction-runner-sin-plugin-cls.md` (Spanish, short) documenting the deviation from ADR-0006 (deferred `nestjs-cls` transactional plugin, singleton `TenantTransactionRunner` instead)
 
 ## Phase 3: apps/api wiring (PR 3)
 

@@ -50,16 +50,17 @@ Chain strategy: stacked-to-main (every PR targets main; dependent PRs open as dr
 
 ## Phase 3: apps/api wiring (PR 3)
 
-- [ ] 3.1 RED: unit tests for `TestTenantHeaderGuard` — missing header → 401, invalid header → 400, throws at construction when `NODE_ENV=production` (spec: API guard requires tenant header)
-- [ ] 3.2 RED: `packages/db/test/tenant-aware-processor.spec.ts` — job with tenant id runs inside `withTenantTransaction`; job missing tenant id is rejected before body executes
-- [ ] 3.3 GREEN: `packages/db/src/tenant-aware-processor.ts` implementing `TenantAwareProcessor`
-- [ ] 3.4 GREEN: `apps/api/src/modules/tenancy/**` (hexagonal layout: `TestTenantHeaderGuard`, CLS resolution into `TenantTransactionRunner`)
-- [ ] 3.5 Wire `ClsModule.forRoot({ global: true, middleware: { mount: true } })` in `apps/api/src/app.module.ts`
-- [ ] 3.6 Create `apps/api/.dependency-cruiser.cjs` (forbid `drizzle-orm`, `pg`, `@electric-sql/`, `@sifen/db` outside `modules/*/infrastructure/` and `*.module.ts`) + `depcruise` script
-- [ ] 3.7 Integration test: request with valid header propagates tenant id via CLS into a `withTenantTransaction` call (Fastify inject + `Test.createTestingModule`)
-- [ ] 3.8 Update `nestjs-cls@7.0.0` dependency pin in `apps/api/package.json`; confirm coverage ≥85% holds per package
+- [x] 3.1 RED: unit tests for `TestTenantHeaderGuard` — missing header → 401, invalid header → 400, throws at construction when `NODE_ENV=production` (spec: API guard requires tenant header)
+- [x] 3.2 RED: `packages/db/test/tenant-aware-processor.spec.ts` — job with tenant id runs inside `withTenantTransaction`; job missing tenant id is rejected before body executes
+- [x] 3.3 GREEN: `packages/db/src/tenant-aware-processor.ts` implementing `TenantAwareProcessor`
+- [x] 3.4 GREEN: `apps/api/src/modules/tenancy/**` (hexagonal layout: `TestTenantHeaderGuard`, CLS resolution into `TenantTransactionRunner`)
+- [x] 3.5 Wire `ClsModule.forRoot({ global: true, middleware: { mount: true } })` in `apps/api/src/app.module.ts`
+- [x] 3.6 Create `apps/api/.dependency-cruiser.cjs` (forbid `drizzle-orm`, `pg`, `@electric-sql/`, `@sifen/db` outside `modules/*/infrastructure/` and `*.module.ts`) + `depcruise` script
+- [x] 3.7 Integration test: request with valid header propagates tenant id via CLS into a `withTenantTransaction` call (Fastify inject + `Test.createTestingModule`)
+- [x] 3.8 Update `nestjs-cls@7.0.0` dependency pin in `apps/api/package.json`; confirm coverage ≥85% holds per package
+- [x] 3.9 (security review debt) `packages/db/src/session-guard.ts`: `assertNonPrivilegedSession(db)` refuses superuser/`BYPASSRLS`/tenant-table-owner sessions; tested RED→GREEN on pglite (always superuser)
 
 ## Phase 4: Cleanup
 
-- [ ] 4.1 Update `docs/adr/` cross-references if RLS GUC naming or transaction runner decisions diverge further from ADR text
-- [ ] 4.2 Confirm `pnpm dependency-cruiser` passes for both new local configs (spec: architecture-boundaries)
+- [x] 4.1 Update `docs/adr/` cross-references — ADR-0016 addendum documents the `withTenantTransaction`/`fn` `set_config` limit and `assertNonPrivilegedSession`
+- [x] 4.2 Confirm `pnpm dependency-cruiser` passes for both new local configs (spec: architecture-boundaries) — `packages/db` and `apps/api` both pass

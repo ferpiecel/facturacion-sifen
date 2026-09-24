@@ -3,7 +3,7 @@ import { eq, sql } from 'drizzle-orm';
 import type { Database, DatabaseHandle } from '../src/client.js';
 import { tenantProbe, tenants } from '../src/schema.js';
 import { withTenantTransaction } from '../src/tenant-transaction.js';
-import { createTestDatabase, queryRows } from './support/harness.js';
+import { connectAsRuntime, createTestDatabase, queryRows } from './support/harness.js';
 
 interface Seed {
   db: Database;
@@ -87,6 +87,14 @@ describe('tenant isolation via RLS', () => {
     ).rejects.toThrow();
   });
 
+  it('Tenant A sees only its own row in tenants', async () => {
+    const { db, tenantA } = await seedTenants();
+
+    const rows = await withTenantTransaction(db, tenantA, (tx) => tx.select().from(tenants));
+
+    expect(rows.map((row) => row.id)).toEqual([tenantA]);
+  });
+
   it('no tenant context: SELECT returns zero rows, INSERT/UPDATE denied', async () => {
     const { db, tenantA } = await seedTenants();
 
@@ -143,4 +151,56 @@ describe('tenant isolation via RLS', () => {
     expect(rows[0]?.rolbypassrls).toBe(false);
     expect(rows[0]?.is_owner).toBe(false);
   });
+
+  // pglite always runs its session as a superuser (its `username` option is
+  // only a SET ROLE), so the privilege-escape scenarios need real Postgres.
+  describe.runIf(process.env.DB_TEST_DRIVER === 'postgres')(
+    'runtime login cannot escape app_user',
+    () => {
+      let runtime: DatabaseHandle | undefined;
+
+      afterEach(async () => {
+        await runtime?.close();
+        runtime = undefined;
+      });
+
+      async function seedRuntime(): Promise<Seed> {
+        const seed = await seedTenants();
+        runtime = connectAsRuntime(required(handle, 'owner handle missing'));
+        return { ...seed, db: runtime.db };
+      }
+
+      it('session role is neither superuser nor BYPASSRLS', async () => {
+        const { db } = await seedRuntime();
+
+        const rows = await queryRows<{ rolsuper: boolean; rolbypassrls: boolean }>(
+          db,
+          sql`select rolsuper, rolbypassrls from pg_roles where rolname = session_user`,
+        );
+
+        expect(rows).toEqual([{ rolsuper: false, rolbypassrls: false }]);
+      });
+
+      it('RESET ROLE inside the tenant transaction does not expose other tenants', async () => {
+        const { db, tenantA } = await seedRuntime();
+
+        const rows = await withTenantTransaction(db, tenantA, async (tx) => {
+          await tx.execute(sql`RESET ROLE`);
+          return tx.select().from(tenantProbe);
+        }).catch(() => []);
+
+        expect(rows.every((row) => row.tenantId === tenantA)).toBe(true);
+      });
+
+      it('SET ROLE platform_admin is denied', async () => {
+        const { db, tenantA } = await seedRuntime();
+
+        await expect(
+          withTenantTransaction(db, tenantA, (tx) =>
+            tx.execute(sql`SET LOCAL ROLE platform_admin`),
+          ),
+        ).rejects.toThrow();
+      });
+    },
+  );
 });

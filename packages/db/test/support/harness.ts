@@ -49,6 +49,23 @@ async function createPostgresTestDatabase(): Promise<DatabaseHandle> {
 
   const url = new URL(baseUrl);
   url.pathname = `/${databaseName}`;
+  const handle = createNodePostgresDatabase(url.toString());
+  databaseUrls.set(handle, url);
+  return handle;
+}
+
+const databaseUrls = new WeakMap<DatabaseHandle, URL>();
+
+/**
+ * Opens the connection application code uses at runtime against the same
+ * database as `owner` (the migrating handle). Only meaningful on the
+ * postgres driver: pglite always runs its session as a superuser.
+ */
+export function connectAsRuntime(owner: DatabaseHandle): DatabaseHandle {
+  const url = databaseUrls.get(owner);
+  if (!url) {
+    throw new Error('connectAsRuntime requires a handle from createTestDatabase on postgres');
+  }
   return createNodePostgresDatabase(url.toString());
 }
 

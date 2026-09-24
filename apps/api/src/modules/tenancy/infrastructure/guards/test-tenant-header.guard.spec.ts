@@ -86,9 +86,7 @@ describe('TestTenantHeaderGuard', () => {
       const guard = new TestTenantHeaderGuard(cls);
 
       cls.run(() => {
-        const activated = guard.canActivate(
-          contextWithHeaders({ 'x-tenant-id': VALID_TENANT_ID }),
-        );
+        const activated = guard.canActivate(contextWithHeaders({ 'x-tenant-id': VALID_TENANT_ID }));
 
         expect(activated).toBe(true);
         expect(cls.get(TENANT_ID_CLS_KEY)).toBe(VALID_TENANT_ID);

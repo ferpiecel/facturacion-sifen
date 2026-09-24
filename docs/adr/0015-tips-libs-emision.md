@@ -13,7 +13,7 @@ ADR-0002 adoptó `xmlgen` para el XML y el CDC, pero dejó `xmlsign`, `qrgen` y 
 
 ## Decisión
 
-Se usan `xmlgen`, `qrgen` y `xmlsign` con versiones exactas fijadas (sin rango de semver), envueltos detrás de los puertos framework-free `DeXmlBuilder`, `XmlSigner` y `QrGenerator` definidos en `packages/sifen-gateway/src/emission-ports.ts`. Ninguna de las tres librerías es importada fuera de `packages/sifen-tips`; esto se hace cumplir con una regla de `dependency-cruiser` en la raíz del monorepo.
+Se usarán `xmlgen`, `qrgen` y `xmlsign` con versiones exactas fijadas (sin rango de semver), en el paquete `packages/sifen-tips` que llega en la siguiente entrega, envueltos detrás de los puertos framework-free `DeXmlBuilder`, `XmlSigner` y `QrGenerator` definidos en `packages/sifen-gateway/src/emission-ports.ts`. Ninguna de las tres librerías es importada fuera de `packages/sifen-tips`; esto se hace cumplir con una regla de `dependency-cruiser` en la raíz del monorepo.
 
 `xmlsign` se usa **siempre en modo Node** (`signByNodeJS: true`, no configurable). El modo JVM queda descartado: no se invoca en ningún camino de código.
 
@@ -30,7 +30,7 @@ Ninguna de las dos bloquea esta decisión: la PoC offline valida contra el XSD p
 
 ## Consecuencias
 
-Los certificados de desarrollo usados en tests se generan en memoria en tiempo de ejecución (con `node-forge`) y nunca se escriben a disco ni se commitean al repositorio.
+El puerto `XmlSigner` recibe el certificado en memoria (bytes del PKCS#12). Como `xmlsign` solo lee el certificado desde una ruta de archivo, el adaptador lo escribe en un archivo temporal efímero, dentro de un directorio propio creado con `mkdtemp`, con permisos `0600`, y lo elimina siempre en un bloque `finally`. Los certificados de desarrollo usados en tests se generan en tiempo de ejecución (con `node-forge`) y nunca se commitean al repositorio.
 
 Si `xmlsign` es rechazado por sifen-test o el Prevalidador por alguna de las preguntas abiertas, el puerto `XmlSigner` permite sustituirlo por un firmador propio sin tocar el resto del pipeline.
 

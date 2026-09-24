@@ -10,7 +10,11 @@
 /** SIFEN target environment. */
 export type Ambiente = 'test' | 'prod';
 
-/** A certificate loaded in memory as a PKCS#12 bundle, never written to disk. */
+/**
+ * A PKCS#12 certificate held in memory. Adapters whose underlying library only
+ * reads from a file path MUST write it to an ephemeral 0600 temp file and delete
+ * it in a `finally` block (ADR-0015).
+ */
 export interface LoadedCertificate {
   readonly p12: Uint8Array;
   readonly password: string;

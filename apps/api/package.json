@@ -17,6 +17,7 @@
     "@nestjs/common": "12.1.0",
     "@nestjs/core": "12.1.0",
     "@nestjs/platform-fastify": "12.1.0",
+    "@node-rs/argon2": "2.2.1",
     "@sifen/db": "workspace:*",
     "nestjs-cls": "7.0.0",
     "reflect-metadata": "0.2.2",

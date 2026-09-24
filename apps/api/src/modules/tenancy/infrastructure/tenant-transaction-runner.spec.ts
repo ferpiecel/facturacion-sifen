@@ -19,8 +19,8 @@ describe('TenantTransactionRunner', () => {
     const cls = new ClsService(new AsyncLocalStorage<ClsStore>());
     const runner = new TenantTransactionRunner(handle.db, cls);
 
-    await expect(
-      cls.run(() => runner.run(async (tx) => tx.execute('select 1'))),
-    ).rejects.toThrow(MissingTenantContextError);
+    await expect(cls.run(() => runner.run(async (tx) => tx.execute('select 1')))).rejects.toThrow(
+      MissingTenantContextError,
+    );
   });
 });

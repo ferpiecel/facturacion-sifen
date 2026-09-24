@@ -5,9 +5,7 @@
  */
 export class MissingTenantContextError extends Error {
   constructor() {
-    super(
-      'No tenant id set on the CLS context: the tenant guard did not run before this call.',
-    );
+    super('No tenant id set on the CLS context: the tenant guard did not run before this call.');
     this.name = 'MissingTenantContextError';
   }
 }

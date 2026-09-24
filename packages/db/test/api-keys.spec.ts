@@ -14,6 +14,11 @@ interface Seed {
   revokedKeyId: string;
 }
 
+// key_id format enforced by the api_keys_key_id_format CHECK: 24-64 alphanumerics.
+const KEY_A = 'keyAactive00000000000000';
+const KEY_B = 'keyBactive00000000000000';
+const KEY_REVOKED = 'keyArevoked0000000000000';
+
 function required<T>(value: T | undefined, message: string): T {
   if (value === undefined) {
     throw new Error(message);
@@ -53,7 +58,7 @@ describe('api_keys', () => {
       .insert(apiKeys)
       .values({
         tenantId: tenantA,
-        keyId: 'key_a_active',
+        keyId: KEY_A,
         environment: 'live',
         secretHash: '$argon2id$v=19$m=65536,t=3,p=4$c2FsdA$aGFzaA',
         scopes: ['documents:write'],
@@ -64,7 +69,7 @@ describe('api_keys', () => {
       .insert(apiKeys)
       .values({
         tenantId: tenantB,
-        keyId: 'key_b_active',
+        keyId: KEY_B,
         environment: 'live',
         secretHash: '$argon2id$v=19$m=65536,t=3,p=4$c2FsdA$b3RoZXI',
         scopes: [],
@@ -74,7 +79,7 @@ describe('api_keys', () => {
       .insert(apiKeys)
       .values({
         tenantId: tenantA,
-        keyId: 'key_a_revoked',
+        keyId: KEY_REVOKED,
         environment: 'test',
         secretHash: '$argon2id$v=19$m=65536,t=3,p=4$c2FsdA$cmV2b2tlZA',
         scopes: [],
@@ -129,7 +134,7 @@ describe('api_keys', () => {
 
     const rows = await db.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL ROLE app_user`);
-      return queryRows<ResolvedApiKey>(tx, sql`select * from resolve_api_key('key_a_active')`);
+      return queryRows<ResolvedApiKey>(tx, sql`select * from resolve_api_key(${KEY_A})`);
     });
 
     expect(rows).toHaveLength(1);
@@ -146,7 +151,7 @@ describe('api_keys', () => {
 
     const rows = await db.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL ROLE app_user`);
-      return queryRows<ResolvedApiKey>(tx, sql`select * from resolve_api_key('key_a_revoked')`);
+      return queryRows<ResolvedApiKey>(tx, sql`select * from resolve_api_key(${KEY_REVOKED})`);
     });
 
     expect(rows).toHaveLength(0);
@@ -179,6 +184,56 @@ describe('api_keys', () => {
     expect(rows[0]?.revoked_at).toBeNull();
   });
 
+  it('resolve_api_key ignores an api_keys shadow table in pg_temp', async () => {
+    const { db } = await seed();
+    const forged = 'forgedKey000000000000000';
+
+    const [forgedRows, realRows] = await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE app_user`);
+      await tx.execute(sql`CREATE TEMP TABLE api_keys (id uuid, tenant_id uuid, key_id text,
+        secret_hash text, scopes text[], environment text, revoked_at timestamptz,
+        last_used_at timestamptz) ON COMMIT DROP`);
+      await tx.execute(sql`INSERT INTO pg_temp.api_keys VALUES (gen_random_uuid(),
+        gen_random_uuid(), ${forged}, 'attacker-hash', '{admin}', 'live', null, null)`);
+      return [
+        await queryRows<ResolvedApiKey>(tx, sql`select * from resolve_api_key(${forged})`),
+        await queryRows<ResolvedApiKey>(tx, sql`select * from resolve_api_key(${KEY_A})`),
+      ];
+    });
+
+    expect(forgedRows).toHaveLength(0);
+    expect(realRows).toHaveLength(1);
+    expect(realRows[0]?.secret_hash).toBe('$argon2id$v=19$m=65536,t=3,p=4$c2FsdA$aGFzaA');
+  });
+
+  it('rejects a key_id outside 24-64 alphanumerics', async () => {
+    const { db, tenantA } = await seed();
+
+    await expect(
+      db.insert(apiKeys).values({
+        tenantId: tenantA,
+        keyId: 'short_key',
+        environment: 'live',
+        secretHash: 'x',
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('touch_api_key_last_used does not touch a revoked key', async () => {
+    const { db, revokedKeyId } = await seed();
+
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE app_user`);
+      await tx.execute(sql`select touch_api_key_last_used(${revokedKeyId}::uuid)`);
+    });
+
+    const rows = await queryRows<{ last_used_at: Date | null }>(
+      db,
+      sql`select last_used_at from api_keys where id = ${revokedKeyId}::uuid`,
+    );
+    expect(rows[0]?.last_used_at).toBeNull();
+  });
+
   // pglite always connects as a superuser, so role-based EXECUTE privilege
   // checks (has_function_privilege for a role with no grants) need real
   // Postgres; a superuser session always has every privilege regardless of
@@ -198,8 +253,30 @@ describe('api_keys', () => {
 
         expect(rows).toHaveLength(2);
         for (const row of rows) {
-          expect(row.proconfig).toContain('search_path=pg_catalog, public');
+          expect(row.proconfig).toContain('search_path=pg_catalog, public, pg_temp');
         }
+      });
+
+      it('both functions are owned by the unprivileged api_key_resolver role', async () => {
+        const { db } = await seed();
+
+        const owners = await queryRows<{ owner: string; super: boolean; bypass: boolean }>(
+          db,
+          sql`select r.rolname as owner, r.rolsuper as super, r.rolbypassrls as bypass
+              from pg_proc p join pg_roles r on r.oid = p.proowner
+              where p.proname in ('resolve_api_key', 'touch_api_key_last_used')`,
+        );
+        expect(owners).toHaveLength(2);
+        for (const row of owners) {
+          expect(row).toEqual({ owner: 'api_key_resolver', super: false, bypass: false });
+        }
+
+        const members = await queryRows<{ member: string }>(
+          db,
+          sql`select m.member::regrole::text as member from pg_auth_members m
+              where m.roleid = 'api_key_resolver'::regrole`,
+        );
+        expect(members).toEqual([]);
       });
 
       it('is not executable by PUBLIC: a fresh role with no grants is denied', async () => {

@@ -42,5 +42,5 @@ The offline PoC test MUST build a test FE, sign it, attach a QR, validate the si
 #### Scenario: FakeSifenGateway receives the signed XML
 
 - GIVEN a signed and QR-annotated FE from the PoC flow
-- WHEN the PoC calls `FakeSifenGateway.enviarDESincronico` with that FE
+- WHEN the PoC calls `FakeSifenGateway.enviarLote` returning `0300`
 - THEN the fake's recorded call MUST include the exact signed XML string sent

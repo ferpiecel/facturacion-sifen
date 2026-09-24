@@ -1,4 +1,4 @@
-import { index, pgTable, timestamp, uuid, varchar } from 'drizzle-orm/pg-core';
+import { index, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid, varchar } from 'drizzle-orm/pg-core';
 
 /**
  * Tenants master table: the source of truth every tenant-scoped table
@@ -30,10 +30,43 @@ export const tenantProbe = pgTable(
   (table) => [index('tenant_probe_tenant_id_idx').on(table.tenantId)],
 );
 
+/** `api_keys.environment`: which SIFEN environment a key authenticates against. */
+export const apiKeyEnvironment = pgEnum('api_key_environment', ['live', 'test']);
+
+/**
+ * API keys issued per tenant (HU-E1-04). `key_id` is the public identifier
+ * embedded in the issued key (`sk_live_<key_id>` / `sk_test_<key_id>`);
+ * `secret_hash` is the Argon2id PHC string of the secret part, hashed by the
+ * application, never in SQL. Pre-authentication lookup (before tenant
+ * context exists) goes through the `resolve_api_key` / `touch_api_key_last_used`
+ * SECURITY DEFINER functions in migration 0003, never a direct query.
+ */
+export const apiKeys = pgTable(
+  'api_keys',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    keyId: text('key_id').notNull(),
+    environment: apiKeyEnvironment('environment').notNull(),
+    secretHash: text('secret_hash').notNull(),
+    scopes: text('scopes').array().notNull().default([]),
+    label: varchar('label', { length: 255 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('api_keys_tenant_id_idx').on(table.tenantId),
+    uniqueIndex('api_keys_key_id_idx').on(table.keyId),
+  ],
+);
+
 /**
  * Every table that carries a `tenant_id` column and MUST be covered by
  * `FORCE ROW LEVEL SECURITY` plus a tenant-isolation policy. The
  * `rls-coverage.spec.ts` drift check discovers these tables from the
  * catalog and asserts this list matches it.
  */
-export const TENANT_TABLES = ['tenant_probe'] as const;
+export const TENANT_TABLES = ['api_keys', 'tenant_probe'] as const;

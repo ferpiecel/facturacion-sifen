@@ -58,13 +58,30 @@ const databaseUrls = new WeakMap<DatabaseHandle, URL>();
 
 /** Runtime connection (`app_login`, see `global-setup.ts`) to `owner`'s database. Postgres only. */
 export function connectAsRuntime(owner: DatabaseHandle): DatabaseHandle {
+  return connectAs(owner, 'app_login', 'app_login');
+}
+
+/**
+ * Connects to `owner`'s database as `username`. `role`, when given, is a
+ * startup `SET ROLE` (libpq `-c role=`), so `session_user` stays `username`
+ * while `current_user` becomes `role`. Postgres only.
+ */
+export function connectAs(
+  owner: DatabaseHandle,
+  username: string,
+  password: string,
+  role?: string,
+): DatabaseHandle {
   const ownerUrl = databaseUrls.get(owner);
   if (!ownerUrl) {
-    throw new Error('connectAsRuntime requires a handle from createTestDatabase on postgres');
+    throw new Error('connectAs requires a handle from createTestDatabase on postgres');
   }
   const url = new URL(ownerUrl);
-  url.username = 'app_login';
-  url.password = 'app_login';
+  url.username = username;
+  url.password = password;
+  if (role) {
+    url.searchParams.set('options', `-c role=${role}`);
+  }
   return createNodePostgresDatabase(url.toString());
 }
 

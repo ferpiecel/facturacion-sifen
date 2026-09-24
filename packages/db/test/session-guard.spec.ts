@@ -1,7 +1,9 @@
+import { randomUUID } from 'node:crypto';
+import { sql } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { DatabaseHandle } from '../src/client.js';
 import { assertNonPrivilegedSession } from '../src/session-guard.js';
-import { connectAsRuntime, createTestDatabase } from './support/harness.js';
+import { connectAs, connectAsRuntime, createTestDatabase } from './support/harness.js';
 
 /**
  * Security-review debt item (PR2 exploit: runtime pool ran as the
@@ -41,4 +43,44 @@ describe('assertNonPrivilegedSession', () => {
       }
     },
   );
+
+  // pglite has a single superuser session and no real logins, so none of
+  // these privilege shapes can be built there; they run on the postgres leg.
+  describe.runIf(process.env.DB_TEST_DRIVER === 'postgres')('rejects escapable sessions', () => {
+    // Roles are cluster-wide, so every test creates its own uniquely named login.
+    async function rejectsLogin(grant: (login: string) => string, role?: string) {
+      handle = await createTestDatabase();
+      const login = `guard_${randomUUID().slice(0, 8)}`;
+      await handle.db.execute(sql.raw(`CREATE ROLE ${login} LOGIN PASSWORD '${login}'`));
+      await handle.db.execute(sql.raw(grant(login)));
+      const session = connectAs(handle, login, login, role);
+      try {
+        await expect(assertNonPrivilegedSession(session.db)).rejects.toThrow(/bypass RLS/);
+      } finally {
+        await session.close();
+      }
+    }
+
+    it('a login with BYPASSRLS', async () => {
+      await rejectsLogin((login) => `ALTER ROLE ${login} BYPASSRLS`);
+    });
+
+    it('a login that owns the RLS-protected tenants table', async () => {
+      await rejectsLogin((login) => `ALTER TABLE tenants OWNER TO ${login}`);
+    });
+
+    it('a login that is a member of platform_admin', async () => {
+      await rejectsLogin((login) => `GRANT platform_admin TO ${login}`);
+    });
+
+    it('a superuser session that SET ROLE app_login (session_user check)', async () => {
+      handle = await createTestDatabase();
+      const session = connectAs(handle, 'sifen', 'sifen', 'app_login');
+      try {
+        await expect(assertNonPrivilegedSession(session.db)).rejects.toThrow(/bypass RLS/);
+      } finally {
+        await session.close();
+      }
+    });
+  });
 });

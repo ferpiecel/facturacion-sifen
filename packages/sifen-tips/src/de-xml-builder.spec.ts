@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-const generateXMLDE = vi.fn();
+const { generateXMLDE } = vi.hoisted(() => ({ generateXMLDE: vi.fn() }));
 vi.mock('facturacionelectronicapy-xmlgen', () => ({ default: { generateXMLDE } }));
 
 import { TipsDeXmlBuilder } from './de-xml-builder.ts';

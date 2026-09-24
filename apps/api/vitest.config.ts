@@ -12,6 +12,10 @@ export default defineConfig({
   test: {
     root: import.meta.dirname,
     include: ['src/**/*.spec.ts', 'test/**/*.spec.ts'],
+    // Tenancy integration specs boot PGlite and apply every migration; CI
+    // runners need more than the 5 s default as migrations accumulate.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     coverage: {
       provider: 'v8',
       all: true,

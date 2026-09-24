@@ -1,0 +1,36 @@
+{
+  "name": "@sifen/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "license": "UNLICENSED",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "depcruise": "depcruise --config .dependency-cruiser.cjs src",
+    "test": "vitest run",
+    "test:postgres": "DB_TEST_DRIVER=postgres vitest run",
+    "coverage": "vitest run --coverage",
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "drizzle-orm": "0.45.3",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "@sifen/config": "workspace:*",
+    "@types/node": "22.20.4",
+    "@types/pg": "8.23.1",
+    "@vitest/coverage-v8": "5.0.1",
+    "dependency-cruiser": "18.4.0",
+    "drizzle-kit": "0.31.11",
+    "testcontainers": "12.1.0",
+    "typescript": "6.0.3",
+    "vitest": "5.0.1"
+  }
+}

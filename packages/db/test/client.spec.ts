@@ -1,0 +1,32 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { eq } from 'drizzle-orm';
+import type { DatabaseHandle } from '../src/client.js';
+import { tenantProbe, tenants } from '../src/schema.js';
+import { createTestDatabase } from './support/harness.js';
+
+describe('packages/db scaffold', () => {
+  let handle: DatabaseHandle | undefined;
+
+  afterEach(async () => {
+    await handle?.close();
+    handle = undefined;
+  });
+
+  it('migrates and round-trips a row through the generated schema', async () => {
+    handle = await createTestDatabase();
+
+    const [tenant] = await handle.db.insert(tenants).values({ name: 'Acme SA' }).returning();
+    expect(tenant?.id).toBeDefined();
+    expect(tenant?.name).toBe('Acme SA');
+
+    await handle.db.insert(tenantProbe).values({ tenantId: tenant!.id, label: 'probe-1' });
+
+    const rows = await handle.db
+      .select()
+      .from(tenantProbe)
+      .where(eq(tenantProbe.tenantId, tenant!.id));
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.label).toBe('probe-1');
+  });
+});

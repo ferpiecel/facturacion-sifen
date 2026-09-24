@@ -61,7 +61,7 @@ Revert PR2 (removes `@sifen/sifen-tips`, no consumers yet), then PR1 (ports are 
 
 ## Success Criteria
 
-- [ ] PoC e2e test passes offline in CI, with no network and no JVM.
-- [ ] Signed FE with QR validates against `siRecepDE`.
-- [ ] Ports import no TIPS or framework modules.
-- [ ] ADR-0015 accepted and indexed; each PR ≤400 hand-written lines.
+- [x] PoC e2e test passes offline in CI, with no network and no JVM.
+- [x] Signed FE with QR validates against `siRecepDE`.
+- [x] Ports import no TIPS or framework modules.
+- [x] ADR-0015 accepted and indexed; each PR ≤400 hand-written lines.

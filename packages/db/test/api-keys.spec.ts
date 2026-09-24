@@ -129,10 +129,7 @@ describe('api_keys', () => {
 
     const rows = await db.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL ROLE app_user`);
-      return queryRows<ResolvedApiKey>(
-        tx,
-        sql`select * from resolve_api_key('key_a_active')`,
-      );
+      return queryRows<ResolvedApiKey>(tx, sql`select * from resolve_api_key('key_a_active')`);
     });
 
     expect(rows).toHaveLength(1);
@@ -218,7 +215,11 @@ describe('api_keys', () => {
           $$;
         `);
 
-        const rows = await queryRows<{ resolve_ok: boolean; touch_ok: boolean; app_user_ok: boolean }>(
+        const rows = await queryRows<{
+          resolve_ok: boolean;
+          touch_ok: boolean;
+          app_user_ok: boolean;
+        }>(
           db,
           sql`select
                 has_function_privilege('api_keys_probe_role', 'resolve_api_key(text)', 'EXECUTE') as resolve_ok,

@@ -15,6 +15,20 @@
       "when": 1790272012172,
       "tag": "0001_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790288573621,
+      "tag": "0002_redundant_jean_grey",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790288573622,
+      "tag": "0003_api_keys_rls",
+      "breakpoints": true
     }
   ]
 }

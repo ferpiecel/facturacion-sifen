@@ -12,11 +12,13 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "depcruise": "depcruise --config .dependency-cruiser.cjs src",
-    "test": "vitest run"
+    "test": "vitest run",
+    "coverage": "vitest run --coverage"
   },
   "devDependencies": {
     "@sifen/config": "workspace:*",
     "@types/node": "22.20.4",
+    "@vitest/coverage-v8": "5.0.1",
     "dependency-cruiser": "18.4.0",
     "typescript": "6.0.3",
     "vitest": "5.0.1"

@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "depcruise": "depcruise --config ../../.dependency-cruiser.cjs src",
     "test": "vitest run",
-    "start": "node dist/main.js"
+    "start": "node dist/main.js",
+    "coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@nestjs/common": "12.1.0",
@@ -24,6 +25,7 @@
     "@sifen/config": "workspace:*",
     "@swc/core": "1.16.2",
     "@types/node": "22.20.4",
+    "@vitest/coverage-v8": "5.0.1",
     "dependency-cruiser": "18.4.0",
     "typescript": "6.0.3",
     "unplugin-swc": "2.0.0",

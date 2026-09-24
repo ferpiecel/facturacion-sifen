@@ -3,7 +3,7 @@ import sharedConfig from '@sifen/config/eslint.config.js';
 // Extends the shared workspace config, then overrides `tsconfigRootDir` so
 // typed linting resolves `packages/sifen-xsd/tsconfig.json` instead of `packages/config`.
 export default [
-  { ignores: ['dist/**', 'vendor/**'] },
+  { ignores: ['dist/**', 'coverage/**', 'vendor/**'] },
   ...sharedConfig,
   {
     languageOptions: {

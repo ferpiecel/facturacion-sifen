@@ -1,6 +1,7 @@
 import { hash, parseOptions } from '@node-rs/argon2';
 import { describe, expect, it } from 'vitest';
-import { ARGON2_PARAMS, Argon2SecretVerifierAdapter } from './argon2-secret-verifier.adapter.js';
+import { ARGON2_PARAMS } from '../../domain/argon2-params.js';
+import { Argon2SecretVerifierAdapter } from './argon2-secret-verifier.adapter.js';
 
 describe('Argon2SecretVerifierAdapter', () => {
   it('verifies a matching secret against its Argon2id hash', async () => {

@@ -1,6 +1,6 @@
 import { parseOptions } from '@node-rs/argon2';
 import { describe, expect, it, vi } from 'vitest';
-import { ARGON2_PARAMS } from '../infrastructure/adapters/argon2-secret-verifier.adapter.js';
+import { ARGON2_PARAMS } from '../domain/argon2-params.js';
 import { AuthenticateApiKeyUseCase, DUMMY_HASH } from './authenticate-api-key.use-case.js';
 import type { ApiKeyLookup, ResolvedApiKeyRecord } from './ports/api-key-lookup.port.js';
 import type { SecretVerifier } from './ports/secret-verifier.port.js';

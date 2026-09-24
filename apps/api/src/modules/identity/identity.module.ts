@@ -36,7 +36,7 @@ import { SIFEN_ENVIRONMENT } from './identity.tokens.js';
     // a fresh testing module observe that value.
     {
       provide: SIFEN_ENVIRONMENT,
-      useFactory: () => parseSifenEnvironment(process.env.SIFEN_ENVIRONMENT),
+      useFactory: () => parseSifenEnvironment(process.env.SIFEN_ENVIRONMENT, process.env.NODE_ENV),
     },
     {
       provide: APP_GUARD,

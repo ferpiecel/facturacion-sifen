@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
+import type { SQLWrapper } from 'drizzle-orm';
 import {
   createNodePostgresDatabase,
   createPgliteDatabase,
+  type Database,
   type DatabaseHandle,
 } from '../../src/client.js';
 
@@ -47,5 +49,36 @@ async function createPostgresTestDatabase(): Promise<DatabaseHandle> {
 
   const url = new URL(baseUrl);
   url.pathname = `/${databaseName}`;
+  const handle = createNodePostgresDatabase(url.toString());
+  databaseUrls.set(handle, url);
+  return handle;
+}
+
+const databaseUrls = new WeakMap<DatabaseHandle, URL>();
+
+/** Runtime connection (`app_login`, see `global-setup.ts`) to `owner`'s database. Postgres only. */
+export function connectAsRuntime(owner: DatabaseHandle): DatabaseHandle {
+  const ownerUrl = databaseUrls.get(owner);
+  if (!ownerUrl) {
+    throw new Error('connectAsRuntime requires a handle from createTestDatabase on postgres');
+  }
+  const url = new URL(ownerUrl);
+  url.username = 'app_login';
+  url.password = 'app_login';
   return createNodePostgresDatabase(url.toString());
+}
+
+/**
+ * Runs a raw SQL query and returns its rows, typed as `T[]`.
+ *
+ * `Database.execute` is typed through drizzle's abstract `PgQueryResultHKT`,
+ * so its return type does not resolve to a concrete `{ rows: T[] }` shape
+ * at the `Database` alias level, even though both drivers return exactly
+ * that at runtime. This helper isolates the one intentional cast the
+ * isolation and RLS drift-check specs need to read diagnostic query
+ * results.
+ */
+export async function queryRows<T>(db: Database, query: SQLWrapper): Promise<T[]> {
+  const result = (await db.execute(query)) as { rows: T[] };
+  return result.rows;
 }

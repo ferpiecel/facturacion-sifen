@@ -23,6 +23,15 @@ export default async function setup(): Promise<(() => Promise<void>) | undefined
   const mappedPort = container.getMappedPort(5432).toString(10);
   process.env.DB_TEST_POSTGRES_URL = `postgres://sifen:sifen@${container.getHost()}:${mappedPort}/sifen`;
 
+  // Unsafe pre-existing app_login: proves the migration re-asserts attributes.
+  const { Pool } = await import('pg');
+  const admin = new Pool({ connectionString: process.env.DB_TEST_POSTGRES_URL });
+  try {
+    await admin.query(`CREATE ROLE app_login LOGIN BYPASSRLS PASSWORD 'app_login'`);
+  } finally {
+    await admin.end();
+  }
+
   return async () => {
     await container.stop();
   };

@@ -6,31 +6,32 @@ import {
   restoreNoSubprocessGuard,
 } from './no-subprocess-guard.ts';
 
+const GUARDED_METHODS = [
+  'spawn',
+  'spawnSync',
+  'exec',
+  'execSync',
+  'execFile',
+  'execFileSync',
+  'fork',
+] as const;
+
 describe('no-subprocess guard', () => {
   afterEach(() => {
     restoreNoSubprocessGuard();
   });
 
-  it('throws when a guarded child_process method is called (tripwire)', async () => {
+  it('traps every documented entry point xmlsign could use and counts each call (tripwire)', async () => {
     installNoSubprocessGuard();
-
-    const { spawn: guardedSpawn } = await import('node:child_process');
-
-    expect(() => guardedSpawn('true')).toThrow(/no-subprocess guard/);
-  });
-
-  it('traps every documented entry point xmlsign could use', async () => {
-    installNoSubprocessGuard();
+    expect(getGuardCallCount()).toBe(0);
 
     const cp = await import('node:child_process');
+    for (const method of GUARDED_METHODS) {
+      const call = cp[method] as (...args: unknown[]) => unknown;
+      expect(() => call('true')).toThrow(/no-subprocess guard/);
+    }
 
-    expect(() => cp.spawn('true')).toThrow(/no-subprocess guard/);
-    expect(() => cp.spawnSync('true')).toThrow(/no-subprocess guard/);
-    expect(() => cp.exec('true')).toThrow(/no-subprocess guard/);
-    expect(() => cp.execSync('true')).toThrow(/no-subprocess guard/);
-    expect(() => cp.execFile('true')).toThrow(/no-subprocess guard/);
-    expect(() => cp.execFileSync('true')).toThrow(/no-subprocess guard/);
-    expect(() => cp.fork('true')).toThrow(/no-subprocess guard/);
+    expect(getGuardCallCount()).toBe(GUARDED_METHODS.length);
   });
 
   it('restores the original implementation so real calls work again', () => {
@@ -38,16 +39,5 @@ describe('no-subprocess guard', () => {
     restoreNoSubprocessGuard();
 
     expect(() => spawn('true')).not.toThrow();
-  });
-
-  it('records zero calls when nothing guarded is invoked, and counts each trapped call', async () => {
-    installNoSubprocessGuard();
-    expect(getGuardCallCount()).toBe(0);
-
-    const cp = await import('node:child_process');
-    expect(() => cp.spawn('true')).toThrow();
-    expect(() => cp.exec('true')).toThrow();
-
-    expect(getGuardCallCount()).toBe(2);
   });
 });

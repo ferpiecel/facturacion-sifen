@@ -31,7 +31,8 @@ Todas tienen un valor por defecto, así que el entorno local funciona sin un arc
 | `POSTGRES_DB` | `sifen` | `docker-compose.yml` | Base de datos. |
 | `POSTGRES_PORT` | `5432` | `docker-compose.yml` | Puerto de PostgreSQL en el host. |
 | `REDIS_PORT` | `6379` | `docker-compose.yml` | Puerto de Redis en el host. |
-| `ENABLE_TEST_TENANT_HEADER` | `false` | `apps/api` | Habilita `TestTenantHeaderGuard` (header `x-tenant-id` sin autenticación). Solo para tests/desarrollo local; nunca en un despliegue real. |
+| `DATABASE_URL` | *(sin valor)* | `apps/api` | Cadena de conexión a PostgreSQL como `app_login`. Sin ella, la API arranca igual y `/health` funciona, pero toda ruta protegida por `ApiKeyGuard` responde `503`. |
+| `SIFEN_ENVIRONMENT` | `test` | `apps/api` | `test` o `production`. Determina si se aceptan API keys `sk_test_...` o `sk_live_...`. |
 
 ## Documentación
 

@@ -24,3 +24,9 @@ PGlite no puede abrir una sesión como rol no superusuario (su opción `username
 ## Alternativas descartadas
 
 Adoptar `@nestjs-cls/transactional` ahora, sin verificar su compatibilidad con Drizzle: se descarta porque introduciría una dependencia externa sin confirmar en el camino crítico de aislamiento de tenants (ADR-0005), el requisito de seguridad más sensible del proyecto.
+
+## Adenda (F1, HU-E1-02): límite conocido de `fn` y guardia de sesión privilegiada
+
+`withTenantTransaction` fija `app.current_tenant` antes de invocar `fn`, pero no impide que código dentro de `fn` vuelva a llamar `set_config('app.current_tenant', ...)` y cambie de tenant en medio de la misma transacción. Esto es una limitación conocida y aceptada: ningún código de dominio debe hacerlo, y ninguno lo hace hoy (`TenantTransactionRunner` y `TenantAwareProcessor` son los únicos llamadores, y ninguno reexpone `tx` a código externo a `fn`). No hay enforcement automático de este límite; queda documentado aquí como deuda de diseño.
+
+Por separado, `packages/db/src/session-guard.ts` agrega `assertNonPrivilegedSession(db)`: rechaza cualquier sesión superusuario, con `BYPASSRLS`, o dueña de una tabla `tenant_id` (ítem de deuda de la revisión de seguridad de PR2). Está probada con pglite (que siempre conecta como superusuario) y queda lista para invocarse justo después de que `apps/api` cree su `DatabaseHandle` real, a partir de HU-E1-04.

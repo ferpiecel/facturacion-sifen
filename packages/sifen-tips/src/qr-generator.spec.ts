@@ -16,7 +16,12 @@ describe('TipsQrGenerator', () => {
       ambiente: 'test',
     });
 
-    expect(generateQR).toHaveBeenCalledWith('<rDE><Signature/></rDE>', '0001', 'CSC-SECRET', 'test');
+    expect(generateQR).toHaveBeenCalledWith(
+      '<rDE><Signature/></rDE>',
+      '0001',
+      'CSC-SECRET',
+      'test',
+    );
     expect(result).toBe('<rDE><gCamFuFD/></rDE>');
   });
 
@@ -24,8 +29,17 @@ describe('TipsQrGenerator', () => {
     generateQR.mockResolvedValue('<rDE/>');
     const generator = new TipsQrGenerator();
 
-    await generator.addQr('<rDE><Signature/></rDE>', { idCsc: '0001', csc: 'CSC-SECRET', ambiente: 'prod' });
+    await generator.addQr('<rDE><Signature/></rDE>', {
+      idCsc: '0001',
+      csc: 'CSC-SECRET',
+      ambiente: 'prod',
+    });
 
-    expect(generateQR).toHaveBeenCalledWith('<rDE><Signature/></rDE>', '0001', 'CSC-SECRET', 'prod');
+    expect(generateQR).toHaveBeenCalledWith(
+      '<rDE><Signature/></rDE>',
+      '0001',
+      'CSC-SECRET',
+      'prod',
+    );
   });
 });

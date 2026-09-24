@@ -14,7 +14,11 @@ const rootConfig = require('../../../.dependency-cruiser.cjs') as {
 
 describe('sifen-tips TIPS-library confinement (package-local dependency-cruiser config)', () => {
   it('does not flag its own src for importing the TIPS libraries', async () => {
-    const result = await cruise(['src'], { validate: true, ruleSet: { forbidden: localConfig.forbidden } }, {});
+    const result = await cruise(
+      ['src'],
+      { validate: true, ruleSet: { forbidden: localConfig.forbidden } },
+      {},
+    );
     if (typeof result.output === 'string') throw new Error('Expected a structured cruise result.');
 
     const violations = result.output.summary.violations.map((violation) => violation.rule.name);

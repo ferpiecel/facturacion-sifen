@@ -3,7 +3,10 @@ import type { DeXmlBuilder, FacturaPocInput } from '@sifen/sifen-gateway';
 import { resolveCjsDefault } from './cjs-interop.ts';
 
 interface XmlgenApi {
-  generateXMLDE(params: Readonly<Record<string, unknown>>, data: Readonly<Record<string, unknown>>): Promise<string>;
+  generateXMLDE(
+    params: Readonly<Record<string, unknown>>,
+    data: Readonly<Record<string, unknown>>,
+  ): Promise<string>;
 }
 
 const xmlgenApi = resolveCjsDefault(xmlgen) as XmlgenApi;

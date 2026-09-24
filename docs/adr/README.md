@@ -17,3 +17,4 @@
 | [0013](0013-drizzle-orm-y-bullmq.md) | Drizzle ORM para persistencia y BullMQ para procesamiento asíncrono | Aceptado |
 | [0014](0014-jerarquia-partner-tenant.md) | Jerarquía partner → tenant para el modelo embebido | Aceptado |
 | [0015](0015-tips-libs-emision.md) | xmlgen, qrgen y xmlsign (modo Node) detrás de puertos de emisión | Aceptado |
+| [0016](0016-tenant-transaction-runner-sin-plugin-cls.md) | `TenantTransactionRunner` singleton en vez del plugin transaccional de nestjs-cls | Aceptado |

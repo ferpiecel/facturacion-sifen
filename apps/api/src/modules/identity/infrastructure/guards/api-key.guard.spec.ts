@@ -114,6 +114,40 @@ describe('ApiKeyGuard', () => {
     ).rejects.toMatchObject({ status: HttpStatus.UNAUTHORIZED });
   });
 
+  it('accepts a lowercase "bearer" scheme (RFC 7235 is case-insensitive)', async () => {
+    const { useCase } = makeUseCase(AUTHENTICATED);
+    const guard = new ApiKeyGuard(new Reflector(), useCase, newCls(), 'production');
+
+    await expect(
+      guard.canActivate(contextFor('protectedRoute', { authorization: 'bearer sk_live_x' })),
+    ).resolves.toBe(true);
+  });
+
+  it('accepts a mixed-case "BeArEr" scheme', async () => {
+    const { useCase } = makeUseCase(AUTHENTICATED);
+    const guard = new ApiKeyGuard(new Reflector(), useCase, newCls(), 'production');
+
+    await expect(
+      guard.canActivate(contextFor('protectedRoute', { authorization: 'BeArEr sk_live_x' })),
+    ).resolves.toBe(true);
+  });
+
+  it.each([
+    'Bearer  sk_live_x', // two spaces
+    'Bearer\tsk_live_x', // tab instead of space
+    'Bearer sk_live_x ', // trailing space
+    ' Bearer sk_live_x', // leading space
+    'Bearer sk_live_x extra', // extra token
+    'Bearer',
+  ])('rejects a whitespace-malformed header %j with the same 401', async (header) => {
+    const { useCase } = makeUseCase(undefined);
+    const guard = new ApiKeyGuard(new Reflector(), useCase, newCls(), 'production');
+
+    await expect(
+      guard.canActivate(contextFor('protectedRoute', { authorization: header })),
+    ).rejects.toMatchObject({ status: HttpStatus.UNAUTHORIZED });
+  });
+
   it('rejects when the use case returns null (unknown/revoked/wrong secret) with 401', async () => {
     const { useCase } = makeUseCase(null);
     const guard = new ApiKeyGuard(new Reflector(), useCase, newCls(), 'production');

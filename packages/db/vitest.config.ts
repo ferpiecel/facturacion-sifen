@@ -5,6 +5,10 @@ export default defineConfig({
     root: import.meta.dirname,
     include: ['src/**/*.spec.ts', 'test/**/*.spec.ts'],
     globalSetup: ['test/support/global-setup.ts'],
+    // Each spec boots PGlite (or Postgres) and applies every migration; CI
+    // runners need more than the 5 s default as migrations accumulate.
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     coverage: {
       provider: 'v8',
       all: true,

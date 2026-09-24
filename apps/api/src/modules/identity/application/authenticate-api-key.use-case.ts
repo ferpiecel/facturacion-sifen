@@ -14,8 +14,12 @@ export interface AuthenticatedApiKey {
  * miss still spends roughly the same time as a lookup hit with a wrong
  * secret. Without this, response latency alone would let a caller tell
  * "unknown key" apart from "wrong secret" (timing oracle).
+ *
+ * Encoded with exactly {@link ARGON2_PARAMS} (`m=19456,t=2,p=1` below) —
+ * a spec asserts that equality, so this constant can never drift silently
+ * from the real cost the adapter hashes/verifies with.
  */
-const DUMMY_HASH =
+export const DUMMY_HASH =
   '$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
 /**

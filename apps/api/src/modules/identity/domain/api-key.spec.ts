@@ -39,6 +39,15 @@ describe('parseApiKey', () => {
     });
   });
 
+  it('parses a secret at the 128-char upper bound', () => {
+    const maxSecret = 'e'.repeat(128);
+    expect(parseApiKey(`sk_live_${KEY_ID}_${maxSecret}`)).toEqual({
+      environment: 'live',
+      keyId: KEY_ID,
+      secret: maxSecret,
+    });
+  });
+
   it.each([
     ['missing prefix', `${KEY_ID}_${SECRET}`],
     ['unknown environment', `sk_staging_${KEY_ID}_${SECRET}`],
@@ -46,6 +55,7 @@ describe('parseApiKey', () => {
     ['key id too long (65 chars)', `sk_live_${'a'.repeat(65)}_${SECRET}`],
     ['key id with invalid chars', `sk_live_${'-'.repeat(24)}_${SECRET}`],
     ['secret too short (31 chars)', `sk_live_${KEY_ID}_${'b'.repeat(31)}`],
+    ['secret too long (129 chars)', `sk_live_${KEY_ID}_${'b'.repeat(129)}`],
     ['secret with invalid chars', `sk_live_${KEY_ID}_${'-'.repeat(32)}`],
     ['missing secret segment', `sk_live_${KEY_ID}`],
     ['empty string', ''],

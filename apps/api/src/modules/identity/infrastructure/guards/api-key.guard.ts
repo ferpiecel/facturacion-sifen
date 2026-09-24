@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import type { CanActivate, ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ClsService } from 'nestjs-cls';
@@ -15,6 +15,7 @@ import { API_KEY_SCOPES_CLS_KEY, type IdentityClsStore } from '../identity-cls-s
 const AUTHORIZATION_HEADER = 'authorization';
 const BEARER_PREFIX = 'Bearer ';
 const GENERIC_UNAUTHORIZED = 'Invalid or missing API key';
+const GENERIC_UNAVAILABLE = 'API key authentication is temporarily unavailable';
 
 interface RequestWithHeaders {
   headers: Record<string, string | string[] | undefined>;
@@ -32,6 +33,8 @@ interface RequestWithHeaders {
  */
 @Injectable()
 export class ApiKeyGuard implements CanActivate {
+  private readonly logger = new Logger(ApiKeyGuard.name);
+
   constructor(
     private readonly reflector: Reflector,
     private readonly useCase: AuthenticateApiKeyUseCase | null,
@@ -64,7 +67,20 @@ export class ApiKeyGuard implements CanActivate {
     }
 
     const rawKey = token.slice(BEARER_PREFIX.length);
-    const authenticated = await this.useCase.execute(rawKey);
+    let authenticated;
+    try {
+      authenticated = await this.useCase.execute(rawKey);
+    } catch (error) {
+      // A DB outage or a corrupt stored hash must never surface as a 500
+      // with a leaking stack/message, and must never be treated as "no
+      // match" either (that would be a silent-accept-adjacent 401 for a
+      // condition that has nothing to do with the caller's credentials).
+      this.logger.error(
+        'Unexpected error authenticating API key',
+        error instanceof Error ? error.stack : error,
+      );
+      throw new HttpException(GENERIC_UNAVAILABLE, HttpStatus.SERVICE_UNAVAILABLE);
+    }
 
     if (!authenticated) {
       throw new HttpException(GENERIC_UNAUTHORIZED, HttpStatus.UNAUTHORIZED);

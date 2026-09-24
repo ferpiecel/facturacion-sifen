@@ -1,8 +1,9 @@
 import { index, pgTable, timestamp, uuid, varchar } from 'drizzle-orm/pg-core';
 
 /**
- * Tenants master table. Not itself RLS-scoped (it has no `tenant_id`
- * column); it is the source of truth every tenant-scoped table references.
+ * Tenants master table: the source of truth every tenant-scoped table
+ * references. It has no `tenant_id` column, but RLS still limits `app_user`
+ * to its own row (`id = app.current_tenant`).
  */
 export const tenants = pgTable('tenants', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -31,8 +32,8 @@ export const tenantProbe = pgTable(
 
 /**
  * Every table that carries a `tenant_id` column and MUST be covered by
- * `FORCE ROW LEVEL SECURITY` plus a tenant-isolation policy. The Phase 2
- * `rls-coverage.spec.ts` drift check asserts this list matches
- * `pg_class.relforcerowsecurity` and `pg_policies` in the database.
+ * `FORCE ROW LEVEL SECURITY` plus a tenant-isolation policy. The
+ * `rls-coverage.spec.ts` drift check discovers these tables from the
+ * catalog and asserts this list matches it.
  */
 export const TENANT_TABLES = ['tenant_probe'] as const;

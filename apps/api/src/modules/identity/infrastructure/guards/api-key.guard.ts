@@ -13,9 +13,14 @@ import { REQUIRED_SCOPES_KEY } from '../decorators/require-scopes.decorator.js';
 import { API_KEY_SCOPES_CLS_KEY, type IdentityClsStore } from '../identity-cls-store.js';
 
 const AUTHORIZATION_HEADER = 'authorization';
-const BEARER_PREFIX = 'Bearer ';
 const GENERIC_UNAUTHORIZED = 'Invalid or missing API key';
 const GENERIC_UNAVAILABLE = 'API key authentication is temporarily unavailable';
+
+// RFC 7235: `auth-scheme` is case-insensitive, and credentials take exactly
+// one separating space before a single token68 (no internal whitespace).
+// `\S+` (rather than a looser `.+`) rejects extra whitespace or a
+// multi-token value instead of silently accepting it as part of the key.
+const BEARER_PATTERN = /^bearer (\S+)$/i;
 
 interface RequestWithHeaders {
   headers: Record<string, string | string[] | undefined>;
@@ -60,13 +65,13 @@ export class ApiKeyGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<RequestWithHeaders>();
     const header = request.headers[AUTHORIZATION_HEADER];
-    const token = typeof header === 'string' ? header : undefined;
+    const match = typeof header === 'string' ? BEARER_PATTERN.exec(header) : null;
 
-    if (!token || !token.startsWith(BEARER_PREFIX)) {
+    if (!match) {
       throw new HttpException(GENERIC_UNAUTHORIZED, HttpStatus.UNAUTHORIZED);
     }
 
-    const rawKey = token.slice(BEARER_PREFIX.length);
+    const rawKey = match[1];
     let authenticated;
     try {
       authenticated = await this.useCase.execute(rawKey);

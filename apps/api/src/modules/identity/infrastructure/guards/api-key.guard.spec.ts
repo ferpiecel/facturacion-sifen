@@ -116,19 +116,25 @@ describe('ApiKeyGuard', () => {
 
   it('accepts a lowercase "bearer" scheme (RFC 7235 is case-insensitive)', async () => {
     const { useCase } = makeUseCase(AUTHENTICATED);
-    const guard = new ApiKeyGuard(new Reflector(), useCase, newCls(), 'production');
+    const cls = newCls();
+    const guard = new ApiKeyGuard(new Reflector(), useCase, cls, 'production');
 
     await expect(
-      guard.canActivate(contextFor('protectedRoute', { authorization: 'bearer sk_live_x' })),
+      cls.run(() =>
+        guard.canActivate(contextFor('protectedRoute', { authorization: 'bearer sk_live_x' })),
+      ),
     ).resolves.toBe(true);
   });
 
   it('accepts a mixed-case "BeArEr" scheme', async () => {
     const { useCase } = makeUseCase(AUTHENTICATED);
-    const guard = new ApiKeyGuard(new Reflector(), useCase, newCls(), 'production');
+    const cls = newCls();
+    const guard = new ApiKeyGuard(new Reflector(), useCase, cls, 'production');
 
     await expect(
-      guard.canActivate(contextFor('protectedRoute', { authorization: 'BeArEr sk_live_x' })),
+      cls.run(() =>
+        guard.canActivate(contextFor('protectedRoute', { authorization: 'BeArEr sk_live_x' })),
+      ),
     ).resolves.toBe(true);
   });
 

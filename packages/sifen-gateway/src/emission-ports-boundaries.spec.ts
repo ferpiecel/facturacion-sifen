@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const FORBIDDEN_IMPORT = /from\s+['"](@nestjs\/|fastify|drizzle-orm|bullmq|facturacionelectronicapy-)/;
+const FORBIDDEN_IMPORT =
+  /from\s+['"](@nestjs\/|fastify|drizzle-orm|bullmq|facturacionelectronicapy-)/;
 
 describe('emission-ports.ts import boundaries', () => {
   it('imports no TIPS library, NestJS, Fastify, Drizzle, or BullMQ', () => {

@@ -26,20 +26,20 @@ Chain strategy: stacked-to-main
 
 ## Phase 1: Ports (`@sifen/sifen-gateway`) — PR1
 
-- [ ] 1.1 Read `packages/sifen-gateway/node_modules/@types/node/` conventions and existing `packages/sifen-gateway/src/port.ts`/`types.ts` for style.
-- [ ] 1.2 RED: write `packages/sifen-gateway/src/emission-ports.test.ts` with `expectTypeOf` asserting `DeXmlBuilder`, `XmlSigner`, `QrGenerator`, `LoadedCertificate`, `QrConfig`, `Ambiente`, `FacturaPocInput` shapes per design Interfaces/Contracts. Run `pnpm --filter @sifen/sifen-gateway test`, capture the failing line (module not found), commit alone `test(sifen-gateway): add emission ports type contract (red)`.
-- [ ] 1.3 GREEN: create `packages/sifen-gateway/src/emission-ports.ts` with `Ambiente`, `LoadedCertificate`, `QrConfig`, `FacturaPocInput`, `DeXmlBuilder`, `XmlSigner`, `QrGenerator` (`addQr(signedXml, QrConfig): Promise<string>`, per design decision replacing plan §5.1 `buildUrl`). Run tests green. Commit `feat(sifen-gateway): add DeXmlBuilder, XmlSigner, QrGenerator ports`.
-- [ ] 1.4 Modify `packages/sifen-gateway/src/index.ts`: add type-only re-exports of the new ports/types.
-- [ ] 1.5 RED: write a depcruise/import-assertion test (extend `packages/sifen-gateway/test/boundaries.spec.ts` or new spec) asserting `emission-ports.ts` imports no TIPS library, `@nestjs/*`, `fastify`, `drizzle-orm`, `bullmq`. Run, capture failing state if any, commit `test(sifen-gateway): assert emission ports import boundaries (red)` only if it fails first.
-- [ ] 1.6 GREEN: confirm boundary test passes with no changes needed (ports are already framework-free) or adjust imports. Commit `feat(sifen-gateway): enforce emission ports import boundary` if any fix was required.
-- [ ] 1.7 Modify `.dependency-cruiser.cjs` (root): add rule that only `packages/sifen-tips` may import `facturacionelectronicapy-*`.
+- [x] 1.1 Read `packages/sifen-gateway/node_modules/@types/node/` conventions and existing `packages/sifen-gateway/src/port.ts`/`types.ts` for style.
+- [x] 1.2 RED: write `packages/sifen-gateway/src/emission-ports.spec.ts` (project convention uses `*.spec.ts`, not `*.test.ts` — vitest.config.ts only globs `*.spec.ts`) with `expectTypeOf` asserting `DeXmlBuilder`, `XmlSigner`, `QrGenerator`, `LoadedCertificate`, `QrConfig`, `Ambiente`, `FacturaPocInput` shapes per design Interfaces/Contracts. `vitest run` type-erases type-only imports (trivially green); true RED evidence is `pnpm --filter @sifen/sifen-gateway typecheck` → `TS2307: Cannot find module './emission-ports.ts'` at `emission-ports.spec.ts(10,8)`. Committed alone `test(sifen-gateway): add emission ports type contract (red)`.
+- [x] 1.3 GREEN: create `packages/sifen-gateway/src/emission-ports.ts` with `Ambiente`, `LoadedCertificate`, `QrConfig`, `FacturaPocInput`, `DeXmlBuilder`, `XmlSigner`, `QrGenerator` (`addQr(signedXml, QrConfig): Promise<string>`, per design decision replacing plan §5.1 `buildUrl`). Tests and typecheck green. Committed `feat(sifen-gateway): add DeXmlBuilder, XmlSigner, QrGenerator ports`.
+- [x] 1.4 Modify `packages/sifen-gateway/src/index.ts`: add type-only re-exports of the new ports/types.
+- [x] 1.5 RED: write a depcruise/import-assertion test (`packages/sifen-gateway/src/emission-ports-boundaries.spec.ts`, a static regex import assertion — the shared `test/boundaries.spec.ts` cruises a synthetic fixture and isn't scoped to a single real file) asserting `emission-ports.ts` imports no TIPS library, `@nestjs/*`, `fastify`, `drizzle-orm`, `bullmq`. Passed immediately (ports already framework-free) — no failing state to capture, so no separate "(red)" commit per the task's conditional.
+- [x] 1.6 GREEN: confirmed boundary test passes with no changes needed. Committed together with 1.4/1.5 as `feat(sifen-gateway): enforce emission ports import boundary` (no fix was required, so no separate labeled commit).
+- [x] 1.7 Modify `.dependency-cruiser.cjs` (root): add rule that only `packages/sifen-tips` may import `facturacionelectronicapy-*`. Committed `feat(architecture): confine TIPS library imports to sifen-tips`.
 
 ## Phase 2: Documentation (ADR + plan) — PR1
 
-- [ ] 2.1 Create `docs/adr/0015-tips-libs-emision.md` (Spanish, MADR): context (ADR-0002 left xmlsign/qrgen pending), decision (xmlgen/qrgen/xmlsign Node-mode behind ports, pinned versions), open questions D7 (`dSisFact`) and D8 (two transforms) pending sifen-test/Prevalidador confirmation, own-signer fallback behind `XmlSigner`, consequence: dev certs generated at test time, never committed.
-- [ ] 2.2 Modify `docs/adr/README.md`: add row `0015` linking the new ADR, status `Aceptado`.
-- [ ] 2.3 Modify `docs/adr/0002-node-typescript-con-librerias-tips.md`: mark "Enmendado por 0015" per ADR-0012 precedent.
-- [ ] 2.4 Modify `docs/plan/plan-desarrollo-v1.1.md` §5.1: update `QrGenerator` signature from `buildUrl(xmlFirmado, csc, ambiente): string` to `addQr(signedXml: string, config: QrConfig): Promise<string>`; note it returns XML with `gCamFuFD` required by `rDE` before XSD validation.
+- [x] 2.1 Create `docs/adr/0015-tips-libs-emision.md` (Spanish, MADR): context (ADR-0002 left xmlsign/qrgen pending), decision (xmlgen/qrgen/xmlsign Node-mode behind ports, pinned versions), open questions D7 (`dSisFact`) and D8 (two transforms) pending sifen-test/Prevalidador confirmation, own-signer fallback behind `XmlSigner`, consequence: dev certs generated at test time, never committed.
+- [x] 2.2 Modify `docs/adr/README.md`: add row `0015` linking the new ADR, status `Aceptado`.
+- [x] 2.3 Modify `docs/adr/0002-node-typescript-con-librerias-tips.md`: mark "Aceptado (enmendado por ADR-0015)" in the Estado line only (per ADR-0001, the decision/body text is never rewritten); mirrored the status note in `docs/adr/README.md`.
+- [x] 2.4 Modify `docs/plan/plan-desarrollo-v1.1.md` §5.1: updated `QrGenerator` signature from `buildUrl(xmlFirmado, csc, ambiente): string` to `addQr(signedXml: string, config: QrConfig): Promise<string>`; added a note that it returns XML with `gCamFuFD` required by `rDE` before XSD validation.
 
 ## Phase 3: `@sifen/sifen-tips` package scaffold — PR2
 

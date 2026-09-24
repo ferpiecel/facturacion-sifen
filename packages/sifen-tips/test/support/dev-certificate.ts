@@ -22,9 +22,7 @@ export function generateDevCertificate(): LoadedCertificate {
   cert.serialNumber = '01';
   cert.validity.notBefore = new Date();
   cert.validity.notAfter = new Date();
-  cert.validity.notAfter.setFullYear(
-    cert.validity.notBefore.getFullYear() + CERT_VALIDITY_YEARS,
-  );
+  cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + CERT_VALIDITY_YEARS);
   cert.setSubject(DEV_CERT_SUBJECT);
   cert.setIssuer(DEV_CERT_SUBJECT);
   cert.sign(keys.privateKey, forge.md.sha256.create());

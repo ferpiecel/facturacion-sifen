@@ -2,7 +2,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { FakeSifenGateway, type QrConfig } from '@sifen/sifen-gateway';
 import { validateXml } from '@sifen/sifen-xsd';
 import { generateDevCertificate } from './support/dev-certificate.ts';
-import { installNoSubprocessGuard, restoreNoSubprocessGuard, getGuardCallCount } from './support/no-subprocess-guard.ts';
+import {
+  installNoSubprocessGuard,
+  restoreNoSubprocessGuard,
+  getGuardCallCount,
+} from './support/no-subprocess-guard.ts';
 import { pocFacturaInput } from './fixtures/poc-factura-input.ts';
 import type { TipsDeXmlBuilder, TipsQrGenerator, TipsXmlSigner } from '../src/index.ts';
 

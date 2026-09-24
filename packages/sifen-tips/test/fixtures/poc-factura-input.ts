@@ -41,7 +41,8 @@ export const pocFacturaInput: FacturaPocInput = {
     codigoSeguridadAleatorio: '298398',
     punto: '001',
     numero: '0000001',
-    descripcion: 'DOCUMENTO ELECTRÓNICO SIN VALOR COMERCIAL NI FISCAL - GENERADO EN AMBIENTE DE PRUEBA',
+    descripcion:
+      'DOCUMENTO ELECTRÓNICO SIN VALOR COMERCIAL NI FISCAL - GENERADO EN AMBIENTE DE PRUEBA',
     observacion: '',
     fecha: new Date().toISOString().slice(0, 19),
     tipoEmision: 1,
@@ -91,7 +92,8 @@ export const pocFacturaInput: FacturaPocInput = {
     items: [
       {
         codigo: 'A-001',
-        descripcion: 'DOCUMENTO ELECTRÓNICO SIN VALOR COMERCIAL NI FISCAL - GENERADO EN AMBIENTE DE PRUEBA',
+        descripcion:
+          'DOCUMENTO ELECTRÓNICO SIN VALOR COMERCIAL NI FISCAL - GENERADO EN AMBIENTE DE PRUEBA',
         unidadMedida: 77,
         cantidad: 1,
         precioUnitario: 10000,

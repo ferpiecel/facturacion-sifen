@@ -54,17 +54,17 @@ class ClassScopedProbeController {
   }
 }
 
+type ProbeConstructor = new () => object;
+
 function contextFor(
   handlerName: string,
   headers: Record<string, string>,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  controllerClass: new () => any = ProbeController as unknown as new () => any,
+  controllerClass: ProbeConstructor = ProbeController,
 ): ExecutionContext {
-  const instance = new controllerClass();
+  const instance = new controllerClass() as Record<string, () => unknown>;
   // Reflector reads metadata off the function object itself (SetMetadata),
   // and never invokes it through `this` here, so the bare reference is
   // safe despite the lint rule assuming a call site.
-  // eslint-disable-next-line @typescript-eslint/unbound-method
   const handler = instance[handlerName];
   return {
     switchToHttp: () => ({ getRequest: () => ({ headers }) }),
@@ -259,7 +259,9 @@ describe('ApiKeyGuard', () => {
 
   it('returns 503 with a generic body when the use case throws unexpectedly (DB down, corrupt hash)', async () => {
     const { useCase, execute } = makeUseCase(undefined);
-    execute.mockRejectedValue(new Error('connection terminated unexpectedly: password for user leaked'));
+    execute.mockRejectedValue(
+      new Error('connection terminated unexpectedly: password for user leaked'),
+    );
     const guard = new ApiKeyGuard(new Reflector(), useCase, newCls(), 'production');
 
     const error = await guard

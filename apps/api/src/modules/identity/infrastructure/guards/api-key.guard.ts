@@ -100,11 +100,13 @@ export class ApiKeyGuard implements CanActivate {
     this.cls.set(TENANT_ID_CLS_KEY, authenticated.tenantId);
     this.cls.set(API_KEY_SCOPES_CLS_KEY, authenticated.scopes);
 
-    const requiredScopes =
-      this.reflector.getAllAndOverride<string[] | undefined>(REQUIRED_SCOPES_KEY, [
-        context.getHandler(),
-        context.getClass(),
-      ]) ?? [];
+    // getAllAndMerge (not getAllAndOverride): a class-level @RequireScopes()
+    // is a baseline every handler in it must still satisfy, not a default
+    // that a handler's own @RequireScopes() silently replaces.
+    const requiredScopes = this.reflector.getAllAndMerge<string[]>(REQUIRED_SCOPES_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
     if (requiredScopes.length > 0) {
       const hasAllScopes = requiredScopes.every((scope) => authenticated.scopes.includes(scope));
       if (!hasAllScopes) {

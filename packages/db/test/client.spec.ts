@@ -30,6 +30,16 @@ describe('packages/db scaffold', () => {
     expect(rows[0]?.label).toBe('probe-1');
   });
 
+  it('rejects a tenant-scoped row whose tenant does not exist', async () => {
+    handle = await createTestDatabase();
+
+    await expect(
+      handle.db
+        .insert(tenantProbe)
+        .values({ tenantId: '00000000-0000-4000-8000-000000000000', label: 'orphan' }),
+    ).rejects.toThrow();
+  });
+
   it('creates a node-postgres handle lazily, without connecting', () => {
     // `pg.Pool` only opens a connection on first query/migrate, so building
     // the handle and closing it again never requires a reachable Postgres

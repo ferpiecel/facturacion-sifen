@@ -11,16 +11,16 @@
       "outputs": ["dist/**"]
     },
     "lint": {
-      "dependsOn": ["transit"]
+      "dependsOn": ["transit", "^build"]
     },
     "typecheck": {
-      "dependsOn": ["transit"]
+      "dependsOn": ["transit", "^build"]
     },
     "depcruise": {
-      "dependsOn": ["transit"]
+      "dependsOn": ["transit", "^build"]
     },
     "test": {
-      "dependsOn": ["transit"]
+      "dependsOn": ["transit", "^build"]
     },
     "verify-vendor": {
       "inputs": ["vendor/**", "scripts/**"]

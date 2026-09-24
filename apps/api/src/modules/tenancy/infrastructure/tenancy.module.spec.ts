@@ -20,8 +20,21 @@ class ProbeController {
   }
 }
 
-@Module({ controllers: [ProbeController] })
-class ProbeModule {}
+function required<T>(value: T | undefined, message: string): T {
+  if (value === undefined) {
+    throw new Error(message);
+  }
+  return value;
+}
+
+function createProbeModule(database: DatabaseHandle) {
+  @Module({
+    imports: [TenancyModule.register({ database })],
+    controllers: [ProbeController],
+  })
+  class ProbeModule {}
+  return ProbeModule;
+}
 
 /**
  * spec: db-access, "API guard requires tenant header" — proves the guard
@@ -43,8 +56,7 @@ describe('TenancyModule integration', () => {
     const moduleRef = await Test.createTestingModule({
       imports: [
         ClsModule.forRoot({ global: true, middleware: { mount: true } }),
-        TenancyModule.register({ database }),
-        ProbeModule,
+        createProbeModule(database),
       ],
     }).compile();
 
@@ -57,13 +69,14 @@ describe('TenancyModule integration', () => {
   it('propagates the tenant header via CLS into withTenantTransaction', async () => {
     handle = createPgliteDatabase();
     await handle.migrate();
-    const [tenant] = await handle.db.insert(tenants).values({ name: 'Acme SA' }).returning();
+    const inserted = await handle.db.insert(tenants).values({ name: 'Acme SA' }).returning();
+    const tenant = required(inserted[0], 'tenant was not inserted');
     app = await bootstrap(handle);
 
     const response = await app.inject({
       method: 'GET',
       url: '/probe',
-      headers: { 'x-tenant-id': tenant!.id },
+      headers: { 'x-tenant-id': tenant.id },
     });
 
     expect(response.statusCode).toBe(200);

@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { apiKeys, partners, tenants, type Database } from '@sifen/db';
 import type { ApiKeyEnvironment } from '../modules/identity/domain/api-key.js';
 import { Argon2SecretHasherAdapter } from '../modules/identity/infrastructure/adapters/argon2-secret-hasher.adapter.js';
@@ -83,7 +83,19 @@ export async function issueApiKey(
   };
 }
 
-/** Operator CLI handler (backlog HU-E1-05): revokes by the public `keyId` embedded in the issued token. */
+/**
+ * Operator CLI handler (backlog HU-E1-05): revokes by the public `keyId`
+ * embedded in the issued token. Throws when no active key matched, so a
+ * mistyped keyId never reads as a successful revocation, and never
+ * overwrites the original `revoked_at` of an already revoked key.
+ */
 export async function revokeApiKey(db: Database, keyId: string): Promise<void> {
-  await db.update(apiKeys).set({ revokedAt: new Date() }).where(eq(apiKeys.keyId, keyId));
+  const rows = await db
+    .update(apiKeys)
+    .set({ revokedAt: new Date() })
+    .where(and(eq(apiKeys.keyId, keyId), isNull(apiKeys.revokedAt)))
+    .returning({ id: apiKeys.id });
+  if (rows.length === 0) {
+    throw new Error(`no active api key with keyId ${keyId}`);
+  }
 }

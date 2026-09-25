@@ -1,4 +1,5 @@
-import { createPgliteDatabase, type DatabaseHandle } from '@sifen/db';
+import { apiKeys, createPgliteDatabase, type DatabaseHandle } from '@sifen/db';
+import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createPartner, createTenant, issueApiKey, revokeApiKey } from './commands.js';
 
@@ -59,6 +60,32 @@ describe('operator CLI command handlers (HU-E1-05)', () => {
     const { id: tenantId } = await createTenant(handle.db, 'Revoke Tenant');
     const issued = await issueApiKey(handle.db, { tenantId, environment: 'test', scopes: [] });
 
-    await expect(revokeApiKey(handle.db, issued.keyId)).resolves.toBeUndefined();
+    await revokeApiKey(handle.db, issued.keyId);
+
+    const [row] = await handle.db.select().from(apiKeys).where(eq(apiKeys.keyId, issued.keyId));
+    expect(row?.revokedAt).toBeInstanceOf(Date);
+  });
+
+  it('revokeApiKey rejects an unknown keyId instead of reporting success', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+
+    await expect(revokeApiKey(handle.db, 'UnknownKeyId000000000000')).rejects.toThrow(
+      'no active api key with keyId UnknownKeyId000000000000',
+    );
+  });
+
+  it('revokeApiKey rejects an already revoked key and keeps the first revoked_at', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Twice Tenant');
+    const issued = await issueApiKey(handle.db, { tenantId, environment: 'test', scopes: [] });
+    await revokeApiKey(handle.db, issued.keyId);
+    const [first] = await handle.db.select().from(apiKeys).where(eq(apiKeys.keyId, issued.keyId));
+
+    await expect(revokeApiKey(handle.db, issued.keyId)).rejects.toThrow('no active api key');
+
+    const [after] = await handle.db.select().from(apiKeys).where(eq(apiKeys.keyId, issued.keyId));
+    expect(after?.revokedAt).toEqual(first?.revokedAt);
   });
 });

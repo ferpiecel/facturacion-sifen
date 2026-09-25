@@ -12,15 +12,35 @@ import {
 } from 'drizzle-orm/pg-core';
 
 /**
- * Tenants master table: the source of truth every tenant-scoped table
- * references. It has no `tenant_id` column, but RLS still limits `app_user`
- * to its own row (`id = app.current_tenant`).
+ * Partners master table (HU-E1-05 / ADR-0014): a partner owns N tenants
+ * (`tenants.partner_id`). Partner RLS/visibility is HU-E1-06, not this
+ * story — deliberately no `GRANT` to `app_user` (or `platform_admin`) here,
+ * so the table stays unreachable from request/job code exactly like before
+ * this migration; only the operator's own connection (never `app_login`)
+ * reads or writes it for now.
  */
-export const tenants = pgTable('tenants', {
+export const partners = pgTable('partners', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: varchar('name', { length: 255 }).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+/**
+ * Tenants master table: the source of truth every tenant-scoped table
+ * references. It has no `tenant_id` column, but RLS still limits `app_user`
+ * to its own row (`id = app.current_tenant`).
+ */
+export const tenants = pgTable(
+  'tenants',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: varchar('name', { length: 255 }).notNull(),
+    // Nullable: direct SaaS tenants have no partner (ADR-0014).
+    partnerId: uuid('partner_id').references(() => partners.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('tenants_partner_id_idx').on(table.partnerId)],
+);
 
 /**
  * Minimal tenant-scoped table used only by the isolation and RLS-drift test

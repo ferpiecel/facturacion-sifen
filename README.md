@@ -52,6 +52,7 @@ pnpm --filter @sifen/api ops tenant:create --name "Tenant Directo"
 pnpm --filter @sifen/api ops tenant:create --name "Tenant De Partner" --partner <partner-id>
 pnpm --filter @sifen/api ops apikey:create --tenant <tenant-id> --env test --scopes documents:write,documents:read --label "CI"
 pnpm --filter @sifen/api ops apikey:revoke --key-id <key-id>
+pnpm --filter @sifen/api ops fiscal:set --tenant <tenant-id> --ruc 4490207-7 --legal-name "Acme SA" --taxpayer-type juridica --activity 62010:"Programación informática"
 ```
 
 `apikey:create` imprime la API key completa (`sk_test_...` / `sk_live_...`) **una sola vez**: no queda guardada en ningún lado más que como hash, así que hay que copiarla en ese momento. El CLI nunca vuelve a loguearla, ni siquiera en `apikey:revoke`.

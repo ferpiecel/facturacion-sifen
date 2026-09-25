@@ -75,6 +75,97 @@ describe('parseOpsArgs (HU-E1-05)', () => {
   });
 });
 
+describe('parseOpsArgs fiscal:set (HU-E2-01)', () => {
+  type FlagMap = Record<string, string | string[] | undefined>;
+  const baseFlags: FlagMap = {
+    tenant: 't-1',
+    ruc: '4490207-7',
+    'legal-name': 'Acme SA',
+    'taxpayer-type': 'juridica',
+    activity: '62010:Programación informática',
+  };
+
+  function argsFor(overrides: FlagMap): string[] {
+    const flags: FlagMap = { ...baseFlags, ...overrides };
+    return [
+      'fiscal:set',
+      ...Object.entries(flags).flatMap(([flag, value]) =>
+        value === undefined
+          ? []
+          : (Array.isArray(value) ? value : [value]).flatMap((v) => [`--${flag}`, v]),
+      ),
+    ];
+  }
+
+  it('parses a full fiscal:set command', () => {
+    const command = parseOpsArgs(
+      argsFor({
+        'trade-name': 'Acme',
+        regime: '1',
+        activity: ['62010:Programación informática', '62020:Consultoría informática'],
+      }),
+    );
+
+    expect(command).toEqual({
+      kind: 'fiscal:set',
+      tenantId: 't-1',
+      profile: {
+        ruc: { base: '4490207', dv: 7 },
+        legalName: 'Acme SA',
+        tradeName: 'Acme',
+        taxpayerType: 'persona_juridica',
+        regimeCode: '1',
+        economicActivities: [
+          { code: '62010', description: 'Programación informática' },
+          { code: '62020', description: 'Consultoría informática' },
+        ],
+      },
+    });
+  });
+
+  it('parses fisica taxpayer type without optional flags', () => {
+    const command = parseOpsArgs(argsFor({ 'taxpayer-type': 'fisica' }));
+
+    expect(command.kind).toBe('fiscal:set');
+    if (command.kind === 'fiscal:set') {
+      expect(command.profile.taxpayerType).toBe('persona_fisica');
+      expect(command.profile.tradeName).toBeNull();
+      expect(command.profile.regimeCode).toBeNull();
+    }
+  });
+
+  it.each([
+    ['tenant', undefined],
+    ['ruc', undefined],
+    ['legal-name', undefined],
+    ['taxpayer-type', undefined],
+    ['taxpayer-type', 'empresa'],
+  ])('rejects flag %s = %s', (flag, value) => {
+    expect(() => parseOpsArgs(argsFor({ [flag]: value }))).toThrow(OpsArgError);
+  });
+
+  it('rejects an --activity without the "<code>:<description>" separator', () => {
+    expect(() => parseOpsArgs(argsFor({ activity: '62010 sin separador' }))).toThrow(OpsArgError);
+  });
+
+  it('rejects zero activities', () => {
+    expect(() => parseOpsArgs(argsFor({ activity: undefined }))).toThrow();
+  });
+
+  it('rejects more than 9 activities', () => {
+    const tenActivities = Array.from(
+      { length: 10 },
+      (_, i) => `act${String(i)}:Descripción ${String(i)}`,
+    );
+
+    expect(() => parseOpsArgs(argsFor({ activity: tenActivities }))).toThrow();
+  });
+
+  it('rejects an invalid RUC check digit', () => {
+    expect(() => parseOpsArgs(argsFor({ ruc: '4490207-1' }))).toThrow();
+  });
+});
+
 describe('getOpsDatabaseUrl (HU-E1-05)', () => {
   it('returns OPS_DATABASE_URL when set', () => {
     expect(getOpsDatabaseUrl({ OPS_DATABASE_URL: 'postgres://owner@host/db' })).toBe(

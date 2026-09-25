@@ -1,5 +1,12 @@
 import { parseArgs } from 'node:util';
 import type { ApiKeyEnvironment } from '../modules/identity/domain/api-key.js';
+import {
+  createFiscalProfile,
+  type EconomicActivity,
+  type FiscalProfile,
+  type TaxpayerType,
+} from '../modules/fiscal-config/domain/fiscal-profile.js';
+import { parseRuc } from '../modules/fiscal-config/domain/ruc.js';
 
 /** Invalid argv or missing environment for the operator CLI (backlog HU-E1-05). */
 export class OpsArgError extends Error {}
@@ -14,7 +21,8 @@ export type OpsCommand =
       scopes: string[];
       label: string | undefined;
     }
-  | { kind: 'apikey:revoke'; keyId: string };
+  | { kind: 'apikey:revoke'; keyId: string }
+  | { kind: 'fiscal:set'; tenantId: string; profile: FiscalProfile };
 
 function requireOption(value: string | undefined, flag: string): string {
   if (!value) {
@@ -37,6 +45,31 @@ function parseScopes(value: string | undefined): string[] {
     .split(',')
     .map((scope) => scope.trim())
     .filter((scope) => scope.length > 0);
+}
+
+function parseTaxpayerType(value: string | undefined): TaxpayerType {
+  const raw = requireOption(value, 'taxpayer-type');
+  if (raw === 'fisica') {
+    return 'persona_fisica';
+  }
+  if (raw === 'juridica') {
+    return 'persona_juridica';
+  }
+  throw new OpsArgError(`--taxpayer-type must be "fisica" or "juridica", got "${raw}"`);
+}
+
+/** Parses repeated `--activity <code>:<description>` flags (backlog HU-E2-01). */
+function parseActivities(values: string[] | undefined): EconomicActivity[] {
+  return (values ?? []).map((entry) => {
+    const separatorIndex = entry.indexOf(':');
+    if (separatorIndex <= 0) {
+      throw new OpsArgError(`--activity must be "<code>:<description>", got "${entry}"`);
+    }
+    return {
+      code: entry.slice(0, separatorIndex),
+      description: entry.slice(separatorIndex + 1),
+    };
+  });
 }
 
 /** Parses `argv` (without `node`/script) into one typed operator command, or throws {@link OpsArgError}. */
@@ -83,6 +116,35 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
     case 'apikey:revoke': {
       const { values } = parseArgs({ args: rest, options: { 'key-id': { type: 'string' } } });
       return { kind: 'apikey:revoke', keyId: requireOption(values['key-id'], 'key-id') };
+    }
+    case 'fiscal:set': {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          ruc: { type: 'string' },
+          'legal-name': { type: 'string' },
+          'trade-name': { type: 'string' },
+          'taxpayer-type': { type: 'string' },
+          regime: { type: 'string' },
+          activity: { type: 'string', multiple: true },
+        },
+      });
+
+      const profile = createFiscalProfile({
+        ruc: parseRuc(requireOption(values.ruc, 'ruc')),
+        legalName: requireOption(values['legal-name'], 'legal-name'),
+        tradeName: values['trade-name'],
+        taxpayerType: parseTaxpayerType(values['taxpayer-type']),
+        regimeCode: values.regime,
+        economicActivities: parseActivities(values.activity),
+      });
+
+      return {
+        kind: 'fiscal:set',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        profile,
+      };
     }
     default:
       throw new OpsArgError(`unknown subcommand "${subcommand}"`);

@@ -7,8 +7,11 @@ export {
 export {
   apiKeyEnvironment,
   apiKeys,
+  fiscalTaxpayerType,
   partners,
   TENANT_TABLES,
+  tenantFiscalEconomicActivities,
+  tenantFiscalProfiles,
   tenantProbe,
   tenants,
 } from './schema.js';

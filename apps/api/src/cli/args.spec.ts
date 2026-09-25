@@ -102,10 +102,7 @@ describe('parseOpsArgs fiscal:set (HU-E2-01)', () => {
       argsFor({
         'trade-name': 'Acme',
         regime: '1',
-        activity: [
-          '62010:Programación informática',
-          '62020:Consultoría informática',
-        ],
+        activity: ['62010:Programación informática', '62020:Consultoría informática'],
       }),
     );
 

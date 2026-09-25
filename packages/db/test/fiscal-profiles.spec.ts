@@ -180,4 +180,17 @@ describe('tenant_fiscal_profiles', () => {
       'tenant_fiscal_profiles_regime_code_format',
     );
   });
+
+  it('rejects an economic activity code outside 1-8 alphanumeric characters', async () => {
+    const { db, tenantA } = await seed();
+
+    await expectConstraintViolation(
+      db.insert(tenantFiscalEconomicActivities).values({
+        tenantId: tenantA,
+        code: '47-11',
+        description: 'Bad code',
+      }),
+      'tenant_fiscal_economic_activities_code_format',
+    );
+  });
 });

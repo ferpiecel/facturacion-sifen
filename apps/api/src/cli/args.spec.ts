@@ -83,8 +83,8 @@ describe('getOpsDatabaseUrl (HU-E1-05)', () => {
   });
 
   it('throws when OPS_DATABASE_URL is unset, even if DATABASE_URL is', () => {
-    expect(() =>
-      getOpsDatabaseUrl({ DATABASE_URL: 'postgres://app_login@host/db' }),
-    ).toThrow(OpsArgError);
+    expect(() => getOpsDatabaseUrl({ DATABASE_URL: 'postgres://app_login@host/db' })).toThrow(
+      OpsArgError,
+    );
   });
 });

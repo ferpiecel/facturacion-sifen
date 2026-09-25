@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { getTableName } from 'drizzle-orm';
 import { getTableConfig } from 'drizzle-orm/pg-core';
 import {
   apiKeys,
@@ -22,7 +23,7 @@ function expectForeignKeyTargets(
 ): void {
   const { foreignKeys } = getTableConfig(table);
   expect(foreignKeys).toHaveLength(expectedTableNames.length);
-  expect(foreignKeys.map((fk) => fk.reference().foreignTable[Symbol.for('drizzle:Name')])).toEqual(
+  expect(foreignKeys.map((fk) => getTableName(fk.reference().foreignTable))).toEqual(
     expectedTableNames,
   );
 }

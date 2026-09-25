@@ -1,7 +1,21 @@
-import { apiKeys, createPgliteDatabase, type DatabaseHandle } from '@sifen/db';
+import {
+  apiKeys,
+  createPgliteDatabase,
+  tenantFiscalEconomicActivities,
+  tenantFiscalProfiles,
+  type DatabaseHandle,
+} from '@sifen/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createPartner, createTenant, issueApiKey, revokeApiKey } from './commands.js';
+import { createFiscalProfile } from '../modules/fiscal-config/domain/fiscal-profile.js';
+import { parseRuc } from '../modules/fiscal-config/domain/ruc.js';
+import {
+  createPartner,
+  createTenant,
+  issueApiKey,
+  revokeApiKey,
+  setFiscalProfile,
+} from './commands.js';
 
 describe('operator CLI command handlers (HU-E1-05)', () => {
   let handle: DatabaseHandle | undefined;
@@ -87,5 +101,123 @@ describe('operator CLI command handlers (HU-E1-05)', () => {
 
     const [after] = await handle.db.select().from(apiKeys).where(eq(apiKeys.keyId, issued.keyId));
     expect(after.revokedAt).toEqual(first.revokedAt);
+  });
+});
+
+describe('setFiscalProfile (HU-E2-01)', () => {
+  let handle: DatabaseHandle | undefined;
+
+  afterEach(async () => {
+    await handle?.close();
+    handle = undefined;
+  });
+
+  const buildProfile = (activities: { code: string; description: string }[]) =>
+    createFiscalProfile({
+      ruc: parseRuc('4490207-7'),
+      legalName: 'Acme SA',
+      taxpayerType: 'persona_juridica',
+      economicActivities: activities,
+    });
+
+  it('inserts a new fiscal profile with its economic activities', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Fiscal Tenant');
+    const profile = buildProfile([{ code: '62010', description: 'Programación informática' }]);
+
+    const result = await setFiscalProfile(handle.db, { tenantId, profile });
+
+    expect(result).toEqual({ tenantId, ruc: '4490207-7' });
+    const [row] = await handle.db
+      .select()
+      .from(tenantFiscalProfiles)
+      .where(eq(tenantFiscalProfiles.tenantId, tenantId));
+    expect(row.rucBase).toBe('4490207');
+    expect(row.rucDv).toBe(7);
+    expect(row.legalName).toBe('Acme SA');
+    const activities = await handle.db
+      .select()
+      .from(tenantFiscalEconomicActivities)
+      .where(eq(tenantFiscalEconomicActivities.tenantId, tenantId));
+    expect(activities).toHaveLength(1);
+    expect(activities[0]?.code).toBe('62010');
+  });
+
+  it('re-running replaces the profile and activities, bumping updated_at', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Fiscal Tenant');
+    await setFiscalProfile(handle.db, {
+      tenantId,
+      profile: buildProfile([{ code: '62010', description: 'Programación informática' }]),
+    });
+    const [before] = await handle.db
+      .select()
+      .from(tenantFiscalProfiles)
+      .where(eq(tenantFiscalProfiles.tenantId, tenantId));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    await setFiscalProfile(handle.db, {
+      tenantId,
+      profile: buildProfile([{ code: '62020', description: 'Consultoría informática' }]),
+    });
+
+    const rows = await handle.db
+      .select()
+      .from(tenantFiscalProfiles)
+      .where(eq(tenantFiscalProfiles.tenantId, tenantId));
+    expect(rows).toHaveLength(1);
+    expect(before?.updatedAt.getTime()).toBeLessThan(rows[0]?.updatedAt.getTime() ?? 0);
+    const activities = await handle.db
+      .select()
+      .from(tenantFiscalEconomicActivities)
+      .where(eq(tenantFiscalEconomicActivities.tenantId, tenantId));
+    expect(activities).toHaveLength(1);
+    expect(activities[0]?.code).toBe('62020');
+  });
+
+  it('rejects an unknown tenant', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const profile = buildProfile([{ code: '62010', description: 'Programación informática' }]);
+
+    await expect(
+      setFiscalProfile(handle.db, { tenantId: '00000000-0000-0000-0000-000000000000', profile }),
+    ).rejects.toThrow('tenant not found');
+  });
+
+  it('leaves no partial state when an activity fails to insert', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Fiscal Tenant');
+    // Built directly (not via createFiscalProfile) so the invalid code
+    // reaches the handler and trips the DB check constraint inside the
+    // transaction, instead of being rejected by domain validation first
+    // (backlog HU-E2-01).
+    const profile = {
+      ruc: parseRuc('4490207-7'),
+      legalName: 'Acme SA',
+      tradeName: null,
+      taxpayerType: 'persona_juridica' as const,
+      regimeCode: null,
+      economicActivities: [
+        { code: '62010', description: 'Programación informática' },
+        { code: 'inv@lid', description: 'Actividad inválida' },
+      ],
+    };
+
+    await expect(setFiscalProfile(handle.db, { tenantId, profile })).rejects.toThrow();
+
+    const rows = await handle.db
+      .select()
+      .from(tenantFiscalProfiles)
+      .where(eq(tenantFiscalProfiles.tenantId, tenantId));
+    expect(rows).toHaveLength(0);
+    const activities = await handle.db
+      .select()
+      .from(tenantFiscalEconomicActivities)
+      .where(eq(tenantFiscalEconomicActivities.tenantId, tenantId));
+    expect(activities).toHaveLength(0);
   });
 });

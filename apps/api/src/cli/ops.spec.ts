@@ -1,5 +1,7 @@
 import { createPgliteDatabase, type DatabaseHandle } from '@sifen/db';
 import { afterEach, describe, expect, it } from 'vitest';
+import { createFiscalProfile } from '../modules/fiscal-config/domain/fiscal-profile.js';
+import { parseRuc } from '../modules/fiscal-config/domain/ruc.js';
 import { createTenant } from './commands.js';
 import { formatOpsError, runOpsCommand } from './ops.js';
 
@@ -68,6 +70,22 @@ describe('runOpsCommand (HU-E1-05)', () => {
 
     expect(output).toMatch(/revoked/i);
     expect(output).not.toContain('sk_test_');
+  });
+
+  it('fiscal:set prints the tenant id and formatted RUC', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Fiscal Tenant');
+    const profile = createFiscalProfile({
+      ruc: parseRuc('4490207-7'),
+      legalName: 'Acme SA',
+      taxpayerType: 'persona_juridica',
+      economicActivities: [{ code: '62010', description: 'Programación informática' }],
+    });
+
+    const output = await runOpsCommand(handle.db, { kind: 'fiscal:set', tenantId, profile });
+
+    expect(output).toBe(`fiscal profile saved: ${tenantId} (RUC 4490207-7)`);
   });
 });
 

@@ -162,10 +162,7 @@ export const tenantFiscalEconomicActivities = pgTable(
   },
   (table) => [
     index('tenant_fiscal_economic_activities_tenant_id_idx').on(table.tenantId),
-    uniqueIndex('tenant_fiscal_economic_activities_tenant_code_idx').on(
-      table.tenantId,
-      table.code,
-    ),
+    uniqueIndex('tenant_fiscal_economic_activities_tenant_code_idx').on(table.tenantId, table.code),
     check(
       'tenant_fiscal_economic_activities_code_format',
       sql`${table.code} ~ '^[A-Za-z0-9]{1,8}$'`,

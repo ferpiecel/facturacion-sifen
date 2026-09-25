@@ -133,8 +133,11 @@ export async function setFiscalProfile(
   const { tenantId, profile } = params;
 
   return db.transaction(async (tx) => {
-    const [tenant] = await tx.select({ id: tenants.id }).from(tenants).where(eq(tenants.id, tenantId));
-    if (!tenant) {
+    const found = await tx
+      .select({ id: tenants.id })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId));
+    if (found.length === 0) {
       throw new Error(`tenant not found: ${tenantId}`);
     }
 

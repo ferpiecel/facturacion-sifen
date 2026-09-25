@@ -142,7 +142,7 @@ describe('setFiscalProfile (HU-E2-01)', () => {
     expect(row).toMatchObject({ rucBase: '4490207', rucDv: 7, legalName: 'Acme SA' });
     const activities = await activityRows(handle.db, tenantId);
     expect(activities).toHaveLength(1);
-    expect(activities[0]?.code).toBe('62010');
+    expect(activities[0].code).toBe('62010');
   });
 
   it('re-running replaces the profile and activities, bumping updated_at', async () => {
@@ -163,10 +163,11 @@ describe('setFiscalProfile (HU-E2-01)', () => {
 
     const rows = await profileRow(handle.db, tenantId);
     expect(rows).toHaveLength(1);
-    expect(before?.updatedAt.getTime()).toBeLessThan(rows[0]?.updatedAt.getTime() ?? 0);
+    const [after] = rows;
+    expect(before.updatedAt.getTime()).toBeLessThan(after.updatedAt.getTime());
     const activities = await activityRows(handle.db, tenantId);
     expect(activities).toHaveLength(1);
-    expect(activities[0]?.code).toBe('62020');
+    expect(activities[0].code).toBe('62020');
   });
 
   it('rejects an unknown tenant', async () => {

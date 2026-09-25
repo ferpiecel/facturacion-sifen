@@ -35,6 +35,27 @@ Todas tienen un valor por defecto, así que el entorno local funciona sin un arc
 | `SIFEN_ENVIRONMENT` | `test` (o sin valor si `NODE_ENV≠production`) | `apps/api` | `test` o `production`. Determina si se aceptan API keys `sk_test_...` o `sk_live_...`. Con `NODE_ENV=production`, dejarla sin definir hace que la API **falle al arrancar** (fail closed): un despliegue productivo nunca debe arrancar en silencio con `sk_test_...` como aceptación por defecto. |
 | `NODE_ENV` | *(sin valor)* | `apps/api` | Estándar de Node. Solo afecta la validación de `SIFEN_ENVIRONMENT` arriba; en `production` la exige explícita. |
 
+## Operación
+
+El operador crea partners, tenants y API keys con el CLI `apps/api/src/cli/ops.ts` (backlog HU-E1-05), nunca a mano en la base. El CLI exige `OPS_DATABASE_URL`: una conexión propia del operador, distinta de `DATABASE_URL` (el rol `app_login`, sujeto a RLS). Sin `OPS_DATABASE_URL` el CLI se niega a arrancar.
+
+```bash
+docker compose up -d postgres
+DATABASE_URL="postgresql://sifen:sifen@localhost:5432/sifen" \
+  pnpm --filter @sifen/db exec drizzle-kit migrate   # como el rol dueño de la base (ver docker-compose.yml)
+pnpm --filter @sifen/api build
+
+export OPS_DATABASE_URL="postgresql://sifen:sifen@localhost:5432/sifen"
+
+pnpm --filter @sifen/api ops partner:create --name "Partner Uno"
+pnpm --filter @sifen/api ops tenant:create --name "Tenant Directo"
+pnpm --filter @sifen/api ops tenant:create --name "Tenant De Partner" --partner <partner-id>
+pnpm --filter @sifen/api ops apikey:create --tenant <tenant-id> --env test --scopes documents:write,documents:read --label "CI"
+pnpm --filter @sifen/api ops apikey:revoke --key-id <key-id>
+```
+
+`apikey:create` imprime la API key completa (`sk_test_...` / `sk_live_...`) **una sola vez**: no queda guardada en ningún lado más que como hash, así que hay que copiarla en ese momento. El CLI nunca vuelve a loguearla, ni siquiera en `apikey:revoke`.
+
 ## Documentación
 
 | Documento | Responde |

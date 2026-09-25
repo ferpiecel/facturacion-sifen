@@ -63,7 +63,7 @@ describe('operator CLI command handlers (HU-E1-05)', () => {
     await revokeApiKey(handle.db, issued.keyId);
 
     const [row] = await handle.db.select().from(apiKeys).where(eq(apiKeys.keyId, issued.keyId));
-    expect(row?.revokedAt).toBeInstanceOf(Date);
+    expect(row.revokedAt).toBeInstanceOf(Date);
   });
 
   it('revokeApiKey rejects an unknown keyId instead of reporting success', async () => {
@@ -86,6 +86,6 @@ describe('operator CLI command handlers (HU-E1-05)', () => {
     await expect(revokeApiKey(handle.db, issued.keyId)).rejects.toThrow('no active api key');
 
     const [after] = await handle.db.select().from(apiKeys).where(eq(apiKeys.keyId, issued.keyId));
-    expect(after?.revokedAt).toEqual(first?.revokedAt);
+    expect(after.revokedAt).toEqual(first.revokedAt);
   });
 });

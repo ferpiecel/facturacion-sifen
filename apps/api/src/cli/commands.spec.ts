@@ -3,6 +3,7 @@ import {
   createPgliteDatabase,
   tenantFiscalEconomicActivities,
   tenantFiscalProfiles,
+  type Database,
   type DatabaseHandle,
 } from '@sifen/db';
 import { eq } from 'drizzle-orm';
@@ -120,6 +121,14 @@ describe('setFiscalProfile (HU-E2-01)', () => {
       economicActivities: activities,
     });
 
+  const profileRow = (db: Database, tenantId: string) =>
+    db.select().from(tenantFiscalProfiles).where(eq(tenantFiscalProfiles.tenantId, tenantId));
+  const activityRows = (db: Database, tenantId: string) =>
+    db
+      .select()
+      .from(tenantFiscalEconomicActivities)
+      .where(eq(tenantFiscalEconomicActivities.tenantId, tenantId));
+
   it('inserts a new fiscal profile with its economic activities', async () => {
     handle = createPgliteDatabase();
     await handle.migrate();
@@ -129,17 +138,9 @@ describe('setFiscalProfile (HU-E2-01)', () => {
     const result = await setFiscalProfile(handle.db, { tenantId, profile });
 
     expect(result).toEqual({ tenantId, ruc: '4490207-7' });
-    const [row] = await handle.db
-      .select()
-      .from(tenantFiscalProfiles)
-      .where(eq(tenantFiscalProfiles.tenantId, tenantId));
-    expect(row.rucBase).toBe('4490207');
-    expect(row.rucDv).toBe(7);
-    expect(row.legalName).toBe('Acme SA');
-    const activities = await handle.db
-      .select()
-      .from(tenantFiscalEconomicActivities)
-      .where(eq(tenantFiscalEconomicActivities.tenantId, tenantId));
+    const [row] = await profileRow(handle.db, tenantId);
+    expect(row).toMatchObject({ rucBase: '4490207', rucDv: 7, legalName: 'Acme SA' });
+    const activities = await activityRows(handle.db, tenantId);
     expect(activities).toHaveLength(1);
     expect(activities[0]?.code).toBe('62010');
   });
@@ -152,10 +153,7 @@ describe('setFiscalProfile (HU-E2-01)', () => {
       tenantId,
       profile: buildProfile([{ code: '62010', description: 'Programación informática' }]),
     });
-    const [before] = await handle.db
-      .select()
-      .from(tenantFiscalProfiles)
-      .where(eq(tenantFiscalProfiles.tenantId, tenantId));
+    const [before] = await profileRow(handle.db, tenantId);
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     await setFiscalProfile(handle.db, {
@@ -163,16 +161,10 @@ describe('setFiscalProfile (HU-E2-01)', () => {
       profile: buildProfile([{ code: '62020', description: 'Consultoría informática' }]),
     });
 
-    const rows = await handle.db
-      .select()
-      .from(tenantFiscalProfiles)
-      .where(eq(tenantFiscalProfiles.tenantId, tenantId));
+    const rows = await profileRow(handle.db, tenantId);
     expect(rows).toHaveLength(1);
     expect(before?.updatedAt.getTime()).toBeLessThan(rows[0]?.updatedAt.getTime() ?? 0);
-    const activities = await handle.db
-      .select()
-      .from(tenantFiscalEconomicActivities)
-      .where(eq(tenantFiscalEconomicActivities.tenantId, tenantId));
+    const activities = await activityRows(handle.db, tenantId);
     expect(activities).toHaveLength(1);
     expect(activities[0]?.code).toBe('62020');
   });
@@ -209,15 +201,7 @@ describe('setFiscalProfile (HU-E2-01)', () => {
 
     await expect(setFiscalProfile(handle.db, { tenantId, profile })).rejects.toThrow();
 
-    const rows = await handle.db
-      .select()
-      .from(tenantFiscalProfiles)
-      .where(eq(tenantFiscalProfiles.tenantId, tenantId));
-    expect(rows).toHaveLength(0);
-    const activities = await handle.db
-      .select()
-      .from(tenantFiscalEconomicActivities)
-      .where(eq(tenantFiscalEconomicActivities.tenantId, tenantId));
-    expect(activities).toHaveLength(0);
+    expect(await profileRow(handle.db, tenantId)).toHaveLength(0);
+    expect(await activityRows(handle.db, tenantId)).toHaveLength(0);
   });
 });

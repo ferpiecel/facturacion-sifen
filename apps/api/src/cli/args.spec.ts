@@ -76,30 +76,38 @@ describe('parseOpsArgs (HU-E1-05)', () => {
 });
 
 describe('parseOpsArgs fiscal:set (HU-E2-01)', () => {
-  const baseArgs = [
-    'fiscal:set',
-    '--tenant',
-    't-1',
-    '--ruc',
-    '4490207-7',
-    '--legal-name',
-    'Acme SA',
-    '--taxpayer-type',
-    'juridica',
-    '--activity',
-    '62010:Programación informática',
-  ];
+  type FlagMap = Record<string, string | string[] | undefined>;
+  const baseFlags: FlagMap = {
+    tenant: 't-1',
+    ruc: '4490207-7',
+    'legal-name': 'Acme SA',
+    'taxpayer-type': 'juridica',
+    activity: '62010:Programación informática',
+  };
+
+  function argsFor(overrides: FlagMap): string[] {
+    const flags: FlagMap = { ...baseFlags, ...overrides };
+    return [
+      'fiscal:set',
+      ...Object.entries(flags).flatMap(([flag, value]) =>
+        value === undefined
+          ? []
+          : (Array.isArray(value) ? value : [value]).flatMap((v) => [`--${flag}`, v]),
+      ),
+    ];
+  }
 
   it('parses a full fiscal:set command', () => {
-    const command = parseOpsArgs([
-      ...baseArgs,
-      '--trade-name',
-      'Acme',
-      '--regime',
-      '1',
-      '--activity',
-      '62020:Consultoría informática',
-    ]);
+    const command = parseOpsArgs(
+      argsFor({
+        'trade-name': 'Acme',
+        regime: '1',
+        activity: [
+          '62010:Programación informática',
+          '62020:Consultoría informática',
+        ],
+      }),
+    );
 
     expect(command).toEqual({
       kind: 'fiscal:set',
@@ -119,19 +127,7 @@ describe('parseOpsArgs fiscal:set (HU-E2-01)', () => {
   });
 
   it('parses fisica taxpayer type without optional flags', () => {
-    const command = parseOpsArgs([
-      'fiscal:set',
-      '--tenant',
-      't-1',
-      '--ruc',
-      '4490207-7',
-      '--legal-name',
-      'Juan Perez',
-      '--taxpayer-type',
-      'fisica',
-      '--activity',
-      '62010:Programación informática',
-    ]);
+    const command = parseOpsArgs(argsFor({ 'taxpayer-type': 'fisica' }));
 
     expect(command.kind).toBe('fiscal:set');
     if (command.kind === 'fiscal:set') {
@@ -141,160 +137,35 @@ describe('parseOpsArgs fiscal:set (HU-E2-01)', () => {
     }
   });
 
-  it('rejects missing --tenant', () => {
-    expect(() =>
-      parseOpsArgs([
-        'fiscal:set',
-        '--ruc',
-        '4490207-7',
-        '--legal-name',
-        'Acme SA',
-        '--taxpayer-type',
-        'juridica',
-        '--activity',
-        '62010:Programación informática',
-      ]),
-    ).toThrow(OpsArgError);
-  });
-
-  it('rejects missing --ruc', () => {
-    expect(() =>
-      parseOpsArgs([
-        'fiscal:set',
-        '--tenant',
-        't-1',
-        '--legal-name',
-        'Acme SA',
-        '--taxpayer-type',
-        'juridica',
-        '--activity',
-        '62010:Programación informática',
-      ]),
-    ).toThrow(OpsArgError);
-  });
-
-  it('rejects missing --legal-name', () => {
-    expect(() =>
-      parseOpsArgs([
-        'fiscal:set',
-        '--tenant',
-        't-1',
-        '--ruc',
-        '4490207-7',
-        '--taxpayer-type',
-        'juridica',
-        '--activity',
-        '62010:Programación informática',
-      ]),
-    ).toThrow(OpsArgError);
-  });
-
-  it('rejects missing --taxpayer-type', () => {
-    expect(() =>
-      parseOpsArgs([
-        'fiscal:set',
-        '--tenant',
-        't-1',
-        '--ruc',
-        '4490207-7',
-        '--legal-name',
-        'Acme SA',
-        '--activity',
-        '62010:Programación informática',
-      ]),
-    ).toThrow(OpsArgError);
-  });
-
-  it('rejects a --taxpayer-type other than fisica/juridica', () => {
-    expect(() =>
-      parseOpsArgs([
-        'fiscal:set',
-        '--tenant',
-        't-1',
-        '--ruc',
-        '4490207-7',
-        '--legal-name',
-        'Acme SA',
-        '--taxpayer-type',
-        'empresa',
-        '--activity',
-        '62010:Programación informática',
-      ]),
-    ).toThrow(OpsArgError);
+  it.each([
+    ['tenant', undefined],
+    ['ruc', undefined],
+    ['legal-name', undefined],
+    ['taxpayer-type', undefined],
+    ['taxpayer-type', 'empresa'],
+  ])('rejects flag %s = %s', (flag, value) => {
+    expect(() => parseOpsArgs(argsFor({ [flag]: value }))).toThrow(OpsArgError);
   });
 
   it('rejects an --activity without the "<code>:<description>" separator', () => {
-    expect(() =>
-      parseOpsArgs([
-        'fiscal:set',
-        '--tenant',
-        't-1',
-        '--ruc',
-        '4490207-7',
-        '--legal-name',
-        'Acme SA',
-        '--taxpayer-type',
-        'juridica',
-        '--activity',
-        '62010 sin separador',
-      ]),
-    ).toThrow(OpsArgError);
+    expect(() => parseOpsArgs(argsFor({ activity: '62010 sin separador' }))).toThrow(OpsArgError);
   });
 
   it('rejects zero activities', () => {
-    expect(() =>
-      parseOpsArgs([
-        'fiscal:set',
-        '--tenant',
-        't-1',
-        '--ruc',
-        '4490207-7',
-        '--legal-name',
-        'Acme SA',
-        '--taxpayer-type',
-        'juridica',
-      ]),
-    ).toThrow();
+    expect(() => parseOpsArgs(argsFor({ activity: undefined }))).toThrow();
   });
 
   it('rejects more than 9 activities', () => {
-    const tenActivities = Array.from({ length: 10 }, (_, i) => [
-      '--activity',
-      `act${String(i)}:Descripción ${String(i)}`,
-    ]).flat();
+    const tenActivities = Array.from(
+      { length: 10 },
+      (_, i) => `act${String(i)}:Descripción ${String(i)}`,
+    );
 
-    expect(() =>
-      parseOpsArgs([
-        'fiscal:set',
-        '--tenant',
-        't-1',
-        '--ruc',
-        '4490207-7',
-        '--legal-name',
-        'Acme SA',
-        '--taxpayer-type',
-        'juridica',
-        ...tenActivities,
-      ]),
-    ).toThrow();
+    expect(() => parseOpsArgs(argsFor({ activity: tenActivities }))).toThrow();
   });
 
   it('rejects an invalid RUC check digit', () => {
-    expect(() =>
-      parseOpsArgs([
-        'fiscal:set',
-        '--tenant',
-        't-1',
-        '--ruc',
-        '4490207-1',
-        '--legal-name',
-        'Acme SA',
-        '--taxpayer-type',
-        'juridica',
-        '--activity',
-        '62010:Programación informática',
-      ]),
-    ).toThrow();
+    expect(() => parseOpsArgs(argsFor({ ruc: '4490207-1' }))).toThrow();
   });
 });
 

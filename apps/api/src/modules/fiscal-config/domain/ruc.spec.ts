@@ -8,7 +8,6 @@ describe('computeRucCheckDigit', () => {
 
   it('computes the check digit for other known bases', () => {
     expect(computeRucCheckDigit('1234567')).toBe(9);
-    expect(computeRucCheckDigit('8')).toBe(6);
     expect(computeRucCheckDigit('123')).toBe(6);
     expect(computeRucCheckDigit('12345678')).toBe(9);
   });

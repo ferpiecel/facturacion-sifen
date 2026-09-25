@@ -49,6 +49,17 @@ describe('createFiscalProfile', () => {
     ).toThrow(InvalidFiscalProfileError);
   });
 
+  it('rejects a legal name that is only 3 characters after trimming', () => {
+    expect(() =>
+      createFiscalProfile({
+        ruc: RUC,
+        legalName: '  Abc  ',
+        taxpayerType: 'persona_fisica',
+        economicActivities: ONE_ACTIVITY,
+      }),
+    ).toThrow(InvalidFiscalProfileError);
+  });
+
   it('rejects a legal name longer than 255 characters', () => {
     expect(() =>
       createFiscalProfile({

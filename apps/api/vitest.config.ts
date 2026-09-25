@@ -25,6 +25,11 @@ export default defineConfig({
         // Process bootstrap entrypoint: top-level await wiring Nest/Fastify,
         // exercised by e2e/manual runs rather than unit tests.
         'src/main.ts',
+        // Operator CLI process entrypoint (argv/env wiring, prints,
+        // process.exit): exercised by the manual docker check, not unit
+        // tests. Its argv parsing (args.ts) and dispatch (ops.ts's
+        // exported runOpsCommand) are unit-tested directly.
+        'src/cli/ops.ts',
         // Type-only declaration output, nothing to execute.
         '**/*.d.ts',
       ],

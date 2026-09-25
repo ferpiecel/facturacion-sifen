@@ -10,7 +10,7 @@
  * declared (tcDisEmi, tcCiuEmi in DE_Types_v150.xsd). District and city
  * validation therefore stays format-only until that table is sourced.
  */
-export const DEPARTMENTS: Readonly<Record<number, string>> = {
+export const DEPARTMENTS: Readonly<Partial<Record<number, string>>> = {
   1: 'CAPITAL',
   2: 'CONCEPCION',
   3: 'SAN PEDRO',

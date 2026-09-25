@@ -4,7 +4,14 @@ export {
   type Database,
   type DatabaseHandle,
 } from './client.js';
-export { apiKeyEnvironment, apiKeys, TENANT_TABLES, tenantProbe, tenants } from './schema.js';
+export {
+  apiKeyEnvironment,
+  apiKeys,
+  partners,
+  TENANT_TABLES,
+  tenantProbe,
+  tenants,
+} from './schema.js';
 export { InvalidTenantIdError, PrivilegedSessionError } from './errors.js';
 export { assertValidTenantId, isValidTenantId } from './tenant-id.js';
 export { withTenantTransaction, type TenantTx } from './tenant-transaction.js';

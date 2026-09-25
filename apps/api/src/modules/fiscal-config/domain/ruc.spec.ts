@@ -21,6 +21,19 @@ describe('computeRucCheckDigit', () => {
     expect(() => computeRucCheckDigit('abc1234')).toThrow(InvalidRucError);
     expect(() => computeRucCheckDigit('')).toThrow(InvalidRucError);
   });
+
+  it('maps a remainder of 0 to check digit 0', () => {
+    expect(computeRucCheckDigit('014')).toBe(0);
+  });
+
+  it('maps a remainder of 1 to check digit 0', () => {
+    expect(computeRucCheckDigit('006')).toBe(0);
+  });
+
+  it('preserves a base with leading zeros', () => {
+    expect(computeRucCheckDigit('014')).toBe(0);
+    expect(createRuc('014', 0)).toEqual({ base: '014', dv: 0 });
+  });
 });
 
 describe('createRuc', () => {

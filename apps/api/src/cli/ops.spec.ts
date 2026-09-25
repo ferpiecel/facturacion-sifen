@@ -1,7 +1,7 @@
 import { createPgliteDatabase, type DatabaseHandle } from '@sifen/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTenant } from './commands.js';
-import { runOpsCommand } from './ops.js';
+import { formatOpsError, runOpsCommand } from './ops.js';
 
 describe('runOpsCommand (HU-E1-05)', () => {
   let handle: DatabaseHandle | undefined;
@@ -68,5 +68,36 @@ describe('runOpsCommand (HU-E1-05)', () => {
 
     expect(output).toMatch(/revoked/i);
     expect(output).not.toContain('sk_test_');
+  });
+});
+
+describe('formatOpsError (HU-E1-05)', () => {
+  it('prints the driver cause, never the failed query params', () => {
+    const driverError = new Error('insert or update on table "api_keys" violates foreign key');
+    const queryError = new Error(
+      'Failed query: insert into "api_keys"\nparams: keyId,$argon2id$hash',
+      {
+        cause: driverError,
+      },
+    );
+
+    const message = formatOpsError(queryError);
+
+    expect(message).toBe('insert or update on table "api_keys" violates foreign key');
+    expect(message).not.toContain('argon2');
+  });
+
+  it('hides a failed query without a cause behind a generic message', () => {
+    expect(formatOpsError(new Error('Failed query: select 1\nparams: secret'))).toBe(
+      'database query failed',
+    );
+  });
+
+  it('keeps plain operator errors as they are', () => {
+    expect(formatOpsError(new Error('missing required --name'))).toBe('missing required --name');
+  });
+
+  it('describes a non-Error rejection generically', () => {
+    expect(formatOpsError('boom')).toBe('unknown error');
   });
 });

@@ -36,6 +36,20 @@
       "when": 1790337973891,
       "tag": "0004_short_azazel",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790341122493,
+      "tag": "0005_orange_stepford_cuckoos",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790341142771,
+      "tag": "0006_fiscal_profiles_rls",
+      "breakpoints": true
     }
   ]
 }

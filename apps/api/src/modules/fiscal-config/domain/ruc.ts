@@ -48,8 +48,8 @@ export function createRuc(base: string, dv: number): Ruc {
   const expected = computeRucCheckDigit(base);
   if (dv !== expected) {
     throw new InvalidRucError(
-      `check digit must be ${expected} (SET modulo-11), got ${dv}`,
-      `${base}-${dv}`,
+      `check digit must be ${String(expected)} (SET modulo-11), got ${String(dv)}`,
+      `${base}-${String(dv)}`,
     );
   }
   return { base, dv };
@@ -63,10 +63,10 @@ export function parseRuc(raw: string): Ruc {
   }
 
   const [, base, dvRaw] = match;
-  return createRuc(base as string, Number(dvRaw));
+  return createRuc(base, Number(dvRaw));
 }
 
 /** Formats a {@link Ruc} back to `"<base>-<dv>"`. */
 export function formatRuc(ruc: Ruc): string {
-  return `${ruc.base}-${ruc.dv}`;
+  return `${ruc.base}-${String(ruc.dv)}`;
 }

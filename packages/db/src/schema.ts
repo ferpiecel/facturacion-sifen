@@ -4,6 +4,7 @@ import {
   index,
   pgEnum,
   pgTable,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -95,10 +96,89 @@ export const apiKeys = pgTable(
   ],
 );
 
+/** `tenant_fiscal_profiles.taxpayer_type`: iTipCont (MT v150 §D2, D103). */
+export const fiscalTaxpayerType = pgEnum('fiscal_taxpayer_type', [
+  'persona_fisica',
+  'persona_juridica',
+]);
+
+/**
+ * One fiscal profile per tenant (HU-E2-01 / RF-15): RUC + check digit,
+ * legal/trade name, taxpayer type (iTipCont) and the optional regime code
+ * (cTipReg). `tenant_id` is the primary key, not a separate `id`, since the
+ * relationship is one row per tenant.
+ */
+export const tenantFiscalProfiles = pgTable(
+  'tenant_fiscal_profiles',
+  {
+    tenantId: uuid('tenant_id')
+      .primaryKey()
+      .references(() => tenants.id),
+    // dRucEm (MT §D2, D101): 3-8 digits, without the check digit.
+    rucBase: varchar('ruc_base', { length: 8 }).notNull(),
+    // dDVEmi (MT §D2, D102): SET modulo-11 check digit, always 0-9.
+    rucDv: smallint('ruc_dv').notNull(),
+    // dNomEmi (MT §D2, D105): 4-255 chars.
+    legalName: varchar('legal_name', { length: 255 }).notNull(),
+    // dNomFanEmi (MT §D2, D106): 4-255 chars, optional.
+    tradeName: varchar('trade_name', { length: 255 }),
+    taxpayerType: fiscalTaxpayerType('taxpayer_type').notNull(),
+    // cTipReg (MT §D2, D104): 1-2 digits, optional. Closed code list
+    // ("Tabla 1 – Tipo de Régimen") not present in docs/referencia/dnit,
+    // so only the format is enforced here.
+    regimeCode: varchar('regime_code', { length: 2 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check('tenant_fiscal_profiles_ruc_base_format', sql`${table.rucBase} ~ '^[0-9]{3,8}$'`),
+    check('tenant_fiscal_profiles_ruc_dv_range', sql`${table.rucDv} BETWEEN 0 AND 9`),
+    check(
+      'tenant_fiscal_profiles_regime_code_format',
+      sql`${table.regimeCode} IS NULL OR ${table.regimeCode} ~ '^[0-9]{1,2}$'`,
+    ),
+  ],
+);
+
+/**
+ * Economic activities declared for a tenant's fiscal profile (gActEco, MT
+ * §D2.1, D130-D132): 1-9 entries per emitter, enforced by the domain layer
+ * (`createFiscalProfile`), not by a DB-level count constraint.
+ */
+export const tenantFiscalEconomicActivities = pgTable(
+  'tenant_fiscal_economic_activities',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    // cActEco (MT §D2.1, D131): 1-8 alphanumeric chars. Closed code list
+    // ("Tabla 3 – Actividades Económicas") not present in docs/referencia/dnit,
+    // so only the format is enforced here.
+    code: varchar('code', { length: 8 }).notNull(),
+    // dDesActEco (MT §D2.1, D132): 1-300 chars.
+    description: varchar('description', { length: 300 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('tenant_fiscal_economic_activities_tenant_id_idx').on(table.tenantId),
+    uniqueIndex('tenant_fiscal_economic_activities_tenant_code_idx').on(table.tenantId, table.code),
+    check(
+      'tenant_fiscal_economic_activities_code_format',
+      sql`${table.code} ~ '^[A-Za-z0-9]{1,8}$'`,
+    ),
+  ],
+);
+
 /**
  * Every table that carries a `tenant_id` column and MUST be covered by
  * `FORCE ROW LEVEL SECURITY` plus a tenant-isolation policy. The
  * `rls-coverage.spec.ts` drift check discovers these tables from the
  * catalog and asserts this list matches it.
  */
-export const TENANT_TABLES = ['api_keys', 'tenant_probe'] as const;
+export const TENANT_TABLES = [
+  'api_keys',
+  'tenant_fiscal_economic_activities',
+  'tenant_fiscal_profiles',
+  'tenant_probe',
+] as const;

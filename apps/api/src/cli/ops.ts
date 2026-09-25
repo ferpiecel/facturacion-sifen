@@ -38,6 +38,21 @@ export async function runOpsCommand(db: Database, command: OpsCommand): Promise<
   }
 }
 
+/**
+ * Operator-facing error text. drizzle's query errors embed the bound params
+ * (e.g. a key's `secret_hash`) in `message`, so print the driver's own
+ * `cause` instead and never the raw failed-query text.
+ */
+export function formatOpsError(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return 'unknown error';
+  }
+  if (error.cause instanceof Error) {
+    return error.cause.message;
+  }
+  return error.message.startsWith('Failed query') ? 'database query failed' : error.message;
+}
+
 // Process entrypoint below, exercised by the manual docker check (see
 // README's "Operación" section) and excluded from coverage in
 // vitest.config.ts, not by unit tests.
@@ -58,7 +73,7 @@ const isMainModule =
   process.argv[1] && import.meta.url === new URL(process.argv[1], 'file://').href;
 if (isMainModule) {
   main().catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : error);
+    console.error(formatOpsError(error));
     process.exitCode = 1;
   });
 }

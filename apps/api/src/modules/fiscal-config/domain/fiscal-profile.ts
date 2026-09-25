@@ -94,8 +94,8 @@ export function createFiscalProfile(input: CreateFiscalProfileInput): FiscalProf
     input.economicActivities.length > MAX_ECONOMIC_ACTIVITIES
   ) {
     throw new InvalidFiscalProfileError(
-      `economicActivities must have 1 to ${MAX_ECONOMIC_ACTIVITIES} entries (gActEco), ` +
-        `got ${input.economicActivities.length}`,
+      `economicActivities must have 1 to ${String(MAX_ECONOMIC_ACTIVITIES)} entries (gActEco), ` +
+        `got ${String(input.economicActivities.length)}`,
     );
   }
   const economicActivities = input.economicActivities.map(validateEconomicActivity);

@@ -96,7 +96,7 @@ describe('createFiscalProfile', () => {
   it('rejects more than 9 economic activities (gActEco occurrence 1-9)', () => {
     const tooMany = Array.from({ length: 10 }, (_, i) => ({
       code: String(i + 1).padStart(5, '0'),
-      description: `Activity ${i + 1}`,
+      description: `Activity ${String(i + 1)}`,
     }));
 
     expect(() =>
@@ -112,7 +112,7 @@ describe('createFiscalProfile', () => {
   it('accepts exactly 9 economic activities', () => {
     const nine = Array.from({ length: 9 }, (_, i) => ({
       code: String(i + 1).padStart(5, '0'),
-      description: `Activity ${i + 1}`,
+      description: `Activity ${String(i + 1)}`,
     }));
 
     const profile = createFiscalProfile({

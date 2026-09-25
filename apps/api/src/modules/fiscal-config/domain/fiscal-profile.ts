@@ -72,6 +72,12 @@ export interface CreateFiscalProfileInput {
  * 1-9 economic activities with a valid code/description.
  */
 export function createFiscalProfile(input: CreateFiscalProfileInput): FiscalProfile {
+  if (!(input.taxpayerType in TAXPAYER_TYPE_CODES)) {
+    throw new InvalidFiscalProfileError(
+      `taxpayerType "${String(input.taxpayerType)}" must be one of ${Object.keys(TAXPAYER_TYPE_CODES).join(', ')} (iTipCont)`,
+    );
+  }
+
   const legalName = validateName(input.legalName, 'legalName (dNomEmi)');
 
   const trimmedTradeName = input.tradeName?.trim();
@@ -99,6 +105,16 @@ export function createFiscalProfile(input: CreateFiscalProfileInput): FiscalProf
     );
   }
   const economicActivities = input.economicActivities.map(validateEconomicActivity);
+
+  const seenCodes = new Set<string>();
+  for (const activity of economicActivities) {
+    if (seenCodes.has(activity.code)) {
+      throw new InvalidFiscalProfileError(
+        `economicActivities code "${activity.code}" is duplicated (cActEco)`,
+      );
+    }
+    seenCodes.add(activity.code);
+  }
 
   return {
     ruc: input.ruc,

@@ -193,4 +193,78 @@ describe('tenant_fiscal_profiles', () => {
       'tenant_fiscal_economic_activities_code_format',
     );
   });
+
+  describe('RLS write isolation', () => {
+    it('app_user with tenant A active cannot insert a profile for tenant B', async () => {
+      const { db, tenantA, tenantC } = await seed();
+
+      await expect(
+        withTenantTransaction(db, tenantA, (tx) =>
+          tx.insert(tenantFiscalProfiles).values({
+            tenantId: tenantC,
+            rucBase: '1234567',
+            rucDv: 9,
+            legalName: 'Forged Profile',
+            taxpayerType: 'persona_fisica',
+          }),
+        ),
+      ).rejects.toThrow();
+    });
+
+    it('app_user with tenant A active cannot insert an activity for tenant B', async () => {
+      const { db, tenantA, tenantB } = await seed();
+
+      await expect(
+        withTenantTransaction(db, tenantA, (tx) =>
+          tx.insert(tenantFiscalEconomicActivities).values({
+            tenantId: tenantB,
+            code: '99999',
+            description: 'Forged activity',
+          }),
+        ),
+      ).rejects.toThrow();
+    });
+
+    it('app_user with tenant A active: UPDATE/DELETE of tenant B fiscal profile affects 0 rows', async () => {
+      const { db, tenantA, tenantB } = await seed();
+
+      const updated = await withTenantTransaction(db, tenantA, (tx) =>
+        tx
+          .update(tenantFiscalProfiles)
+          .set({ legalName: 'hijacked' })
+          .where(eq(tenantFiscalProfiles.tenantId, tenantB))
+          .returning(),
+      );
+      expect(updated).toHaveLength(0);
+
+      const deleted = await withTenantTransaction(db, tenantA, (tx) =>
+        tx
+          .delete(tenantFiscalProfiles)
+          .where(eq(tenantFiscalProfiles.tenantId, tenantB))
+          .returning(),
+      );
+      expect(deleted).toHaveLength(0);
+    });
+
+    it('app_user with tenant A active: UPDATE/DELETE of tenant B economic activities affects 0 rows', async () => {
+      const { db, tenantA, tenantB } = await seed();
+
+      const updated = await withTenantTransaction(db, tenantA, (tx) =>
+        tx
+          .update(tenantFiscalEconomicActivities)
+          .set({ description: 'hijacked' })
+          .where(eq(tenantFiscalEconomicActivities.tenantId, tenantB))
+          .returning(),
+      );
+      expect(updated).toHaveLength(0);
+
+      const deleted = await withTenantTransaction(db, tenantA, (tx) =>
+        tx
+          .delete(tenantFiscalEconomicActivities)
+          .where(eq(tenantFiscalEconomicActivities.tenantId, tenantB))
+          .returning(),
+      );
+      expect(deleted).toHaveLength(0);
+    });
+  });
 });

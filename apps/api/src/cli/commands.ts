@@ -1,6 +1,15 @@
 import { and, eq, isNull } from 'drizzle-orm';
-import { apiKeys, partners, tenants, type Database } from '@sifen/db';
+import {
+  apiKeys,
+  partners,
+  tenantFiscalEconomicActivities,
+  tenantFiscalProfiles,
+  tenants,
+  type Database,
+} from '@sifen/db';
 import type { ApiKeyEnvironment } from '../modules/identity/domain/api-key.js';
+import type { FiscalProfile } from '../modules/fiscal-config/domain/fiscal-profile.js';
+import { formatRuc } from '../modules/fiscal-config/domain/ruc.js';
 import { Argon2SecretHasherAdapter } from '../modules/identity/infrastructure/adapters/argon2-secret-hasher.adapter.js';
 import { IssueApiKeyUseCase } from '../modules/identity/application/issue-api-key.use-case.js';
 
@@ -98,4 +107,75 @@ export async function revokeApiKey(db: Database, keyId: string): Promise<void> {
   if (rows.length === 0) {
     throw new Error(`no active api key with keyId ${keyId}`);
   }
+}
+
+export interface SetFiscalProfileParams {
+  tenantId: string;
+  profile: FiscalProfile;
+}
+
+export interface SetFiscalProfileResult {
+  tenantId: string;
+  ruc: string;
+}
+
+/**
+ * Operator CLI handler (backlog HU-E2-01): upserts the tenant's fiscal
+ * profile and replaces its economic activities inside one transaction, so
+ * a failing activity (e.g. a DB check-constraint violation) leaves no
+ * partial state. `profile` must already be domain-validated by the caller
+ * (see `parseOpsArgs`'s `fiscal:set` case) before this ever touches the DB.
+ */
+export async function setFiscalProfile(
+  db: Database,
+  params: SetFiscalProfileParams,
+): Promise<SetFiscalProfileResult> {
+  const { tenantId, profile } = params;
+
+  return db.transaction(async (tx) => {
+    const [tenant] = await tx.select({ id: tenants.id }).from(tenants).where(eq(tenants.id, tenantId));
+    if (!tenant) {
+      throw new Error(`tenant not found: ${tenantId}`);
+    }
+
+    const now = new Date();
+    await tx
+      .insert(tenantFiscalProfiles)
+      .values({
+        tenantId,
+        rucBase: profile.ruc.base,
+        rucDv: profile.ruc.dv,
+        legalName: profile.legalName,
+        tradeName: profile.tradeName,
+        taxpayerType: profile.taxpayerType,
+        regimeCode: profile.regimeCode,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: tenantFiscalProfiles.tenantId,
+        set: {
+          rucBase: profile.ruc.base,
+          rucDv: profile.ruc.dv,
+          legalName: profile.legalName,
+          tradeName: profile.tradeName,
+          taxpayerType: profile.taxpayerType,
+          regimeCode: profile.regimeCode,
+          updatedAt: now,
+        },
+      });
+
+    await tx
+      .delete(tenantFiscalEconomicActivities)
+      .where(eq(tenantFiscalEconomicActivities.tenantId, tenantId));
+
+    await tx.insert(tenantFiscalEconomicActivities).values(
+      profile.economicActivities.map((activity) => ({
+        tenantId,
+        code: activity.code,
+        description: activity.description,
+      })),
+    );
+
+    return { tenantId, ruc: formatRuc(profile.ruc) };
+  });
 }

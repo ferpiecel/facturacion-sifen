@@ -1,6 +1,12 @@
 import { createNodePostgresDatabase, type Database } from '@sifen/db';
 import { getOpsDatabaseUrl, parseOpsArgs, type OpsCommand } from './args.js';
-import { createPartner, createTenant, issueApiKey, revokeApiKey } from './commands.js';
+import {
+  createPartner,
+  createTenant,
+  issueApiKey,
+  revokeApiKey,
+  setFiscalProfile,
+} from './commands.js';
 
 /**
  * Dispatches one parsed {@link OpsCommand} to its handler and formats the
@@ -34,6 +40,13 @@ export async function runOpsCommand(db: Database, command: OpsCommand): Promise<
     case 'apikey:revoke': {
       await revokeApiKey(db, command.keyId);
       return `api key revoked: ${command.keyId}`;
+    }
+    case 'fiscal:set': {
+      const result = await setFiscalProfile(db, {
+        tenantId: command.tenantId,
+        profile: command.profile,
+      });
+      return `fiscal profile saved: ${result.tenantId} (RUC ${result.ruc})`;
     }
   }
 }

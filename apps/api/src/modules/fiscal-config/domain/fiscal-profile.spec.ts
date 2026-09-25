@@ -155,4 +155,29 @@ describe('createFiscalProfile', () => {
       }),
     ).toThrow(InvalidFiscalProfileError);
   });
+
+  it('rejects duplicate economic activity codes', () => {
+    expect(() =>
+      createFiscalProfile({
+        ruc: RUC,
+        legalName: 'Juan Perez',
+        taxpayerType: 'persona_fisica',
+        economicActivities: [
+          { code: '47111', description: 'Venta al por menor en comercios' },
+          { code: '47111', description: 'Otra descripcion para el mismo codigo' },
+        ],
+      }),
+    ).toThrow(InvalidFiscalProfileError);
+  });
+
+  it('rejects an invalid taxpayerType even if the type system is bypassed', () => {
+    expect(() =>
+      createFiscalProfile({
+        ruc: RUC,
+        legalName: 'Juan Perez',
+        taxpayerType: '3' as never,
+        economicActivities: ONE_ACTIVITY,
+      }),
+    ).toThrow(InvalidFiscalProfileError);
+  });
 });

@@ -11,6 +11,7 @@
     "depcruise": "depcruise --config .dependency-cruiser.cjs src",
     "test": "vitest run",
     "start": "node dist/main.js",
+    "ops": "node dist/cli/ops.js",
     "coverage": "vitest run --coverage"
   },
   "dependencies": {

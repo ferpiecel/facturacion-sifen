@@ -74,7 +74,7 @@ export interface CreateFiscalProfileInput {
 export function createFiscalProfile(input: CreateFiscalProfileInput): FiscalProfile {
   if (!(input.taxpayerType in TAXPAYER_TYPE_CODES)) {
     throw new InvalidFiscalProfileError(
-      `taxpayerType "${String(input.taxpayerType)}" must be one of ${Object.keys(TAXPAYER_TYPE_CODES).join(', ')} (iTipCont)`,
+      `taxpayerType "${input.taxpayerType}" must be one of ${Object.keys(TAXPAYER_TYPE_CODES).join(', ')} (iTipCont)`,
     );
   }
 

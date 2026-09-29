@@ -5,6 +5,7 @@ import {
   tenantExpeditionPoints,
   tenantFiscalEconomicActivities,
   tenantFiscalProfiles,
+  tenantTimbrados,
   type Database,
   type DatabaseHandle,
 } from '@sifen/db';
@@ -14,9 +15,11 @@ import { createEstablishment } from '../modules/fiscal-config/domain/establishme
 import { createExpeditionPoint } from '../modules/fiscal-config/domain/expedition-point.js';
 import { createFiscalProfile } from '../modules/fiscal-config/domain/fiscal-profile.js';
 import { parseRuc } from '../modules/fiscal-config/domain/ruc.js';
+import { createTimbrado } from '../modules/fiscal-config/domain/timbrado.js';
 import {
   addEstablishment,
   addExpeditionPoint,
+  addTimbrado,
   createPartner,
   createTenant,
   issueApiKey,
@@ -367,5 +370,58 @@ describe('addExpeditionPoint (HU-E2-02)', () => {
         point: createExpeditionPoint({ code: '002' }),
       }),
     ).rejects.toThrow();
+  });
+});
+
+describe('addTimbrado (HU-E2-02)', () => {
+  let handle: DatabaseHandle | undefined;
+
+  afterEach(async () => {
+    await handle?.close();
+    handle = undefined;
+  });
+
+  const buildTimbrado = (number = '12345678') =>
+    createTimbrado({ number, validityStart: '2024-01-01', validityEnd: '2025-01-01' });
+
+  it('inserts a timbrado for an existing tenant', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Timbrado Tenant');
+
+    const result = await addTimbrado(handle.db, { tenantId, timbrado: buildTimbrado() });
+
+    expect(result.number).toBe('12345678');
+    const [row] = await handle.db
+      .select()
+      .from(tenantTimbrados)
+      .where(eq(tenantTimbrados.id, result.id));
+    expect(row).toMatchObject({
+      tenantId,
+      number: '12345678',
+      validFrom: '2024-01-01',
+      validTo: '2025-01-01',
+    });
+  });
+
+  it('rejects an unknown tenant', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+
+    await expect(
+      addTimbrado(handle.db, {
+        tenantId: '00000000-0000-0000-0000-000000000000',
+        timbrado: buildTimbrado(),
+      }),
+    ).rejects.toThrow('tenant not found');
+  });
+
+  it('rejects a duplicate number for the same tenant', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Timbrado Tenant');
+    await addTimbrado(handle.db, { tenantId, timbrado: buildTimbrado() });
+
+    await expect(addTimbrado(handle.db, { tenantId, timbrado: buildTimbrado() })).rejects.toThrow();
   });
 });

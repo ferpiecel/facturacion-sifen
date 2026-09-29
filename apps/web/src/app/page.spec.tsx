@@ -13,6 +13,14 @@ describe('HomePage (Panel de Control)', () => {
     expect(screen.getByText('Datos de ejemplo')).toBeInTheDocument();
   });
 
+  it('shows the brand only as a logo, with no brand wordmark or DNIT tagline next to it', () => {
+    render(<HomePage />);
+
+    expect(screen.getAllByRole('img', { name: 'SifenFlow' }).length).toBeGreaterThan(0);
+    expect(screen.queryByText('SifenFlow', { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText('DNIT FACTURACIÓN PY')).not.toBeInTheDocument();
+  });
+
   it('shows the non-dismissible test-environment legend and no environment toggle', () => {
     render(<HomePage />);
 

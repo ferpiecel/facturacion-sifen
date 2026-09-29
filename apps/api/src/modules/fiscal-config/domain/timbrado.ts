@@ -64,8 +64,17 @@ export function createTimbrado(input: CreateTimbradoInput): Timbrado {
 
 function requireValidDate(raw: string, field: string): string {
   const value = raw.trim();
-  if (!VALIDITY_DATE_PATTERN.test(value) || Number.isNaN(Date.parse(value))) {
+  if (!VALIDITY_DATE_PATTERN.test(value) || !isCalendarDate(value)) {
     throw new InvalidTimbradoError(`${field} "${raw}" must be a valid "AAAA-MM-DD" date`);
   }
   return value;
+}
+
+/**
+ * `Date.parse` silently rolls over impossible days ("2026-02-30" becomes
+ * March 2nd), so round-trip the parsed UTC date back to its string form.
+ */
+function isCalendarDate(value: string): boolean {
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }

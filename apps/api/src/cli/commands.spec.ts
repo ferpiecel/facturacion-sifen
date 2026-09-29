@@ -223,6 +223,8 @@ describe('addEstablishment (HU-E2-02)', () => {
       code,
       address: 'Avda. Siempre Viva 123',
       houseNumber: '123',
+      addressComplement1: 'Casi Av. Mcal. Lopez',
+      addressComplement2: 'Piso 2',
       departmentCode: 11,
       districtCode: '145',
       districtDescription: 'Ciudad del Este',
@@ -230,7 +232,7 @@ describe('addEstablishment (HU-E2-02)', () => {
       cityDescription: 'Ciudad del Este',
     });
 
-  it('inserts an establishment for an existing tenant', async () => {
+  it('inserts an establishment for an existing tenant, persisting every field', async () => {
     handle = createPgliteDatabase();
     await handle.migrate();
     const { id: tenantId } = await createTenant(handle.db, 'Establishment Tenant');
@@ -249,9 +251,42 @@ describe('addEstablishment (HU-E2-02)', () => {
       tenantId,
       code: '001',
       address: 'Avda. Siempre Viva 123',
+      houseNumber: '123',
+      addressComplement1: 'Casi Av. Mcal. Lopez',
+      addressComplement2: 'Piso 2',
       departmentCode: '11',
       districtCode: '145',
+      districtDescription: 'Ciudad del Este',
       cityCode: '3316',
+      cityDescription: 'Ciudad del Este',
+    });
+  });
+
+  it('inserts an establishment without district/district-description (both optional)', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Establishment Tenant');
+
+    const establishment = createEstablishment({
+      code: '002',
+      address: 'Avda. Siempre Viva 123',
+      houseNumber: '123',
+      departmentCode: 11,
+      cityCode: '3316',
+      cityDescription: 'Ciudad del Este',
+    });
+
+    const result = await addEstablishment(handle.db, { tenantId, establishment });
+
+    const [row] = await handle.db
+      .select()
+      .from(tenantEstablishments)
+      .where(eq(tenantEstablishments.id, result.id));
+    expect(row).toMatchObject({
+      districtCode: null,
+      districtDescription: null,
+      addressComplement1: null,
+      addressComplement2: null,
     });
   });
 
@@ -273,8 +308,10 @@ describe('addEstablishment (HU-E2-02)', () => {
     const { id: tenantId } = await createTenant(handle.db, 'Establishment Tenant');
     await addEstablishment(handle.db, { tenantId, establishment: buildEstablishment() });
 
-    await expect(
-      addEstablishment(handle.db, { tenantId, establishment: buildEstablishment() }),
-    ).rejects.toThrow();
+    const rejection = addEstablishment(handle.db, { tenantId, establishment: buildEstablishment() });
+    await expect(rejection).rejects.toThrow();
+    const cause = await rejection.catch((error: unknown) => (error as { cause?: unknown }).cause);
+    expect(cause).toBeInstanceOf(Error);
+    expect((cause as Error).message).toContain('tenant_establishments_tenant_code_idx');
   });
 });

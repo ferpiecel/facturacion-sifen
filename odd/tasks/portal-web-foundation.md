@@ -33,7 +33,7 @@ Stitch design (project 14175002856948249287), wired into every monorepo quality 
 - [x] T3 (inline) RED: failing specs for the four display components.
 - [x] T4 (inline) GREEN: components. — PR 2 boundary.
 - [x] T5 (inline) RED: failing spec for the panel shell.
-- [ ] T6 (inline) GREEN: sidebar + topbar + environment legend. — PR 3 boundary.
+- [x] T6 (inline) GREEN: sidebar + topbar + environment legend. — PR 3 boundary.
 - [ ] T7 (inline) RED: failing spec for the panel content.
 - [ ] T8 (inline) GREEN: hero, KPI cards, recent documents table. — PR 4 boundary.
 

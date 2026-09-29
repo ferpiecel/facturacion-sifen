@@ -27,30 +27,30 @@ describe('createTimbrado', () => {
   });
 
   it('rejects a number that is not exactly 8 digits', () => {
-    expect(() =>
-      createTimbrado({ number: '1234567', validityStart: '2024-01-15' }),
-    ).toThrow(InvalidTimbradoError);
-    expect(() =>
-      createTimbrado({ number: '123456789', validityStart: '2024-01-15' }),
-    ).toThrow(InvalidTimbradoError);
+    expect(() => createTimbrado({ number: '1234567', validityStart: '2024-01-15' })).toThrow(
+      InvalidTimbradoError,
+    );
+    expect(() => createTimbrado({ number: '123456789', validityStart: '2024-01-15' })).toThrow(
+      InvalidTimbradoError,
+    );
   });
 
   it('rejects an all-zero number', () => {
-    expect(() =>
-      createTimbrado({ number: '00000000', validityStart: '2024-01-15' }),
-    ).toThrow(InvalidTimbradoError);
+    expect(() => createTimbrado({ number: '00000000', validityStart: '2024-01-15' })).toThrow(
+      InvalidTimbradoError,
+    );
   });
 
   it('rejects a validity start before 2018-05-01 (dFeIniT, XSD minInclusive)', () => {
-    expect(() =>
-      createTimbrado({ number: '12345678', validityStart: '2018-04-30' }),
-    ).toThrow(InvalidTimbradoError);
+    expect(() => createTimbrado({ number: '12345678', validityStart: '2018-04-30' })).toThrow(
+      InvalidTimbradoError,
+    );
   });
 
   it('rejects a malformed validity start date', () => {
-    expect(() =>
-      createTimbrado({ number: '12345678', validityStart: '2024-13-01' }),
-    ).toThrow(InvalidTimbradoError);
+    expect(() => createTimbrado({ number: '12345678', validityStart: '2024-13-01' })).toThrow(
+      InvalidTimbradoError,
+    );
   });
 
   it('rejects a validity end before the validity start', () => {

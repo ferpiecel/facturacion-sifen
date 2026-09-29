@@ -166,6 +166,79 @@ describe('parseOpsArgs fiscal:set (HU-E2-01)', () => {
   });
 });
 
+describe('parseOpsArgs establishment:add (HU-E2-02)', () => {
+  type FlagMap = Record<string, string | undefined>;
+  const baseFlags: FlagMap = {
+    tenant: 't-1',
+    code: '001',
+    address: 'Avda. Siempre Viva 123',
+    'house-number': '123',
+    department: '11',
+    district: '145',
+    'district-description': 'Ciudad del Este',
+    city: '3316',
+    'city-description': 'Ciudad del Este',
+  };
+
+  function argsFor(overrides: FlagMap): string[] {
+    const flags: FlagMap = { ...baseFlags, ...overrides };
+    return [
+      'establishment:add',
+      ...Object.entries(flags).flatMap(([flag, value]) =>
+        value === undefined ? [] : [`--${flag}`, value],
+      ),
+    ];
+  }
+
+  it('parses a full establishment:add command', () => {
+    const command = parseOpsArgs(argsFor({}));
+
+    expect(command).toEqual({
+      kind: 'establishment:add',
+      tenantId: 't-1',
+      establishment: {
+        code: '001',
+        address: 'Avda. Siempre Viva 123',
+        houseNumber: '123',
+        addressComplement1: null,
+        addressComplement2: null,
+        departmentCode: 11,
+        departmentDescription: 'ALTO PARANA',
+        districtCode: '145',
+        districtDescription: 'Ciudad del Este',
+        cityCode: '3316',
+        cityDescription: 'Ciudad del Este',
+      },
+    });
+  });
+
+  it.each([
+    ['tenant', undefined],
+    ['code', undefined],
+    ['address', undefined],
+    ['house-number', undefined],
+    ['department', undefined],
+    ['district', undefined],
+    ['district-description', undefined],
+    ['city', undefined],
+    ['city-description', undefined],
+  ])('rejects missing --%s', (flag) => {
+    expect(() => parseOpsArgs(argsFor({ [flag]: undefined }))).toThrow(OpsArgError);
+  });
+
+  it('rejects a non-numeric --department', () => {
+    expect(() => parseOpsArgs(argsFor({ department: 'abc' }))).toThrow(OpsArgError);
+  });
+
+  it('rejects an unknown --department code (domain validation)', () => {
+    expect(() => parseOpsArgs(argsFor({ department: '99' }))).toThrow();
+  });
+
+  it('rejects an invalid --code (domain validation)', () => {
+    expect(() => parseOpsArgs(argsFor({ code: '000' }))).toThrow();
+  });
+});
+
 describe('getOpsDatabaseUrl (HU-E1-05)', () => {
   it('returns OPS_DATABASE_URL when set', () => {
     expect(getOpsDatabaseUrl({ OPS_DATABASE_URL: 'postgres://owner@host/db' })).toBe(

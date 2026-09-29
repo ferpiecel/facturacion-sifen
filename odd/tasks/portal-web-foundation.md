@@ -35,7 +35,7 @@ Stitch design (project 14175002856948249287), wired into every monorepo quality 
 - [x] T5 (inline) RED: failing spec for the panel shell.
 - [x] T6 (inline) GREEN: sidebar + topbar + environment legend. — PR 3 boundary.
 - [x] T7 (inline) RED: failing spec for the panel content.
-- [ ] T8 (inline) GREEN: hero, KPI cards, recent documents table. — PR 4 boundary.
+- [x] T8 (inline) GREEN: hero, KPI cards, recent documents table. — PR 4 boundary.
 
 Route: inline — a single delegated writer subagent handles every task.
 
@@ -71,4 +71,9 @@ Route: inline — a single delegated writer subagent handles every task.
 
 ## Progress
 
-- Pending.
+- T1–T8 done; each RED commit observed failing before its GREEN commit.
+- Evidence (2026-09-29): `pnpm install` up to date; `pnpm check` 30/30 tasks; `pnpm run format:check` clean;
+  `turbo run build coverage depcruise --filter @sifen/web` 3/3; web coverage 100 % (41 tests).
+- Not verified: visual comparison against the Stitch screenshot in a real browser (no headless browser in the
+  environment).
+- Next: PO approval of the deviations; then Explorer screen (HU-E12-01/02).

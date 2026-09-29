@@ -91,7 +91,11 @@ export function createEstablishment(input: CreateEstablishmentInput): Establishm
   if (!CITY_CODE_PATTERN.test(cityCode)) {
     throw new InvalidEstablishmentError(`cityCode "${cityCode}" must be 1 to 5 digits (cCiuEmi)`);
   }
-  const cityDescription = requireNonEmpty(input.cityDescription, 'cityDescription (dDesCiuEmi)', 30);
+  const cityDescription = requireNonEmpty(
+    input.cityDescription,
+    'cityDescription (dDesCiuEmi)',
+    30,
+  );
 
   return {
     code,

@@ -1,6 +1,8 @@
 import { sql } from 'drizzle-orm';
 import {
   check,
+  date,
+  foreignKey,
   index,
   pgEnum,
   pgTable,
@@ -171,6 +173,136 @@ export const tenantFiscalEconomicActivities = pgTable(
 );
 
 /**
+ * Establishments (dEst, MT §D2 D107 / XSD tdEst): tenant-scoped physical
+ * locations that issue documents. `code` is the 3-digit dEst (never
+ * "000"); `departmentCode`/`districtCode`/`cityCode` mirror cDepEmi/
+ * cDisEmi/cCiuEmi (HU-E2-02). The closed code lists ("Tabla 2 –
+ * Departamentos" etc.) aren't in docs/referencia/dnit, so only the format
+ * is enforced here, same approach as `regimeCode`/`code` above.
+ */
+export const tenantEstablishments = pgTable(
+  'tenant_establishments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    // dEst (MT §D2, D107 / XSD tdEst): 3 digits, not all zeros.
+    code: varchar('code', { length: 3 }).notNull(),
+    // dDirEmi (MT §D2, D109 / XSD tdDirec): up to 255 chars.
+    address: varchar('address', { length: 255 }).notNull(),
+    // cDepEmi (MT §D2, D111 / XSD tDepartamentos): 1-2 digits. Closed code
+    // list ("Tabla 2 – Departamentos") not present in docs/referencia/dnit.
+    departmentCode: varchar('department_code', { length: 2 }).notNull(),
+    // cDisEmi (MT §D2, D113 / XSD tcDisEmi): 1-4 digits.
+    districtCode: varchar('district_code', { length: 4 }).notNull(),
+    // cCiuEmi (MT §D2, D115 / XSD tcCiuEmi): 1-5 digits.
+    cityCode: varchar('city_code', { length: 5 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('tenant_establishments_tenant_id_idx').on(table.tenantId),
+    uniqueIndex('tenant_establishments_tenant_code_idx').on(table.tenantId, table.code),
+    // Composite target for tenant_expedition_points' (tenant_id, establishment_id)
+    // FK, so a child row can never point at another tenant's establishment.
+    uniqueIndex('tenant_establishments_tenant_id_id_idx').on(table.tenantId, table.id),
+    check(
+      'tenant_establishments_code_format',
+      sql`${table.code} ~ '^[0-9]{3}$' AND ${table.code} <> '000'`,
+    ),
+    check(
+      'tenant_establishments_department_code_format',
+      sql`${table.departmentCode} ~ '^[0-9]{1,2}$'`,
+    ),
+    check(
+      'tenant_establishments_district_code_format',
+      sql`${table.districtCode} ~ '^[0-9]{1,4}$'`,
+    ),
+    check('tenant_establishments_city_code_format', sql`${table.cityCode} ~ '^[0-9]{1,5}$'`),
+  ],
+);
+
+/**
+ * Expedition points (dPunExp, MT §C006 / XSD tdPunExp): tenant-scoped,
+ * always attached to one establishment (HU-E2-02). The FK is composite on
+ * `(tenant_id, establishment_id)` against `tenant_establishments(tenant_id,
+ * id)` so a row can never reference another tenant's establishment even if
+ * an attacker guesses a valid `establishment_id` (defense in depth on top
+ * of RLS).
+ */
+export const tenantExpeditionPoints = pgTable(
+  'tenant_expedition_points',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    establishmentId: uuid('establishment_id').notNull(),
+    // dPunExp (MT §C006 / XSD tdPunExp): 3 digits, not all zeros.
+    code: varchar('code', { length: 3 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('tenant_expedition_points_tenant_id_idx').on(table.tenantId),
+    index('tenant_expedition_points_establishment_id_idx').on(table.establishmentId),
+    uniqueIndex('tenant_expedition_points_tenant_establishment_code_idx').on(
+      table.tenantId,
+      table.establishmentId,
+      table.code,
+    ),
+    foreignKey({
+      columns: [table.tenantId, table.establishmentId],
+      foreignColumns: [tenantEstablishments.tenantId, tenantEstablishments.id],
+      name: 'tenant_expedition_points_tenant_establishment_fk',
+    }),
+    check(
+      'tenant_expedition_points_code_format',
+      sql`${table.code} ~ '^[0-9]{3}$' AND ${table.code} <> '000'`,
+    ),
+  ],
+);
+
+/**
+ * Timbrados (dNumTim, MT §C004 / XSD tdNumTim): tenant-scoped authorization
+ * numbers issued by SET to the emitter (HU-E2-02). Per the MT a timbrado
+ * covers the issuer (RUC), not a single establishment/expedition point —
+ * SIFEN's own habilitación (SGTM) links a timbrado to up to one
+ * establishment and 3 points (plan-desarrollo-v1.1.md §"Timbrado"), but
+ * that linkage belongs to a future numbering/habilitación table
+ * (`numeracion_secuencial` in the plan), not this one.
+ */
+export const tenantTimbrados = pgTable(
+  'tenant_timbrados',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    // dNumTim (MT §C004 / XSD tdNumTim): 8 digits, not all zeros.
+    number: varchar('number', { length: 8 }).notNull(),
+    // dFeIniT (MT §C008 / XSD tdFeIniT): minInclusive 2018-05-01, enforced
+    // by the domain layer (`createTimbrado`), not by a DB-level check.
+    validFrom: date('valid_from').notNull(),
+    // dFeFinT (MT §C008 / XSD tdFeFinT): optional, must not precede validFrom.
+    validTo: date('valid_to'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('tenant_timbrados_tenant_id_idx').on(table.tenantId),
+    uniqueIndex('tenant_timbrados_tenant_number_idx').on(table.tenantId, table.number),
+    check(
+      'tenant_timbrados_number_format',
+      sql`${table.number} ~ '^[0-9]{8}$' AND ${table.number} <> '00000000'`,
+    ),
+    check(
+      'tenant_timbrados_valid_to_after_valid_from',
+      sql`${table.validTo} IS NULL OR ${table.validTo} >= ${table.validFrom}`,
+    ),
+  ],
+);
+
+/**
  * Every table that carries a `tenant_id` column and MUST be covered by
  * `FORCE ROW LEVEL SECURITY` plus a tenant-isolation policy. The
  * `rls-coverage.spec.ts` drift check discovers these tables from the
@@ -178,7 +310,10 @@ export const tenantFiscalEconomicActivities = pgTable(
  */
 export const TENANT_TABLES = [
   'api_keys',
+  'tenant_establishments',
+  'tenant_expedition_points',
   'tenant_fiscal_economic_activities',
   'tenant_fiscal_profiles',
   'tenant_probe',
+  'tenant_timbrados',
 ] as const;

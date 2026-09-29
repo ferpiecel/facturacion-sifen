@@ -4,6 +4,15 @@ import { describe, expect, it } from 'vitest';
 import HomePage from './page';
 
 describe('HomePage (Panel de Control)', () => {
+  it('welcomes the user with the brand name in a single top-level heading', () => {
+    render(<HomePage />);
+
+    expect(
+      screen.getByRole('heading', { level: 1, name: '¡Bienvenido a SifenFlow!' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Datos de ejemplo')).toBeInTheDocument();
+  });
+
   it('shows the non-dismissible test-environment legend and no environment toggle', () => {
     render(<HomePage />);
 
@@ -20,6 +29,19 @@ describe('HomePage (Panel de Control)', () => {
       'page',
     );
     expect(within(nav).getAllByRole('link')).toHaveLength(3);
+  });
+
+  it('lists recent documents with status, 44-digit CDC and Guaraní amounts', () => {
+    render(<HomePage />);
+
+    const table = screen.getByRole('table');
+    const rows = within(table).getAllByRole('row');
+    expect(rows).toHaveLength(6);
+    expect(within(table).getAllByText('Aprobado SIFEN')).toHaveLength(5);
+    expect(within(table).getAllByRole('button', { name: 'Copiar CDC' })).toHaveLength(5);
+    expect(within(table).getByText('01-80012345-0...585')).toBeInTheDocument();
+    expect(within(table).getByText('₲ 12.850.000')).toBeInTheDocument();
+    expect(within(table).getByText('-₲ 650.000')).toHaveClass('text-error');
   });
 
   it('labels icon-only controls for assistive technology', () => {

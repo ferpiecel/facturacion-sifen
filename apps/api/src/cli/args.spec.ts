@@ -308,6 +308,78 @@ describe('parseOpsArgs point:add (HU-E2-02)', () => {
   });
 });
 
+describe('parseOpsArgs timbrado:add (HU-E2-02)', () => {
+  it('parses a full timbrado:add command', () => {
+    expect(
+      parseOpsArgs([
+        'timbrado:add',
+        '--tenant',
+        't-1',
+        '--number',
+        '12345678',
+        '--valid-from',
+        '2024-01-01',
+        '--valid-to',
+        '2025-01-01',
+      ]),
+    ).toEqual({
+      kind: 'timbrado:add',
+      tenantId: 't-1',
+      timbrado: { number: '12345678', validityStart: '2024-01-01', validityEnd: '2025-01-01' },
+    });
+  });
+
+  it('parses timbrado:add without --valid-to', () => {
+    const command = parseOpsArgs([
+      'timbrado:add',
+      '--tenant',
+      't-1',
+      '--number',
+      '12345678',
+      '--valid-from',
+      '2024-01-01',
+    ]);
+
+    expect(command).toEqual({
+      kind: 'timbrado:add',
+      tenantId: 't-1',
+      timbrado: { number: '12345678', validityStart: '2024-01-01', validityEnd: null },
+    });
+  });
+
+  it.each([
+    ['tenant', undefined],
+    ['number', undefined],
+    ['valid-from', undefined],
+  ])('rejects missing --%s', (flag) => {
+    const flags: Record<string, string | undefined> = {
+      tenant: 't-1',
+      number: '12345678',
+      'valid-from': '2024-01-01',
+      [flag]: undefined,
+    };
+    const args = [
+      'timbrado:add',
+      ...Object.entries(flags).flatMap(([f, v]) => (v === undefined ? [] : [`--${f}`, v])),
+    ];
+    expect(() => parseOpsArgs(args)).toThrow(OpsArgError);
+  });
+
+  it('rejects an impossible calendar date (domain validation)', () => {
+    expect(() =>
+      parseOpsArgs([
+        'timbrado:add',
+        '--tenant',
+        't-1',
+        '--number',
+        '12345678',
+        '--valid-from',
+        '2024-02-30',
+      ]),
+    ).toThrow();
+  });
+});
+
 describe('getOpsDatabaseUrl (HU-E1-05)', () => {
   it('returns OPS_DATABASE_URL when set', () => {
     expect(getOpsDatabaseUrl({ OPS_DATABASE_URL: 'postgres://owner@host/db' })).toBe(

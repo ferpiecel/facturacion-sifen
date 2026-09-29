@@ -4,6 +4,7 @@ import { createEstablishment } from '../modules/fiscal-config/domain/establishme
 import { createExpeditionPoint } from '../modules/fiscal-config/domain/expedition-point.js';
 import { createFiscalProfile } from '../modules/fiscal-config/domain/fiscal-profile.js';
 import { parseRuc } from '../modules/fiscal-config/domain/ruc.js';
+import { createTimbrado } from '../modules/fiscal-config/domain/timbrado.js';
 import { addEstablishment, createTenant } from './commands.js';
 import { formatOpsError, runOpsCommand } from './ops.js';
 
@@ -140,6 +141,17 @@ describe('runOpsCommand (HU-E1-05)', () => {
     });
 
     expect(output).toMatch(/^expedition point created: [0-9a-f-]{36} \(code 002\)$/);
+  });
+
+  it('timbrado:add prints the new timbrado id and number', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Timbrado Tenant');
+    const timbrado = createTimbrado({ number: '12345678', validityStart: '2024-01-01' });
+
+    const output = await runOpsCommand(handle.db, { kind: 'timbrado:add', tenantId, timbrado });
+
+    expect(output).toMatch(/^timbrado created: [0-9a-f-]{36} \(number 12345678\)$/);
   });
 });
 

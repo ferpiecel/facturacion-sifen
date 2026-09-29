@@ -3,6 +3,7 @@ import { getOpsDatabaseUrl, parseOpsArgs, type OpsCommand } from './args.js';
 import {
   addEstablishment,
   addExpeditionPoint,
+  addTimbrado,
   createPartner,
   createTenant,
   issueApiKey,
@@ -64,6 +65,13 @@ export async function runOpsCommand(db: Database, command: OpsCommand): Promise<
         point: command.point,
       });
       return `expedition point created: ${result.id} (code ${result.code})`;
+    }
+    case 'timbrado:add': {
+      const result = await addTimbrado(db, {
+        tenantId: command.tenantId,
+        timbrado: command.timbrado,
+      });
+      return `timbrado created: ${result.id} (number ${result.number})`;
     }
   }
 }

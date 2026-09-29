@@ -400,12 +400,16 @@ describe('addExpeditionPoint (HU-E2-02)', () => {
       point: createExpeditionPoint({ code: '002' }),
     });
 
-    await expect(
-      addExpeditionPoint(handle.db, {
-        tenantId,
-        establishmentCode: '001',
-        point: createExpeditionPoint({ code: '002' }),
-      }),
-    ).rejects.toThrow();
+    const rejection = addExpeditionPoint(handle.db, {
+      tenantId,
+      establishmentCode: '001',
+      point: createExpeditionPoint({ code: '002' }),
+    });
+    await expect(rejection).rejects.toThrow();
+    const cause = await rejection.catch((error: unknown) => (error as { cause?: unknown }).cause);
+    expect(cause).toBeInstanceOf(Error);
+    expect((cause as Error).message).toContain(
+      'tenant_expedition_points_tenant_establishment_code_idx',
+    );
   });
 });

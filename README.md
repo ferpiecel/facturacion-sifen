@@ -54,9 +54,10 @@ pnpm --filter @sifen/api ops apikey:create --tenant <tenant-id> --env test --sco
 pnpm --filter @sifen/api ops apikey:revoke --key-id <key-id>
 pnpm --filter @sifen/api ops fiscal:set --tenant <tenant-id> --ruc 4490207-7 --legal-name "Acme SA" --taxpayer-type juridica --activity 62010:"Programación informática"
 pnpm --filter @sifen/api ops establishment:add --tenant <tenant-id> --code 001 --address "Avda. Siempre Viva 123" --house-number 123 --department 11 --district 145 --district-description "Ciudad del Este" --city 3316 --city-description "Ciudad del Este"
+pnpm --filter @sifen/api ops point:add --tenant <tenant-id> --establishment 001 --code 001
 ```
 
-`establishment:add` valida el establecimiento con el dominio de `fiscal-config` antes de tocar la base, pero `tenant_establishments` (migración 0007) todavía no tiene columnas para `--house-number` (dNumCas), los complementos de dirección (dCompDir1/2) ni las descripciones de distrito/ciudad (dDesDisEmi/dDesCiuEmi): el CLI los exige y valida, pero no los persiste. `--district`/`--district-description` son obligatorios en el CLI aunque el dominio los permite ausentes, porque `district_code` es `NOT NULL` en esa misma migración.
+`establishment:add` valida el establecimiento con el dominio de `fiscal-config` antes de tocar la base, pero `tenant_establishments` (migración 0007) todavía no tiene columnas para `--house-number` (dNumCas), los complementos de dirección (dCompDir1/2) ni las descripciones de distrito/ciudad (dDesDisEmi/dDesCiuEmi): el CLI los exige y valida, pero no los persiste. `--district`/`--district-description` son obligatorios en el CLI aunque el dominio los permite ausentes, porque `district_code` es `NOT NULL` en esa misma migración. `point:add` resuelve el establecimiento por `(tenant, --establishment)`; si no existe, falla con un error claro en vez de una violación de FK cruda.
 
 `apikey:create` imprime la API key completa (`sk_test_...` / `sk_live_...`) **una sola vez**: no queda guardada en ningún lado más que como hash, así que hay que copiarla en ese momento. El CLI nunca vuelve a loguearla, ni siquiera en `apikey:revoke`.
 

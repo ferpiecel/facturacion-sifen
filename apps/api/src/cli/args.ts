@@ -92,6 +92,23 @@ function parseDepartmentCode(value: string | undefined): number {
   return code;
 }
 
+/**
+ * `--district`/`--district-description` (cDisEmi/dDesDisEmi) mirror the
+ * domain's occurrence-0-1 rule: both present or both absent. Passing only
+ * one is a usage error here rather than a silent domain rejection later.
+ */
+function parseDistrict(
+  district: string | undefined,
+  districtDescription: string | undefined,
+): { districtCode: string | undefined; districtDescription: string | undefined } {
+  if ((district === undefined) !== (districtDescription === undefined)) {
+    throw new OpsArgError(
+      '--district and --district-description must both be provided or both omitted',
+    );
+  }
+  return { districtCode: district, districtDescription };
+}
+
 /** Parses `argv` (without `node`/script) into one typed operator command, or throws {@link OpsArgError}. */
 export function parseOpsArgs(argv: string[]): OpsCommand {
   const [subcommand, ...rest] = argv;
@@ -174,6 +191,8 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
           code: { type: 'string' },
           address: { type: 'string' },
           'house-number': { type: 'string' },
+          'address-complement-1': { type: 'string' },
+          'address-complement-2': { type: 'string' },
           department: { type: 'string' },
           district: { type: 'string' },
           'district-description': { type: 'string' },
@@ -182,13 +201,20 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
         },
       });
 
+      const { districtCode, districtDescription } = parseDistrict(
+        values.district,
+        values['district-description'],
+      );
+
       const establishment = createEstablishment({
         code: requireOption(values.code, 'code'),
         address: requireOption(values.address, 'address'),
         houseNumber: requireOption(values['house-number'], 'house-number'),
+        addressComplement1: values['address-complement-1'],
+        addressComplement2: values['address-complement-2'],
         departmentCode: parseDepartmentCode(values.department),
-        districtCode: requireOption(values.district, 'district'),
-        districtDescription: requireOption(values['district-description'], 'district-description'),
+        districtCode,
+        districtDescription,
         cityCode: requireOption(values.city, 'city'),
         cityDescription: requireOption(values['city-description'], 'city-description'),
       });

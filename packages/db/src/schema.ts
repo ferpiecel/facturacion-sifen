@@ -191,13 +191,27 @@ export const tenantEstablishments = pgTable(
     code: varchar('code', { length: 3 }).notNull(),
     // dDirEmi (MT §D2, D109 / XSD tdDirec): up to 255 chars.
     address: varchar('address', { length: 255 }).notNull(),
+    // dNumCas (MT §D2, D110 / XSD tdNumCas): 1-6 chars, "0" when the
+    // property has no numbering. Always required (domain: houseNumber).
+    houseNumber: varchar('house_number', { length: 6 }).notNull(),
+    // dCompDir1 (MT §D2, D110b): optional, same length class as dDirEmi.
+    addressComplement1: varchar('address_complement_1', { length: 255 }),
+    // dCompDir2 (MT §D2, D110c): optional, same length class as dDirEmi.
+    addressComplement2: varchar('address_complement_2', { length: 255 }),
     // cDepEmi (MT §D2, D111 / XSD tDepartamentos): 1-2 digits. Closed code
     // list ("Tabla 2 – Departamentos") not present in docs/referencia/dnit.
     departmentCode: varchar('department_code', { length: 2 }).notNull(),
-    // cDisEmi (MT §D2, D113 / XSD tcDisEmi): 1-4 digits.
-    districtCode: varchar('district_code', { length: 4 }).notNull(),
+    // cDisEmi (MT §D2, D113 / XSD tcDisEmi): 1-4 digits, occurrence 0-1.
+    // Nullable: the domain allows omitting it (see the pairing CHECK below).
+    districtCode: varchar('district_code', { length: 4 }),
+    // dDesDisEmi (MT §D2, D114): required together with cDisEmi, same
+    // length class as dDesCiuEmi below.
+    districtDescription: varchar('district_description', { length: 30 }),
     // cCiuEmi (MT §D2, D115 / XSD tcCiuEmi): 1-5 digits.
     cityCode: varchar('city_code', { length: 5 }).notNull(),
+    // dDesCiuEmi (MT §D2, D116): 1-30 chars, always required (domain:
+    // cityDescription).
+    cityDescription: varchar('city_description', { length: 30 }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -218,6 +232,12 @@ export const tenantEstablishments = pgTable(
     check(
       'tenant_establishments_district_code_format',
       sql`${table.districtCode} ~ '^[0-9]{1,4}$'`,
+    ),
+    // Mirrors the domain's pairing rule (createEstablishment): cDisEmi and
+    // dDesDisEmi must both be present or both be absent.
+    check(
+      'tenant_establishments_district_code_description_pairing',
+      sql`(${table.districtCode} IS NULL) = (${table.districtDescription} IS NULL)`,
     ),
     check('tenant_establishments_city_code_format', sql`${table.cityCode} ~ '^[0-9]{1,5}$'`),
   ],

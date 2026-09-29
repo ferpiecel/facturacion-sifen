@@ -191,7 +191,33 @@ describe('parseOpsArgs establishment:add (HU-E2-02)', () => {
   }
 
   it('parses a full establishment:add command', () => {
-    const command = parseOpsArgs(argsFor({}));
+    const command = parseOpsArgs(
+      argsFor({ 'address-complement-1': 'Casi Av. Mcal. Lopez', 'address-complement-2': 'Piso 2' }),
+    );
+
+    expect(command).toEqual({
+      kind: 'establishment:add',
+      tenantId: 't-1',
+      establishment: {
+        code: '001',
+        address: 'Avda. Siempre Viva 123',
+        houseNumber: '123',
+        addressComplement1: 'Casi Av. Mcal. Lopez',
+        addressComplement2: 'Piso 2',
+        departmentCode: 11,
+        departmentDescription: 'ALTO PARANA',
+        districtCode: '145',
+        districtDescription: 'Ciudad del Este',
+        cityCode: '3316',
+        cityDescription: 'Ciudad del Este',
+      },
+    });
+  });
+
+  it('parses establishment:add without district/district-description (both optional)', () => {
+    const command = parseOpsArgs(
+      argsFor({ district: undefined, 'district-description': undefined }),
+    );
 
     expect(command).toEqual({
       kind: 'establishment:add',
@@ -204,8 +230,8 @@ describe('parseOpsArgs establishment:add (HU-E2-02)', () => {
         addressComplement2: null,
         departmentCode: 11,
         departmentDescription: 'ALTO PARANA',
-        districtCode: '145',
-        districtDescription: 'Ciudad del Este',
+        districtCode: null,
+        districtDescription: null,
         cityCode: '3316',
         cityDescription: 'Ciudad del Este',
       },
@@ -218,12 +244,18 @@ describe('parseOpsArgs establishment:add (HU-E2-02)', () => {
     ['address', undefined],
     ['house-number', undefined],
     ['department', undefined],
-    ['district', undefined],
-    ['district-description', undefined],
     ['city', undefined],
     ['city-description', undefined],
   ])('rejects missing --%s', (flag) => {
     expect(() => parseOpsArgs(argsFor({ [flag]: undefined }))).toThrow(OpsArgError);
+  });
+
+  it('rejects --district without --district-description', () => {
+    expect(() => parseOpsArgs(argsFor({ 'district-description': undefined }))).toThrow(OpsArgError);
+  });
+
+  it('rejects --district-description without --district', () => {
+    expect(() => parseOpsArgs(argsFor({ district: undefined }))).toThrow(OpsArgError);
   });
 
   it('rejects a non-numeric --department', () => {

@@ -466,6 +466,10 @@ describe('addTimbrado (HU-E2-02)', () => {
     const { id: tenantId } = await createTenant(handle.db, 'Timbrado Tenant');
     await addTimbrado(handle.db, { tenantId, timbrado: buildTimbrado() });
 
-    await expect(addTimbrado(handle.db, { tenantId, timbrado: buildTimbrado() })).rejects.toThrow();
+    const rejection = addTimbrado(handle.db, { tenantId, timbrado: buildTimbrado() });
+    await expect(rejection).rejects.toThrow();
+    const cause = await rejection.catch((error: unknown) => (error as { cause?: unknown }).cause);
+    expect(cause).toBeInstanceOf(Error);
+    expect((cause as Error).message).toContain('tenant_timbrados_tenant_number_idx');
   });
 });

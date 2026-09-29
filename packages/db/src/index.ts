@@ -10,10 +10,13 @@ export {
   fiscalTaxpayerType,
   partners,
   TENANT_TABLES,
+  tenantEstablishments,
+  tenantExpeditionPoints,
   tenantFiscalEconomicActivities,
   tenantFiscalProfiles,
   tenantProbe,
   tenants,
+  tenantTimbrados,
 } from './schema.js';
 export { InvalidTenantIdError, PrivilegedSessionError } from './errors.js';
 export { assertValidTenantId, isValidTenantId } from './tenant-id.js';

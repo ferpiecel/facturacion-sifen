@@ -4,10 +4,13 @@ import { getTableConfig } from 'drizzle-orm/pg-core';
 import {
   apiKeys,
   partners,
+  tenantEstablishments,
+  tenantExpeditionPoints,
   tenantFiscalEconomicActivities,
   tenantFiscalProfiles,
   tenantProbe,
   tenants,
+  tenantTimbrados,
 } from '../src/schema.js';
 
 /**
@@ -51,5 +54,17 @@ describe('schema foreign key targets', () => {
 
   it('partners has no foreign keys', () => {
     expectForeignKeyTargets(partners, []);
+  });
+
+  it('tenant_establishments.tenant_id references tenants', () => {
+    expectForeignKeyTargets(tenantEstablishments, ['tenants']);
+  });
+
+  it('tenant_expedition_points references tenants and tenant_establishments', () => {
+    expectForeignKeyTargets(tenantExpeditionPoints, ['tenants', 'tenant_establishments']);
+  });
+
+  it('tenant_timbrados.tenant_id references tenants', () => {
+    expectForeignKeyTargets(tenantTimbrados, ['tenants']);
   });
 });

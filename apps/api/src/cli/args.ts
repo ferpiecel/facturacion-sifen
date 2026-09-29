@@ -14,6 +14,7 @@ import {
   type TaxpayerType,
 } from '../modules/fiscal-config/domain/fiscal-profile.js';
 import { parseRuc } from '../modules/fiscal-config/domain/ruc.js';
+import { createTimbrado, type Timbrado } from '../modules/fiscal-config/domain/timbrado.js';
 import type { ApiKeyEnvironment } from '../modules/identity/domain/api-key.js';
 
 /** Invalid argv or missing environment for the operator CLI (backlog HU-E1-05). */
@@ -32,7 +33,8 @@ export type OpsCommand =
   | { kind: 'apikey:revoke'; keyId: string }
   | { kind: 'fiscal:set'; tenantId: string; profile: FiscalProfile }
   | { kind: 'establishment:add'; tenantId: string; establishment: Establishment }
-  | { kind: 'point:add'; tenantId: string; establishmentCode: string; point: ExpeditionPoint };
+  | { kind: 'point:add'; tenantId: string; establishmentCode: string; point: ExpeditionPoint }
+  | { kind: 'timbrado:add'; tenantId: string; timbrado: Timbrado };
 
 function requireOption(value: string | undefined, flag: string): string {
   if (!value) {
@@ -216,6 +218,29 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
         tenantId: requireOption(values.tenant, 'tenant'),
         establishmentCode: requireOption(values.establishment, 'establishment'),
         point,
+      };
+    }
+    case 'timbrado:add': {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          number: { type: 'string' },
+          'valid-from': { type: 'string' },
+          'valid-to': { type: 'string' },
+        },
+      });
+
+      const timbrado = createTimbrado({
+        number: requireOption(values.number, 'number'),
+        validityStart: requireOption(values['valid-from'], 'valid-from'),
+        validityEnd: values['valid-to'],
+      });
+
+      return {
+        kind: 'timbrado:add',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        timbrado,
       };
     }
     default:

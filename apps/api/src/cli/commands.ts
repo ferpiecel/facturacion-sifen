@@ -6,6 +6,7 @@ import {
   tenantExpeditionPoints,
   tenantFiscalEconomicActivities,
   tenantFiscalProfiles,
+  tenantTimbrados,
   tenants,
   type Database,
 } from '@sifen/db';
@@ -13,6 +14,7 @@ import type { Establishment } from '../modules/fiscal-config/domain/establishmen
 import type { ExpeditionPoint } from '../modules/fiscal-config/domain/expedition-point.js';
 import type { FiscalProfile } from '../modules/fiscal-config/domain/fiscal-profile.js';
 import { formatRuc } from '../modules/fiscal-config/domain/ruc.js';
+import type { Timbrado } from '../modules/fiscal-config/domain/timbrado.js';
 import type { ApiKeyEnvironment } from '../modules/identity/domain/api-key.js';
 import { Argon2SecretHasherAdapter } from '../modules/identity/infrastructure/adapters/argon2-secret-hasher.adapter.js';
 import { IssueApiKeyUseCase } from '../modules/identity/application/issue-api-key.use-case.js';
@@ -292,5 +294,42 @@ export async function addExpeditionPoint(
       .returning();
 
     return { id: required(row, 'expedition point was not inserted').id, code: point.code };
+  });
+}
+
+export interface AddTimbradoParams {
+  tenantId: string;
+  timbrado: Timbrado;
+}
+
+export interface AddTimbradoResult {
+  id: string;
+  number: string;
+}
+
+/** Operator CLI handler (backlog HU-E2-02): inserts one tenant-scoped timbrado. */
+export async function addTimbrado(
+  db: Database,
+  params: AddTimbradoParams,
+): Promise<AddTimbradoResult> {
+  const { tenantId, timbrado } = params;
+
+  return db.transaction(async (tx) => {
+    const found = await tx.select({ id: tenants.id }).from(tenants).where(eq(tenants.id, tenantId));
+    if (found.length === 0) {
+      throw new Error(`tenant not found: ${tenantId}`);
+    }
+
+    const [row] = await tx
+      .insert(tenantTimbrados)
+      .values({
+        tenantId,
+        number: timbrado.number,
+        validFrom: timbrado.validityStart,
+        validTo: timbrado.validityEnd,
+      })
+      .returning();
+
+    return { id: required(row, 'timbrado was not inserted').id, number: timbrado.number };
   });
 }

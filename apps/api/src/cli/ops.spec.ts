@@ -1,9 +1,10 @@
 import { createPgliteDatabase, type DatabaseHandle } from '@sifen/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEstablishment } from '../modules/fiscal-config/domain/establishment.js';
+import { createExpeditionPoint } from '../modules/fiscal-config/domain/expedition-point.js';
 import { createFiscalProfile } from '../modules/fiscal-config/domain/fiscal-profile.js';
 import { parseRuc } from '../modules/fiscal-config/domain/ruc.js';
-import { createTenant } from './commands.js';
+import { addEstablishment, createTenant } from './commands.js';
 import { formatOpsError, runOpsCommand } from './ops.js';
 
 describe('runOpsCommand (HU-E1-05)', () => {
@@ -111,6 +112,34 @@ describe('runOpsCommand (HU-E1-05)', () => {
     });
 
     expect(output).toMatch(/^establishment created: [0-9a-f-]{36} \(code 001\)$/);
+  });
+
+  it('point:add prints the new expedition point id and code', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Point Tenant');
+    await addEstablishment(handle.db, {
+      tenantId,
+      establishment: createEstablishment({
+        code: '001',
+        address: 'Avda. Siempre Viva 123',
+        houseNumber: '123',
+        departmentCode: 11,
+        districtCode: '145',
+        districtDescription: 'Ciudad del Este',
+        cityCode: '3316',
+        cityDescription: 'Ciudad del Este',
+      }),
+    });
+
+    const output = await runOpsCommand(handle.db, {
+      kind: 'point:add',
+      tenantId,
+      establishmentCode: '001',
+      point: createExpeditionPoint({ code: '002' }),
+    });
+
+    expect(output).toMatch(/^expedition point created: [0-9a-f-]{36} \(code 002\)$/);
   });
 });
 

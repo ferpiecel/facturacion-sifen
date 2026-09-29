@@ -239,6 +239,43 @@ describe('parseOpsArgs establishment:add (HU-E2-02)', () => {
   });
 });
 
+describe('parseOpsArgs point:add (HU-E2-02)', () => {
+  it('parses a point:add command', () => {
+    expect(
+      parseOpsArgs(['point:add', '--tenant', 't-1', '--establishment', '001', '--code', '002']),
+    ).toEqual({
+      kind: 'point:add',
+      tenantId: 't-1',
+      establishmentCode: '001',
+      point: { code: '002' },
+    });
+  });
+
+  it.each([
+    ['tenant', undefined],
+    ['establishment', undefined],
+    ['code', undefined],
+  ])('rejects missing --%s', (flag) => {
+    const flags: Record<string, string | undefined> = {
+      tenant: 't-1',
+      establishment: '001',
+      code: '002',
+      [flag]: undefined,
+    };
+    const args = [
+      'point:add',
+      ...Object.entries(flags).flatMap(([f, v]) => (v === undefined ? [] : [`--${f}`, v])),
+    ];
+    expect(() => parseOpsArgs(args)).toThrow(OpsArgError);
+  });
+
+  it('rejects an invalid --code (domain validation)', () => {
+    expect(() =>
+      parseOpsArgs(['point:add', '--tenant', 't-1', '--establishment', '001', '--code', '000']),
+    ).toThrow();
+  });
+});
+
 describe('getOpsDatabaseUrl (HU-E1-05)', () => {
   it('returns OPS_DATABASE_URL when set', () => {
     expect(getOpsDatabaseUrl({ OPS_DATABASE_URL: 'postgres://owner@host/db' })).toBe(

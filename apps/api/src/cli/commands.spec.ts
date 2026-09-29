@@ -2,6 +2,7 @@ import {
   apiKeys,
   createPgliteDatabase,
   tenantEstablishments,
+  tenantExpeditionPoints,
   tenantFiscalEconomicActivities,
   tenantFiscalProfiles,
   type Database,
@@ -10,10 +11,12 @@ import {
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createEstablishment } from '../modules/fiscal-config/domain/establishment.js';
+import { createExpeditionPoint } from '../modules/fiscal-config/domain/expedition-point.js';
 import { createFiscalProfile } from '../modules/fiscal-config/domain/fiscal-profile.js';
 import { parseRuc } from '../modules/fiscal-config/domain/ruc.js';
 import {
   addEstablishment,
+  addExpeditionPoint,
   createPartner,
   createTenant,
   issueApiKey,
@@ -316,5 +319,97 @@ describe('addEstablishment (HU-E2-02)', () => {
     const cause = await rejection.catch((error: unknown) => (error as { cause?: unknown }).cause);
     expect(cause).toBeInstanceOf(Error);
     expect((cause as Error).message).toContain('tenant_establishments_tenant_code_idx');
+  });
+});
+
+describe('addExpeditionPoint (HU-E2-02)', () => {
+  let handle: DatabaseHandle | undefined;
+
+  afterEach(async () => {
+    await handle?.close();
+    handle = undefined;
+  });
+
+  const buildEstablishment = () =>
+    createEstablishment({
+      code: '001',
+      address: 'Avda. Siempre Viva 123',
+      houseNumber: '123',
+      departmentCode: 11,
+      districtCode: '145',
+      districtDescription: 'Ciudad del Este',
+      cityCode: '3316',
+      cityDescription: 'Ciudad del Este',
+    });
+
+  it('inserts an expedition point resolved by tenant and establishment code', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Point Tenant');
+    await addEstablishment(handle.db, { tenantId, establishment: buildEstablishment() });
+
+    const result = await addExpeditionPoint(handle.db, {
+      tenantId,
+      establishmentCode: '001',
+      point: createExpeditionPoint({ code: '002' }),
+    });
+
+    expect(result.code).toBe('002');
+    const [row] = await handle.db
+      .select()
+      .from(tenantExpeditionPoints)
+      .where(eq(tenantExpeditionPoints.id, result.id));
+    expect(row).toMatchObject({ tenantId, code: '002' });
+  });
+
+  it('rejects an unknown tenant', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+
+    await expect(
+      addExpeditionPoint(handle.db, {
+        tenantId: '00000000-0000-0000-0000-000000000000',
+        establishmentCode: '001',
+        point: createExpeditionPoint({ code: '002' }),
+      }),
+    ).rejects.toThrow('tenant not found');
+  });
+
+  it('rejects an unknown establishment code for the tenant', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Point Tenant');
+
+    await expect(
+      addExpeditionPoint(handle.db, {
+        tenantId,
+        establishmentCode: '999',
+        point: createExpeditionPoint({ code: '002' }),
+      }),
+    ).rejects.toThrow('establishment not found');
+  });
+
+  it('rejects a duplicate code for the same establishment', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Point Tenant');
+    await addEstablishment(handle.db, { tenantId, establishment: buildEstablishment() });
+    await addExpeditionPoint(handle.db, {
+      tenantId,
+      establishmentCode: '001',
+      point: createExpeditionPoint({ code: '002' }),
+    });
+
+    const rejection = addExpeditionPoint(handle.db, {
+      tenantId,
+      establishmentCode: '001',
+      point: createExpeditionPoint({ code: '002' }),
+    });
+    await expect(rejection).rejects.toThrow();
+    const cause = await rejection.catch((error: unknown) => (error as { cause?: unknown }).cause);
+    expect(cause).toBeInstanceOf(Error);
+    expect((cause as Error).message).toContain(
+      'tenant_expedition_points_tenant_establishment_code_idx',
+    );
   });
 });

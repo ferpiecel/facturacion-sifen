@@ -2,6 +2,7 @@ import { createNodePostgresDatabase, type Database } from '@sifen/db';
 import { getOpsDatabaseUrl, parseOpsArgs, type OpsCommand } from './args.js';
 import {
   addEstablishment,
+  addExpeditionPoint,
   createPartner,
   createTenant,
   issueApiKey,
@@ -55,6 +56,14 @@ export async function runOpsCommand(db: Database, command: OpsCommand): Promise<
         establishment: command.establishment,
       });
       return `establishment created: ${result.id} (code ${result.code})`;
+    }
+    case 'point:add': {
+      const result = await addExpeditionPoint(db, {
+        tenantId: command.tenantId,
+        establishmentCode: command.establishmentCode,
+        point: command.point,
+      });
+      return `expedition point created: ${result.id} (code ${result.code})`;
     }
   }
 }

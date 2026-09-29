@@ -4,6 +4,10 @@ import {
   type Establishment,
 } from '../modules/fiscal-config/domain/establishment.js';
 import {
+  createExpeditionPoint,
+  type ExpeditionPoint,
+} from '../modules/fiscal-config/domain/expedition-point.js';
+import {
   createFiscalProfile,
   type EconomicActivity,
   type FiscalProfile,
@@ -27,7 +31,8 @@ export type OpsCommand =
     }
   | { kind: 'apikey:revoke'; keyId: string }
   | { kind: 'fiscal:set'; tenantId: string; profile: FiscalProfile }
-  | { kind: 'establishment:add'; tenantId: string; establishment: Establishment };
+  | { kind: 'establishment:add'; tenantId: string; establishment: Establishment }
+  | { kind: 'point:add'; tenantId: string; establishmentCode: string; point: ExpeditionPoint };
 
 function requireOption(value: string | undefined, flag: string): string {
   if (!value) {
@@ -218,6 +223,25 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
         kind: 'establishment:add',
         tenantId: requireOption(values.tenant, 'tenant'),
         establishment,
+      };
+    }
+    case 'point:add': {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          establishment: { type: 'string' },
+          code: { type: 'string' },
+        },
+      });
+
+      const point = createExpeditionPoint({ code: requireOption(values.code, 'code') });
+
+      return {
+        kind: 'point:add',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        establishmentCode: requireOption(values.establishment, 'establishment'),
+        point,
       };
     }
     default:

@@ -3,12 +3,14 @@ import {
   apiKeys,
   partners,
   tenantEstablishments,
+  tenantExpeditionPoints,
   tenantFiscalEconomicActivities,
   tenantFiscalProfiles,
   tenants,
   type Database,
 } from '@sifen/db';
 import type { Establishment } from '../modules/fiscal-config/domain/establishment.js';
+import type { ExpeditionPoint } from '../modules/fiscal-config/domain/expedition-point.js';
 import type { FiscalProfile } from '../modules/fiscal-config/domain/fiscal-profile.js';
 import { formatRuc } from '../modules/fiscal-config/domain/ruc.js';
 import type { ApiKeyEnvironment } from '../modules/identity/domain/api-key.js';
@@ -228,5 +230,63 @@ export async function addEstablishment(
       .returning();
 
     return { id: required(row, 'establishment was not inserted').id, code: establishment.code };
+  });
+}
+
+export interface AddExpeditionPointParams {
+  tenantId: string;
+  establishmentCode: string;
+  point: ExpeditionPoint;
+}
+
+export interface AddExpeditionPointResult {
+  id: string;
+  code: string;
+}
+
+/**
+ * Operator CLI handler (backlog HU-E2-02): resolves the establishment by
+ * `(tenantId, establishmentCode)` before inserting, so a mistyped or
+ * cross-tenant establishment code fails with a clear error rather than a
+ * raw FK violation.
+ */
+export async function addExpeditionPoint(
+  db: Database,
+  params: AddExpeditionPointParams,
+): Promise<AddExpeditionPointResult> {
+  const { tenantId, establishmentCode, point } = params;
+
+  return db.transaction(async (tx) => {
+    const foundTenant = await tx
+      .select({ id: tenants.id })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId));
+    if (foundTenant.length === 0) {
+      throw new Error(`tenant not found: ${tenantId}`);
+    }
+
+    const foundEstablishment = await tx
+      .select({ id: tenantEstablishments.id })
+      .from(tenantEstablishments)
+      .where(
+        and(
+          eq(tenantEstablishments.tenantId, tenantId),
+          eq(tenantEstablishments.code, establishmentCode),
+        ),
+      );
+    if (foundEstablishment.length === 0) {
+      throw new Error(`establishment not found: ${establishmentCode} (tenant ${tenantId})`);
+    }
+    const establishmentId = required(
+      foundEstablishment[0],
+      'establishment query returned no row',
+    ).id;
+
+    const [row] = await tx
+      .insert(tenantExpeditionPoints)
+      .values({ tenantId, establishmentId, code: point.code })
+      .returning();
+
+    return { id: required(row, 'expedition point was not inserted').id, code: point.code };
   });
 }

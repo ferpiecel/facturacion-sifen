@@ -56,11 +56,13 @@ describe('tenants.environment', () => {
   it('rejects a value outside the "tenant_environment" enum', async () => {
     handle = await createTestDatabase();
 
-    const rejection = handle.db.insert(tenants).values({
-      name: 'Bad Tenant',
-      // @ts-expect-error exercising the DB-level enum guard with an invalid value
-      environment: 'staging',
-    });
+    // Exercises the DB-level enum guard directly, bypassing the TS union so
+    // an invalid runtime value (e.g. a stale client) still fails in Postgres.
+    const invalidValues = { name: 'Bad Tenant', environment: 'staging' } as unknown as {
+      name: string;
+      environment: 'test' | 'production';
+    };
+    const rejection = handle.db.insert(tenants).values(invalidValues);
 
     await expect(rejection).rejects.toThrow();
     const cause = await rejection.catch((error: unknown) => (error as { cause?: unknown }).cause);

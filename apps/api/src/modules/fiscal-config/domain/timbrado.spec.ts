@@ -53,6 +53,31 @@ describe('createTimbrado', () => {
     );
   });
 
+  it.each(['2026-02-30', '2024-04-31', '2025-02-29'])(
+    'rejects a well-formed but non-existent calendar date %s',
+    (validityStart) => {
+      expect(() => createTimbrado({ number: '12345678', validityStart })).toThrow(
+        InvalidTimbradoError,
+      );
+    },
+  );
+
+  it('accepts February 29 in a leap year', () => {
+    expect(createTimbrado({ number: '12345678', validityStart: '2024-02-29' }).validityStart).toBe(
+      '2024-02-29',
+    );
+  });
+
+  it('rejects a non-existent validity end date', () => {
+    expect(() =>
+      createTimbrado({
+        number: '12345678',
+        validityStart: '2024-01-15',
+        validityEnd: '2024-06-31',
+      }),
+    ).toThrow(InvalidTimbradoError);
+  });
+
   it('rejects a validity end before the validity start', () => {
     expect(() =>
       createTimbrado({

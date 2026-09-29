@@ -1,5 +1,6 @@
 import { createPgliteDatabase, type DatabaseHandle } from '@sifen/db';
 import { afterEach, describe, expect, it } from 'vitest';
+import { createEstablishment } from '../modules/fiscal-config/domain/establishment.js';
 import { createFiscalProfile } from '../modules/fiscal-config/domain/fiscal-profile.js';
 import { parseRuc } from '../modules/fiscal-config/domain/ruc.js';
 import { createTenant } from './commands.js';
@@ -86,6 +87,30 @@ describe('runOpsCommand (HU-E1-05)', () => {
     const output = await runOpsCommand(handle.db, { kind: 'fiscal:set', tenantId, profile });
 
     expect(output).toBe(`fiscal profile saved: ${tenantId} (RUC 4490207-7)`);
+  });
+
+  it('establishment:add prints the new establishment id and code', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Establishment Tenant');
+    const establishment = createEstablishment({
+      code: '001',
+      address: 'Avda. Siempre Viva 123',
+      houseNumber: '123',
+      departmentCode: 11,
+      districtCode: '145',
+      districtDescription: 'Ciudad del Este',
+      cityCode: '3316',
+      cityDescription: 'Ciudad del Este',
+    });
+
+    const output = await runOpsCommand(handle.db, {
+      kind: 'establishment:add',
+      tenantId,
+      establishment,
+    });
+
+    expect(output).toMatch(/^establishment created: [0-9a-f-]{36} \(code 001\)$/);
   });
 });
 

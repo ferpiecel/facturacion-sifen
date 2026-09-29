@@ -1,5 +1,8 @@
 import { parseArgs } from 'node:util';
-import type { ApiKeyEnvironment } from '../modules/identity/domain/api-key.js';
+import {
+  createEstablishment,
+  type Establishment,
+} from '../modules/fiscal-config/domain/establishment.js';
 import {
   createFiscalProfile,
   type EconomicActivity,
@@ -7,6 +10,7 @@ import {
   type TaxpayerType,
 } from '../modules/fiscal-config/domain/fiscal-profile.js';
 import { parseRuc } from '../modules/fiscal-config/domain/ruc.js';
+import type { ApiKeyEnvironment } from '../modules/identity/domain/api-key.js';
 
 /** Invalid argv or missing environment for the operator CLI (backlog HU-E1-05). */
 export class OpsArgError extends Error {}
@@ -22,7 +26,8 @@ export type OpsCommand =
       label: string | undefined;
     }
   | { kind: 'apikey:revoke'; keyId: string }
-  | { kind: 'fiscal:set'; tenantId: string; profile: FiscalProfile };
+  | { kind: 'fiscal:set'; tenantId: string; profile: FiscalProfile }
+  | { kind: 'establishment:add'; tenantId: string; establishment: Establishment };
 
 function requireOption(value: string | undefined, flag: string): string {
   if (!value) {
@@ -70,6 +75,33 @@ function parseActivities(values: string[] | undefined): EconomicActivity[] {
       description: entry.slice(separatorIndex + 1),
     };
   });
+}
+
+/** Parses `--department <code>` (cDepEmi) into the integer the establishment domain expects. */
+function parseDepartmentCode(value: string | undefined): number {
+  const raw = requireOption(value, 'department');
+  const code = Number(raw);
+  if (!Number.isInteger(code)) {
+    throw new OpsArgError(`--department must be an integer code, got "${raw}"`);
+  }
+  return code;
+}
+
+/**
+ * `--district`/`--district-description` (cDisEmi/dDesDisEmi) mirror the
+ * domain's occurrence-0-1 rule: both present or both absent. Passing only
+ * one is a usage error here rather than a silent domain rejection later.
+ */
+function parseDistrict(
+  district: string | undefined,
+  districtDescription: string | undefined,
+): { districtCode: string | undefined; districtDescription: string | undefined } {
+  if ((district === undefined) !== (districtDescription === undefined)) {
+    throw new OpsArgError(
+      '--district and --district-description must both be provided or both omitted',
+    );
+  }
+  return { districtCode: district, districtDescription };
 }
 
 /** Parses `argv` (without `node`/script) into one typed operator command, or throws {@link OpsArgError}. */
@@ -144,6 +176,48 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
         kind: 'fiscal:set',
         tenantId: requireOption(values.tenant, 'tenant'),
         profile,
+      };
+    }
+    case 'establishment:add': {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          code: { type: 'string' },
+          address: { type: 'string' },
+          'house-number': { type: 'string' },
+          'address-complement-1': { type: 'string' },
+          'address-complement-2': { type: 'string' },
+          department: { type: 'string' },
+          district: { type: 'string' },
+          'district-description': { type: 'string' },
+          city: { type: 'string' },
+          'city-description': { type: 'string' },
+        },
+      });
+
+      const { districtCode, districtDescription } = parseDistrict(
+        values.district,
+        values['district-description'],
+      );
+
+      const establishment = createEstablishment({
+        code: requireOption(values.code, 'code'),
+        address: requireOption(values.address, 'address'),
+        houseNumber: requireOption(values['house-number'], 'house-number'),
+        addressComplement1: values['address-complement-1'],
+        addressComplement2: values['address-complement-2'],
+        departmentCode: parseDepartmentCode(values.department),
+        districtCode,
+        districtDescription,
+        cityCode: requireOption(values.city, 'city'),
+        cityDescription: requireOption(values['city-description'], 'city-description'),
+      });
+
+      return {
+        kind: 'establishment:add',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        establishment,
       };
     }
     default:

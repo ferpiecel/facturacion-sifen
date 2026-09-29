@@ -2,14 +2,16 @@ import { and, eq, isNull } from 'drizzle-orm';
 import {
   apiKeys,
   partners,
+  tenantEstablishments,
   tenantFiscalEconomicActivities,
   tenantFiscalProfiles,
   tenants,
   type Database,
 } from '@sifen/db';
-import type { ApiKeyEnvironment } from '../modules/identity/domain/api-key.js';
+import type { Establishment } from '../modules/fiscal-config/domain/establishment.js';
 import type { FiscalProfile } from '../modules/fiscal-config/domain/fiscal-profile.js';
 import { formatRuc } from '../modules/fiscal-config/domain/ruc.js';
+import type { ApiKeyEnvironment } from '../modules/identity/domain/api-key.js';
 import { Argon2SecretHasherAdapter } from '../modules/identity/infrastructure/adapters/argon2-secret-hasher.adapter.js';
 import { IssueApiKeyUseCase } from '../modules/identity/application/issue-api-key.use-case.js';
 
@@ -177,5 +179,54 @@ export async function setFiscalProfile(
     );
 
     return { tenantId, ruc: formatRuc(profile.ruc) };
+  });
+}
+
+export interface AddEstablishmentParams {
+  tenantId: string;
+  establishment: Establishment;
+}
+
+export interface AddEstablishmentResult {
+  id: string;
+  code: string;
+}
+
+/**
+ * Operator CLI handler (backlog HU-E2-02): inserts one tenant-scoped
+ * establishment, persisting every field the domain validates. `districtCode`/
+ * `districtDescription` are optional together (cDisEmi has occurrence 0-1),
+ * matching `tenant_establishments.district_code`'s nullability.
+ */
+export async function addEstablishment(
+  db: Database,
+  params: AddEstablishmentParams,
+): Promise<AddEstablishmentResult> {
+  const { tenantId, establishment } = params;
+
+  return db.transaction(async (tx) => {
+    const found = await tx.select({ id: tenants.id }).from(tenants).where(eq(tenants.id, tenantId));
+    if (found.length === 0) {
+      throw new Error(`tenant not found: ${tenantId}`);
+    }
+
+    const [row] = await tx
+      .insert(tenantEstablishments)
+      .values({
+        tenantId,
+        code: establishment.code,
+        address: establishment.address,
+        houseNumber: establishment.houseNumber,
+        addressComplement1: establishment.addressComplement1,
+        addressComplement2: establishment.addressComplement2,
+        departmentCode: String(establishment.departmentCode),
+        districtCode: establishment.districtCode,
+        districtDescription: establishment.districtDescription,
+        cityCode: establishment.cityCode,
+        cityDescription: establishment.cityDescription,
+      })
+      .returning();
+
+    return { id: required(row, 'establishment was not inserted').id, code: establishment.code };
   });
 }

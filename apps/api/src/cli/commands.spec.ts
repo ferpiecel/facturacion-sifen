@@ -1,6 +1,7 @@
 import {
   apiKeys,
   createPgliteDatabase,
+  tenantEstablishments,
   tenantFiscalEconomicActivities,
   tenantFiscalProfiles,
   type Database,
@@ -8,9 +9,11 @@ import {
 } from '@sifen/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
+import { createEstablishment } from '../modules/fiscal-config/domain/establishment.js';
 import { createFiscalProfile } from '../modules/fiscal-config/domain/fiscal-profile.js';
 import { parseRuc } from '../modules/fiscal-config/domain/ruc.js';
 import {
+  addEstablishment,
   createPartner,
   createTenant,
   issueApiKey,
@@ -204,5 +207,114 @@ describe('setFiscalProfile (HU-E2-01)', () => {
 
     expect(await profileRow(handle.db, tenantId)).toHaveLength(0);
     expect(await activityRows(handle.db, tenantId)).toHaveLength(0);
+  });
+});
+
+describe('addEstablishment (HU-E2-02)', () => {
+  let handle: DatabaseHandle | undefined;
+
+  afterEach(async () => {
+    await handle?.close();
+    handle = undefined;
+  });
+
+  const buildEstablishment = (code = '001') =>
+    createEstablishment({
+      code,
+      address: 'Avda. Siempre Viva 123',
+      houseNumber: '123',
+      addressComplement1: 'Casi Av. Mcal. Lopez',
+      addressComplement2: 'Piso 2',
+      departmentCode: 11,
+      districtCode: '145',
+      districtDescription: 'Ciudad del Este',
+      cityCode: '3316',
+      cityDescription: 'Ciudad del Este',
+    });
+
+  it('inserts an establishment for an existing tenant, persisting every field', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Establishment Tenant');
+
+    const result = await addEstablishment(handle.db, {
+      tenantId,
+      establishment: buildEstablishment(),
+    });
+
+    expect(result.code).toBe('001');
+    const [row] = await handle.db
+      .select()
+      .from(tenantEstablishments)
+      .where(eq(tenantEstablishments.id, result.id));
+    expect(row).toMatchObject({
+      tenantId,
+      code: '001',
+      address: 'Avda. Siempre Viva 123',
+      houseNumber: '123',
+      addressComplement1: 'Casi Av. Mcal. Lopez',
+      addressComplement2: 'Piso 2',
+      departmentCode: '11',
+      districtCode: '145',
+      districtDescription: 'Ciudad del Este',
+      cityCode: '3316',
+      cityDescription: 'Ciudad del Este',
+    });
+  });
+
+  it('inserts an establishment without district/district-description (both optional)', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Establishment Tenant');
+
+    const establishment = createEstablishment({
+      code: '002',
+      address: 'Avda. Siempre Viva 123',
+      houseNumber: '123',
+      departmentCode: 11,
+      cityCode: '3316',
+      cityDescription: 'Ciudad del Este',
+    });
+
+    const result = await addEstablishment(handle.db, { tenantId, establishment });
+
+    const [row] = await handle.db
+      .select()
+      .from(tenantEstablishments)
+      .where(eq(tenantEstablishments.id, result.id));
+    expect(row).toMatchObject({
+      districtCode: null,
+      districtDescription: null,
+      addressComplement1: null,
+      addressComplement2: null,
+    });
+  });
+
+  it('rejects an unknown tenant', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+
+    await expect(
+      addEstablishment(handle.db, {
+        tenantId: '00000000-0000-0000-0000-000000000000',
+        establishment: buildEstablishment(),
+      }),
+    ).rejects.toThrow('tenant not found');
+  });
+
+  it('rejects a duplicate code for the same tenant', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Establishment Tenant');
+    await addEstablishment(handle.db, { tenantId, establishment: buildEstablishment() });
+
+    const rejection = addEstablishment(handle.db, {
+      tenantId,
+      establishment: buildEstablishment(),
+    });
+    await expect(rejection).rejects.toThrow();
+    const cause = await rejection.catch((error: unknown) => (error as { cause?: unknown }).cause);
+    expect(cause).toBeInstanceOf(Error);
+    expect((cause as Error).message).toContain('tenant_establishments_tenant_code_idx');
   });
 });

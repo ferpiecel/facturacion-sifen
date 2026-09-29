@@ -198,15 +198,9 @@ export interface AddEstablishmentResult {
 
 /**
  * Operator CLI handler (backlog HU-E2-02): inserts one tenant-scoped
- * establishment. `districtCode` is required here even though the
- * establishment domain allows it to be absent (cDisEmi has occurrence
- * 0-1) because `tenant_establishments.district_code` is `NOT NULL` in
- * this slice's migration (see `parseOpsArgs`'s `establishment:add` case,
- * which always supplies it); this mismatch is not fixed by adding a
- * migration here. `houseNumber`, the address complements and
- * `districtDescription`/`cityDescription` are validated by the domain but
- * have no column on `tenant_establishments` yet, so they are accepted and
- * then discarded, never persisted.
+ * establishment, persisting every field the domain validates. `districtCode`/
+ * `districtDescription` are optional together (cDisEmi has occurrence 0-1),
+ * matching `tenant_establishments.district_code`'s nullability.
  */
 export async function addEstablishment(
   db: Database,
@@ -219,9 +213,6 @@ export async function addEstablishment(
     if (found.length === 0) {
       throw new Error(`tenant not found: ${tenantId}`);
     }
-    if (establishment.districtCode === null) {
-      throw new Error('districtCode is required: tenant_establishments.district_code is NOT NULL');
-    }
 
     const [row] = await tx
       .insert(tenantEstablishments)
@@ -229,9 +220,14 @@ export async function addEstablishment(
         tenantId,
         code: establishment.code,
         address: establishment.address,
+        houseNumber: establishment.houseNumber,
+        addressComplement1: establishment.addressComplement1,
+        addressComplement2: establishment.addressComplement2,
         departmentCode: String(establishment.departmentCode),
         districtCode: establishment.districtCode,
+        districtDescription: establishment.districtDescription,
         cityCode: establishment.cityCode,
+        cityDescription: establishment.cityDescription,
       })
       .returning();
 

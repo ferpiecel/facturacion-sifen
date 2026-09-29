@@ -1,6 +1,7 @@
 import { createNodePostgresDatabase, type Database } from '@sifen/db';
 import { getOpsDatabaseUrl, parseOpsArgs, type OpsCommand } from './args.js';
 import {
+  addEstablishment,
   createPartner,
   createTenant,
   issueApiKey,
@@ -47,6 +48,13 @@ export async function runOpsCommand(db: Database, command: OpsCommand): Promise<
         profile: command.profile,
       });
       return `fiscal profile saved: ${result.tenantId} (RUC ${result.ruc})`;
+    }
+    case 'establishment:add': {
+      const result = await addEstablishment(db, {
+        tenantId: command.tenantId,
+        establishment: command.establishment,
+      });
+      return `establishment created: ${result.id} (code ${result.code})`;
     }
   }
 }

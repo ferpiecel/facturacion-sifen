@@ -2,6 +2,9 @@ node_modules/
 dist/
 .turbo/
 coverage/
+# Next.js build output and its generated type shim
+.next/
+next-env.d.ts
 *.tsbuildinfo
 .env
 .env.*

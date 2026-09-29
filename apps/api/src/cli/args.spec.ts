@@ -215,7 +215,9 @@ describe('parseOpsArgs establishment:add (HU-E2-02)', () => {
   });
 
   it('parses establishment:add without district/district-description (both optional)', () => {
-    const command = parseOpsArgs(argsFor({ district: undefined, 'district-description': undefined }));
+    const command = parseOpsArgs(
+      argsFor({ district: undefined, 'district-description': undefined }),
+    );
 
     expect(command).toEqual({
       kind: 'establishment:add',

@@ -308,7 +308,10 @@ describe('addEstablishment (HU-E2-02)', () => {
     const { id: tenantId } = await createTenant(handle.db, 'Establishment Tenant');
     await addEstablishment(handle.db, { tenantId, establishment: buildEstablishment() });
 
-    const rejection = addEstablishment(handle.db, { tenantId, establishment: buildEstablishment() });
+    const rejection = addEstablishment(handle.db, {
+      tenantId,
+      establishment: buildEstablishment(),
+    });
     await expect(rejection).rejects.toThrow();
     const cause = await rejection.catch((error: unknown) => (error as { cause?: unknown }).cause);
     expect(cause).toBeInstanceOf(Error);

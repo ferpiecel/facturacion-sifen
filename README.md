@@ -56,7 +56,7 @@ pnpm --filter @sifen/api ops fiscal:set --tenant <tenant-id> --ruc 4490207-7 --l
 pnpm --filter @sifen/api ops establishment:add --tenant <tenant-id> --code 001 --address "Avda. Siempre Viva 123" --house-number 123 --department 11 --district 145 --district-description "Ciudad del Este" --city 3316 --city-description "Ciudad del Este"
 ```
 
-`establishment:add` valida el establecimiento con el dominio de `fiscal-config` antes de tocar la base, pero `tenant_establishments` (migración 0007) todavía no tiene columnas para `--house-number` (dNumCas), los complementos de dirección (dCompDir1/2) ni las descripciones de distrito/ciudad (dDesDisEmi/dDesCiuEmi): el CLI los exige y valida, pero no los persiste. `--district`/`--district-description` son obligatorios en el CLI aunque el dominio los permite ausentes, porque `district_code` es `NOT NULL` en esa misma migración.
+`establishment:add` valida el establecimiento con el dominio de `fiscal-config` antes de tocar la base y persiste todos los campos, incluyendo `--house-number` (dNumCas), los complementos de dirección opcionales (`--address-complement-1`/`--address-complement-2`, dCompDir1/2) y las descripciones de distrito/ciudad (dDesDisEmi/dDesCiuEmi). `--district`/`--district-description` son opcionales en el CLI, igual que en el dominio (cDisEmi tiene ocurrencia 0-1): deben darse ambos o ninguno.
 
 `apikey:create` imprime la API key completa (`sk_test_...` / `sk_live_...`) **una sola vez**: no queda guardada en ningún lado más que como hash, así que hay que copiarla en ese momento. El CLI nunca vuelve a loguearla, ni siquiera en `apikey:revoke`.
 

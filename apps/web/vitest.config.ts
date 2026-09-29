@@ -19,6 +19,8 @@ export default defineConfig({
         // compiler; it holds no logic and is exercised by `next build`.
         'src/app/layout.tsx',
         'src/app/fonts.ts',
+        // Brand constants only (no logic); consumed by the layout and panel.
+        'src/design-system/brand.ts',
         // Type-only declaration output, nothing to execute.
         '**/*.d.ts',
       ],

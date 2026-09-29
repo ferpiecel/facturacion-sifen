@@ -19,6 +19,16 @@ docker compose up -d  # PostgreSQL 16 y Redis 7
 pnpm --filter @sifen/api build && pnpm --filter @sifen/api start
 ```
 
+### Portal web
+
+El portal del cliente vive en `apps/web` (Next.js + Tailwind v4, diseño SifenFlow de Stitch).
+
+```bash
+pnpm --filter @sifen/web dev     # http://localhost:3000, panel de control con datos de ejemplo
+pnpm --filter @sifen/web test    # tests de componentes (Vitest + Testing Library)
+pnpm --filter @sifen/web build   # build de producción (descarga las fuentes de Google)
+```
+
 ### Variables de entorno
 
 Todas tienen un valor por defecto, así que el entorno local funciona sin un archivo `.env`. Para cambiarlas, exportalas en tu shell o creá un `.env` local, que nunca se sube al repositorio.

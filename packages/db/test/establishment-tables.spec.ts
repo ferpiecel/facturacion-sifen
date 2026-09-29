@@ -18,6 +18,7 @@ interface Seed {
   tenantC: string;
   establishmentA: string;
   establishmentB: string;
+  expeditionPointA: string;
 }
 
 function required<T>(value: T | undefined, message: string): T {
@@ -28,20 +29,40 @@ function required<T>(value: T | undefined, message: string): T {
 }
 
 /**
+ * Awaits `promise`, which must reject, and returns the underlying Postgres
+ * error message (from `error.cause`, where `postgres`/`pg` attach the
+ * driver-level message) so callers can assert on the exact reason instead
+ * of failing for an unrelated cause (e.g. a PK/unique collision).
+ */
+async function getRejectionCause(promise: Promise<unknown>): Promise<string> {
+  try {
+    await promise;
+  } catch (error) {
+    const cause = (error as { cause?: unknown }).cause;
+    return cause instanceof Error ? cause.message : String(cause);
+  }
+  return expect.unreachable('expected the query to reject');
+}
+
+/**
  * Asserts `promise` rejects with a Postgres error whose message names the
  * given constraint, so the test actually exercises that constraint instead
  * of failing for an unrelated reason (e.g. a PK/unique collision).
  */
 async function expectConstraintViolation(promise: Promise<unknown>, constraintName: string) {
-  await expect(promise).rejects.toThrow();
-  try {
-    await promise;
-    expect.unreachable('expected the insert to reject');
-  } catch (error) {
-    const cause = (error as { cause?: unknown }).cause;
-    const causeMessage = cause instanceof Error ? cause.message : String(cause);
-    expect(causeMessage).toContain(constraintName);
-  }
+  const message = await getRejectionCause(promise);
+  expect(message).toContain(constraintName);
+}
+
+/**
+ * Asserts `promise` rejects because a row-level security policy blocked it
+ * (not some unrelated failure), by checking Postgres' own
+ * "new row violates row-level security policy for table \"...\"" message.
+ */
+async function expectRowLevelSecurityViolation(promise: Promise<unknown>, tableName: string) {
+  const message = await getRejectionCause(promise);
+  expect(message).toContain('row-level security policy');
+  expect(message).toContain(tableName);
 }
 
 /**
@@ -88,17 +109,29 @@ describe('tenant_establishments / tenant_expedition_points / tenant_timbrados', 
     const establishmentA = required(insertedEstablishments[0], 'establishment A not inserted').id;
     const establishmentB = required(insertedEstablishments[1], 'establishment B not inserted').id;
 
-    await testHandle.db.insert(tenantExpeditionPoints).values([
-      { tenantId: tenantA, establishmentId: establishmentA, code: '001' },
-      { tenantId: tenantB, establishmentId: establishmentB, code: '001' },
-    ]);
+    const insertedPoints = await testHandle.db
+      .insert(tenantExpeditionPoints)
+      .values([
+        { tenantId: tenantA, establishmentId: establishmentA, code: '001' },
+        { tenantId: tenantB, establishmentId: establishmentB, code: '001' },
+      ])
+      .returning();
+    const expeditionPointA = required(insertedPoints[0], 'expedition point A not inserted').id;
 
     await testHandle.db.insert(tenantTimbrados).values([
       { tenantId: tenantA, number: '12345678', validFrom: '2024-01-01' },
       { tenantId: tenantB, number: '87654321', validFrom: '2024-01-01', validTo: '2024-12-31' },
     ]);
 
-    return { db: testHandle.db, tenantA, tenantB, tenantC, establishmentA, establishmentB };
+    return {
+      db: testHandle.db,
+      tenantA,
+      tenantB,
+      tenantC,
+      establishmentA,
+      establishmentB,
+      expeditionPointA,
+    };
   }
 
   afterEach(async () => {
@@ -211,25 +244,27 @@ describe('tenant_establishments / tenant_expedition_points / tenant_timbrados', 
     it('rejects a duplicate expedition point code within the same establishment', async () => {
       const { db, tenantA, establishmentA } = await seed();
 
-      await expect(
+      await expectConstraintViolation(
         db.insert(tenantExpeditionPoints).values({
           tenantId: tenantA,
           establishmentId: establishmentA,
           code: '001',
         }),
-      ).rejects.toThrow();
+        'tenant_expedition_points_tenant_establishment_code_idx',
+      );
     });
 
     it('rejects an expedition point pointing at another tenant establishment (cross-tenant parent)', async () => {
       const { db, tenantA, establishmentB } = await seed();
 
-      await expect(
+      await expectConstraintViolation(
         db.insert(tenantExpeditionPoints).values({
           tenantId: tenantA,
           establishmentId: establishmentB,
           code: '002',
         }),
-      ).rejects.toThrow();
+        'tenant_expedition_points_tenant_establishment_fk',
+      );
     });
 
     it('rejects a timbrado number outside the 8-digit, non-all-zero format', async () => {
@@ -262,13 +297,14 @@ describe('tenant_establishments / tenant_expedition_points / tenant_timbrados', 
     it('rejects a duplicate timbrado number for the same tenant', async () => {
       const { db, tenantA } = await seed();
 
-      await expect(
+      await expectConstraintViolation(
         db.insert(tenantTimbrados).values({
           tenantId: tenantA,
           number: '12345678',
           validFrom: '2024-01-01',
         }),
-      ).rejects.toThrow();
+        'tenant_timbrados_tenant_number_idx',
+      );
     });
   });
 
@@ -276,7 +312,7 @@ describe('tenant_establishments / tenant_expedition_points / tenant_timbrados', 
     it('app_user with tenant A active cannot insert an establishment for tenant B', async () => {
       const { db, tenantA, tenantB } = await seed();
 
-      await expect(
+      await expectRowLevelSecurityViolation(
         withTenantTransaction(db, tenantA, (tx) =>
           tx.insert(tenantEstablishments).values({
             tenantId: tenantB,
@@ -287,13 +323,14 @@ describe('tenant_establishments / tenant_expedition_points / tenant_timbrados', 
             cityCode: '1',
           }),
         ),
-      ).rejects.toThrow();
+        'tenant_establishments',
+      );
     });
 
     it('app_user with tenant A active cannot insert an expedition point for tenant B', async () => {
       const { db, tenantA, tenantB, establishmentB } = await seed();
 
-      await expect(
+      await expectRowLevelSecurityViolation(
         withTenantTransaction(db, tenantA, (tx) =>
           tx.insert(tenantExpeditionPoints).values({
             tenantId: tenantB,
@@ -301,13 +338,14 @@ describe('tenant_establishments / tenant_expedition_points / tenant_timbrados', 
             code: '099',
           }),
         ),
-      ).rejects.toThrow();
+        'tenant_expedition_points',
+      );
     });
 
     it('app_user with tenant A active cannot insert a timbrado for tenant B', async () => {
       const { db, tenantA, tenantB } = await seed();
 
-      await expect(
+      await expectRowLevelSecurityViolation(
         withTenantTransaction(db, tenantA, (tx) =>
           tx.insert(tenantTimbrados).values({
             tenantId: tenantB,
@@ -315,7 +353,36 @@ describe('tenant_establishments / tenant_expedition_points / tenant_timbrados', 
             validFrom: '2024-01-01',
           }),
         ),
-      ).rejects.toThrow();
+        'tenant_timbrados',
+      );
+    });
+
+    it('app_user with tenant A active cannot UPDATE its own expedition point to move it to tenant B', async () => {
+      const { db, tenantA, tenantB, expeditionPointA } = await seed();
+
+      await expectRowLevelSecurityViolation(
+        withTenantTransaction(db, tenantA, (tx) =>
+          tx
+            .update(tenantExpeditionPoints)
+            .set({ tenantId: tenantB })
+            .where(eq(tenantExpeditionPoints.id, expeditionPointA)),
+        ),
+        'tenant_expedition_points',
+      );
+    });
+
+    it('app_user with tenant A active cannot UPDATE its own expedition point to reference tenant B establishment', async () => {
+      const { db, tenantA, expeditionPointA, establishmentB } = await seed();
+
+      await expectConstraintViolation(
+        withTenantTransaction(db, tenantA, (tx) =>
+          tx
+            .update(tenantExpeditionPoints)
+            .set({ establishmentId: establishmentB })
+            .where(eq(tenantExpeditionPoints.id, expeditionPointA)),
+        ),
+        'tenant_expedition_points_tenant_establishment_fk',
+      );
     });
 
     it('app_user with tenant A active: UPDATE/DELETE of tenant B rows affects 0 rows', async () => {

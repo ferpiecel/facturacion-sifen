@@ -21,30 +21,41 @@ SET search_path = pg_catalog, pg_temp AS $$
 $$;
 --> statement-breakpoint
 -- Backfill rows written before the chain existed, in (occurred_at, id) order.
-DO $$
+-- audit_log has FORCE ROW LEVEL SECURITY (0014), which also applies to a
+-- non-superuser table owner and would hide every row, so the function lifts
+-- FORCE for its own transaction and restores it. It is left installed (owner
+-- only) so the chain can be rebuilt after a maintenance restore.
+CREATE FUNCTION audit_log_backfill_chain() RETURNS void
+LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp AS $$
 DECLARE
   r record;
   last_tenant uuid;
   n bigint;
   prev text;
+  cur_prev text;
 BEGIN
-  ALTER TABLE "audit_log" DISABLE TRIGGER audit_log_append_only;
-  FOR r IN SELECT * FROM "audit_log" ORDER BY tenant_id, occurred_at, id LOOP
+  ALTER TABLE public.audit_log NO FORCE ROW LEVEL SECURITY;
+  ALTER TABLE public.audit_log DISABLE TRIGGER audit_log_append_only;
+  FOR r IN SELECT * FROM public.audit_log ORDER BY tenant_id, occurred_at, id LOOP
     IF last_tenant IS DISTINCT FROM r.tenant_id THEN
       last_tenant := r.tenant_id; n := 0; prev := repeat('0', 64);
     END IF;
     n := n + 1;
+    cur_prev := prev;
     prev := public.audit_log_compute_hash(r.tenant_id, r.id, n, r.occurred_at,
       r.actor_type::text, r.actor_id, r.action, r.entity_type, r.entity_id,
-      r.before, r.after, prev);
-    UPDATE "audit_log" SET seq = n, hash = prev,
-      prev_hash = CASE WHEN n = 1 THEN repeat('0', 64) ELSE (
-        SELECT a.hash FROM "audit_log" a WHERE a.tenant_id = r.tenant_id AND a.seq = n - 1) END
-    WHERE id = r.id;
+      r.before, r.after, cur_prev);
+    UPDATE public.audit_log SET seq = n, prev_hash = cur_prev, hash = prev WHERE id = r.id;
   END LOOP;
-  ALTER TABLE "audit_log" ENABLE TRIGGER audit_log_append_only;
+  ALTER TABLE public.audit_log ENABLE TRIGGER audit_log_append_only;
+  ALTER TABLE public.audit_log FORCE ROW LEVEL SECURITY;
 END
 $$;
+--> statement-breakpoint
+REVOKE ALL ON FUNCTION audit_log_backfill_chain() FROM PUBLIC;
+--> statement-breakpoint
+SELECT audit_log_backfill_chain();
 --> statement-breakpoint
 ALTER TABLE "audit_log" ADD CONSTRAINT "audit_log_tenant_seq_unique" UNIQUE("tenant_id","seq");
 --> statement-breakpoint
@@ -55,7 +66,11 @@ DECLARE
   last_seq bigint;
   last_hash text;
 BEGIN
-  -- One appender per tenant at a time; released at commit/rollback.
+  -- One appender per tenant at a time. The lock is held until the surrounding
+  -- transaction ends, so keep audit writes at the end of the business
+  -- transaction. Under REPEATABLE READ/SERIALIZABLE the snapshot may predate
+  -- the lock and read a stale head; the insert then fails loudly on
+  -- audit_log_tenant_seq_unique instead of forking the chain (retry the tx).
   PERFORM pg_advisory_xact_lock(hashtextextended(NEW.tenant_id::text, 0));
   SELECT a.seq, a.hash INTO last_seq, last_hash
     FROM public.audit_log a WHERE a.tenant_id = NEW.tenant_id

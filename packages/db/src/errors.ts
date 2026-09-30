@@ -40,3 +40,17 @@ export class PrivilegedSessionError extends Error {
     this.name = 'PrivilegedSessionError';
   }
 }
+
+/**
+ * Thrown by `verifyAuditChain` when the session is subject to RLS but has no
+ * matching `app.current_tenant`: it would see no rows and report a false
+ * "intact" chain.
+ */
+export class MissingTenantContextError extends Error {
+  constructor(tenantId: string) {
+    super(
+      `Cannot verify the audit chain for tenant ${tenantId}: the session has no matching tenant context`,
+    );
+    this.name = 'MissingTenantContextError';
+  }
+}

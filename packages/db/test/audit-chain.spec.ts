@@ -292,8 +292,10 @@ describe('audit_log hash chain', () => {
     'backfill rebuilds the chain as a non-superuser owner despite FORCE ROW LEVEL SECURITY',
     async () => {
       const { db, tenantA, tenantB, append, chainOf } = await seed();
-      await append(tenantA, 3);
-      await append(tenantB, 2);
+      // Separate transactions: rows of one transaction share occurred_at.
+      for (const tenant of [tenantA, tenantA, tenantA, tenantB, tenantB]) {
+        await append(tenant, 1);
+      }
       const original = [...(await chainOf(tenantA)), ...(await chainOf(tenantB))].map(
         (row) => row.hash,
       );

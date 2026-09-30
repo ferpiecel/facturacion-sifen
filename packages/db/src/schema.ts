@@ -357,7 +357,7 @@ export const auditActorType = pgEnum('audit_actor_type', ['api_key', 'user', 'op
  * stored already redacted (the API's `redact`). UPDATE/DELETE/TRUNCATE are
  * rejected by a trigger (migration 0014) and app_user only has
  * SELECT/INSERT. `seq`, `prev_hash` and `hash` form a per-tenant SHA-256
- * chain (HU-E13-02): a BEFORE INSERT trigger (migration 0015) overwrites them,
+ * chain (HU-E13-02): a BEFORE INSERT trigger (migration 0017) overwrites them,
  * so values supplied by the app are ignored.
  */
 export const auditLog = pgTable(

@@ -13,7 +13,7 @@ export class DocumentNumberExhaustedError extends Error {
 /** `documentType` is not an `iTiDE` code (1..8). */
 export class InvalidDocumentTypeError extends Error {
   constructor(documentType: number) {
-    super(`invalid iTiDE document type:  (expected an integer 1..8)`);
+    super(`invalid iTiDE document type: ${String(documentType)} (expected an integer 1..8)`);
     this.name = 'InvalidDocumentTypeError';
   }
 }

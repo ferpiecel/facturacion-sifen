@@ -1,4 +1,5 @@
 import { createPgliteDatabase, tenantCscs, tenants, type DatabaseHandle } from '@sifen/db';
+import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { SecretDecryptionError } from '../domain/sealed-secret.js';
 import { createLocalKms } from './adapters/local-kms.adapter.js';
@@ -72,11 +73,47 @@ describe('CscVault (HU-E2-03)', () => {
     await db.insert(tenantCscs).values({ ...row, id: undefined, tenantId: b });
     await db
       .insert(tenantCscs)
-      .values({ tenantId: a, environment: 'production', idCsc: '0001', sealed: row.sealed });
+      .values({
+        tenantId: a,
+        environment: 'production',
+        idCsc: '0001',
+        slot: 1,
+        sealed: row.sealed,
+      });
 
     await expect(vault.getPlaintext(db, b, 'test', '0001')).rejects.toThrow(SecretDecryptionError);
     await expect(vault.getPlaintext(db, a, 'production', '0001')).rejects.toThrow(
       SecretDecryptionError,
     );
+  });
+
+  it('does not open a blob moved between slots of the same tenant and environment', async () => {
+    const { db, vault, a } = await setup();
+    await vault.add(db, { tenantId: a, environment: 'test', idCsc: '0001', value: VALUE });
+    await vault.add(db, { tenantId: a, environment: 'test', idCsc: '0002', value: 'Z'.repeat(32) });
+    const rows = await db.select().from(tenantCscs);
+    const first = rows.find((r) => r.idCsc === '0001');
+    const second = rows.find((r) => r.idCsc === '0002');
+    await db
+      .update(tenantCscs)
+      .set({ sealed: second?.sealed })
+      .where(eq(tenantCscs.id, first?.id ?? ''));
+
+    await expect(vault.getPlaintext(db, a, 'test', '0001')).rejects.toThrow(SecretDecryptionError);
+    expect((await vault.getPlaintext(db, a, 'test', '0002')).toString()).toBe('Z'.repeat(32));
+  });
+
+  it('accepts the CSC as a Buffer and stores it in the first free slot', async () => {
+    const { db, vault, a } = await setup();
+    await vault.add(db, {
+      tenantId: a,
+      environment: 'test',
+      idCsc: '0007',
+      value: Buffer.from(VALUE),
+    });
+    await vault.add(db, { tenantId: a, environment: 'test', idCsc: '0008', value: VALUE });
+
+    const slots = (await db.select().from(tenantCscs)).map((r) => r.slot).sort();
+    expect(slots).toEqual([1, 2]);
   });
 });

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { DatabaseHandle } from '../src/client.js';
 import { tenantCscs, tenants } from '../src/schema.js';
 import { withTenantTransaction } from '../src/tenant-transaction.js';
-import { createTestDatabase } from './support/harness.js';
+import { createTestDatabase, queryRows } from './support/harness.js';
 
 const SEALED = {
   v: 1,
@@ -43,19 +43,28 @@ describe('tenant_cscs', () => {
     return { db: handle.db, a, b };
   }
 
-  const csc = (tenantId: string, idCsc: string, environment: 'test' | 'production' = 'test') => ({
-    tenantId,
-    environment,
-    idCsc,
-    sealed: SEALED,
-  });
+  const csc = (
+    tenantId: string,
+    idCsc: string,
+    environment: 'test' | 'production' = 'test',
+    slot = Number(idCsc) % 2 === 0 ? 2 : 1,
+  ) => ({ tenantId, environment, idCsc, slot, sealed: SEALED });
 
-  it('has no plaintext column', async () => {
+  it('has only the expected columns, none in clear', async () => {
     const { db } = await seed();
-    const columns = Object.keys(tenantCscs);
-    expect(columns).toContain('sealed');
-    expect(columns.some((c) => /^(csc|code|secret|plain)/i.test(c))).toBe(false);
-    expect(db).toBeDefined();
+    const rows = await queryRows<{ column_name: string }>(
+      db,
+      sql`select column_name from information_schema.columns where table_name = 'tenant_cscs' order by column_name`,
+    );
+    expect(rows.map((r) => r.column_name)).toEqual([
+      'created_at',
+      'environment',
+      'id',
+      'id_csc',
+      'sealed',
+      'slot',
+      'tenant_id',
+    ]);
   });
 
   it('rejects an id_csc that is not 4 digits', async () => {
@@ -74,22 +83,58 @@ describe('tenant_cscs', () => {
   it('allows 2 per environment and rejects the third, counting each environment apart', async () => {
     const { db, a } = await seed();
     await db.insert(tenantCscs).values([csc(a, '0001'), csc(a, '0002')]);
-    const message = await causeOf(db.insert(tenantCscs).values(csc(a, '0003')));
-    expect(message).toContain('at most 2 CSC per environment');
-    await db.insert(tenantCscs).values(csc(a, '0003', 'production'));
+    expect(await causeOf(db.insert(tenantCscs).values(csc(a, '0003', 'test', 3)))).toContain(
+      'tenant_cscs_slot_range',
+    );
+    expect(await causeOf(db.insert(tenantCscs).values(csc(a, '0003', 'test', 1)))).toContain(
+      'tenant_cscs_tenant_environment_slot_key',
+    );
+    await db.insert(tenantCscs).values(csc(a, '0003', 'production', 1));
     expect(await db.select().from(tenantCscs).where(eq(tenantCscs.tenantId, a))).toHaveLength(3);
   });
 
-  it('isolates reads and writes by tenant through RLS', async () => {
+  it('isolates reads by tenant through RLS', async () => {
     const { db, a, b } = await seed();
     await db.insert(tenantCscs).values([csc(a, '0001'), csc(b, '0001')]);
 
     const seen = await withTenantTransaction(db, a, (tx) => tx.select().from(tenantCscs));
     expect(seen.map((r) => r.tenantId)).toEqual([a]);
-
-    const message = await causeOf(
-      withTenantTransaction(db, a, (tx) => tx.insert(tenantCscs).values(csc(b, '0002'))),
-    );
-    expect(message).toContain('row-level security policy');
   });
+
+  it('gives app_user SELECT only: insert, update and delete are permission errors', async () => {
+    const { db, a } = await seed();
+    await db.insert(tenantCscs).values(csc(a, '0001'));
+
+    const attempts = [
+      withTenantTransaction(db, a, (tx) => tx.insert(tenantCscs).values(csc(a, '0002'))),
+      withTenantTransaction(db, a, (tx) => tx.update(tenantCscs).set({ idCsc: '0009' })),
+      withTenantTransaction(db, a, (tx) => tx.delete(tenantCscs)),
+    ];
+    for (const attempt of attempts) {
+      expect(await causeOf(attempt)).toContain('permission denied for table tenant_cscs');
+    }
+  });
+
+  it('makes tenant_id and environment immutable, even for the owner', async () => {
+    const { db, a, b } = await seed();
+    await db.insert(tenantCscs).values(csc(a, '0001'));
+    expect(await causeOf(db.update(tenantCscs).set({ tenantId: b }))).toContain('immutable');
+    expect(await causeOf(db.update(tenantCscs).set({ environment: 'production' }))).toContain(
+      'immutable',
+    );
+  });
+
+  it.runIf(process.env.DB_TEST_DRIVER === 'postgres')(
+    'never exceeds 2 CSC under concurrent inserts',
+    async () => {
+      const { db, a } = await seed();
+      const results = await Promise.allSettled(
+        ['0001', '0002', '0003', '0004'].map((id, i) =>
+          db.insert(tenantCscs).values(csc(a, id, 'test', (i % 3) + 1)),
+        ),
+      );
+      expect(results.filter((r) => r.status === 'fulfilled').length).toBeLessThanOrEqual(2);
+      expect(await db.select().from(tenantCscs)).toHaveLength(2);
+    },
+  );
 });

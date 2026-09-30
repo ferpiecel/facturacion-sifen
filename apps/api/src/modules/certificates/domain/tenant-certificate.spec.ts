@@ -1,4 +1,5 @@
 import { X509Certificate } from 'node:crypto';
+import forge from 'node-forge';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   createTestAuthority,
@@ -12,6 +13,7 @@ import {
   validateTenantCertificate,
   type CertificatePolicy,
 } from './tenant-certificate.js';
+import { DerError } from './der.js';
 
 const DAY_MS = 86_400_000;
 const TENANT_RUC = parseRuc('80000005-6');
@@ -132,6 +134,17 @@ describe('validateTenantCertificate (HU-E3-01, ADR-0010, §8.7)', () => {
     expect(validateTenantCertificate(inspection, policy())).toEqual([
       { code: 'missing-digital-signature' },
     ]);
+  });
+
+  it('refuses a keyUsage extension that is not a BIT STRING', () => {
+    const { asn1 } = forge;
+    const keyUsageValue = asn1.create(
+      asn1.Class.UNIVERSAL,
+      asn1.Type.OCTETSTRING,
+      false,
+      '\x07\x80',
+    );
+    expect(() => inspectLeaf(psc, { keyUsageValue })).toThrow(DerError);
   });
 
   it('rejects an expired certificate', () => {

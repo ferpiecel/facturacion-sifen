@@ -53,6 +53,22 @@ function withIterations(p12: Buffer, count: number): Buffer {
   });
 }
 
+/** Repeats the shrouded key bag `copies` times, so opening needs that many key decryptions. */
+function withKeyBagCopies(p12: Buffer, copies: number): Buffer {
+  return rewritePkcs12(p12, (node) => {
+    if (!Array.isArray(node.value)) return;
+    const first = node.value.at(0);
+    const bagId = Array.isArray(first?.value) ? first.value.at(0) : undefined;
+    if (
+      first !== undefined &&
+      bagId?.type === forge.asn1.Type.OID &&
+      forge.asn1.derToOid(bagId.value as string) === forge.pki.oids.pkcs8ShroudedKeyBag
+    ) {
+      node.value = Array.from({ length: copies }, () => first);
+    }
+  });
+}
+
 function rejectionReason(attempt: () => unknown): string | undefined {
   try {
     attempt();
@@ -151,6 +167,39 @@ describe('inspectPkcs12 (HU-E3-01)', () => {
     const started = Date.now();
     expect(rejectionReason(() => inspectPkcs12(hostile, password))).toBe('excessive-iterations');
     expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it('caps the number of key derivations, however cheap each one is', () => {
+    const { p12, password } = issueTestPkcs12(psc, {
+      serialNumber: 'RUC80000005-6',
+      pkcs12: { useMac: false },
+    });
+    expect(rejectionReason(() => inspectPkcs12(withKeyBagCopies(p12, 40), password))).toBe(
+      'excessive-key-derivations',
+    );
+  });
+
+  it('caps the total iterations across key derivations, each below the per-call limit', () => {
+    const { p12, password } = issueTestPkcs12(psc, {
+      serialNumber: 'RUC80000005-6',
+      pkcs12: { useMac: false, count: 90_000 },
+    });
+    // 3 valid key bags x (key + IV) x 90000 = 540000 iterations, over the total budget.
+    const hostile = withKeyBagCopies(p12, 3);
+    expect(rejectionReason(() => inspectPkcs12(hostile, password))).toBe(
+      'excessive-key-derivations',
+    );
+  });
+
+  it('restores the forge key-derivation functions after a rejection', () => {
+    const pbe = (forge.pki as unknown as { pbe: Record<string, unknown> }).pbe;
+    const before = [forge.pkcs12, pbe, forge.pkcs5].map((owner) => ({ ...owner }));
+    const { p12, password } = issueTestPkcs12(psc, { serialNumber: 'RUC80000005-6' });
+
+    expect(rejectionReason(() => inspectPkcs12(withIterations(p12, 500_000), password))).toBe(
+      'excessive-iterations',
+    );
+    expect([forge.pkcs12, pbe, forge.pkcs5].map((owner) => ({ ...owner }))).toEqual(before);
   });
 
   it('rejects a .p12 bundling more than 10 certificates, bounding chain building', () => {

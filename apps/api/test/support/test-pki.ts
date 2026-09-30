@@ -41,6 +41,8 @@ export interface LeafOptions {
   readonly digitalSignature?: boolean;
   /** Leaves out the keyUsage extension entirely. */
   readonly omitKeyUsage?: boolean;
+  /** Raw keyUsage extension value, replacing the well-formed BIT STRING. */
+  readonly keyUsageValue?: forge.asn1.Asn1;
   readonly notBefore?: Date;
   readonly notAfter?: Date;
   /** Extra certificates bundled in the `.p12` (default: the issuer). */
@@ -139,7 +141,9 @@ export function issueTestPkcs12(
   certificate.setSubject(subject);
   certificate.setIssuer(issuer.certificate.subject.attributes);
   const extensions: object[] = [];
-  if (options.omitKeyUsage !== true) {
+  if (options.keyUsageValue !== undefined) {
+    extensions.push({ id: '2.5.29.15', value: options.keyUsageValue });
+  } else if (options.omitKeyUsage !== true) {
     extensions.push({
       name: 'keyUsage',
       digitalSignature: options.digitalSignature ?? true,

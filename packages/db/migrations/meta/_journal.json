@@ -78,6 +78,20 @@
       "when": 1790709961800,
       "tag": "0010_wild_darkhawk",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1790769402179,
+      "tag": "0011_document_sequences",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1790768732979,
+      "tag": "0012_document_sequences_rls",
+      "breakpoints": true
     }
   ]
 }

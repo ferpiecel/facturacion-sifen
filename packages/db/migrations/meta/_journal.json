@@ -134,6 +134,20 @@
       "when": 1790771752544,
       "tag": "0018_audit_log_hash_chain",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1790792354239,
+      "tag": "0019_csc_tenant",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1790792381786,
+      "tag": "0020_csc_tenant_rls",
+      "breakpoints": true
     }
   ]
 }

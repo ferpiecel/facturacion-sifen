@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint,
+  char,
   check,
   date,
   foreignKey,
@@ -416,6 +417,34 @@ export const tenantRequestSequences = pgTable(
 );
 
 /**
+ * Envelope-encrypted CSC (ADR-0009, HU-E2-03), up to 2 per tenant and
+ * environment (`tenant_cscs_enforce_limit` trigger). The CSC never exists in
+ * clear in the database: only the `EnvelopeCipher` output is stored in `sealed`.
+ */
+export const tenantCscs = pgTable(
+  'tenant_cscs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    environment: tenantEnvironment('environment').notNull(),
+    /** `idCSC` (4 digits, e.g. '0001'). */
+    idCsc: char('id_csc', { length: 4 }).notNull(),
+    sealed: jsonb('sealed').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('tenant_cscs_tenant_environment_id_csc_key').on(
+      table.tenantId,
+      table.environment,
+      table.idCsc,
+    ),
+    check('tenant_cscs_id_csc_format', sql`${table.idCsc} ~ '^[0-9]{4}$'`),
+  ],
+);
+
+/**
  * Last assigned `dNumDoc` (MT v150 C005, 7 digits: 0000001..9999999) per
  * (environment, timbrado, establishment, expedition point, document type)
  * for a tenant (HU-E4-01). Only advanced by `nextDocumentNumber` inside the
@@ -493,6 +522,7 @@ export const TENANT_TABLES = [
   'tenant_expedition_points',
   'tenant_fiscal_economic_activities',
   'tenant_fiscal_profiles',
+  'tenant_cscs',
   'tenant_probe',
   'tenant_request_sequences',
   'tenant_timbrados',

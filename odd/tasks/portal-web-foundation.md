@@ -30,8 +30,8 @@ Stitch design (project 14175002856948249287), wired into every monorepo quality 
 
 - [x] T1 (inline) RED: scaffold `@sifen/web` + tooling + failing `cn` spec.
 - [x] T2 (inline) GREEN: Stitch tokens, fonts, layout, brand, `cn`; README. — PR 1 boundary.
-- [ ] T3 (inline) RED: failing specs for the four display components.
-- [ ] T4 (inline) GREEN: components. — PR 2 boundary.
+- [x] T3 (inline) RED: failing specs for the four display components.
+- [x] T4 (inline) GREEN: components. — PR 2 boundary.
 - [ ] T5 (inline) RED: failing spec for the panel shell.
 - [ ] T6 (inline) GREEN: sidebar + topbar + environment legend. — PR 3 boundary.
 - [ ] T7 (inline) RED: failing spec for the panel content.

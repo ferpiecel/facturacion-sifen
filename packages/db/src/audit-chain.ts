@@ -29,12 +29,12 @@ type ChainRow = {
  */
 export async function verifyAuditChain(db: Database, tenantId: string): Promise<AuditChainResult> {
   assertValidTenantId(tenantId);
-  const result = await db.execute(sql`
+  const result = (await db.execute(sql`
     select id, seq::text as seq, prev_hash, hash,
       audit_log_compute_hash(tenant_id, id, seq, occurred_at, actor_type::text, actor_id,
         action, entity_type, entity_id, before, after, prev_hash) as expected_hash
-    from audit_log where tenant_id = ${tenantId} order by audit_log.seq`);
-  const rows = result.rows as ChainRow[];
+    from audit_log where tenant_id = ${tenantId} order by audit_log.seq`)) as { rows: ChainRow[] };
+  const { rows } = result;
 
   let expectedPrev = GENESIS_HASH;
   let expectedSeq = 1;

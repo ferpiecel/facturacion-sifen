@@ -28,9 +28,9 @@ describe('audit_log hash chain', () => {
     tenantId,
     actorType: 'api_key' as const,
     actorId: 'key-1',
-    action: `test.action.${n}`,
+    action: `test.action.${String(n)}`,
     entityType: 'thing',
-    entityId: `thing-${n}`,
+    entityId: `thing-${String(n)}`,
     before: n === 0 ? null : { n: n - 1 },
     after: { n, texto: 'ñandú' },
   });

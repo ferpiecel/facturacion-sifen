@@ -25,7 +25,6 @@ describe('CscVault (HU-E2-03)', () => {
         .returning()
     ).map((row) => row.id);
     const [a, b] = ids;
-    if (a === undefined || b === undefined) throw new Error('tenants were not inserted');
     const cipher = new EnvelopeCipher(createLocalKms(undefined, 'test', () => undefined));
     return { db: handle.db, vault: new CscVault(cipher), a, b };
   }
@@ -68,7 +67,7 @@ describe('CscVault (HU-E2-03)', () => {
     const { db, vault, a, b } = await setup();
     await vault.add(db, { tenantId: a, environment: 'test', idCsc: '0001', value: VALUE });
     const [row] = await db.select().from(tenantCscs);
-    if (!row) throw new Error('CSC was not stored');
+
     // Move the blob to tenant B / production: AAD no longer matches.
     await db.insert(tenantCscs).values({ ...row, id: undefined, tenantId: b });
     await db

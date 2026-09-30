@@ -9,7 +9,7 @@ const CSC_VERSION = 1;
 
 export class CscLimitError extends Error {
   constructor(environment: string) {
-    super(`tenant already has ${MAX_CSC_PER_ENVIRONMENT} CSC for ${environment}`);
+    super(`tenant already has ${String(MAX_CSC_PER_ENVIRONMENT)} CSC for ${environment}`);
     this.name = 'CscLimitError';
   }
 }
@@ -52,7 +52,7 @@ export class CscVault {
         .select({ n: sql<number>`count(*)::int` })
         .from(tenantCscs)
         .where(and(eq(tenantCscs.tenantId, tenantId), eq(tenantCscs.environment, environment)));
-      if ((count?.n ?? 0) >= MAX_CSC_PER_ENVIRONMENT) {
+      if (count.n >= MAX_CSC_PER_ENVIRONMENT) {
         throw new CscLimitError(environment);
       }
       await tx.insert(tenantCscs).values({ tenantId, environment, idCsc, sealed });
@@ -77,7 +77,7 @@ export class CscVault {
         .from(tenantCscs)
         .where(and(eq(tenantCscs.environment, environment), eq(tenantCscs.idCsc, idCsc))),
     );
-    const row = rows[0];
+    const row = rows.at(0);
     if (!row) {
       throw new Error(`CSC not found: ${idCsc} (${environment})`);
     }

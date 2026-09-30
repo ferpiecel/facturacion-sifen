@@ -1,7 +1,7 @@
 'use client';
 
 import { Check, Copy } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { cn } from '../lib/cn';
 
@@ -9,6 +9,8 @@ const CDC_PATTERN = /^\d{44}$/;
 // CDC layout: iTiDE, RUC, DV, establishment, point, number, taxpayer type,
 // date, emission type, security code, check digit.
 const FIELD_LENGTHS = [2, 8, 1, 3, 3, 7, 1, 8, 1, 9, 1] as const;
+
+const COPY_FEEDBACK_MS = 2000;
 
 type CopyState = 'idle' | 'copied' | 'failed';
 
@@ -45,6 +47,14 @@ function truncate(value: string): string {
  */
 export function CdcDisplay({ value, variant = 'full', className }: CdcDisplayProps) {
   const [copyState, setCopyState] = useState<CopyState>('idle');
+  const resetTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(
+    () => () => {
+      clearTimeout(resetTimer.current);
+    },
+    [],
+  );
 
   if (!CDC_PATTERN.test(value)) {
     return (
@@ -58,12 +68,18 @@ export function CdcDisplay({ value, variant = 'full', className }: CdcDisplayPro
   }
 
   const copy = async () => {
+    let next: CopyState = 'copied';
     try {
       await navigator.clipboard.writeText(value);
-      setCopyState('copied');
     } catch {
-      setCopyState('failed');
+      next = 'failed';
     }
+    setCopyState(next);
+    // Reset so the next copy changes the live region again and is announced.
+    clearTimeout(resetTimer.current);
+    resetTimer.current = setTimeout(() => {
+      setCopyState('idle');
+    }, COPY_FEEDBACK_MS);
   };
 
   return (
@@ -96,7 +112,8 @@ export function CdcDisplay({ value, variant = 'full', className }: CdcDisplayPro
         type="button"
         aria-label="Copiar CDC"
         onClick={() => void copy()}
-        className="inline-flex rounded text-outline transition-colors group-hover:text-primary"
+        // 24x24px hit area (WCAG 2.5.8); negative margin keeps the Stitch layout.
+        className="-m-1 inline-flex size-6 items-center justify-center rounded text-outline transition-colors group-hover:text-primary"
       >
         {copyState === 'copied' ? (
           <Check aria-hidden="true" className="size-3.5 text-secondary" />

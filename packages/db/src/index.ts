@@ -10,6 +10,7 @@ export {
   fiscalTaxpayerType,
   partners,
   TENANT_TABLES,
+  tenantEnvironment,
   tenantEstablishments,
   tenantExpeditionPoints,
   tenantFiscalEconomicActivities,

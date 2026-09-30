@@ -2,14 +2,21 @@ import { and, eq, isNull } from 'drizzle-orm';
 import {
   apiKeys,
   partners,
+  tenantEstablishments,
+  tenantExpeditionPoints,
   tenantFiscalEconomicActivities,
   tenantFiscalProfiles,
+  tenantTimbrados,
   tenants,
   type Database,
 } from '@sifen/db';
-import type { ApiKeyEnvironment } from '../modules/identity/domain/api-key.js';
+import type { TenantEnvironment } from '../modules/fiscal-config/domain/document-environment.js';
+import type { Establishment } from '../modules/fiscal-config/domain/establishment.js';
+import type { ExpeditionPoint } from '../modules/fiscal-config/domain/expedition-point.js';
 import type { FiscalProfile } from '../modules/fiscal-config/domain/fiscal-profile.js';
 import { formatRuc } from '../modules/fiscal-config/domain/ruc.js';
+import type { Timbrado } from '../modules/fiscal-config/domain/timbrado.js';
+import type { ApiKeyEnvironment } from '../modules/identity/domain/api-key.js';
 import { Argon2SecretHasherAdapter } from '../modules/identity/infrastructure/adapters/argon2-secret-hasher.adapter.js';
 import { IssueApiKeyUseCase } from '../modules/identity/application/issue-api-key.use-case.js';
 
@@ -178,4 +185,183 @@ export async function setFiscalProfile(
 
     return { tenantId, ruc: formatRuc(profile.ruc) };
   });
+}
+
+export interface AddEstablishmentParams {
+  tenantId: string;
+  establishment: Establishment;
+}
+
+export interface AddEstablishmentResult {
+  id: string;
+  code: string;
+}
+
+/**
+ * Operator CLI handler (backlog HU-E2-02): inserts one tenant-scoped
+ * establishment, persisting every field the domain validates. `districtCode`/
+ * `districtDescription` are optional together (cDisEmi has occurrence 0-1),
+ * matching `tenant_establishments.district_code`'s nullability.
+ */
+export async function addEstablishment(
+  db: Database,
+  params: AddEstablishmentParams,
+): Promise<AddEstablishmentResult> {
+  const { tenantId, establishment } = params;
+
+  return db.transaction(async (tx) => {
+    const found = await tx.select({ id: tenants.id }).from(tenants).where(eq(tenants.id, tenantId));
+    if (found.length === 0) {
+      throw new Error(`tenant not found: ${tenantId}`);
+    }
+
+    const [row] = await tx
+      .insert(tenantEstablishments)
+      .values({
+        tenantId,
+        code: establishment.code,
+        address: establishment.address,
+        houseNumber: establishment.houseNumber,
+        addressComplement1: establishment.addressComplement1,
+        addressComplement2: establishment.addressComplement2,
+        departmentCode: String(establishment.departmentCode),
+        districtCode: establishment.districtCode,
+        districtDescription: establishment.districtDescription,
+        cityCode: establishment.cityCode,
+        cityDescription: establishment.cityDescription,
+      })
+      .returning();
+
+    return { id: required(row, 'establishment was not inserted').id, code: establishment.code };
+  });
+}
+
+export interface AddExpeditionPointParams {
+  tenantId: string;
+  establishmentCode: string;
+  point: ExpeditionPoint;
+}
+
+export interface AddExpeditionPointResult {
+  id: string;
+  code: string;
+}
+
+/**
+ * Operator CLI handler (backlog HU-E2-02): resolves the establishment by
+ * `(tenantId, establishmentCode)` before inserting, so a mistyped or
+ * cross-tenant establishment code fails with a clear error rather than a
+ * raw FK violation.
+ */
+export async function addExpeditionPoint(
+  db: Database,
+  params: AddExpeditionPointParams,
+): Promise<AddExpeditionPointResult> {
+  const { tenantId, establishmentCode, point } = params;
+
+  return db.transaction(async (tx) => {
+    const foundTenant = await tx
+      .select({ id: tenants.id })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId));
+    if (foundTenant.length === 0) {
+      throw new Error(`tenant not found: ${tenantId}`);
+    }
+
+    const foundEstablishment = await tx
+      .select({ id: tenantEstablishments.id })
+      .from(tenantEstablishments)
+      .where(
+        and(
+          eq(tenantEstablishments.tenantId, tenantId),
+          eq(tenantEstablishments.code, establishmentCode),
+        ),
+      );
+    if (foundEstablishment.length === 0) {
+      throw new Error(`establishment not found: ${establishmentCode} (tenant ${tenantId})`);
+    }
+    const establishmentId = required(
+      foundEstablishment[0],
+      'establishment query returned no row',
+    ).id;
+
+    const [row] = await tx
+      .insert(tenantExpeditionPoints)
+      .values({ tenantId, establishmentId, code: point.code })
+      .returning();
+
+    return { id: required(row, 'expedition point was not inserted').id, code: point.code };
+  });
+}
+
+export interface AddTimbradoParams {
+  tenantId: string;
+  timbrado: Timbrado;
+}
+
+export interface AddTimbradoResult {
+  id: string;
+  number: string;
+}
+
+/** Operator CLI handler (backlog HU-E2-02): inserts one tenant-scoped timbrado. */
+export async function addTimbrado(
+  db: Database,
+  params: AddTimbradoParams,
+): Promise<AddTimbradoResult> {
+  const { tenantId, timbrado } = params;
+
+  return db.transaction(async (tx) => {
+    const found = await tx.select({ id: tenants.id }).from(tenants).where(eq(tenants.id, tenantId));
+    if (found.length === 0) {
+      throw new Error(`tenant not found: ${tenantId}`);
+    }
+
+    const [row] = await tx
+      .insert(tenantTimbrados)
+      .values({
+        tenantId,
+        number: timbrado.number,
+        validFrom: timbrado.validityStart,
+        validTo: timbrado.validityEnd,
+      })
+      .returning();
+
+    return { id: required(row, 'timbrado was not inserted').id, number: timbrado.number };
+  });
+}
+
+export interface SetTenantEnvironmentParams {
+  tenantId: string;
+  environment: TenantEnvironment;
+}
+
+export interface SetTenantEnvironmentResult {
+  id: string;
+  environment: TenantEnvironment;
+}
+
+/**
+ * Operator CLI handler (backlog HU-E2-04): switches a tenant's SIFEN
+ * environment. The `--confirm-production` guard against an accidental
+ * production switch lives in `parseOpsArgs`, not here — this handler only
+ * requires that the tenant exists so a mistyped id fails clearly instead of
+ * silently updating 0 rows.
+ */
+export async function setTenantEnvironment(
+  db: Database,
+  params: SetTenantEnvironmentParams,
+): Promise<SetTenantEnvironmentResult> {
+  const { tenantId, environment } = params;
+
+  const rows = await db
+    .update(tenants)
+    .set({ environment })
+    .where(eq(tenants.id, tenantId))
+    .returning({ id: tenants.id, environment: tenants.environment });
+  if (rows.length === 0) {
+    throw new Error(`tenant not found: ${tenantId}`);
+  }
+  const row = required(rows[0], 'tenant update returned no row');
+  return { id: row.id, environment: row.environment };
 }

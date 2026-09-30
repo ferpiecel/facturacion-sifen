@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { validateXml } from '@sifen/sifen-xsd';
 import { TipsDeXmlBuilder } from '@sifen/sifen-tips';
 import { createEstablishment } from '../../fiscal-config/domain/establishment.js';
 import { DEFAULT_TEST_DOCUMENT_LITERAL } from '../../fiscal-config/domain/document-environment.js';
@@ -54,7 +55,7 @@ function context(environment: 'test' | 'production'): InvoiceXmlContext {
     point: createExpeditionPoint({ code: '001' }),
     timbrado: createTimbrado({ number: '12345678', validityStart: '2024-01-01' }),
     numbering: { documentNumber: '0000001', securityCode: '298398000' },
-    issuedAt: '2026-09-30T10:00:00',
+    issuedAt: new Date('2026-09-30T13:00:00Z'),
     receiver: {
       ruc: '80000002-7',
       name: 'Receptor Prueba SA',
@@ -73,6 +74,9 @@ function context(environment: 'test' | 'production'): InvoiceXmlContext {
 }
 
 const builder = new TipsDeXmlBuilder();
+
+const MISSING_SIGNATURE =
+  "Element '{http://ekuatia.set.gov.py/sifen/xsd}rDE': Missing child element(s). Expected is ( {http://www.w3.org/2000/09/xmldsig#}Signature ).";
 
 describe('generateInvoiceXml', () => {
   it('builds XSD-valid XML (siRecepDE) whose DE Id is the CDC of the numbering results', async () => {
@@ -123,6 +127,109 @@ describe('generateInvoiceXml', () => {
     expect(body).toMatch(/<dTotOpe>11050<\/dTotOpe>/);
   });
 
+  it('before signing, the XSD reports exactly one error: the missing ds:Signature', async () => {
+    const { xml } = await generateInvoiceXml(builder, draft, context('production'));
+
+    const { errors } = validateXml(xml, 'siRecepDE');
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.message).toBe(MISSING_SIGNATURE);
+    expect(errors[0]?.path).toBe('/*');
+  });
+
+  it('does not tolerate another XSD error that merely mentions Signature', async () => {
+    const real = await generateInvoiceXml(builder, draft, context('production'));
+    const bogus = real.xml.replace(
+      '</rDE>',
+      '<Signature xmlns="http://www.w3.org/2000/09/xmldsig#"/></rDE>',
+    );
+
+    await expect(
+      generateInvoiceXml({ buildParaSifen: () => Promise.resolve(bogus) }, draft, context('test')),
+    ).rejects.toThrow(InvoiceXmlError);
+  });
+
+  it('does not tolerate a content error next to the missing signature', async () => {
+    const real = await generateInvoiceXml(builder, draft, context('production'));
+    const bad = real.xml.replace('<dVerFor>150</dVerFor>', '<dVerFor>151</dVerFor>');
+
+    await expect(
+      generateInvoiceXml({ buildParaSifen: () => Promise.resolve(bad) }, draft, context('test')),
+    ).rejects.toThrow(/dVerFor/);
+  });
+
+  it('derives the emission date and dFeEmiDE in America/Asuncion, not UTC', async () => {
+    const ctx = { ...context('production'), issuedAt: new Date('2026-10-01T01:30:00Z') };
+
+    const { xml, cdc } = await generateInvoiceXml(builder, draft, ctx);
+
+    expect(xml).toContain('<dFeEmiDE>2026-09-30T22:30:00</dFeEmiDE>');
+    expect(cdc.slice(25, 33)).toBe('20260930');
+  });
+
+  it('anchors the Id check to the root DE, not to any text containing the CDC', async () => {
+    const real = await generateInvoiceXml(builder, draft, context('production'));
+    const forged = real.xml
+      .replace(`<DE Id="${real.cdc}">`, '<DE Id="99999999999999999999999999999999999999999999">')
+      .replace('</DE>', `</DE><!--<DE Id="${real.cdc}">-->`);
+
+    await expect(
+      generateInvoiceXml({ buildParaSifen: () => Promise.resolve(forged) }, draft, context('test')),
+    ).rejects.toThrow(/Id/);
+  });
+
+  it.each([
+    ['B2C', '<iTiOpe>2</iTiOpe>'],
+    ['B2G', '<iTiOpe>3</iTiOpe>'],
+    ['B2F', '<iTiOpe>4</iTiOpe>'],
+  ] as const)('maps operation type %s', async (operationType, tag) => {
+    const { xml } = await generateInvoiceXml(builder, { ...draft, operationType }, context('test'));
+
+    expect(xml).toContain(tag);
+  });
+
+  it('omits the optional trade name and regime when the profile has none', async () => {
+    const base = context('production');
+    const issuer = createFiscalProfile({
+      ruc,
+      legalName: 'Empresa Real SA',
+      taxpayerType: 'persona_juridica',
+      economicActivities: [{ code: '1254', description: 'Desarrollo de Software' }],
+    });
+
+    const { xml } = await generateInvoiceXml(builder, draft, { ...base, issuer });
+
+    expect(xml).not.toContain('<dNomFanEmi>');
+    expect(xml).not.toContain('<cTipReg>');
+  });
+
+  it('maps VAT 0 as exempt and VAT 5 as 5%, with integer PYG amounts', async () => {
+    const mixed = {
+      ...draft,
+      items: [
+        { quantity: 1.5, unitPrice: 1000, vatRate: 0 as const },
+        { quantity: 1, unitPrice: 2100, vatRate: 5 as const },
+      ],
+    };
+
+    const { xml } = await generateInvoiceXml(builder, mixed, context('production'));
+
+    expect(xml).toContain('<dDesAfecIVA>Exento</dDesAfecIVA>');
+    expect(xml).toContain('<dTasaIVA>5</dTasaIVA>');
+    expect(xml).toContain('<dTotOpe>3600</dTotOpe>');
+  });
+
+  it('rejects a fractional PYG line total (non-integer quantity x price)', async () => {
+    const fractional = {
+      ...draft,
+      items: [{ quantity: 1.5, unitPrice: 1001, vatRate: 10 as const }],
+    };
+
+    await expect(generateInvoiceXml(builder, fractional, context('test'))).rejects.toThrow(
+      /pyg-integer/,
+    );
+  });
+
   it('rejects an invalid draft before building anything', async () => {
     const invalid = { ...draft, items: [] };
 
@@ -147,26 +254,37 @@ describe('generateInvoiceXml', () => {
 });
 
 describe('SIFEN and receiver variants (rule 2503, J003)', () => {
-  const withQr = '<rDE><gCamFuFD><dCarQR>https://q?a=1&amp;b=2</dCarQR></gCamFuFD></rDE>';
-  const withInfo =
-    '<rDE><gCamFuFD><dCarQR>https://q?a=1&amp;b=2</dCarQR><dInfAdic>Gracias</dInfAdic></gCamFuFD></rDE>';
+  const qr = '<dCarQR>https://q?a=1&amp;b=2</dCarQR>';
+  const signed = '<DE Id="x"><gCamItem><dInfAdic>item note</dInfAdic></gCamItem></DE><Signature/>';
+  const withQr = `<rDE>${signed}<gCamFuFD>${qr}</gCamFuFD></rDE>`;
+  const withInfo = `<rDE>${signed}<gCamFuFD>${qr}<dInfAdic>Gracias</dInfAdic></gCamFuFD></rDE>`;
 
-  it('adds dInfAdic after dCarQR for the receiver', () => {
+  it('adds dInfAdic after dCarQR inside gCamFuFD for the receiver', () => {
     expect(toReceiverXml(withQr, 'Gracias')).toBe(withInfo);
   });
 
-  it('escapes the additional information', () => {
-    expect(toReceiverXml(withQr, 'A & B <c>')).toContain(
-      '<dInfAdic>A &amp; B &lt;c&gt;</dInfAdic>',
-    );
+  it('replaces an existing gCamFuFD dInfAdic, including self-closing and attributed forms', () => {
+    const selfClosing = withQr.replace('</gCamFuFD>', '<dInfAdic/></gCamFuFD>');
+    const attributed = withQr.replace('</gCamFuFD>', '<dInfAdic a="1">Viejo</dInfAdic></gCamFuFD>');
+
+    expect(toReceiverXml(selfClosing, 'Gracias')).toBe(withInfo);
+    expect(toReceiverXml(attributed, 'Gracias')).toBe(withInfo);
   });
 
-  it('strips dInfAdic from the SIFEN version and leaves the rest byte-identical', () => {
+  it('escapes markup and quotes, and drops XML-illegal control characters', () => {
+    const xml = toReceiverXml(withQr, 'A & B <c> "d" \'e\'\u0001\u000B');
+
+    expect(xml).toContain('<dInfAdic>A &amp; B &lt;c&gt; &quot;d&quot; &apos;e&apos;</dInfAdic>');
+  });
+
+  it('strips only the gCamFuFD dInfAdic and leaves an item-level one untouched', () => {
     expect(toSifenXml(withInfo)).toBe(withQr);
     expect(toSifenXml(withQr)).toBe(withQr);
+    expect(toSifenXml(withInfo)).toContain('<dInfAdic>item note</dInfAdic>');
   });
 
   it('refuses to add dInfAdic when the QR block does not exist yet', () => {
     expect(() => toReceiverXml('<rDE/>', 'x')).toThrow(InvoiceXmlError);
+    expect(() => toReceiverXml('<rDE><dCarQR>q</dCarQR></rDE>', 'x')).toThrow(InvoiceXmlError);
   });
 });

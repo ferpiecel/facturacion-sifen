@@ -41,4 +41,5 @@ export {
   type AuditChainResult,
   type VerifyAuditChainOptions,
 } from './audit-chain.js';
+export * from './series.js';
 export * from './request-id.js';

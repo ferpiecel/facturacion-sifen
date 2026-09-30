@@ -357,7 +357,7 @@ export const auditActorType = pgEnum('audit_actor_type', ['api_key', 'user', 'op
  * stored already redacted (the API's `redact`). UPDATE/DELETE/TRUNCATE are
  * rejected by a trigger (migration 0014) and app_user only has
  * SELECT/INSERT. `seq`, `prev_hash` and `hash` form a per-tenant SHA-256
- * chain (HU-E13-02): a BEFORE INSERT trigger (migration 0017) overwrites them,
+ * chain (HU-E13-02): a BEFORE INSERT trigger (migration 0018) overwrites them,
  * so values supplied by the app are ignored.
  */
 export const auditLog = pgTable(
@@ -432,6 +432,9 @@ export const tenantDocumentSequences = pgTable(
     establishmentId: uuid('establishment_id').notNull(),
     expeditionPointId: uuid('expedition_point_id').notNull(),
     documentType: smallint('document_type').notNull(),
+    /** `dSerieNum`; '' while numbering runs without a series (rule 1110). */
+    series: varchar('series', { length: 2 }).notNull().default(''),
+    seriesStartedAt: timestamp('series_started_at', { withTimezone: true }).notNull().defaultNow(),
     lastNumber: integer('last_number').notNull().default(0),
   },
   (table) => [
@@ -443,6 +446,7 @@ export const tenantDocumentSequences = pgTable(
         table.establishmentId,
         table.expeditionPointId,
         table.documentType,
+        table.series,
       ],
       name: 'tenant_document_sequences_pkey',
     }),
@@ -463,6 +467,10 @@ export const tenantDocumentSequences = pgTable(
     check(
       'tenant_document_sequences_document_type_range',
       sql`${table.documentType} BETWEEN 1 AND 8`,
+    ),
+    check(
+      'tenant_document_sequences_series_format',
+      sql`${table.series} = '' OR ${table.series} ~ '^[A-Z]{2}$'`,
     ),
     check(
       'tenant_document_sequences_last_number_range',

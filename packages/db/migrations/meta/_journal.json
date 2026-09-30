@@ -124,8 +124,15 @@
     {
       "idx": 17,
       "version": "7",
-      "when": 1790771004963,
-      "tag": "0017_audit_log_hash_chain",
+      "when": 1790771065573,
+      "tag": "0017_document_series",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1790771752544,
+      "tag": "0018_audit_log_hash_chain",
       "breakpoints": true
     }
   ]

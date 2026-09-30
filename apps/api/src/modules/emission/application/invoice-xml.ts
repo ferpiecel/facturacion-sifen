@@ -56,8 +56,6 @@ export interface InvoiceXmlContext {
   testLiteral?: string;
 }
 
-const ROUNDING_CONFIG = {};
-
 /** Maps the draft and its fiscal context to the xmlgen input (params + data). */
 export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext): FacturaPocInput {
   if (draft.receiver.kind === 'unnamed') {
@@ -174,7 +172,7 @@ export async function generateInvoiceXml(
   draft: InvoiceDraft,
   ctx: InvoiceXmlContext,
 ): Promise<{ xml: string; cdc: string }> {
-  const draftErrors = validateInvoiceDraft(draft, ROUNDING_CONFIG);
+  const draftErrors = validateInvoiceDraft(draft, {});
   if (draftErrors.length > 0) {
     throw new InvoiceXmlError(draftErrors.map((e) => `${e.field} (${e.rule})`).join(', '));
   }

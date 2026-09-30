@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import {
   SEALED_SECRET_FORMAT,
   SecretDecryptionError,
+  decodeCanonicalBase64,
   encodeAad,
   type SealedSecret,
   type SecretContext,
@@ -42,37 +43,42 @@ export class EnvelopeCipher {
 
   /**
    * Returns the secret in clear, for in-memory use only; the caller should
-   * zeroize it when done.
+   * zeroize it when done. Zeroized here: the unwrapped data key and the
+   * intermediate decipher chunks (including unauthenticated plaintext when the
+   * tag check fails). Not zeroized: the returned buffer, which the caller owns.
    *
-   * @throws SecretDecryptionError on any tampering, context mismatch or unknown key.
+   * @throws SecretDecryptionError on any malformed input, tampering, context
+   *   mismatch or unknown key.
    */
   async open(sealed: SealedSecret, context: SecretContext): Promise<Buffer> {
-    const nonce = Buffer.from(sealed.nonce, 'base64');
-    const tag = Buffer.from(sealed.tag, 'base64');
-    if (
-      sealed.v !== SEALED_SECRET_FORMAT ||
-      nonce.length !== NONCE_BYTES ||
-      tag.length !== TAG_BYTES
-    ) {
-      throw new SecretDecryptionError();
-    }
-
     let dataKey: Buffer | undefined;
+    const chunks: Buffer[] = [];
     try {
-      dataKey = await this.kms.unwrapDataKey(
-        Buffer.from(sealed.wrappedKey, 'base64'),
-        sealed.keyId,
-      );
+      const nonce = decodeCanonicalBase64(sealed.nonce);
+      const tag = decodeCanonicalBase64(sealed.tag);
+      const ciphertext = decodeCanonicalBase64(sealed.ciphertext);
+      const wrappedKey = decodeCanonicalBase64(sealed.wrappedKey);
+      if (
+        sealed.v !== SEALED_SECRET_FORMAT ||
+        typeof sealed.keyId !== 'string' ||
+        nonce.length !== NONCE_BYTES ||
+        tag.length !== TAG_BYTES
+      ) {
+        throw new SecretDecryptionError();
+      }
+      dataKey = await this.kms.unwrapDataKey(wrappedKey, sealed.keyId);
       const decipher = createDecipheriv(ALGORITHM, dataKey, nonce, { authTagLength: TAG_BYTES });
       decipher.setAAD(encodeAad(context));
       decipher.setAuthTag(tag);
-      const ciphertext = Buffer.from(sealed.ciphertext, 'base64');
-      return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+      chunks.push(decipher.update(ciphertext));
+      chunks.push(decipher.final());
+      return Buffer.concat(chunks);
     } catch {
-      // No cause attached: KMS or OpenSSL errors must not leak into logs.
+      // No cause attached: parse, KMS or OpenSSL errors must not leak into logs.
       throw new SecretDecryptionError();
     } finally {
       dataKey?.fill(0);
+      for (const chunk of chunks) chunk.fill(0);
     }
   }
 }

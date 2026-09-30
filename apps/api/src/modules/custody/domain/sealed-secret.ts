@@ -38,11 +38,38 @@ export class SecretDecryptionError extends Error {
   }
 }
 
-/** Unambiguous AAD encoding of the format version and the {@link SecretContext}. */
+/**
+ * Unambiguous AAD encoding of the format version and the {@link SecretContext}.
+ *
+ * @throws RangeError when `version` is not a non-negative safe integer.
+ */
 export function encodeAad(context: SecretContext): Buffer {
   const { tenantId, kind, environment, version } = context;
+  if (!Number.isSafeInteger(version) || version < 0) {
+    throw new RangeError('secret version must be a non-negative safe integer');
+  }
   return Buffer.from(
     JSON.stringify([SEALED_SECRET_FORMAT, tenantId, kind, environment, version]),
     'utf8',
   );
+}
+
+const CANONICAL_BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+/**
+ * Decodes standard, padded base64 and rejects anything else (whitespace,
+ * base64url, missing padding, garbage, non-strings), unlike `Buffer.from`,
+ * which silently skips what it cannot parse.
+ *
+ * @throws TypeError when `value` is not canonical base64.
+ */
+export function decodeCanonicalBase64(value: unknown): Buffer {
+  if (typeof value !== 'string' || !CANONICAL_BASE64.test(value)) {
+    throw new TypeError('value is not canonical base64');
+  }
+  const decoded = Buffer.from(value, 'base64');
+  if (decoded.toString('base64') !== value) {
+    throw new TypeError('value is not canonical base64');
+  }
+  return decoded;
 }

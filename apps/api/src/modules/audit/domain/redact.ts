@@ -54,7 +54,7 @@ export function redact(
     const normalized = normalize(key);
     return fragments.some((fragment) => normalized.includes(fragment));
   };
-  const ancestors = new WeakSet<object>();
+  const ancestors = new WeakSet();
 
   const walk = (node: unknown): unknown => {
     if (typeof node === 'string') {

@@ -10,6 +10,7 @@ import {
   tenants,
   type Database,
 } from '@sifen/db';
+import type { TenantEnvironment } from '../modules/fiscal-config/domain/document-environment.js';
 import type { Establishment } from '../modules/fiscal-config/domain/establishment.js';
 import type { ExpeditionPoint } from '../modules/fiscal-config/domain/expedition-point.js';
 import type { FiscalProfile } from '../modules/fiscal-config/domain/fiscal-profile.js';
@@ -328,4 +329,39 @@ export async function addTimbrado(
 
     return { id: required(row, 'timbrado was not inserted').id, number: timbrado.number };
   });
+}
+
+export interface SetTenantEnvironmentParams {
+  tenantId: string;
+  environment: TenantEnvironment;
+}
+
+export interface SetTenantEnvironmentResult {
+  id: string;
+  environment: TenantEnvironment;
+}
+
+/**
+ * Operator CLI handler (backlog HU-E2-04): switches a tenant's SIFEN
+ * environment. The `--confirm-production` guard against an accidental
+ * production switch lives in `parseOpsArgs`, not here — this handler only
+ * requires that the tenant exists so a mistyped id fails clearly instead of
+ * silently updating 0 rows.
+ */
+export async function setTenantEnvironment(
+  db: Database,
+  params: SetTenantEnvironmentParams,
+): Promise<SetTenantEnvironmentResult> {
+  const { tenantId, environment } = params;
+
+  const rows = await db
+    .update(tenants)
+    .set({ environment })
+    .where(eq(tenants.id, tenantId))
+    .returning({ id: tenants.id, environment: tenants.environment });
+  if (rows.length === 0) {
+    throw new Error(`tenant not found: ${tenantId}`);
+  }
+  const row = required(rows[0], 'tenant update returned no row');
+  return { id: row.id, environment: row.environment };
 }

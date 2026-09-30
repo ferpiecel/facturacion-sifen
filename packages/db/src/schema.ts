@@ -30,6 +30,17 @@ export const partners = pgTable('partners', {
 });
 
 /**
+ * `tenants.environment`: which SIFEN environment a tenant's documents are
+ * emitted for (HU-E2-04, ADR-0012). Lives on `tenants` rather than
+ * `tenant_fiscal_profiles` because it is a platform-level identity attribute
+ * that must exist for every tenant from creation (default `'test'`, fail
+ * safe) independently of whether a fiscal profile has been configured yet,
+ * and because it governs behavior outside fiscal data too (which API keys a
+ * tenant may use, `SIFEN_ENVIRONMENT` at the deployment level).
+ */
+export const tenantEnvironment = pgEnum('tenant_environment', ['test', 'production']);
+
+/**
  * Tenants master table: the source of truth every tenant-scoped table
  * references. It has no `tenant_id` column, but RLS still limits `app_user`
  * to its own row (`id = app.current_tenant`).
@@ -41,6 +52,9 @@ export const tenants = pgTable(
     name: varchar('name', { length: 255 }).notNull(),
     // Nullable: direct SaaS tenants have no partner (ADR-0014).
     partnerId: uuid('partner_id').references(() => partners.id),
+    // Defaults to 'test' (fail safe): a tenant must be switched to
+    // 'production' explicitly (HU-E2-04).
+    environment: tenantEnvironment('environment').notNull().default('test'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index('tenants_partner_id_idx').on(table.partnerId)],
@@ -329,7 +343,7 @@ export const auditActorType = pgEnum('audit_actor_type', ['api_key', 'user', 'op
 /**
  * Append-only audit trail (HU-E13-01, RF-16, RNF-08). `before`/`after` are
  * stored already redacted (the API's `redact`). UPDATE/DELETE/TRUNCATE are
- * rejected by a trigger (migration 0011) and app_user only has
+ * rejected by a trigger (migration 0012) and app_user only has
  * SELECT/INSERT. HU-E13-02 will add nullable `prev_hash`/`hash` columns.
  */
 export const auditLog = pgTable(

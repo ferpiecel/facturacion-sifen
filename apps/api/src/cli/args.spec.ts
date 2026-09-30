@@ -380,6 +380,57 @@ describe('parseOpsArgs timbrado:add (HU-E2-02)', () => {
   });
 });
 
+describe('parseOpsArgs tenant:environment (HU-E2-04)', () => {
+  it('parses a switch to "test" without --confirm-production', () => {
+    expect(parseOpsArgs(['tenant:environment', '--tenant', 't-1', '--env', 'test'])).toEqual({
+      kind: 'tenant:environment',
+      tenantId: 't-1',
+      environment: 'test',
+    });
+  });
+
+  it('parses a switch to "production" with --confirm-production', () => {
+    expect(
+      parseOpsArgs([
+        'tenant:environment',
+        '--tenant',
+        't-1',
+        '--env',
+        'production',
+        '--confirm-production',
+      ]),
+    ).toEqual({ kind: 'tenant:environment', tenantId: 't-1', environment: 'production' });
+  });
+
+  it('rejects a switch to "production" without --confirm-production', () => {
+    expect(() =>
+      parseOpsArgs(['tenant:environment', '--tenant', 't-1', '--env', 'production']),
+    ).toThrow(/--confirm-production/);
+  });
+
+  it('rejects an invalid --env', () => {
+    expect(() =>
+      parseOpsArgs(['tenant:environment', '--tenant', 't-1', '--env', 'staging']),
+    ).toThrow(OpsArgError);
+  });
+
+  it.each([
+    ['tenant', undefined],
+    ['env', undefined],
+  ])('rejects missing --%s', (flag) => {
+    const flags: Record<string, string | undefined> = {
+      tenant: 't-1',
+      env: 'test',
+      [flag]: undefined,
+    };
+    const args = [
+      'tenant:environment',
+      ...Object.entries(flags).flatMap(([f, v]) => (v === undefined ? [] : [`--${f}`, v])),
+    ];
+    expect(() => parseOpsArgs(args)).toThrow(OpsArgError);
+  });
+});
+
 describe('getOpsDatabaseUrl (HU-E1-05)', () => {
   it('returns OPS_DATABASE_URL when set', () => {
     expect(getOpsDatabaseUrl({ OPS_DATABASE_URL: 'postgres://owner@host/db' })).toBe(

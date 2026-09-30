@@ -388,6 +388,34 @@ export const auditLog = pgTable(
 );
 
 /**
+ * Last `dId` (SIFEN request id, numeric 1..15 digits) issued per tenant and
+ * environment (HU-E4-03). Only advanced by `nextRequestId` inside the
+ * caller's tenant transaction.
+ */
+export const tenantRequestSequences = pgTable(
+  'tenant_request_sequences',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    environment: tenantEnvironment('environment').notNull(),
+    lastValue: bigint('last_value', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.tenantId, table.environment],
+      name: 'tenant_request_sequences_pkey',
+    }),
+    check(
+      'tenant_request_sequences_last_value_range',
+      sql`${table.lastValue} BETWEEN 0 AND 999999999999999`,
+    ),
+  ],
+);
+
+/**
  * Last assigned `dNumDoc` (MT v150 C005, 7 digits: 0000001..9999999) per
  * (environment, timbrado, establishment, expedition point, document type)
  * for a tenant (HU-E4-01). Only advanced by `nextDocumentNumber` inside the
@@ -458,5 +486,6 @@ export const TENANT_TABLES = [
   'tenant_fiscal_economic_activities',
   'tenant_fiscal_profiles',
   'tenant_probe',
+  'tenant_request_sequences',
   'tenant_timbrados',
 ] as const;

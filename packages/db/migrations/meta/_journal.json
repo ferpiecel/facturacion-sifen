@@ -110,8 +110,22 @@
     {
       "idx": 15,
       "version": "7",
-      "when": 1790770499245,
-      "tag": "0015_audit_log_hash_chain",
+      "when": 1790770332551,
+      "tag": "0015_request_sequences",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1790770333551,
+      "tag": "0016_request_sequences_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1790771004963,
+      "tag": "0017_audit_log_hash_chain",
       "breakpoints": true
     }
   ]

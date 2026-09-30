@@ -1,6 +1,6 @@
 {
-  "id": "a2d5fbb3-bfec-4fad-8d0f-e7087673bb50",
-  "prevId": "6e68cea7-8b1b-4f08-a245-e7b92c0fc140",
+  "id": "b60da300-d051-486f-9141-b0d3813d80bb",
+  "prevId": "a2d5fbb3-bfec-4fad-8d0f-e7087673bb50",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -197,6 +197,27 @@
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
+        },
+        "seq": {
+          "name": "seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "prev_hash": {
+          "name": "prev_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "hash": {
+          "name": "hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
         }
       },
       "indexes": {
@@ -238,7 +259,16 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "audit_log_tenant_seq_unique": {
+          "name": "audit_log_tenant_seq_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "seq"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {
         "audit_log_action_not_blank": {

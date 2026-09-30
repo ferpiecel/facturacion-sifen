@@ -19,6 +19,7 @@ export {
   tenantFiscalEconomicActivities,
   tenantFiscalProfiles,
   tenantProbe,
+  tenantRequestSequences,
   tenants,
   tenantTimbrados,
 } from './schema.js';
@@ -30,3 +31,4 @@ export { assertNonPrivilegedSession } from './session-guard.js';
 export { TenantAwareProcessor, type TenantJob } from './tenant-aware-processor.js';
 export * from './document-number.js';
 export { verifyAuditChain, type AuditChainBreak, type AuditChainResult } from './audit-chain.js';
+export * from './request-id.js';

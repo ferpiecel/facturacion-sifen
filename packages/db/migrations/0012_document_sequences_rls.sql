@@ -1,11 +1,11 @@
--- RLS + grants for tenant_document_sequences (same pattern as 0008).
+-- RLS + grants for tenant_document_sequences (same pattern as 0008, minus DELETE: numbering history is never deleted).
 ALTER TABLE "tenant_document_sequences" ENABLE ROW LEVEL SECURITY;
 --> statement-breakpoint
 ALTER TABLE "tenant_document_sequences" FORCE ROW LEVEL SECURITY;
 --> statement-breakpoint
-GRANT SELECT, INSERT, UPDATE, DELETE ON "tenant_document_sequences" TO app_user;
+GRANT SELECT, INSERT, UPDATE ON "tenant_document_sequences" TO app_user;
 --> statement-breakpoint
-GRANT SELECT, INSERT, UPDATE, DELETE ON "tenant_document_sequences" TO platform_admin;
+GRANT SELECT, INSERT, UPDATE ON "tenant_document_sequences" TO platform_admin;
 --> statement-breakpoint
 CREATE POLICY "tenant_isolation" ON "tenant_document_sequences"
   TO app_user

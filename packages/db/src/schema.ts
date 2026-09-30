@@ -58,7 +58,11 @@ export const tenants = pgTable(
     environment: tenantEnvironment('environment').notNull().default('test'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index('tenants_partner_id_idx').on(table.partnerId)],
+  (table) => [
+    index('tenants_partner_id_idx').on(table.partnerId),
+    // Composite target for tenant_document_sequences' environment FK.
+    uniqueIndex('tenants_id_environment_idx').on(table.id, table.environment),
+  ],
 );
 
 /**
@@ -391,6 +395,15 @@ export const tenantDocumentSequences = pgTable(
       ],
       name: 'tenant_document_sequences_tenant_point_fk',
     }),
+    foreignKey({
+      columns: [table.tenantId, table.environment],
+      foreignColumns: [tenants.id, tenants.environment],
+      name: 'tenant_document_sequences_tenant_environment_fk',
+    }),
+    check(
+      'tenant_document_sequences_document_type_range',
+      sql`${table.documentType} BETWEEN 1 AND 8`,
+    ),
     check(
       'tenant_document_sequences_last_number_range',
       sql`${table.lastNumber} BETWEEN 0 AND 9999999`,

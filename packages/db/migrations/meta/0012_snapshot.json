@@ -1,6 +1,6 @@
 {
   "id": "1ceba1d7-7564-491f-a7cf-688f770e6cd5",
-  "prevId": "e0e3f98a-7096-4e4f-be18-2cfa308dab0a",
+  "prevId": "70dbc2cd-afed-4428-932a-ba4e4b7874c5",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -85,9 +85,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "api_keys_key_id_idx": {
           "name": "api_keys_key_id_idx",
@@ -100,24 +100,24 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "api_keys_tenant_id_tenants_id_fk": {
           "name": "api_keys_tenant_id_tenants_id_fk",
           "tableFrom": "api_keys",
+          "tableTo": "tenants",
           "columnsFrom": [
             "tenant_id"
           ],
-          "tableTo": "tenants",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -218,47 +218,62 @@
         "tenant_document_sequences_tenant_id_tenants_id_fk": {
           "name": "tenant_document_sequences_tenant_id_tenants_id_fk",
           "tableFrom": "tenant_document_sequences",
+          "tableTo": "tenants",
           "columnsFrom": [
             "tenant_id"
           ],
-          "tableTo": "tenants",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "tenant_document_sequences_tenant_timbrado_fk": {
           "name": "tenant_document_sequences_tenant_timbrado_fk",
           "tableFrom": "tenant_document_sequences",
+          "tableTo": "tenant_timbrados",
           "columnsFrom": [
             "tenant_id",
             "timbrado_id"
           ],
-          "tableTo": "tenant_timbrados",
           "columnsTo": [
             "tenant_id",
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "tenant_document_sequences_tenant_point_fk": {
           "name": "tenant_document_sequences_tenant_point_fk",
           "tableFrom": "tenant_document_sequences",
+          "tableTo": "tenant_expedition_points",
           "columnsFrom": [
             "tenant_id",
             "establishment_id",
             "expedition_point_id"
           ],
-          "tableTo": "tenant_expedition_points",
           "columnsTo": [
             "tenant_id",
             "establishment_id",
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "tenant_document_sequences_tenant_environment_fk": {
+          "name": "tenant_document_sequences_tenant_environment_fk",
+          "tableFrom": "tenant_document_sequences",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id",
+            "environment"
+          ],
+          "columnsTo": [
+            "id",
+            "environment"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -277,6 +292,10 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
+        "tenant_document_sequences_document_type_range": {
+          "name": "tenant_document_sequences_document_type_range",
+          "value": "\"tenant_document_sequences\".\"document_type\" BETWEEN 1 AND 8"
+        },
         "tenant_document_sequences_last_number_range": {
           "name": "tenant_document_sequences_last_number_range",
           "value": "\"tenant_document_sequences\".\"last_number\" BETWEEN 0 AND 9999999"
@@ -388,9 +407,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "tenant_establishments_tenant_code_idx": {
           "name": "tenant_establishments_tenant_code_idx",
@@ -409,9 +428,9 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "tenant_establishments_tenant_id_id_idx": {
           "name": "tenant_establishments_tenant_id_id_idx",
@@ -430,24 +449,24 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "tenant_establishments_tenant_id_tenants_id_fk": {
           "name": "tenant_establishments_tenant_id_tenants_id_fk",
           "tableFrom": "tenant_establishments",
+          "tableTo": "tenants",
           "columnsFrom": [
             "tenant_id"
           ],
-          "tableTo": "tenants",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -526,9 +545,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "tenant_expedition_points_establishment_id_idx": {
           "name": "tenant_expedition_points_establishment_id_idx",
@@ -541,9 +560,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "tenant_expedition_points_tenant_establishment_code_idx": {
           "name": "tenant_expedition_points_tenant_establishment_code_idx",
@@ -568,9 +587,9 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "tenant_expedition_points_tenant_establishment_id_idx": {
           "name": "tenant_expedition_points_tenant_establishment_id_idx",
@@ -595,39 +614,39 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "tenant_expedition_points_tenant_id_tenants_id_fk": {
           "name": "tenant_expedition_points_tenant_id_tenants_id_fk",
           "tableFrom": "tenant_expedition_points",
+          "tableTo": "tenants",
           "columnsFrom": [
             "tenant_id"
           ],
-          "tableTo": "tenants",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         },
         "tenant_expedition_points_tenant_establishment_fk": {
           "name": "tenant_expedition_points_tenant_establishment_fk",
           "tableFrom": "tenant_expedition_points",
+          "tableTo": "tenant_establishments",
           "columnsFrom": [
             "tenant_id",
             "establishment_id"
           ],
-          "tableTo": "tenant_establishments",
           "columnsTo": [
             "tenant_id",
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -690,9 +709,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "tenant_fiscal_economic_activities_tenant_code_idx": {
           "name": "tenant_fiscal_economic_activities_tenant_code_idx",
@@ -711,24 +730,24 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "tenant_fiscal_economic_activities_tenant_id_tenants_id_fk": {
           "name": "tenant_fiscal_economic_activities_tenant_id_tenants_id_fk",
           "tableFrom": "tenant_fiscal_economic_activities",
+          "tableTo": "tenants",
           "columnsFrom": [
             "tenant_id"
           ],
-          "tableTo": "tenants",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -809,15 +828,15 @@
         "tenant_fiscal_profiles_tenant_id_tenants_id_fk": {
           "name": "tenant_fiscal_profiles_tenant_id_tenants_id_fk",
           "tableFrom": "tenant_fiscal_profiles",
+          "tableTo": "tenants",
           "columnsFrom": [
             "tenant_id"
           ],
-          "tableTo": "tenants",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -882,24 +901,24 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "tenant_probe_tenant_id_tenants_id_fk": {
           "name": "tenant_probe_tenant_id_tenants_id_fk",
           "tableFrom": "tenant_probe",
+          "tableTo": "tenants",
           "columnsFrom": [
             "tenant_id"
           ],
-          "tableTo": "tenants",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -963,9 +982,9 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "tenant_timbrados_tenant_number_idx": {
           "name": "tenant_timbrados_tenant_number_idx",
@@ -984,9 +1003,9 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         },
         "tenant_timbrados_tenant_id_id_idx": {
           "name": "tenant_timbrados_tenant_id_id_idx",
@@ -1005,24 +1024,24 @@
             }
           ],
           "isUnique": true,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
         }
       },
       "foreignKeys": {
         "tenant_timbrados_tenant_id_tenants_id_fk": {
           "name": "tenant_timbrados_tenant_id_tenants_id_fk",
           "tableFrom": "tenant_timbrados",
+          "tableTo": "tenants",
           "columnsFrom": [
             "tenant_id"
           ],
-          "tableTo": "tenants",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1091,24 +1110,45 @@
             }
           ],
           "isUnique": false,
-          "with": {},
+          "concurrently": false,
           "method": "btree",
-          "concurrently": false
+          "with": {}
+        },
+        "tenants_id_environment_idx": {
+          "name": "tenants_id_environment_idx",
+          "columns": [
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "environment",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
         "tenants_partner_id_partners_id_fk": {
           "name": "tenants_partner_id_partners_id_fk",
           "tableFrom": "tenants",
+          "tableTo": "partners",
           "columnsFrom": [
             "partner_id"
           ],
-          "tableTo": "partners",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "no action"
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1145,10 +1185,10 @@
     }
   },
   "schemas": {},
-  "views": {},
   "sequences": {},
   "roles": {},
   "policies": {},
+  "views": {},
   "_meta": {
     "columns": {},
     "schemas": {},

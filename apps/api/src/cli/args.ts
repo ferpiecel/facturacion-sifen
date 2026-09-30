@@ -1,4 +1,4 @@
-import { parseArgs } from 'node:util';
+import { parseArgs, type ParseArgsConfig } from 'node:util';
 import {
   createEstablishment,
   type Establishment,
@@ -16,6 +16,7 @@ import {
 import { parseRuc } from '../modules/fiscal-config/domain/ruc.js';
 import { createTimbrado, type Timbrado } from '../modules/fiscal-config/domain/timbrado.js';
 import type { TenantEnvironment } from '../modules/fiscal-config/domain/document-environment.js';
+import { InvalidCscError, parseCsc } from '../modules/custody/domain/csc.js';
 import type { ApiKeyEnvironment } from '../modules/identity/domain/api-key.js';
 
 /** Invalid argv or missing environment for the operator CLI (backlog HU-E1-05). */
@@ -36,7 +37,35 @@ export type OpsCommand =
   | { kind: 'establishment:add'; tenantId: string; establishment: Establishment }
   | { kind: 'point:add'; tenantId: string; establishmentCode: string; point: ExpeditionPoint }
   | { kind: 'timbrado:add'; tenantId: string; timbrado: Timbrado }
-  | { kind: 'tenant:environment'; tenantId: string; environment: TenantEnvironment };
+  | { kind: 'tenant:environment'; tenantId: string; environment: TenantEnvironment }
+  | {
+      kind: 'csc:add';
+      tenantId: string;
+      environment: TenantEnvironment;
+      idCsc: string;
+      csc: string;
+    };
+
+/**
+ * `parseArgs` wrapper: stray positionals (a forgotten flag, an unquoted value)
+ * and parser errors become fixed messages, because node's own errors echo the
+ * offending argv value, which for `csc:add` may be the CSC.
+ */
+function parseStrict<T extends ParseArgsConfig>(config: T) {
+  try {
+    const result = parseArgs({ ...config, allowPositionals: true });
+    if (result.positionals.length > 0) {
+      throw new OpsArgError('unexpected positional argument (value hidden)');
+    }
+    return result;
+  } catch (error) {
+    if (error instanceof OpsArgError) {
+      throw error;
+    }
+    const code = (error as { code?: string }).code ?? 'ERR_PARSE_ARGS';
+    throw new OpsArgError(`invalid arguments (${code})`);
+  }
+}
 
 function requireOption(value: string | undefined, flag: string): string {
   if (!value) {
@@ -131,11 +160,11 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
 
   switch (subcommand) {
     case 'partner:create': {
-      const { values } = parseArgs({ args: rest, options: { name: { type: 'string' } } });
+      const { values } = parseStrict({ args: rest, options: { name: { type: 'string' } } });
       return { kind: 'partner:create', name: requireOption(values.name, 'name') };
     }
     case 'tenant:create': {
-      const { values } = parseArgs({
+      const { values } = parseStrict({
         args: rest,
         options: { name: { type: 'string' }, partner: { type: 'string' } },
       });
@@ -146,7 +175,7 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
       };
     }
     case 'apikey:create': {
-      const { values } = parseArgs({
+      const { values } = parseStrict({
         args: rest,
         options: {
           tenant: { type: 'string' },
@@ -164,11 +193,11 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
       };
     }
     case 'apikey:revoke': {
-      const { values } = parseArgs({ args: rest, options: { 'key-id': { type: 'string' } } });
+      const { values } = parseStrict({ args: rest, options: { 'key-id': { type: 'string' } } });
       return { kind: 'apikey:revoke', keyId: requireOption(values['key-id'], 'key-id') };
     }
     case 'fiscal:set': {
-      const { values } = parseArgs({
+      const { values } = parseStrict({
         args: rest,
         options: {
           tenant: { type: 'string' },
@@ -197,7 +226,7 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
       };
     }
     case 'establishment:add': {
-      const { values } = parseArgs({
+      const { values } = parseStrict({
         args: rest,
         options: {
           tenant: { type: 'string' },
@@ -239,7 +268,7 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
       };
     }
     case 'point:add': {
-      const { values } = parseArgs({
+      const { values } = parseStrict({
         args: rest,
         options: {
           tenant: { type: 'string' },
@@ -258,7 +287,7 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
       };
     }
     case 'timbrado:add': {
-      const { values } = parseArgs({
+      const { values } = parseStrict({
         args: rest,
         options: {
           tenant: { type: 'string' },
@@ -281,7 +310,7 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
       };
     }
     case 'tenant:environment': {
-      const { values } = parseArgs({
+      const { values } = parseStrict({
         args: rest,
         options: {
           tenant: { type: 'string' },
@@ -302,6 +331,33 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
         tenantId: requireOption(values.tenant, 'tenant'),
         environment,
       };
+    }
+    case 'csc:add': {
+      const { values } = parseStrict({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          env: { type: 'string' },
+          id: { type: 'string' },
+          csc: { type: 'string' },
+        },
+      });
+
+      const tenantId = requireOption(values.tenant, 'tenant');
+      const environment = parseTenantEnvironment(values.env);
+      try {
+        // parseCsc never echoes the value; a format error is a usage error.
+        const { idCsc, value } = parseCsc(
+          requireOption(values.id, 'id'),
+          requireOption(values.csc, 'csc'),
+        );
+        return { kind: 'csc:add', tenantId, environment, idCsc, csc: value };
+      } catch (error) {
+        if (error instanceof InvalidCscError) {
+          throw new OpsArgError(error.message);
+        }
+        throw error;
+      }
     }
     default:
       throw new OpsArgError(`unknown subcommand "${subcommand}"`);

@@ -1,4 +1,3 @@
--- Manual rollback for 0020 (limit trigger, RLS and grants only; 0019 owns the table).
 DROP POLICY IF EXISTS "platform_admin_all" ON "tenant_cscs";
 DROP POLICY IF EXISTS "tenant_isolation" ON "tenant_cscs";
 ALTER TABLE "tenant_cscs" NO FORCE ROW LEVEL SECURITY;

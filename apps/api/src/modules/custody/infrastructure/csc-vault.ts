@@ -3,7 +3,6 @@ import { tenantCscs, tenants, withTenantTransaction, type Database } from '@sife
 import type { SealedSecret, SecretContext } from '../domain/sealed-secret.js';
 import type { EnvelopeCipher } from '../application/envelope-cipher.js';
 
-/** Maximum CSCs per tenant and environment (HU-E2-03). */
 export const MAX_CSC_PER_ENVIRONMENT = 2;
 const CSC_VERSION = 1;
 

@@ -1,4 +1,3 @@
--- Limit trigger (max 2 CSC per tenant and environment) + RLS + grants for tenant_cscs.
 CREATE FUNCTION "tenant_cscs_enforce_limit"() RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = pg_catalog, pg_temp

@@ -429,7 +429,6 @@ export const tenantCscs = pgTable(
       .notNull()
       .references(() => tenants.id),
     environment: tenantEnvironment('environment').notNull(),
-    /** `idCSC` (4 digits, e.g. '0001'). */
     idCsc: char('id_csc', { length: 4 }).notNull(),
     sealed: jsonb('sealed').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

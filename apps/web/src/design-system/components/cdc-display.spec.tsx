@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -62,11 +62,13 @@ describe('CdcDisplay', () => {
     try {
       const writeText = vi.fn(() => Promise.resolve());
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       render(<CdcDisplay value={CDC} />);
       const button = screen.getByRole('button', { name: 'Copiar CDC' });
 
-      await user.click(button);
+      await act(async () => {
+        fireEvent.click(button);
+        await Promise.resolve();
+      });
       expect(screen.getByText('CDC copiado')).toBeInTheDocument();
 
       act(() => {
@@ -74,7 +76,10 @@ describe('CdcDisplay', () => {
       });
       expect(screen.queryByText('CDC copiado')).not.toBeInTheDocument();
 
-      await user.click(button);
+      await act(async () => {
+        fireEvent.click(button);
+        await Promise.resolve();
+      });
       expect(screen.getByText('CDC copiado')).toBeInTheDocument();
     } finally {
       vi.useRealTimers();

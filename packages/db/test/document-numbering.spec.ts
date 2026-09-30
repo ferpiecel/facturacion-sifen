@@ -202,7 +202,7 @@ describe('nextDocumentNumber (dNumDoc numbering)', () => {
       'tenant_document_sequences_document_type_range',
     );
     expect(await causeMessage(insert({ environment: 'production' }))).toContain(
-      'tenant_document_sequences_tenant_environment_fk',
+      "environment must match the tenant's current environment",
     );
     expect(
       await causeMessage(insert({ timbradoId: '00000000-0000-4000-8000-000000000000' })),
@@ -251,6 +251,30 @@ describe('nextDocumentNumber (dNumDoc numbering)', () => {
     ).toContain('permission denied');
 
     expect(await next()).toBe(3);
+  });
+
+  it('follows a tenant switched from test to production, keeping old test sequences', async () => {
+    const { db, keyA } = await seed();
+    const next = (key: DocumentSequenceKey) =>
+      withTenantTransaction(db, key.tenantId, (tx) => nextDocumentNumber(tx, key));
+    expect(await next(keyA)).toBe(1);
+
+    await db
+      .update(tenants)
+      .set({ environment: 'production' })
+      .where(eq(tenants.id, keyA.tenantId));
+
+    const productionKey = { ...keyA, environment: 'production' as const };
+    expect(await next(productionKey)).toBe(1);
+    expect(await next(productionKey)).toBe(2);
+    expect(await causeMessage(next(keyA))).toContain(
+      "environment must match the tenant's current environment",
+    );
+    const rows = await db.select().from(tenantDocumentSequences);
+    expect(rows.map((row) => [row.environment, row.lastNumber]).sort()).toEqual([
+      ['production', 2],
+      ['test', 1],
+    ]);
   });
 
   it.skipIf(process.env.DB_TEST_DRIVER !== 'postgres')(

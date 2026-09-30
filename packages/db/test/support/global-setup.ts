@@ -28,6 +28,11 @@ export default async function setup(): Promise<(() => Promise<void>) | undefined
   const admin = new Pool({ connectionString: process.env.DB_TEST_POSTGRES_URL });
   try {
     await admin.query(`CREATE ROLE app_login LOGIN BYPASSRLS PASSWORD 'app_login'`);
+    // Unsafe pre-existing audit_maintenance membership: the migration must revoke it.
+    await admin.query(`CREATE ROLE audit_maintenance NOLOGIN`);
+    await admin.query(`GRANT audit_maintenance TO app_login`);
+    await admin.query(`CREATE ROLE legacy_ops NOLOGIN`);
+    await admin.query(`GRANT audit_maintenance TO legacy_ops`);
   } finally {
     await admin.end();
   }

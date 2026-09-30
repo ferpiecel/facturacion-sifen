@@ -1,5 +1,5 @@
 {
-  "id": "4fec5e57-1dc2-4770-bd87-0936461a7031",
+  "id": "6e68cea7-8b1b-4f08-a245-e7b92c0fc140",
   "prevId": "1ceba1d7-7564-491f-a7cf-688f770e6cd5",
   "version": "7",
   "dialect": "postgresql",
@@ -127,6 +127,127 @@
         "api_keys_key_id_format": {
           "name": "api_keys_key_id_format",
           "value": "\"api_keys\".\"key_id\" ~ '^[A-Za-z0-9]{24,64}$'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.audit_log": {
+      "name": "audit_log",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "actor_type": {
+          "name": "actor_type",
+          "type": "audit_actor_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "action": {
+          "name": "action",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entity_type": {
+          "name": "entity_type",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entity_id": {
+          "name": "entity_id",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "before": {
+          "name": "before",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "after": {
+          "name": "after",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "audit_log_tenant_occurred_at_idx": {
+          "name": "audit_log_tenant_occurred_at_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "occurred_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "audit_log_tenant_id_tenants_id_fk": {
+          "name": "audit_log_tenant_id_tenants_id_fk",
+          "tableFrom": "audit_log",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "audit_log_action_not_blank": {
+          "name": "audit_log_action_not_blank",
+          "value": "btrim(\"audit_log\".\"action\") <> ''"
+        },
+        "audit_log_entity_id_not_blank": {
+          "name": "audit_log_entity_id_not_blank",
+          "value": "btrim(\"audit_log\".\"entity_id\") <> ''"
         }
       },
       "isRLSEnabled": false
@@ -912,66 +1033,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.tenant_request_sequences": {
-      "name": "tenant_request_sequences",
-      "schema": "",
-      "columns": {
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "environment": {
-          "name": "environment",
-          "type": "tenant_environment",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "last_value": {
-          "name": "last_value",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "0"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "tenant_request_sequences_tenant_id_tenants_id_fk": {
-          "name": "tenant_request_sequences_tenant_id_tenants_id_fk",
-          "tableFrom": "tenant_request_sequences",
-          "tableTo": "tenants",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "tenant_request_sequences_pkey": {
-          "name": "tenant_request_sequences_pkey",
-          "columns": [
-            "tenant_id",
-            "environment"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "tenant_request_sequences_last_value_range": {
-          "name": "tenant_request_sequences_last_value_range",
-          "value": "\"tenant_request_sequences\".\"last_value\" BETWEEN 0 AND 999999999999999"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.tenant_timbrados": {
       "name": "tenant_timbrados",
       "schema": "",
@@ -1189,6 +1250,15 @@
       "values": [
         "live",
         "test"
+      ]
+    },
+    "public.audit_actor_type": {
+      "name": "audit_actor_type",
+      "schema": "public",
+      "values": [
+        "api_key",
+        "user",
+        "operator"
       ]
     },
     "public.fiscal_taxpayer_type": {

@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import type { DocumentStatus } from '../../design-system/components/status-badge';
 
 // Sample data shown on the panel until the API is wired (labeled "Datos de
@@ -71,11 +70,3 @@ export const SAMPLE_RECENT_DOCUMENTS: readonly RecentDocument[] = [
     status: 'aprobado',
   },
 ];
-=======
-// Sample data shown on the panel until the API is wired (labeled "Datos de
-// ejemplo" in the UI).
-
-export const SAMPLE_TENANT = 'Acme Paraguay S.A.';
-
-export const SAMPLE_USER = { name: 'Carlos Bogado', role: 'Operador Certificado' } as const;
->>>>>>> origin/main

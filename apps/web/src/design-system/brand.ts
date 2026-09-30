@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 /**
  * Product brand. Change it here; the logo asset lives in public/brand/.
  * The UI shows the brand as the logo only (PO decision); `name` is the
@@ -6,11 +5,5 @@
  */
 export const BRAND = {
   name: 'SifenFlow',
-=======
-/** Product brand. Change it here; the logo asset lives in public/brand/. */
-export const BRAND = {
-  name: 'SifenFlow',
-  tagline: 'DNIT FACTURACIÓN PY',
->>>>>>> origin/main
   logoSrc: '/brand/logo.svg',
 } as const;

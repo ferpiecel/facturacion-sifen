@@ -44,4 +44,69 @@ describe('redact', () => {
     expect(redact(5)).toBe(5);
     expect(redact({ at: date })).toEqual({ at: date.toISOString() });
   });
+
+  it.each([
+    'accessToken',
+    'refresh_token',
+    'certificatePassword',
+    'p12Base64',
+    'privateKey',
+    'apiKey',
+    'api_key',
+    'authorization',
+    'Cookie',
+    'secret',
+    'idCsc',
+    'secretHash',
+  ])('redacts the key variant %s', (key) => {
+    expect(redact({ [key]: 'x' })).toEqual({ [key]: REDACTED });
+  });
+
+  it('leaves harmless keys untouched', () => {
+    expect(redact({ name: 'Acme', amount: 10, ruc: '80000000-1' })).toEqual({
+      name: 'Acme',
+      amount: 10,
+      ruc: '80000000-1',
+    });
+  });
+
+  it('guards against cycles', () => {
+    const node: Record<string, unknown> = { name: 'a' };
+    node.self = node;
+
+    expect(redact(node)).toEqual({ name: 'a', self: '[Circular]' });
+  });
+
+  it('does not flag a repeated (non-circular) reference as circular', () => {
+    const shared = { a: 1 };
+
+    expect(redact({ x: shared, y: shared })).toEqual({ x: { a: 1 }, y: { a: 1 } });
+  });
+
+  it('converts binary, Map, Set and BigInt values', () => {
+    expect(
+      redact({
+        buf: Buffer.from('abc'),
+        bytes: new Uint8Array([1]),
+        map: new Map([['k', 'v']]),
+        set: new Set([1, 2]),
+        big: 10n,
+      }),
+    ).toEqual({
+      buf: '[Binary]',
+      bytes: '[Binary]',
+      map: { k: 'v' },
+      set: [1, 2],
+      big: '10',
+    });
+  });
+
+  it('redacts secret-shaped string values regardless of key', () => {
+    const pem = '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----';
+
+    expect(
+      redact({ a: 'sk_live_abcdef123456', b: 'sk_test_abcdef123456', c: pem, d: 'safe' }),
+    ).toEqual({ a: REDACTED, b: REDACTED, c: REDACTED, d: 'safe' });
+    expect(redact(['sk_live_abcdef123456'])).toEqual([REDACTED]);
+  });
 });

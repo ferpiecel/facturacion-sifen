@@ -1,5 +1,5 @@
 {
-  "id": "70dbc2cd-afed-4428-932a-ba4e4b7874c5",
+  "id": "f55fd924-9d3a-420e-a980-8bae4e87dfcb",
   "prevId": "1b28b274-38ca-4469-8edc-d6e04d3c07af",
   "version": "7",
   "dialect": "postgresql",
@@ -256,21 +256,6 @@
             "tenant_id",
             "establishment_id",
             "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "tenant_document_sequences_tenant_environment_fk": {
-          "name": "tenant_document_sequences_tenant_environment_fk",
-          "tableFrom": "tenant_document_sequences",
-          "tableTo": "tenants",
-          "columnsFrom": [
-            "tenant_id",
-            "environment"
-          ],
-          "columnsTo": [
-            "id",
-            "environment"
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
@@ -1110,27 +1095,6 @@
             }
           ],
           "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "tenants_id_environment_idx": {
-          "name": "tenants_id_environment_idx",
-          "columns": [
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "environment",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
           "concurrently": false,
           "method": "btree",
           "with": {}

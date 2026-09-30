@@ -1,12 +1,16 @@
 import type { X509Certificate } from 'node:crypto';
 import { formatRuc, type Ruc } from '../../fiscal-config/domain/ruc.js';
 import { extractSubjectRuc } from './subject-ruc.js';
+import { readX509Profile } from './x509-profile.js';
 
-/** EKU `id-kp-clientAuth` (RFC 5280 §4.2.1.12), required for SIFEN mTLS (§8.7). */
+/**
+ * EKU `id-kp-clientAuth` (RFC 5280 §4.2.1.12). Required, strictly, for SIFEN
+ * mTLS: backlog HU-E3-01 rejects a certificate without it and §8.7 lists it.
+ */
 export const CLIENT_AUTH_EKU = '1.3.6.1.5.5.7.3.2';
 
-/** Longest issuer path accepted between a tenant certificate and a PSC root. */
-const MAX_CHAIN_DEPTH = 5;
+/** Most intermediate CA certificates accepted between a tenant certificate and a PSC root. */
+const MAX_INTERMEDIATES = 4;
 
 /**
  * The PKCS#12 could not be opened: wrong password or malformed bytes.
@@ -20,9 +24,24 @@ export class Pkcs12UnreadableError extends Error {
   }
 }
 
-/** The PKCS#12 opened but does not hold exactly one key and its certificate. */
+export type Pkcs12ContentReason =
+  | 'too-large'
+  | 'excessive-iterations'
+  | 'too-many-certificates'
+  | 'key-count'
+  | 'unsupported-key-algorithm'
+  | 'no-matching-certificate';
+
+/**
+ * The PKCS#12 was refused for its shape or cost rather than its password:
+ * too large, too expensive to open, or not exactly one RSA key with its
+ * certificate. Carries no bytes of the file.
+ */
 export class Pkcs12ContentError extends Error {
-  constructor(message: string) {
+  constructor(
+    readonly reason: Pkcs12ContentReason,
+    message: string,
+  ) {
     super(message);
     this.name = 'Pkcs12ContentError';
   }
@@ -36,6 +55,8 @@ export interface CertificateInspection {
   readonly notAfter: Date;
   /** Extended key usage OIDs; empty when the extension is absent. */
   readonly extendedKeyUsages: readonly string[];
+  /** keyUsage digitalSignature bit; `false` when the extension is absent. */
+  readonly digitalSignature: boolean;
   readonly certificate: X509Certificate;
   /** The other certificates bundled with it (candidate intermediates). */
   readonly chain: readonly X509Certificate[];
@@ -51,6 +72,7 @@ export interface CertificatePolicy {
 export type CertificateRejection =
   | { readonly code: 'ruc-mismatch'; readonly expected: string; readonly actual: string | null }
   | { readonly code: 'missing-client-auth' }
+  | { readonly code: 'missing-digital-signature' }
   | { readonly code: 'expired'; readonly notAfter: Date }
   | { readonly code: 'not-yet-valid'; readonly notBefore: Date }
   | { readonly code: 'untrusted-chain' };
@@ -62,13 +84,15 @@ export function inspectCertificate(
   // Node exposes the EKU OIDs as `keyUsage`, undefined (despite its typing)
   // when the extension is absent.
   const extendedKeyUsages: unknown = certificate.keyUsage;
+  const profile = readX509Profile(certificate.raw);
   return {
-    subjectRuc: extractSubjectRuc(certificate.subject, certificate.subjectAltName),
+    subjectRuc: extractSubjectRuc([...profile.subjectSerialNumbers, ...profile.sanSerialNumbers]),
     notBefore: certificate.validFromDate,
     notAfter: certificate.validToDate,
     extendedKeyUsages: Array.isArray(extendedKeyUsages)
       ? extendedKeyUsages.filter((usage: unknown): usage is string => typeof usage === 'string')
       : [],
+    digitalSignature: profile.digitalSignature,
     certificate,
     chain,
   };
@@ -76,7 +100,9 @@ export function inspectCertificate(
 
 /**
  * HU-E3-01 / ADR-0010 / §8.7: a tenant may only load a certificate issued to
- * its own RUC, with the `clientAuth` EKU, currently valid, and chaining to a
+ * its own RUC, with the `clientAuth` EKU and the digitalSignature key usage
+ * (XMLDSig signing of the DE; neither §8.7 nor ADR-0010 requires
+ * nonRepudiation, so it is not checked), currently valid, and chaining to a
  * configured PSC root. Returns every rejection; an empty list means valid.
  */
 export function validateTenantCertificate(
@@ -92,6 +118,9 @@ export function validateTenantCertificate(
   if (!inspection.extendedKeyUsages.includes(CLIENT_AUTH_EKU)) {
     rejections.push({ code: 'missing-client-auth' });
   }
+  if (!inspection.digitalSignature) {
+    rejections.push({ code: 'missing-digital-signature' });
+  }
   if (policy.now.getTime() > inspection.notAfter.getTime()) {
     rejections.push({ code: 'expired', notAfter: inspection.notAfter });
   } else if (policy.now.getTime() < inspection.notBefore.getTime()) {
@@ -103,11 +132,18 @@ export function validateTenantCertificate(
   return rejections;
 }
 
+interface CaCandidate {
+  readonly certificate: X509Certificate;
+  /** basicConstraints pathLenConstraint; `null` when unconstrained. */
+  readonly pathLength: number | null;
+}
+
 /**
- * Walks issuer links from the tenant certificate, through currently valid CA
- * certificates bundled in the `.p12`, until one is signed by a configured PSC
- * root. Trust comes only from the roots' public keys: a bundled certificate
- * that merely copies a root's name does not verify.
+ * Searches for an issuer path from the tenant certificate, through currently
+ * valid CA certificates bundled in the `.p12`, to a configured PSC root,
+ * backtracking over every candidate issuer. Trust comes only from the roots'
+ * public keys (a certificate that merely copies a root's name does not
+ * verify), and every CA's pathLenConstraint bounds the intermediates below it.
  */
 function chainsToTrustedRoot(
   inspection: CertificateInspection,
@@ -116,26 +152,45 @@ function chainsToTrustedRoot(
   if (inspection.certificate.ca) {
     return false;
   }
-  const roots = policy.trustedPscRoots.filter((root) => root.ca && isCurrent(root, policy.now));
-  const intermediates = inspection.chain.filter((cert) => cert.ca && isCurrent(cert, policy.now));
-  let current = inspection.certificate;
-  for (let depth = 0; depth < MAX_CHAIN_DEPTH; depth += 1) {
-    if (roots.some((root) => isIssuedBy(current, root))) {
-      return true;
+  const roots = caCandidates(policy.trustedPscRoots, policy.now);
+  const intermediates = caCandidates(inspection.chain, policy.now);
+  const verified = new Map<string, boolean>();
+  const issues = (subject: X509Certificate, issuer: X509Certificate): boolean => {
+    const key = `${subject.fingerprint256}>${issuer.fingerprint256}`;
+    let result = verified.get(key);
+    if (result === undefined) {
+      result = subject.checkIssued(issuer) && subject.verify(issuer.publicKey);
+      verified.set(key, result);
     }
-    const issuer = intermediates.find(
-      (cert) => cert.fingerprint256 !== current.fingerprint256 && isIssuedBy(current, cert),
-    );
-    if (issuer === undefined) {
-      return false;
-    }
-    current = issuer;
-  }
-  return false;
+    return result;
+  };
+  const allows = (ca: CaCandidate, below: number) =>
+    ca.pathLength === null || below <= ca.pathLength;
+
+  const search = (current: X509Certificate, below: number, path: readonly string[]): boolean =>
+    roots.some((root) => allows(root, below) && issues(current, root.certificate)) ||
+    (below < MAX_INTERMEDIATES &&
+      intermediates.some(
+        (ca) =>
+          !path.includes(ca.certificate.fingerprint256) &&
+          allows(ca, below) &&
+          issues(current, ca.certificate) &&
+          search(ca.certificate, below + 1, [...path, ca.certificate.fingerprint256]),
+      ));
+
+  return search(inspection.certificate, 0, [inspection.certificate.fingerprint256]);
 }
 
-function isIssuedBy(subject: X509Certificate, issuer: X509Certificate): boolean {
-  return subject.checkIssued(issuer) && subject.verify(issuer.publicKey);
+/** Current CA certificates with their path length; unreadable ones are skipped. */
+function caCandidates(certificates: readonly X509Certificate[], now: Date): CaCandidate[] {
+  return certificates.flatMap((certificate) => {
+    if (!certificate.ca || !isCurrent(certificate, now)) return [];
+    try {
+      return [{ certificate, pathLength: readX509Profile(certificate.raw).pathLength }];
+    } catch {
+      return [];
+    }
+  });
 }
 
 function isCurrent(certificate: X509Certificate, now: Date): boolean {

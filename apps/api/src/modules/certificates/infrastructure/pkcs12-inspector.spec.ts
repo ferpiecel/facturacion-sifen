@@ -177,7 +177,9 @@ describe('inspectPkcs12 (HU-E3-01)', () => {
       { algorithm: '3des' },
     );
     const withEcKey = rewritePkcs12(p12, (node) => {
-      const [bagId, bagValue] = Array.isArray(node.value) ? node.value : [];
+      const children = Array.isArray(node.value) ? node.value : [];
+      const bagId = children.at(0);
+      const bagValue = children.at(1);
       if (
         bagId?.type === forge.asn1.Type.OID &&
         forge.asn1.derToOid(bagId.value as string) === forge.pki.oids.pkcs8ShroudedKeyBag &&

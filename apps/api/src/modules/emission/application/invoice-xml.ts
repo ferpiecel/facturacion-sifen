@@ -137,6 +137,9 @@ export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext
       numero: ctx.numbering.documentNumber,
       codigoSeguridadAleatorio: ctx.numbering.securityCode,
       fecha: asuncionTimestamp(ctx.issuedAt),
+      // xmlgen formats dFecFirma with the process-local clock; an explicit Asuncion wall time
+      // (no zone, re-read as local and printed back unchanged) keeps it correct under any TZ.
+      fechaFirmaDigital: asuncionTimestamp(new Date()),
       // TODO(E6): tipoEmision is always 1 (normal); contingencia (2) comes with E6.
       tipoEmision: 1,
       // TODO: tipoTransaccion is always 1 (venta de mercaderia); other transaction types are pending.

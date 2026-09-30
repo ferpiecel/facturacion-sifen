@@ -1,4 +1,7 @@
 import { createNodePostgresDatabase, type Database } from '@sifen/db';
+import { EnvelopeCipher } from '../modules/custody/application/envelope-cipher.js';
+import { createLocalKms } from '../modules/custody/infrastructure/adapters/local-kms.adapter.js';
+import { CscVault } from '../modules/custody/infrastructure/csc-vault.js';
 import { getOpsDatabaseUrl, parseOpsArgs, type OpsCommand } from './args.js';
 import {
   addEstablishment,
@@ -13,12 +16,24 @@ import {
 } from './commands.js';
 
 /**
+ * Builds the CSC vault with the same KMS rules as the API (ADR-0009): fails
+ * closed without `KMS_LOCAL_MASTER_KEY` unless `NODE_ENV` is development/test.
+ */
+export function createCscVault(env: NodeJS.ProcessEnv): CscVault {
+  return new CscVault(new EnvelopeCipher(createLocalKms(env.KMS_LOCAL_MASTER_KEY, env.NODE_ENV)));
+}
+
+/**
  * Dispatches one parsed {@link OpsCommand} to its handler and formats the
  * operator-facing output (backlog HU-E1-05). `apikey:create`'s formatted
  * key is the only place the raw secret ever appears — the caller must
  * print this return value once and never log it again.
  */
-export async function runOpsCommand(db: Database, command: OpsCommand): Promise<string> {
+export async function runOpsCommand(
+  db: Database,
+  command: OpsCommand,
+  vault?: CscVault,
+): Promise<string> {
   switch (command.kind) {
     case 'partner:create': {
       const { id } = await createPartner(db, command.name);
@@ -81,6 +96,19 @@ export async function runOpsCommand(db: Database, command: OpsCommand): Promise<
       });
       return `tenant environment set: ${result.id} (${result.environment})`;
     }
+    case 'csc:add': {
+      if (!vault) {
+        throw new Error('csc:add requires a CSC vault');
+      }
+      await vault.add(db, {
+        tenantId: command.tenantId,
+        environment: command.environment,
+        idCsc: command.idCsc,
+        value: command.csc,
+      });
+      // Never echo the CSC: the operator already holds it, and only its sealed form is stored.
+      return `csc stored: tenant ${command.tenantId} (${command.environment}, idCSC ${command.idCsc})`;
+    }
   }
 }
 
@@ -108,7 +136,8 @@ async function main(): Promise<void> {
 
   const handle = createNodePostgresDatabase(url);
   try {
-    const output = await runOpsCommand(handle.db, command);
+    const vault = command.kind === 'csc:add' ? createCscVault(process.env) : undefined;
+    const output = await runOpsCommand(handle.db, command, vault);
     console.log(output);
   } finally {
     await handle.close();

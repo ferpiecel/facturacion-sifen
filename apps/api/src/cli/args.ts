@@ -16,6 +16,7 @@ import {
 import { parseRuc } from '../modules/fiscal-config/domain/ruc.js';
 import { createTimbrado, type Timbrado } from '../modules/fiscal-config/domain/timbrado.js';
 import type { TenantEnvironment } from '../modules/fiscal-config/domain/document-environment.js';
+import { InvalidCscError, parseCsc } from '../modules/custody/domain/csc.js';
 import type { ApiKeyEnvironment } from '../modules/identity/domain/api-key.js';
 
 /** Invalid argv or missing environment for the operator CLI (backlog HU-E1-05). */
@@ -36,7 +37,14 @@ export type OpsCommand =
   | { kind: 'establishment:add'; tenantId: string; establishment: Establishment }
   | { kind: 'point:add'; tenantId: string; establishmentCode: string; point: ExpeditionPoint }
   | { kind: 'timbrado:add'; tenantId: string; timbrado: Timbrado }
-  | { kind: 'tenant:environment'; tenantId: string; environment: TenantEnvironment };
+  | { kind: 'tenant:environment'; tenantId: string; environment: TenantEnvironment }
+  | {
+      kind: 'csc:add';
+      tenantId: string;
+      environment: TenantEnvironment;
+      idCsc: string;
+      csc: string;
+    };
 
 function requireOption(value: string | undefined, flag: string): string {
   if (!value) {
@@ -302,6 +310,33 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
         tenantId: requireOption(values.tenant, 'tenant'),
         environment,
       };
+    }
+    case 'csc:add': {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          env: { type: 'string' },
+          id: { type: 'string' },
+          csc: { type: 'string' },
+        },
+      });
+
+      const tenantId = requireOption(values.tenant, 'tenant');
+      const environment = parseTenantEnvironment(values.env);
+      try {
+        // parseCsc never echoes the value; a format error is a usage error.
+        const { idCsc, value } = parseCsc(
+          requireOption(values.id, 'id'),
+          requireOption(values.csc, 'csc'),
+        );
+        return { kind: 'csc:add', tenantId, environment, idCsc, csc: value };
+      } catch (error) {
+        if (error instanceof InvalidCscError) {
+          throw new OpsArgError(error.message);
+        }
+        throw error;
+      }
     }
     default:
       throw new OpsArgError(`unknown subcommand "${subcommand}"`);

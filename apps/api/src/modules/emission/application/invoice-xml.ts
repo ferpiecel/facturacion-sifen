@@ -56,6 +56,13 @@ export interface InvoiceXmlContext {
   testLiteral?: string;
 }
 
+/** Inverse of `asuncionTimestamp`: the instant whose Paraguay local time is `local` (`AAAA-MM-DDThh:mm:ss`). */
+export function fromAsuncionTimestamp(local: string): Date {
+  const asIfUtc = Date.parse(`${local}Z`);
+  const offset = asIfUtc - Date.parse(`${asuncionTimestamp(new Date(asIfUtc))}Z`);
+  return new Date(asIfUtc + offset);
+}
+
 const ASUNCION_FORMAT = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'America/Asuncion',
   year: 'numeric',
@@ -68,7 +75,7 @@ const ASUNCION_FORMAT = new Intl.DateTimeFormat('en-CA', {
 });
 
 /** MT format `AAAA-MM-DDThh:mm:ss` for an instant, in Paraguay local time. */
-function asuncionTimestamp(instant: Date): string {
+export function asuncionTimestamp(instant: Date): string {
   const p = Object.fromEntries(
     ASUNCION_FORMAT.formatToParts(instant).map((x) => [x.type, x.value]),
   );

@@ -1,11 +1,16 @@
 import type { DeXmlBuilder, LoadedCertificate, XmlSigner } from '@sifen/sifen-gateway';
 import { validateXml } from '@sifen/sifen-xsd';
 import type { InvoiceDraft } from '../domain/invoice-draft.js';
-import { generateInvoiceXml, InvoiceXmlError, type InvoiceXmlContext } from './invoice-xml.js';
+import {
+  fromAsuncionTimestamp,
+  generateInvoiceXml,
+  InvoiceXmlError,
+  type InvoiceXmlContext,
+} from './invoice-xml.js';
 
 export interface SignedInvoiceXml {
   xml: string;
-  /** Instant the signature was produced; persisted with the document. */
+  /** The dFecFirma the library wrote, as an instant; persisted with the document. */
   signedAt: Date;
 }
 
@@ -24,15 +29,20 @@ export async function signInvoiceXml(
   signer: XmlSigner,
   xml: string,
   material: LoadedCertificate,
-  now: () => Date = () => new Date(),
 ): Promise<SignedInvoiceXml> {
   const signed = await signer.sign(xml, material);
-  const signedAt = now();
   const { errors } = validateXml(signed, 'siRecepDE');
   if (errors.length !== 1 || errors[0]?.message !== MISSING_QR_GROUP) {
     throw new InvoiceXmlError(`signed XML: ${errors.map((e) => e.message).join('; ')}`);
   }
-  return { xml: signed, signedAt };
+  const deId = signed.match(/<DE\b[^>]*\bId="([^"]*)"/)?.[1];
+  const references = [...signed.matchAll(/<Reference\b[^>]*\bURI="([^"]*)"/g)].map((m) => m[1]);
+  if (!deId || references.length !== 1 || references[0] !== `#${deId}`) {
+    throw new InvoiceXmlError(`signed XML: Reference URI must be #${deId ?? '<DE Id>'}`);
+  }
+  const firmDate = signed.match(/<dFecFirma>(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)<\/dFecFirma>/)?.[1];
+  if (!firmDate) throw new InvoiceXmlError('signed XML: missing dFecFirma');
+  return { xml: signed, signedAt: fromAsuncionTimestamp(firmDate) };
 }
 
 /** Draft to signed, fully XSD-valid XML: generateInvoiceXml -> signInvoiceXml. */
@@ -41,8 +51,7 @@ export async function buildSignedInvoice(
   draft: InvoiceDraft,
   ctx: InvoiceXmlContext,
   material: LoadedCertificate,
-  now?: () => Date,
 ): Promise<SignedInvoiceXml & { cdc: string }> {
   const { xml, cdc } = await generateInvoiceXml(ports.builder, draft, ctx);
-  return { ...(await signInvoiceXml(ports.signer, xml, material, now)), cdc };
+  return { ...(await signInvoiceXml(ports.signer, xml, material)), cdc };
 }

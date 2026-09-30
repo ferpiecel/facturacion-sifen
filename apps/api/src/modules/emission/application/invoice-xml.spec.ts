@@ -12,6 +12,7 @@ import type { InvoiceDraft } from '../domain/invoice-draft.js';
 import {
   generateInvoiceXml,
   InvoiceXmlError,
+  mapInvoiceToXmlInput,
   toReceiverXml,
   toSifenXml,
   type InvoiceXmlContext,
@@ -179,13 +180,14 @@ describe('generateInvoiceXml', () => {
   });
 
   it.each([
-    ['B2C', '<iTiOpe>2</iTiOpe>'],
-    ['B2G', '<iTiOpe>3</iTiOpe>'],
-    ['B2F', '<iTiOpe>4</iTiOpe>'],
-  ] as const)('maps operation type %s', async (operationType, tag) => {
-    const { xml } = await generateInvoiceXml(builder, { ...draft, operationType }, context('test'));
+    ['B2B', 1],
+    ['B2C', 2],
+    ['B2G', 3],
+    ['B2F', 4],
+  ] as const)('maps operation type %s to iTiOpe %i', (operationType, code) => {
+    const { data } = mapInvoiceToXmlInput({ ...draft, operationType }, context('test'));
 
-    expect(xml).toContain(tag);
+    expect((data.cliente as { tipoOperacion: number }).tipoOperacion).toBe(code);
   });
 
   it('omits the optional trade name and regime when the profile has none', async () => {

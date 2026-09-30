@@ -47,8 +47,8 @@ export interface InvoiceXmlContext {
   timbrado: Timbrado;
   /** dNumDoc and dCodSeg, already allocated by the numbering services. */
   numbering: { documentNumber: string; securityCode: string };
-  /** dFeEmiDE, `YYYY-MM-DDTHH:mm:ss`. */
-  issuedAt: string;
+  /** Emission instant; dFeEmiDE and the CDC date are derived in America/Asuncion. */
+  issuedAt: Date;
   receiver: XmlReceiver;
   /** One entry per draft item, in order: dCodInt, dDesProSer, cUniMed. */
   lines: readonly { code: string; description: string; unitCode: number }[];
@@ -56,7 +56,29 @@ export interface InvoiceXmlContext {
   testLiteral?: string;
 }
 
-/** Maps the draft and its fiscal context to the xmlgen input (params + data). */
+const ASUNCION_FORMAT = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Asuncion',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+});
+
+/** MT format `AAAA-MM-DDThh:mm:ss` for an instant, in Paraguay local time. */
+function asuncionTimestamp(instant: Date): string {
+  const p = Object.fromEntries(
+    ASUNCION_FORMAT.formatToParts(instant).map((x) => [x.type, x.value]),
+  );
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}:${p.second}`;
+}
+
+/**
+ * Maps the draft and its fiscal context to the xmlgen input (params + data).
+ * PYG amounts are integers: validateInvoiceDraft rejects any fractional line total
+ * (MT group F, no decimals in Guaranies) before this mapper runs. */
 export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext): FacturaPocInput {
   if (draft.receiver.kind === 'unnamed') {
     throw new InvoiceXmlError('an unnamed receiver is not supported yet');
@@ -107,8 +129,10 @@ export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext
       punto: ctx.point.code,
       numero: ctx.numbering.documentNumber,
       codigoSeguridadAleatorio: ctx.numbering.securityCode,
-      fecha: ctx.issuedAt,
+      fecha: asuncionTimestamp(ctx.issuedAt),
+      // TODO(E6): tipoEmision is always 1 (normal); contingencia (2) comes with E6.
       tipoEmision: 1,
+      // TODO: tipoTransaccion is always 1 (venta de mercaderia); other transaction types are pending.
       tipoTransaccion: 1,
       tipoImpuesto: 1,
       moneda: 'PYG',
@@ -161,6 +185,10 @@ export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext
   };
 }
 
+/** The one libxml2 error an unsigned, otherwise valid rDE produces (verified in the spec). */
+const MISSING_SIGNATURE =
+  "Element '{http://ekuatia.set.gov.py/sifen/xsd}rDE': Missing child element(s). Expected is ( {http://www.w3.org/2000/09/xmldsig#}Signature ).";
+
 /**
  * Validates the draft, builds the DE through the `DeXmlBuilder` port, checks
  * it against the siRecepDE XSD and verifies the Id attribute is the CDC of the
@@ -176,12 +204,17 @@ export async function generateInvoiceXml(
   if (draftErrors.length > 0) {
     throw new InvoiceXmlError(draftErrors.map((e) => `${e.field} (${e.rule})`).join(', '));
   }
-  const xml = await builder.buildParaSifen(mapInvoiceToXmlInput(draft, ctx));
-
-  const errors = validateXml(xml, 'siRecepDE').errors.filter(
-    (e) => !e.message.includes('Signature'),
+  // xmlgen emits an empty cTipReg when the regime is unknown; the XSD makes it optional (MT 7.2.4: no empty tags).
+  const xml = (await builder.buildParaSifen(mapInvoiceToXmlInput(draft, ctx))).replace(
+    /<cTipReg><\/cTipReg>|<cTipReg\/>/,
+    '',
   );
-  if (errors.length > 0) throw new InvoiceXmlError(errors.map((e) => e.message).join('; '));
+
+  const { errors } = validateXml(xml, 'siRecepDE');
+  const [only] = errors;
+  if (errors.length !== 1 || only.message !== MISSING_SIGNATURE || only.path !== '/*') {
+    throw new InvoiceXmlError(errors.map((e) => e.message).join('; '));
+  }
 
   const cdc = buildCdc({
     documentType: '01',
@@ -191,31 +224,53 @@ export async function generateInvoiceXml(
     point: ctx.point.code,
     documentNumber: ctx.numbering.documentNumber,
     taxpayerType: TAXPAYER_TYPE_CODES[ctx.issuer.taxpayerType],
-    issueDate: ctx.issuedAt.slice(0, 10),
+    issueDate: asuncionTimestamp(ctx.issuedAt).slice(0, 10),
     emissionType: 1,
     securityCode: ctx.numbering.securityCode,
   });
-  if (!xml.includes(`<DE Id="${cdc}">`)) {
+  const rootDe = new RegExp(
+    `<rDE\\b[^>]*>\\s*<dVerFor>[^<]*</dVerFor>\\s*<DE\\b[^>]*\\bId="${cdc}"`,
+  );
+  if (!rootDe.test(xml)) {
     throw new InvoiceXmlError('the DE Id attribute does not match the expected CDC');
   }
   return { xml, cdc };
 }
 
-const INF_ADIC = /<dInfAdic>[\s\S]*?<\/dInfAdic>/g;
+const GCAMFUFD = /(<gCamFuFD\b[^>]*>)([\s\S]*?)(<\/gCamFuFD>)/;
+const INF_ADIC = /<dInfAdic\b[^>]*\/>|<dInfAdic\b[^>]*>[\s\S]*?<\/dInfAdic>/g;
+// eslint-disable-next-line no-control-regex -- stripping XML 1.0 illegal characters is the point
+const XML_ILLEGAL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g;
+
+/** Applies `edit` to the body of the gCamFuFD group only (J001), leaving the rest of the document alone. */
+function editFuFd(xml: string, edit: (body: string) => string): string {
+  return xml.replace(
+    GCAMFUFD,
+    (_m, open: string, body: string, close: string) => open + edit(body) + close,
+  );
+}
 
 /** Version sent to SIFEN: no dInfAdic (J003), which SIFEN rejects with 2503. */
 export function toSifenXml(xml: string): string {
-  return xml.replace(INF_ADIC, '');
+  return editFuFd(xml, (body) => body.replace(INF_ADIC, ''));
+}
+
+function escapeText(text: string): string {
+  return text
+    .replace(XML_ILLEGAL, '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&apos;');
 }
 
 /** Version kept for the receiver: dInfAdic (J003) goes right after dCarQR in gCamFuFD. */
 export function toReceiverXml(xml: string, additionalInfo: string): string {
-  if (!xml.includes('</dCarQR>')) {
+  if (!GCAMFUFD.test(xml) || !/<gCamFuFD\b[\s\S]*<\/dCarQR>[\s\S]*<\/gCamFuFD>/.test(xml)) {
     throw new InvoiceXmlError('dInfAdic needs the gCamFuFD/dCarQR block (add the QR first)');
   }
-  const escaped = additionalInfo
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;');
-  return toSifenXml(xml).replace('</dCarQR>', `</dCarQR><dInfAdic>${escaped}</dInfAdic>`);
+  return editFuFd(toSifenXml(xml), (body) =>
+    body.replace('</dCarQR>', `</dCarQR><dInfAdic>${escapeText(additionalInfo)}</dInfAdic>`),
+  );
 }

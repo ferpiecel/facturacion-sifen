@@ -39,7 +39,8 @@ describe('tenant_cscs', () => {
       .insert(tenants)
       .values([{ name: 'A' }, { name: 'B' }])
       .returning();
-    return { db: handle.db, a: rows[0]!.id, b: rows[1]!.id };
+    const [a, b] = rows.map((row) => row.id);
+    return { db: handle.db, a, b };
   }
 
   const csc = (tenantId: string, idCsc: string, environment: 'test' | 'production' = 'test') => ({

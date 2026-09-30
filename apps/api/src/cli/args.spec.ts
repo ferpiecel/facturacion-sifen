@@ -444,3 +444,58 @@ describe('getOpsDatabaseUrl (HU-E1-05)', () => {
     );
   });
 });
+
+describe('parseOpsArgs csc:add (HU-E2-03)', () => {
+  const CSC = 'ABCD0000000000000000000000000000';
+  const base = ['csc:add', '--tenant', 't-1', '--env', 'test', '--id', '0001', '--csc', CSC];
+
+  it('parses tenant, environment, idCSC and CSC', () => {
+    expect(parseOpsArgs(base)).toEqual({
+      kind: 'csc:add',
+      tenantId: 't-1',
+      environment: 'test',
+      idCsc: '0001',
+      csc: CSC,
+    });
+  });
+
+  it('rejects an invalid --env', () => {
+    expect(() =>
+      parseOpsArgs(['csc:add', '--tenant', 't-1', '--env', 'live', '--id', '0001', '--csc', CSC]),
+    ).toThrow(OpsArgError);
+  });
+
+  it('rejects an invalid --id without echoing the CSC', () => {
+    const argv = ['csc:add', '--tenant', 't-1', '--env', 'test', '--id', '12', '--csc', CSC];
+    expect(() => parseOpsArgs(argv)).toThrow(/4 digits/);
+  });
+
+  it('rejects a malformed --csc without echoing it', () => {
+    const argv = [
+      'csc:add',
+      '--tenant',
+      't-1',
+      '--env',
+      'test',
+      '--id',
+      '0001',
+      '--csc',
+      'SECRET-short',
+    ];
+    let message = '';
+    try {
+      parseOpsArgs(argv);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toMatch(/32 alphanumeric/);
+    expect(message).not.toContain('SECRET-short');
+  });
+
+  it.each(['tenant', 'env', 'id', 'csc'])('rejects missing --%s', (flag) => {
+    const argv = base.filter(
+      (_, index, all) => all[index] !== `--${flag}` && all[index - 1] !== `--${flag}`,
+    );
+    expect(() => parseOpsArgs(argv)).toThrow(new RegExp(`--${flag}`));
+  });
+});

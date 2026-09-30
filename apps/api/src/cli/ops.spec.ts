@@ -6,7 +6,11 @@ import { createFiscalProfile } from '../modules/fiscal-config/domain/fiscal-prof
 import { parseRuc } from '../modules/fiscal-config/domain/ruc.js';
 import { createTimbrado } from '../modules/fiscal-config/domain/timbrado.js';
 import { addEstablishment, createTenant } from './commands.js';
-import { formatOpsError, runOpsCommand } from './ops.js';
+import { tenantCscs } from '@sifen/db';
+import { EnvelopeCipher } from '../modules/custody/application/envelope-cipher.js';
+import { createLocalKms } from '../modules/custody/infrastructure/adapters/local-kms.adapter.js';
+import { CscVault } from '../modules/custody/infrastructure/csc-vault.js';
+import { createCscVault, formatOpsError, runOpsCommand } from './ops.js';
 
 describe('runOpsCommand (HU-E1-05)', () => {
   let handle: DatabaseHandle | undefined;
@@ -197,5 +201,60 @@ describe('formatOpsError (HU-E1-05)', () => {
 
   it('describes a non-Error rejection generically', () => {
     expect(formatOpsError('boom')).toBe('unknown error');
+  });
+});
+
+describe('csc:add (HU-E2-03)', () => {
+  const CSC = 'ABCD0000000000000000000000000000';
+  let handle: DatabaseHandle | undefined;
+
+  afterEach(async () => {
+    await handle?.close();
+    handle = undefined;
+  });
+
+  async function setup() {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Csc Tenant');
+    const vault = new CscVault(
+      new EnvelopeCipher(createLocalKms(undefined, 'test', () => undefined)),
+    );
+    const command = (idCsc: string) =>
+      ({ kind: 'csc:add', tenantId, environment: 'test', idCsc, csc: CSC }) as const;
+    return { db: handle.db, vault, tenantId, command };
+  }
+
+  it('seals the CSC, prints a confirmation without the value, and decrypts back', async () => {
+    const { db, vault, tenantId, command } = await setup();
+
+    const output = await runOpsCommand(db, command('0001'), vault);
+
+    expect(output).toContain('0001');
+    expect(output).not.toContain(CSC);
+    expect(JSON.stringify(await db.select().from(tenantCscs))).not.toContain(CSC);
+    expect((await vault.getPlaintext(db, tenantId, 'test', '0001')).toString('utf8')).toBe(CSC);
+  });
+
+  it('fails clearly, without the value, when both slots are already used', async () => {
+    const { db, vault, command } = await setup();
+    await runOpsCommand(db, command('0001'), vault);
+    await runOpsCommand(db, command('0002'), vault);
+
+    const error = await runOpsCommand(db, command('0003'), vault).catch((e: unknown) => e);
+
+    expect(formatOpsError(error)).toContain('already has 2 CSC');
+    expect(formatOpsError(error)).not.toContain(CSC);
+  });
+
+  it('refuses to run without a vault', async () => {
+    const { db, command } = await setup();
+    await expect(runOpsCommand(db, command('0001'))).rejects.toThrow(/vault/);
+  });
+
+  it('builds the vault with the API KMS rules: fail closed outside development/test', () => {
+    expect(() => createCscVault({ NODE_ENV: 'production' })).toThrow(/KMS_LOCAL_MASTER_KEY/);
+    expect(() => createCscVault({})).toThrow(/KMS_LOCAL_MASTER_KEY/);
+    expect(createCscVault({ NODE_ENV: 'test' })).toBeInstanceOf(CscVault);
   });
 });

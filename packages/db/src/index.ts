@@ -19,6 +19,7 @@ export {
   tenantFiscalEconomicActivities,
   tenantFiscalProfiles,
   tenantProbe,
+  tenantRequestSequences,
   tenants,
   tenantTimbrados,
 } from './schema.js';
@@ -29,3 +30,4 @@ export { withAppRoleTransaction, type AppRoleTx } from './app-role-transaction.j
 export { assertNonPrivilegedSession } from './session-guard.js';
 export { TenantAwareProcessor, type TenantJob } from './tenant-aware-processor.js';
 export * from './document-number.js';
+export * from './request-id.js';

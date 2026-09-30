@@ -89,7 +89,7 @@ describe('nextRequestId (dId)', () => {
     for (const lastValue of [0n, 1n, 2n, 4n]) {
       expect(await update({ lastValue })).toContain('last_value may only advance by 1');
     }
-    expect(await update({ environment: 'production' })).toContain('key columns are immutable');
+    expect(await update({ environment: 'production' })).toContain('environment must match');
     expect(await update({ tenantId: tenantB })).toContain('key columns are immutable');
     expect(await next(db, tenantA)).toBe(3n);
   });

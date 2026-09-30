@@ -67,6 +67,7 @@ describe('audit_log', () => {
       'audit_log_entity_id_not_blank',
       'audit_log_pkey',
       'audit_log_tenant_id_tenants_id_fk',
+      'audit_log_tenant_seq_unique',
     ]);
   });
 

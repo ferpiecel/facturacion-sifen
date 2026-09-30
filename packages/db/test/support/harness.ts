@@ -57,7 +57,7 @@ async function getMigratedTemplate(): Promise<Blob> {
     const seed = new PGlite();
     try {
       await migrateClient(seed);
-      return (await seed.dumpDataDir('none')) as Blob;
+      return seed.dumpDataDir('none');
     } finally {
       await seed.close();
     }

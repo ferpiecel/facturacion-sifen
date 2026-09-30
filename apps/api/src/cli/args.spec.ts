@@ -382,9 +382,11 @@ describe('parseOpsArgs timbrado:add (HU-E2-02)', () => {
 
 describe('parseOpsArgs tenant:environment (HU-E2-04)', () => {
   it('parses a switch to "test" without --confirm-production', () => {
-    expect(
-      parseOpsArgs(['tenant:environment', '--tenant', 't-1', '--env', 'test']),
-    ).toEqual({ kind: 'tenant:environment', tenantId: 't-1', environment: 'test' });
+    expect(parseOpsArgs(['tenant:environment', '--tenant', 't-1', '--env', 'test'])).toEqual({
+      kind: 'tenant:environment',
+      tenantId: 't-1',
+      environment: 'test',
+    });
   });
 
   it('parses a switch to "production" with --confirm-production', () => {

@@ -41,7 +41,10 @@ describe('tenants.environment', () => {
 
   it('can be switched from "test" to "production"', async () => {
     handle = await createTestDatabase();
-    const [inserted] = await handle.db.insert(tenants).values({ name: 'Switch Tenant' }).returning();
+    const [inserted] = await handle.db
+      .insert(tenants)
+      .values({ name: 'Switch Tenant' })
+      .returning();
     const tenantId = required(inserted, 'tenant was not inserted').id;
 
     const [updated] = await handle.db

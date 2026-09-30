@@ -489,8 +489,8 @@ describe('setTenantEnvironment (HU-E2-04)', () => {
     await handle.migrate();
     const { id: tenantId } = await createTenant(handle.db, 'Env Tenant');
 
-    const [row] = await handle.db.select().from(tenants).where(eq(tenants.id, tenantId));
-    expect(row?.environment).toBe('test');
+    const rows = await handle.db.select().from(tenants).where(eq(tenants.id, tenantId));
+    expect(rows).toMatchObject([{ environment: 'test' }]);
   });
 
   it('switches a tenant to "production"', async () => {
@@ -501,8 +501,8 @@ describe('setTenantEnvironment (HU-E2-04)', () => {
     const result = await setTenantEnvironment(handle.db, { tenantId, environment: 'production' });
 
     expect(result).toEqual({ id: tenantId, environment: 'production' });
-    const [row] = await handle.db.select().from(tenants).where(eq(tenants.id, tenantId));
-    expect(row?.environment).toBe('production');
+    const rows = await handle.db.select().from(tenants).where(eq(tenants.id, tenantId));
+    expect(rows).toMatchObject([{ environment: 'production' }]);
   });
 
   it('rejects an unknown tenant', async () => {

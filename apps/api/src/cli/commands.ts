@@ -359,9 +359,9 @@ export async function setTenantEnvironment(
     .set({ environment })
     .where(eq(tenants.id, tenantId))
     .returning({ id: tenants.id, environment: tenants.environment });
-  const row = rows[0];
-  if (!row) {
+  if (rows.length === 0) {
     throw new Error(`tenant not found: ${tenantId}`);
   }
+  const row = required(rows[0], 'tenant update returned no row');
   return { id: row.id, environment: row.environment };
 }

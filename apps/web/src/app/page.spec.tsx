@@ -59,4 +59,32 @@ describe('HomePage (Panel de Control)', () => {
     expect(screen.getByRole('button', { name: 'Cerrar sesión' })).toBeInTheDocument();
     expect(screen.getByRole('searchbox', { name: 'Buscar comprobantes' })).toBeInTheDocument();
   });
+
+  it('keeps the hero text readable over the whole gradient', () => {
+    render(<HomePage />);
+
+    const hero = screen.getByRole('heading', { level: 1 }).closest('div.relative.overflow-hidden');
+    expect(hero).toHaveClass('to-primary-container');
+    expect(hero?.className).not.toContain('surface-container-high');
+    expect(screen.getByText(/Tu asistente inteligente/)).toHaveClass('text-white');
+  });
+
+  it('formats the billing KPI as Guaraníes', () => {
+    render(<HomePage />);
+
+    const kpis = screen.getByRole('region', { name: 'Indicadores' });
+    expect(within(kpis).getByText('₲ 48.750.000')).toBeInTheDocument();
+  });
+
+  it('gives the documents table an accessible name, column scopes and a focusable scroll area', () => {
+    render(<HomePage />);
+
+    const table = screen.getByRole('table', { name: 'Comprobantes Electrónicos Recientes' });
+    for (const header of within(table).getAllByRole('columnheader')) {
+      expect(header).toHaveAttribute('scope', 'col');
+    }
+    const scroller = screen.getByRole('region', { name: 'Tabla de comprobantes recientes' });
+    expect(scroller).toHaveAttribute('tabindex', '0');
+    expect(scroller).toContainElement(table);
+  });
 });

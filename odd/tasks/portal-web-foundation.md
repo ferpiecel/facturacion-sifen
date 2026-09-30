@@ -34,8 +34,8 @@ Stitch design (project 14175002856948249287), wired into every monorepo quality 
 - [x] T4 (inline) GREEN: components. — PR 2 boundary.
 - [x] T5 (inline) RED: failing spec for the panel shell.
 - [x] T6 (inline) GREEN: sidebar + topbar + environment legend. — PR 3 boundary.
-- [ ] T7 (inline) RED: failing spec for the panel content.
-- [ ] T8 (inline) GREEN: hero, KPI cards, recent documents table. — PR 4 boundary.
+- [x] T7 (inline) RED: failing spec for the panel content.
+- [x] T8 (inline) GREEN: hero, KPI cards, recent documents table. — PR 4 boundary.
 
 Route: inline — a single delegated writer subagent handles every task.
 
@@ -68,7 +68,25 @@ Route: inline — a single delegated writer subagent handles every task.
 | Estados sin equivalente en Stitch (borrador, firmado, en lote, observación, rechazado, cancelado, inutilizado, desconocido) usan colores de la paleta de Stitch; "Aprobado con observación" usa los de `tokens.json` | `StatusBadge` | Stitch solo muestra "Aprobado SIFEN" |
 | Chip "Datos de ejemplo" | Hero | Pedido del PO: marcar los datos de ejemplo |
 | Montos con `tabular-nums` | `MoneyPYG` | Alinear columnas de montos (sin cambio visible de forma) |
+| Degradado del hero termina en `primary-container` (#4F46E5) en vez de `surface-container-high`; el párrafo del hero usa blanco | Hero | Accesibilidad: el texto blanco daba 1,2:1 sobre el tramo claro; ahora ≥ 6,3:1 en todo el ancho |
+| KPI "Facturación Hoy" se muestra como `₲ 48.750.000` con un solo estilo (Stitch separaba el `₲` en un span más pequeño) | KPI | Consistencia: usa `MoneyPYG`/`formatPYG` en vez de texto fijo |
+| Región de la tabla enfocable por teclado con nombre accesible, `scope="col"` en encabezados y nombre para la tabla | Tabla de comprobantes | Accesibilidad: scroll horizontal operable por teclado (sin cambio visual) |
+| Botón de copiar CDC con área de 24×24 px (margen negativo, ícono y layout iguales) y estado "copiado" que se reinicia a los 2 s | `CdcDisplay` | Accesibilidad: objetivo táctil mínimo (WCAG 2.5.8) y re-anuncio de una segunda copia |
+| Cabeceras de seguridad y CSP en `next.config.ts` (sin cambio visual) | Configuración | Seguridad: CSP, `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy` |
+
+## Deuda registrada (sin cambios en este PR)
+
+- Sidebar responsivo/móvil: Stitch es solo escritorio.
+- Handlers de ⌘K, campana de notificaciones y cerrar sesión (hoy solo maquetados).
+- Destinos de navegación (`/comercios`, `/comprobantes`, etc.) devuelven 404 hasta que existan las páginas.
+- `next/font/google` descarga las fuentes en el build (requiere red); evaluar fuentes locales.
+- CSP con `'unsafe-inline'` en scripts/estilos hasta migrar a nonces.
 
 ## Progress
 
-- Pending.
+- T1–T8 done; each RED commit observed failing before its GREEN commit.
+- Evidence (2026-09-29): `pnpm install` up to date; `pnpm check` 30/30 tasks; `pnpm run format:check` clean;
+  `turbo run build coverage depcruise --filter @sifen/web` 3/3; web coverage 100 % (41 tests).
+- Not verified: visual comparison against the Stitch screenshot in a real browser (no headless browser in the
+  environment).
+- Next: PO approval of the deviations; then Explorer screen (HU-E12-01/02).

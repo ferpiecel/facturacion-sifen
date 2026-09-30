@@ -1,0 +1,232 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { eq } from 'drizzle-orm';
+import type { DatabaseHandle } from '../src/client.js';
+import {
+  DocumentNumberExhaustedError,
+  MAX_DOCUMENT_NUMBER,
+  nextDocumentNumber,
+  type DocumentSequenceKey,
+} from '../src/document-number.js';
+import {
+  tenantDocumentSequences,
+  tenantEstablishments,
+  tenantExpeditionPoints,
+  tenants,
+  tenantTimbrados,
+} from '../src/schema.js';
+import { withTenantTransaction } from '../src/tenant-transaction.js';
+import { createTestDatabase } from './support/harness.js';
+
+function required<T>(value: T | undefined, message: string): T {
+  if (value === undefined) {
+    throw new Error(message);
+  }
+  return value;
+}
+
+async function causeMessage(promise: Promise<unknown>): Promise<string> {
+  try {
+    await promise;
+  } catch (error) {
+    const cause = (error as { cause?: unknown }).cause;
+    return cause instanceof Error ? cause.message : String(error);
+  }
+  return expect.unreachable('expected the query to reject');
+}
+
+/** Spec: HU-E4-01. `dNumDoc` (MT v150, 7 digits) assigned atomically per sequence key. */
+describe('nextDocumentNumber (dNumDoc numbering)', () => {
+  let handle: DatabaseHandle | undefined;
+
+  async function seed() {
+    const testHandle = await createTestDatabase();
+    handle = testHandle;
+    const { db } = testHandle;
+
+    const [a, b] = await db
+      .insert(tenants)
+      .values([{ name: 'Tenant A' }, { name: 'Tenant B' }])
+      .returning();
+    const tenantA = required(a, 'tenant A').id;
+    const tenantB = required(b, 'tenant B').id;
+
+    async function fiscalSetup(tenantId: string) {
+      const [est] = await db
+        .insert(tenantEstablishments)
+        .values({
+          tenantId,
+          code: '001',
+          address: 'Av. Mariscal Lopez 123',
+          houseNumber: '123',
+          departmentCode: '11',
+          districtCode: '145',
+          districtDescription: 'Asuncion',
+          cityCode: '3432',
+          cityDescription: 'Asuncion',
+        })
+        .returning();
+      const establishmentId = required(est, 'establishment').id;
+      const points = await db
+        .insert(tenantExpeditionPoints)
+        .values([
+          { tenantId, establishmentId, code: '001' },
+          { tenantId, establishmentId, code: '002' },
+        ])
+        .returning();
+      const [tim] = await db
+        .insert(tenantTimbrados)
+        .values({ tenantId, number: '12345678', validFrom: '2024-01-01' })
+        .returning();
+      const key: DocumentSequenceKey = {
+        tenantId,
+        environment: 'test',
+        timbradoId: required(tim, 'timbrado').id,
+        establishmentId,
+        expeditionPointId: required(points[0], 'point 1').id,
+        documentType: 1,
+      };
+      return { key, secondPointId: required(points[1], 'point 2').id };
+    }
+
+    const setupA = await fiscalSetup(tenantA);
+    const setupB = await fiscalSetup(tenantB);
+    return {
+      db,
+      tenantA,
+      tenantB,
+      keyA: setupA.key,
+      secondPointA: setupA.secondPointId,
+      keyB: setupB.key,
+    };
+  }
+
+  afterEach(async () => {
+    await handle?.close();
+    handle = undefined;
+  });
+
+  it('starts at 1 and increments sequentially', async () => {
+    const { db, keyA } = await seed();
+
+    const numbers: number[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      numbers.push(
+        await withTenantTransaction(db, keyA.tenantId, (tx) => nextDocumentNumber(tx, keyA)),
+      );
+    }
+
+    expect(numbers).toEqual([1, 2, 3]);
+  });
+
+  it('keeps an independent sequence per key component', async () => {
+    const { db, keyA, secondPointA } = await seed();
+    const next = (key: DocumentSequenceKey) =>
+      withTenantTransaction(db, key.tenantId, (tx) => nextDocumentNumber(tx, key));
+
+    expect(await next(keyA)).toBe(1);
+    expect(await next(keyA)).toBe(2);
+    expect(await next({ ...keyA, environment: 'production' })).toBe(1);
+    expect(await next({ ...keyA, documentType: 5 })).toBe(1);
+    expect(await next({ ...keyA, expeditionPointId: secondPointA })).toBe(1);
+    expect(await next(keyA)).toBe(3);
+  });
+
+  it('does not burn a number when the transaction rolls back', async () => {
+    const { db, keyA } = await seed();
+
+    await expect(
+      withTenantTransaction(db, keyA.tenantId, async (tx) => {
+        expect(await nextDocumentNumber(tx, keyA)).toBe(1);
+        throw new Error('emission failed');
+      }),
+    ).rejects.toThrow('emission failed');
+
+    expect(
+      await withTenantTransaction(db, keyA.tenantId, (tx) => nextDocumentNumber(tx, keyA)),
+    ).toBe(1);
+  });
+
+  it('refuses to go past 9999999 with a typed error and leaves the counter intact', async () => {
+    const { db, keyA } = await seed();
+    await db
+      .insert(tenantDocumentSequences)
+      .values({ ...keyA, lastNumber: MAX_DOCUMENT_NUMBER - 1 });
+    const next = () =>
+      withTenantTransaction(db, keyA.tenantId, (tx) => nextDocumentNumber(tx, keyA));
+
+    expect(await next()).toBe(MAX_DOCUMENT_NUMBER);
+    await expect(next()).rejects.toBeInstanceOf(DocumentNumberExhaustedError);
+
+    const [row] = await db.select().from(tenantDocumentSequences);
+    expect(row?.lastNumber).toBe(MAX_DOCUMENT_NUMBER);
+  });
+
+  it('isolates tenants: RLS hides and blocks other tenants sequences', async () => {
+    const { db, tenantA, tenantB, keyA, keyB } = await seed();
+    await withTenantTransaction(db, tenantA, (tx) => nextDocumentNumber(tx, keyA));
+    await withTenantTransaction(db, tenantB, (tx) => nextDocumentNumber(tx, keyB));
+    await withTenantTransaction(db, tenantB, (tx) => nextDocumentNumber(tx, keyB));
+
+    const seenByA = await withTenantTransaction(db, tenantA, (tx) =>
+      tx.select().from(tenantDocumentSequences),
+    );
+    expect(seenByA.map((row) => [row.tenantId, row.lastNumber])).toEqual([[tenantA, 1]]);
+
+    const updated = await withTenantTransaction(db, tenantA, (tx) =>
+      tx
+        .update(tenantDocumentSequences)
+        .set({ lastNumber: 0 })
+        .where(eq(tenantDocumentSequences.tenantId, tenantB))
+        .returning(),
+    );
+    expect(updated).toEqual([]);
+
+    const message = await causeMessage(
+      withTenantTransaction(db, tenantA, (tx) => nextDocumentNumber(tx, keyB)),
+    );
+    expect(message).toContain('row-level security policy');
+    expect(message).toContain('tenant_document_sequences');
+  });
+
+  it('enforces the table constraints by name', async () => {
+    const { db, keyA } = await seed();
+    const insert = (values: Partial<typeof tenantDocumentSequences.$inferInsert>) =>
+      db.insert(tenantDocumentSequences).values({ ...keyA, ...values });
+
+    expect(await causeMessage(insert({ lastNumber: -1 }))).toContain(
+      'tenant_document_sequences_last_number_range',
+    );
+    expect(await causeMessage(insert({ lastNumber: MAX_DOCUMENT_NUMBER + 1 }))).toContain(
+      'tenant_document_sequences_last_number_range',
+    );
+    expect(await causeMessage(insert({ environment: 'staging' as 'test' }))).toContain(
+      'tenant_document_sequences_environment_valid',
+    );
+    expect(
+      await causeMessage(insert({ timbradoId: '00000000-0000-4000-8000-000000000000' })),
+    ).toContain('tenant_document_sequences_tenant_timbrado_fk');
+    expect(
+      await causeMessage(insert({ expeditionPointId: '00000000-0000-4000-8000-000000000000' })),
+    ).toContain('tenant_document_sequences_tenant_point_fk');
+
+    await insert({});
+    expect(await causeMessage(insert({}))).toContain('tenant_document_sequences_pkey');
+  });
+
+  it.skipIf(process.env.DB_TEST_DRIVER !== 'postgres')(
+    'assigns exactly 1..100 with no gaps or duplicates across 100 parallel emissions (needs real Postgres: PGlite is single-connection)',
+    async () => {
+      const { db, keyA } = await seed();
+
+      const numbers = await Promise.all(
+        Array.from({ length: 100 }, () =>
+          withTenantTransaction(db, keyA.tenantId, (tx) => nextDocumentNumber(tx, keyA)),
+        ),
+      );
+
+      expect([...numbers].sort((x, y) => x - y)).toEqual(
+        Array.from({ length: 100 }, (_, i) => i + 1),
+      );
+    },
+  );
+});

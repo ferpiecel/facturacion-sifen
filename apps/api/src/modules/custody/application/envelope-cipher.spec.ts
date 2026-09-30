@@ -130,6 +130,62 @@ describe('EnvelopeCipher', () => {
     );
   });
 
+  it.each<[string, unknown]>([
+    ['null', null],
+    ['a non-object', 'sealed'],
+    ['an object missing fields', { v: 1, keyId: 'fake:1' }],
+    [
+      'fields of the wrong type',
+      { v: 1, keyId: 1, wrappedKey: 1, nonce: 1, tag: 1, ciphertext: 1 },
+    ],
+  ])('rejects %s with the opaque error, never a raw TypeError', async (_label, malformed) => {
+    const { cipher } = await seal();
+
+    await expect(cipher.open(malformed as SealedSecret, CONTEXT)).rejects.toBeInstanceOf(
+      SecretDecryptionError,
+    );
+  });
+
+  it.each([
+    ['trailing garbage', (value: string) => `${value}!!`],
+    ['embedded whitespace', (value: string) => `${value.slice(0, 4)} ${value.slice(4)}`],
+    ['base64url alphabet', (value: string) => value.replace(/\+/g, '-').replace(/\//g, '_')],
+    ['missing padding', (value: string) => value.replace(/=+$/, '')],
+  ])('rejects non-canonical base64 (%s) in any field', async (_label, mangle) => {
+    const { cipher, sealed } = await seal();
+    const fields = ['ciphertext', 'tag', 'nonce', 'wrappedKey'] as const;
+
+    for (const field of fields) {
+      const mangled = mangle(sealed[field]);
+      if (mangled === sealed[field]) continue;
+      await expect(cipher.open({ ...sealed, [field]: mangled }, CONTEXT)).rejects.toBeInstanceOf(
+        SecretDecryptionError,
+      );
+    }
+  });
+
+  it('rejects trailing garbage appended to an otherwise valid ciphertext', async () => {
+    const { cipher, sealed } = await seal();
+
+    await expect(
+      cipher.open({ ...sealed, ciphertext: `${sealed.ciphertext}!!` }, CONTEXT),
+    ).rejects.toBeInstanceOf(SecretDecryptionError);
+  });
+
+  it.each([-1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1])(
+    'refuses a version that is not a non-negative safe integer (%s)',
+    async (version) => {
+      const { cipher, sealed } = await seal();
+
+      await expect(cipher.seal(Buffer.from(SECRET), { ...CONTEXT, version })).rejects.toThrow(
+        RangeError,
+      );
+      await expect(cipher.open(sealed, { ...CONTEXT, version })).rejects.toBeInstanceOf(
+        SecretDecryptionError,
+      );
+    },
+  );
+
   it('leaks no secret material in the error message', async () => {
     const { cipher, sealed } = await seal();
     const other = { ...CONTEXT, tenantId: '22222222-2222-4222-8222-222222222222' };

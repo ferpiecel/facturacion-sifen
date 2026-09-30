@@ -159,16 +159,20 @@ describe('audit_log hash chain', () => {
     });
   });
 
-  it('serializes concurrent appends for one tenant into a single linear chain', async () => {
-    const { db, tenantA, append, chainOf } = await seed();
+  // pglite multiplexes one session, so transactions cannot truly overlap there.
+  it.runIf(process.env.DB_TEST_DRIVER === 'postgres')(
+    'serializes concurrent appends for one tenant into a single linear chain',
+    async () => {
+      const { db, tenantA, append, chainOf } = await seed();
 
-    await Promise.all(Array.from({ length: 8 }, () => append(tenantA, 3)));
-    const rows = await chainOf(tenantA);
+      await Promise.all(Array.from({ length: 8 }, () => append(tenantA, 3)));
+      const rows = await chainOf(tenantA);
 
-    expect(rows.map((row) => row.seq)).toEqual(Array.from({ length: 24 }, (_, i) => i + 1));
-    expect(new Set(rows.map((row) => row.prevHash)).size).toBe(24);
-    expect(await verifyAuditChain(db, tenantA)).toEqual({ ok: true, rows: 24 });
-  });
+      expect(rows.map((row) => row.seq)).toEqual(Array.from({ length: 24 }, (_, i) => i + 1));
+      expect(new Set(rows.map((row) => row.prevHash)).size).toBe(24);
+      expect(await verifyAuditChain(db, tenantA)).toEqual({ ok: true, rows: 24 });
+    },
+  );
 
   it('rejects a duplicated (tenant_id, seq) at the constraint level', async () => {
     const { db, tenantA, append } = await seed();
@@ -177,7 +181,9 @@ describe('audit_log hash chain', () => {
     const error: unknown = await db
       .transaction(async (tx) => {
         await tx.execute(sql`alter table audit_log disable trigger audit_log_hash_chain`);
-        await tx.insert(auditLog).values({ ...entry(tenantA, 5), seq: 1, prevHash: 'a', hash: 'b' });
+        await tx
+          .insert(auditLog)
+          .values({ ...entry(tenantA, 5), seq: 1, prevHash: 'a', hash: 'b' });
       })
       .catch((caught: unknown) => caught);
 

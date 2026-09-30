@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  bigint,
   check,
   date,
   foreignKey,
@@ -12,6 +13,7 @@ import {
   smallint,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
   varchar,
@@ -354,7 +356,9 @@ export const auditActorType = pgEnum('audit_actor_type', ['api_key', 'user', 'op
  * Append-only audit trail (HU-E13-01, RF-16, RNF-08). `before`/`after` are
  * stored already redacted (the API's `redact`). UPDATE/DELETE/TRUNCATE are
  * rejected by a trigger (migration 0014) and app_user only has
- * SELECT/INSERT. HU-E13-02 will add nullable `prev_hash`/`hash` columns.
+ * SELECT/INSERT. `seq`, `prev_hash` and `hash` form a per-tenant SHA-256
+ * chain (HU-E13-02): a BEFORE INSERT trigger (migration 0015) overwrites them,
+ * so values supplied by the app are ignored.
  */
 export const auditLog = pgTable(
   'audit_log',
@@ -371,8 +375,12 @@ export const auditLog = pgTable(
     entityId: varchar('entity_id', { length: 255 }).notNull(),
     before: jsonb('before'),
     after: jsonb('after'),
+    seq: bigint('seq', { mode: 'number' }).notNull().default(0),
+    prevHash: text('prev_hash').notNull().default(''),
+    hash: text('hash').notNull().default(''),
   },
   (table) => [
+    unique('audit_log_tenant_seq_unique').on(table.tenantId, table.seq),
     index('audit_log_tenant_occurred_at_idx').on(table.tenantId, table.occurredAt),
     check('audit_log_action_not_blank', sql`btrim(${table.action}) <> ''`),
     check('audit_log_entity_id_not_blank', sql`btrim(${table.entityId}) <> ''`),

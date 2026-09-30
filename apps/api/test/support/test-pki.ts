@@ -17,6 +17,8 @@ export interface LeafOptions {
   /** SAN directoryName `serialNumber` (persona física), e.g. `RUC4490207-7`. */
   readonly sanSerialNumber?: string;
   readonly clientAuth?: boolean;
+  /** Leaves out the extended key usage extension entirely. */
+  readonly omitExtendedKeyUsage?: boolean;
   readonly notBefore?: Date;
   readonly notAfter?: Date;
 }
@@ -38,8 +40,8 @@ function newKeys(): forge.pki.rsa.KeyPair {
     privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
   });
   return {
-    privateKey: forge.pki.privateKeyFromPem(privateKey) as forge.pki.rsa.PrivateKey,
-    publicKey: forge.pki.publicKeyFromPem(publicKey) as forge.pki.rsa.PublicKey,
+    privateKey: forge.pki.privateKeyFromPem(privateKey),
+    publicKey: forge.pki.publicKeyFromPem(publicKey),
   };
 }
 
@@ -53,8 +55,8 @@ function baseCertificate(publicKey: forge.pki.PublicKey, notBefore: Date, notAft
   return certificate;
 }
 
-/** A self-signed CA standing in for a PSC root. */
-export function createTestAuthority(commonName: string): TestAuthority {
+/** A CA standing in for a PSC root (self-signed) or, given an `issuer`, an intermediate. */
+export function createTestAuthority(commonName: string, issuer?: TestAuthority): TestAuthority {
   const keys = newKeys();
   const now = Date.now();
   const certificate = baseCertificate(
@@ -64,12 +66,12 @@ export function createTestAuthority(commonName: string): TestAuthority {
   );
   const subject = [{ name: 'commonName', value: commonName }];
   certificate.setSubject(subject);
-  certificate.setIssuer(subject);
+  certificate.setIssuer(issuer?.certificate.subject.attributes ?? subject);
   certificate.setExtensions([
     { name: 'basicConstraints', cA: true, critical: true },
     { name: 'keyUsage', keyCertSign: true, cRLSign: true, critical: true },
   ]);
-  certificate.sign(keys.privateKey, forge.md.sha256.create());
+  certificate.sign(issuer?.privateKey ?? keys.privateKey, forge.md.sha256.create());
   return { certificate, privateKey: keys.privateKey, pem: forge.pki.certificateToPem(certificate) };
 }
 
@@ -93,11 +95,13 @@ export function issueTestPkcs12(
   certificate.setSubject(subject);
   certificate.setIssuer(issuer.certificate.subject.attributes);
   const extensions: object[] = [{ name: 'keyUsage', digitalSignature: true }];
-  extensions.push({
-    name: 'extKeyUsage',
-    clientAuth: options.clientAuth ?? true,
-    emailProtection: true,
-  });
+  if (options.omitExtendedKeyUsage !== true) {
+    extensions.push({
+      name: 'extKeyUsage',
+      clientAuth: options.clientAuth ?? true,
+      emailProtection: true,
+    });
+  }
   if (options.sanSerialNumber !== undefined) {
     extensions.push({ id: '2.5.29.17', value: sanDirectoryName(options.sanSerialNumber) });
   }

@@ -84,6 +84,14 @@ describe('validateTenantCertificate (HU-E3-01, ADR-0010, §8.7)', () => {
     ]);
   });
 
+  it('rejects a certificate without any extended key usage', () => {
+    const inspection = inspectLeaf(psc, { omitExtendedKeyUsage: true });
+    expect(inspection.extendedKeyUsages).toEqual([]);
+    expect(validateTenantCertificate(inspection, policy())).toEqual([
+      { code: 'missing-client-auth' },
+    ]);
+  });
+
   it('rejects an expired certificate', () => {
     const notAfter = new Date(Date.now() - DAY_MS);
     const inspection = inspectLeaf(psc, {
@@ -109,6 +117,25 @@ describe('validateTenantCertificate (HU-E3-01, ADR-0010, §8.7)', () => {
     expect(validateTenantCertificate(inspectLeaf(foreign), policy())).toEqual([
       { code: 'untrusted-chain' },
     ]);
+  });
+
+  it('accepts a certificate issued by a PSC intermediate bundled in the .p12', () => {
+    const intermediate = createTestAuthority('Test PSC Issuing CA', psc);
+    expect(validateTenantCertificate(inspectLeaf(intermediate), policy())).toEqual([]);
+  });
+
+  it('rejects a PSC intermediate chain when the intermediate is not bundled', () => {
+    const intermediate = createTestAuthority('Test PSC Issuing CA', psc);
+    const { leafPem } = issueTestPkcs12(intermediate, { serialNumber: 'RUC80000005-6' });
+    const inspection = inspectCertificate(new X509Certificate(leafPem), []);
+    expect(validateTenantCertificate(inspection, policy())).toEqual([{ code: 'untrusted-chain' }]);
+  });
+
+  it('rejects a CA certificate presented as the tenant certificate', () => {
+    const inspection = inspectCertificate(new X509Certificate(psc.pem), []);
+    expect(validateTenantCertificate(inspection, policy()).map(({ code }) => code)).toContain(
+      'untrusted-chain',
+    );
   });
 
   it('rejects every certificate when no PSC root is configured', () => {

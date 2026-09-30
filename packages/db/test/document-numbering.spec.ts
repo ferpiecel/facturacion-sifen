@@ -2,12 +2,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import type { DatabaseHandle } from '../src/client.js';
 import {
-  DocumentNumberExhaustedError,
   InvalidDocumentTypeError,
   MAX_DOCUMENT_NUMBER,
-  nextDocumentNumber,
+  nextDocumentNumber as nextSequenceValue,
   type DocumentSequenceKey,
 } from '../src/document-number.js';
+import { SeriesExhaustedError } from '../src/series.js';
 import {
   tenantDocumentSequences,
   tenantEstablishments,
@@ -17,6 +17,13 @@ import {
 } from '../src/schema.js';
 import { withTenantTransaction } from '../src/tenant-transaction.js';
 import { createTestDatabase } from './support/harness.js';
+
+type Tx = Parameters<typeof nextSequenceValue>[0];
+
+/** The dNumDoc alone (the series-aware result is asserted in the HU-E4-02 tests). */
+async function nextDocumentNumber(tx: Tx, key: DocumentSequenceKey): Promise<number> {
+  return (await nextSequenceValue(tx, key)).number;
+}
 
 async function causeMessage(promise: Promise<unknown>): Promise<string> {
   try {
@@ -139,19 +146,117 @@ describe('nextDocumentNumber (dNumDoc numbering)', () => {
     ).toBe(1);
   });
 
-  it('refuses to go past 9999999 with a typed error and leaves the counter intact', async () => {
+  it('refuses to go past 9999999 of series ZZ with a typed error and leaves the counter intact', async () => {
     const { db, keyA } = await seed();
     await db
       .insert(tenantDocumentSequences)
-      .values({ ...keyA, lastNumber: MAX_DOCUMENT_NUMBER - 1 });
+      .values({ ...keyA, series: 'ZZ', lastNumber: MAX_DOCUMENT_NUMBER - 1 });
     const next = () =>
       withTenantTransaction(db, keyA.tenantId, (tx) => nextDocumentNumber(tx, keyA));
 
     expect(await next()).toBe(MAX_DOCUMENT_NUMBER);
-    await expect(next()).rejects.toBeInstanceOf(DocumentNumberExhaustedError);
+    await expect(next()).rejects.toBeInstanceOf(SeriesExhaustedError);
 
     const rows = await db.select().from(tenantDocumentSequences);
-    expect(rows.map((row) => row.lastNumber)).toEqual([MAX_DOCUMENT_NUMBER]);
+    expect(rows.map((row) => [row.series, row.lastNumber])).toEqual([['ZZ', MAX_DOCUMENT_NUMBER]]);
+  });
+
+  /** Spec: HU-E4-02 (rule 1110). Move to the next series when 9999999 is exhausted. */
+  describe('series rollover', () => {
+    const next = (db: DatabaseHandle['db'], key: DocumentSequenceKey) =>
+      withTenantTransaction(db, key.tenantId, (tx) => nextSequenceValue(tx, key));
+
+    it('issues no series at first, then opens AA at number 1 after 9999999', async () => {
+      const { db, keyA } = await seed();
+      await db
+        .insert(tenantDocumentSequences)
+        .values({ ...keyA, lastNumber: MAX_DOCUMENT_NUMBER - 1 });
+
+      expect(await next(db, keyA)).toEqual({ series: null, number: MAX_DOCUMENT_NUMBER });
+      expect(await next(db, keyA)).toEqual({ series: 'AA', number: 1 });
+      expect(await next(db, keyA)).toEqual({ series: 'AA', number: 2 });
+    });
+
+    it('carries AZ over to BA and keeps every series row', async () => {
+      const { db, keyA } = await seed();
+      await db
+        .insert(tenantDocumentSequences)
+        .values({ ...keyA, series: 'AZ', lastNumber: MAX_DOCUMENT_NUMBER });
+
+      expect(await next(db, keyA)).toEqual({ series: 'BA', number: 1 });
+      const rows = await db.select().from(tenantDocumentSequences);
+      expect(rows.map((row) => row.series).sort()).toEqual(['AZ', 'BA']);
+    });
+
+    it('records the start date of each series', async () => {
+      const { db, keyA } = await seed();
+      await db.insert(tenantDocumentSequences).values({ ...keyA, lastNumber: MAX_DOCUMENT_NUMBER });
+      const before = Date.now();
+
+      await next(db, keyA);
+
+      const rows = await db.select().from(tenantDocumentSequences);
+      const opened = rows.find((row) => row.series === 'AA');
+      expect(opened?.seriesStartedAt.getTime()).toBeGreaterThanOrEqual(before - 60_000);
+      expect(opened?.seriesStartedAt.getTime()).toBeLessThanOrEqual(Date.now() + 60_000);
+    });
+
+    it('keeps series independent per sequence key', async () => {
+      const { db, keyA, secondPointA } = await seed();
+      await db.insert(tenantDocumentSequences).values({ ...keyA, lastNumber: MAX_DOCUMENT_NUMBER });
+
+      expect(await next(db, keyA)).toEqual({ series: 'AA', number: 1 });
+      expect(await next(db, { ...keyA, expeditionPointId: secondPointA })).toEqual({
+        series: null,
+        number: 1,
+      });
+    });
+
+    it('rejects malformed series at the table level (no Ñ, two uppercase letters)', async () => {
+      const { db, keyA } = await seed();
+      for (const series of ['ÑA', 'aa', 'A', 'AAA']) {
+        expect(
+          await causeMessage(db.insert(tenantDocumentSequences).values({ ...keyA, series })),
+        ).toContain('tenant_document_sequences_series_format');
+      }
+    });
+
+    it.skipIf(process.env.DB_TEST_DRIVER !== 'postgres')(
+      'gives 9999999 to one caller and series AA number 1 to the other at the boundary (needs real Postgres)',
+      async () => {
+        const { db, keyA } = await seed();
+        await db
+          .insert(tenantDocumentSequences)
+          .values({ ...keyA, lastNumber: MAX_DOCUMENT_NUMBER - 1 });
+
+        const results = await Promise.all([next(db, keyA), next(db, keyA)]);
+
+        expect(results).toContainEqual({ series: null, number: MAX_DOCUMENT_NUMBER });
+        expect(results).toContainEqual({ series: 'AA', number: 1 });
+      },
+    );
+
+    it.skipIf(process.env.DB_TEST_DRIVER !== 'postgres')(
+      'never duplicates a (series, number) pair with many callers straddling the rollover',
+      async () => {
+        const { db, keyA } = await seed();
+        await db
+          .insert(tenantDocumentSequences)
+          .values({ ...keyA, lastNumber: MAX_DOCUMENT_NUMBER - 3 });
+
+        const results = await Promise.all(Array.from({ length: 10 }, () => next(db, keyA)));
+
+        const pairs = results.map((r) => `${r.series ?? '-'}:${String(r.number)}`).sort();
+        expect(new Set(pairs).size).toBe(10);
+        expect(results.filter((r) => r.series === null)).toHaveLength(3);
+        expect(
+          results
+            .filter((r) => r.series === 'AA')
+            .map((r) => r.number)
+            .sort((a, b) => a - b),
+        ).toEqual([1, 2, 3, 4, 5, 6, 7]);
+      },
+    );
   });
 
   it('isolates tenants: RLS hides and blocks other tenants sequences', async () => {

@@ -80,7 +80,7 @@ describe('validateInvoiceDraft', () => {
       );
       const q = draft({ items: [{ quantity: 1.5, unitPrice: 101, vatRate: 5 }] });
       expect(validateInvoiceDraft(q, {})).toContainEqual(
-        expect.objectContaining({ field: 'items[0]', rule: 'pyg-integer' }),
+        expect.objectContaining({ field: 'items[0].total', rule: 'pyg-integer' }),
       );
     });
 
@@ -114,15 +114,88 @@ describe('validateInvoiceDraft', () => {
     ]);
   });
 
+  describe('items', () => {
+    const one = (item: Partial<InvoiceDraft['items'][number]>) =>
+      draft({ items: [{ quantity: 1, unitPrice: 100_000, vatRate: 10, ...item }] });
+
+    it('requires at least one item', () => {
+      expect(validateInvoiceDraft(draft({ items: [] }), {})).toContainEqual(
+        expect.objectContaining({ field: 'items', rule: 'items-required' }),
+      );
+    });
+
+    it('rejects non-positive quantity', () => {
+      for (const quantity of [0, -1]) {
+        expect(validateInvoiceDraft(one({ quantity }), {})).toContainEqual(
+          expect.objectContaining({ field: 'items[0].quantity', rule: 'quantity-positive' }),
+        );
+      }
+    });
+
+    it('rejects negative unit price but allows zero (free-of-charge item)', () => {
+      expect(validateInvoiceDraft(one({ unitPrice: -50 }), {})).toContainEqual(
+        expect.objectContaining({ field: 'items[0].unitPrice', rule: 'unit-price-non-negative' }),
+      );
+      expect(validateInvoiceDraft(one({ unitPrice: 0 }), {})).toEqual([]);
+    });
+
+    it('rejects an unsupported VAT rate at runtime', () => {
+      const bad = one({ vatRate: 7 as never });
+      expect(validateInvoiceDraft(bad, {})).toContainEqual(
+        expect.objectContaining({ field: 'items[0].vatRate', rule: 'vat-rate' }),
+      );
+    });
+
+    it('does not let a negative line offset the total past the threshold', () => {
+      const d = draft({
+        receiver: { kind: 'unnamed' },
+        operationType: 'B2C',
+        items: [
+          { quantity: 1, unitPrice: 8_000_000, vatRate: 10 },
+          { quantity: 1, unitPrice: -5_000_000, vatRate: 10 },
+        ],
+      });
+      expect(rules(d)).toContain('unnamed-receiver-over-threshold');
+    });
+
+    it('still checks the threshold when an item total is non-integer', () => {
+      const d = draft({
+        receiver: { kind: 'unnamed' },
+        operationType: 'B2C',
+        items: [{ quantity: 1, unitPrice: 7_000_000.5, vatRate: 10 }],
+      });
+      expect(rules(d)).toEqual(
+        expect.arrayContaining(['pyg-integer', 'unnamed-receiver-over-threshold']),
+      );
+    });
+  });
+
   it('collects all errors instead of stopping at the first', () => {
     const d = draft({
       receiver: { kind: 'unnamed' },
       operationType: 'B2C',
-      items: [{ quantity: 1, unitPrice: 8_000_001, vatRate: 10 }],
+      items: [
+        { quantity: 1, unitPrice: 8_000_001, vatRate: 10 },
+        { quantity: 0, unitPrice: 10, vatRate: 7 as never },
+      ],
       location: { departmentCode: 0 },
     });
     expect(rules(d).sort()).toEqual(
-      ['department-code', 'rounding-multiple-of-50', 'unnamed-receiver-over-threshold'].sort(),
+      [
+        'department-code',
+        'quantity-positive',
+        'rounding-multiple-of-50',
+        'unnamed-receiver-over-threshold',
+        'vat-rate',
+      ].sort(),
+    );
+    const oee = draft({
+      receiver: { kind: 'named', isPublicEntity: true },
+      operationType: 'B2B',
+      items: [{ quantity: -1, unitPrice: 1, vatRate: 5 }],
+    });
+    expect(rules(oee)).toEqual(
+      expect.arrayContaining(['public-entity-requires-b2g', 'quantity-positive']),
     );
   });
 });

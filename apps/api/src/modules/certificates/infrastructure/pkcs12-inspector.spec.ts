@@ -16,6 +16,52 @@ import { inspectPkcs12 } from './pkcs12-inspector.js';
 
 let psc: TestAuthority;
 
+const DEFAULT_ITERATIONS = forge.asn1.integerToDer(2048).getBytes();
+
+/**
+ * Re-encodes a `.p12`, letting `visit` edit any ASN.1 node, including those
+ * nested in OCTET STRINGs that hold DER (authSafe, plaintext SafeContents).
+ * Lengths are recomputed, so edits need not preserve sizes.
+ */
+function rewritePkcs12(p12: Buffer, visit: (node: forge.asn1.Asn1) => void): Buffer {
+  const walk = (node: forge.asn1.Asn1): void => {
+    visit(node);
+    if (Array.isArray(node.value)) {
+      node.value.forEach(walk);
+    } else if (
+      node.tagClass === forge.asn1.Class.UNIVERSAL &&
+      node.type === forge.asn1.Type.OCTETSTRING &&
+      node.value.startsWith('0') &&
+      node.value.length > 32
+    ) {
+      const inner = forge.asn1.fromDer(node.value);
+      walk(inner);
+      node.value = forge.asn1.toDer(inner).getBytes();
+    }
+  };
+  const root = forge.asn1.fromDer(p12.toString('binary'));
+  walk(root);
+  return Buffer.from(forge.asn1.toDer(root).getBytes(), 'binary');
+}
+
+/** Replaces every default (2048) PBE/PBKDF2/MAC iteration count with `count`. */
+function withIterations(p12: Buffer, count: number): Buffer {
+  return rewritePkcs12(p12, (node) => {
+    if (node.type === forge.asn1.Type.INTEGER && node.value === DEFAULT_ITERATIONS) {
+      node.value = forge.asn1.integerToDer(count).getBytes();
+    }
+  });
+}
+
+function rejectionReason(attempt: () => unknown): string | undefined {
+  try {
+    attempt();
+  } catch (error) {
+    return error instanceof Pkcs12ContentError ? error.reason : (error as Error).name;
+  }
+  return undefined;
+}
+
 beforeAll(() => {
   psc = createTestAuthority('Test PSC Root');
 });
@@ -86,5 +132,55 @@ describe('inspectPkcs12 (HU-E3-01)', () => {
     const p12 = Buffer.from(forge.asn1.toDer(asn1).getBytes(), 'binary');
 
     expect(() => inspectPkcs12(p12, 'pw')).toThrow(Pkcs12ContentError);
+  });
+
+  it('rejects a file larger than 64 KiB before parsing it', () => {
+    expect(rejectionReason(() => inspectPkcs12(Buffer.alloc(64 * 1024 + 1), 'x'))).toBe(
+      'too-large',
+    );
+  });
+
+  it.each([
+    ['the MAC', {}],
+    ['PKCS#12 PBE (3DES)', { useMac: false }],
+    ['PBES2/PBKDF2 (AES-256)', { useMac: false, algorithm: 'aes256' as const }],
+  ])('rejects an excessive iteration count in %s before deriving keys', (_case, pkcs12) => {
+    const { p12, password } = issueTestPkcs12(psc, { serialNumber: 'RUC80000005-6', pkcs12 });
+    const hostile = withIterations(p12, 500_000);
+
+    const started = Date.now();
+    expect(rejectionReason(() => inspectPkcs12(hostile, password))).toBe('excessive-iterations');
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it('reports a non-RSA private key as unsupported instead of a wrong password', () => {
+    const { p12, password } = issueTestPkcs12(psc, {
+      serialNumber: 'RUC80000005-6',
+      pkcs12: { useMac: false },
+    });
+    const { privateKey } = generateKeyPairSync('ec', {
+      namedCurve: 'prime256v1',
+      privateKeyEncoding: { type: 'pkcs8', format: 'der' },
+      publicKeyEncoding: { type: 'spki', format: 'der' },
+    });
+    const ecKey = forge.pki.encryptPrivateKeyInfo(
+      forge.asn1.fromDer(privateKey.toString('binary')),
+      password,
+      { algorithm: '3des' },
+    );
+    const withEcKey = rewritePkcs12(p12, (node) => {
+      const [bagId, bagValue] = Array.isArray(node.value) ? node.value : [];
+      if (
+        bagId?.type === forge.asn1.Type.OID &&
+        forge.asn1.derToOid(bagId.value as string) === forge.pki.oids.pkcs8ShroudedKeyBag &&
+        Array.isArray(bagValue?.value)
+      ) {
+        bagValue.value = [ecKey];
+      }
+    });
+
+    expect(rejectionReason(() => inspectPkcs12(withEcKey, password))).toBe(
+      'unsupported-key-algorithm',
+    );
   });
 });

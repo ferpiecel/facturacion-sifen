@@ -11,16 +11,46 @@ export interface TestAuthority {
   readonly pem: string;
 }
 
+export interface AuthorityOptions {
+  /** Issuing CA; omitted for a self-signed root. */
+  readonly issuer?: TestAuthority;
+  /** basicConstraints cA flag (default true). */
+  readonly ca?: boolean;
+  readonly pathLength?: number;
+  /** Reuses another authority's key pair (a cross-certificate). */
+  readonly keysFrom?: TestAuthority;
+  readonly notBefore?: Date;
+  readonly notAfter?: Date;
+}
+
+/** One SAN GeneralName; `directorySerialNumber` is a directoryName with a serialNumber. */
+export interface TestGeneralName {
+  readonly type: 'directorySerialNumber' | 'email' | 'dns' | 'uri' | 'otherName';
+  readonly value: string;
+}
+
 export interface LeafOptions {
   /** Subject `serialNumber` attribute (persona jurídica), e.g. `RUC80000005-6`. */
   readonly serialNumber?: string;
-  /** SAN directoryName `serialNumber` (persona física), e.g. `RUC4490207-7`. */
-  readonly sanSerialNumber?: string;
+  /** SubjectAltName entries (persona física carries the RUC in a directoryName). */
+  readonly san?: readonly TestGeneralName[];
   readonly clientAuth?: boolean;
   /** Leaves out the extended key usage extension entirely. */
   readonly omitExtendedKeyUsage?: boolean;
+  /** keyUsage digitalSignature bit (default true). */
+  readonly digitalSignature?: boolean;
+  /** Leaves out the keyUsage extension entirely. */
+  readonly omitKeyUsage?: boolean;
   readonly notBefore?: Date;
   readonly notAfter?: Date;
+  /** Extra certificates bundled in the `.p12` (default: the issuer). */
+  readonly bundle?: readonly TestAuthority[];
+  /** PKCS#12 protection (default: 3DES, 2048 iterations, with MAC). */
+  readonly pkcs12?: {
+    readonly algorithm?: '3des' | 'aes256';
+    readonly count?: number;
+    readonly useMac?: boolean;
+  };
 }
 
 export interface TestPkcs12 {
@@ -56,19 +86,33 @@ function baseCertificate(publicKey: forge.pki.PublicKey, notBefore: Date, notAft
 }
 
 /** A CA standing in for a PSC root (self-signed) or, given an `issuer`, an intermediate. */
-export function createTestAuthority(commonName: string, issuer?: TestAuthority): TestAuthority {
-  const keys = newKeys();
+export function createTestAuthority(
+  commonName: string,
+  options: AuthorityOptions = {},
+): TestAuthority {
+  const { issuer, keysFrom } = options;
+  const keys = keysFrom
+    ? {
+        privateKey: keysFrom.privateKey,
+        publicKey: keysFrom.certificate.publicKey as forge.pki.rsa.PublicKey,
+      }
+    : newKeys();
   const now = Date.now();
   const certificate = baseCertificate(
     keys.publicKey,
-    new Date(now - DAY_MS),
-    new Date(now + 3650 * DAY_MS),
+    options.notBefore ?? new Date(now - DAY_MS),
+    options.notAfter ?? new Date(now + 3650 * DAY_MS),
   );
   const subject = [{ name: 'commonName', value: commonName }];
   certificate.setSubject(subject);
   certificate.setIssuer(issuer?.certificate.subject.attributes ?? subject);
   certificate.setExtensions([
-    { name: 'basicConstraints', cA: true, critical: true },
+    {
+      name: 'basicConstraints',
+      cA: options.ca ?? true,
+      ...(options.pathLength === undefined ? {} : { pathLenConstraint: options.pathLength }),
+      critical: true,
+    },
     { name: 'keyUsage', keyCertSign: true, cRLSign: true, critical: true },
   ]);
   certificate.sign(issuer?.privateKey ?? keys.privateKey, forge.md.sha256.create());
@@ -94,7 +138,14 @@ export function issueTestPkcs12(
   }
   certificate.setSubject(subject);
   certificate.setIssuer(issuer.certificate.subject.attributes);
-  const extensions: object[] = [{ name: 'keyUsage', digitalSignature: true }];
+  const extensions: object[] = [];
+  if (options.omitKeyUsage !== true) {
+    extensions.push({
+      name: 'keyUsage',
+      digitalSignature: options.digitalSignature ?? true,
+      keyEncipherment: true,
+    });
+  }
   if (options.omitExtendedKeyUsage !== true) {
     extensions.push({
       name: 'extKeyUsage',
@@ -102,17 +153,17 @@ export function issueTestPkcs12(
       emailProtection: true,
     });
   }
-  if (options.sanSerialNumber !== undefined) {
-    extensions.push({ id: '2.5.29.17', value: sanDirectoryName(options.sanSerialNumber) });
+  if (options.san !== undefined) {
+    extensions.push({ id: '2.5.29.17', value: generalNames(options.san) });
   }
   certificate.setExtensions(extensions);
   certificate.sign(issuer.privateKey, forge.md.sha256.create());
 
   const asn1 = forge.pkcs12.toPkcs12Asn1(
     keys.privateKey,
-    [certificate, issuer.certificate],
+    [certificate, ...(options.bundle ?? [issuer]).map((authority) => authority.certificate)],
     password,
-    { algorithm: '3des' },
+    { algorithm: '3des', ...options.pkcs12 },
   );
   return {
     p12: Buffer.from(forge.asn1.toDer(asn1).getBytes(), 'binary'),
@@ -121,17 +172,49 @@ export function issueTestPkcs12(
   };
 }
 
-/** `GeneralNames` holding one `directoryName` whose Name has a `serialNumber` (2.5.4.5). */
-function sanDirectoryName(value: string): forge.asn1.Asn1 {
-  const { asn1 } = forge;
-  const attribute = asn1.create(asn1.Class.UNIVERSAL, asn1.Type.SEQUENCE, true, [
-    asn1.create(asn1.Class.UNIVERSAL, asn1.Type.OID, false, asn1.oidToDer('2.5.4.5').getBytes()),
-    asn1.create(asn1.Class.UNIVERSAL, asn1.Type.PRINTABLESTRING, false, value),
-  ]);
-  const name = asn1.create(asn1.Class.UNIVERSAL, asn1.Type.SEQUENCE, true, [
-    asn1.create(asn1.Class.UNIVERSAL, asn1.Type.SET, true, [attribute]),
-  ]);
+const { asn1 } = forge;
+
+function derString(type: number, value: string): forge.asn1.Asn1 {
+  return asn1.create(asn1.Class.UNIVERSAL, type, false, value);
+}
+
+function oid(value: string): forge.asn1.Asn1 {
+  return asn1.create(asn1.Class.UNIVERSAL, asn1.Type.OID, false, asn1.oidToDer(value).getBytes());
+}
+
+/** A `Name` with a single `serialNumber` (2.5.4.5) attribute. */
+function serialNumberName(value: string): forge.asn1.Asn1 {
   return asn1.create(asn1.Class.UNIVERSAL, asn1.Type.SEQUENCE, true, [
-    asn1.create(asn1.Class.CONTEXT_SPECIFIC, 4, true, [name]),
+    asn1.create(asn1.Class.UNIVERSAL, asn1.Type.SET, true, [
+      asn1.create(asn1.Class.UNIVERSAL, asn1.Type.SEQUENCE, true, [
+        oid('2.5.4.5'),
+        derString(asn1.Type.PRINTABLESTRING, value),
+      ]),
+    ]),
   ]);
+}
+
+function generalName({ type, value }: TestGeneralName): forge.asn1.Asn1 {
+  const context = (tag: number, constructed: boolean, content: string | forge.asn1.Asn1[]) =>
+    asn1.create(asn1.Class.CONTEXT_SPECIFIC, tag, constructed, content);
+  switch (type) {
+    case 'directorySerialNumber':
+      return context(4, true, [serialNumberName(value)]);
+    case 'email':
+      return context(1, false, value);
+    case 'dns':
+      return context(2, false, value);
+    case 'uri':
+      return context(6, false, value);
+    case 'otherName':
+      return context(0, true, [
+        oid('1.3.6.1.4.1.311.20.2.3'),
+        context(0, true, [derString(asn1.Type.UTF8, value)]),
+      ]);
+  }
+}
+
+/** DER `GeneralNames` for a subjectAltName extension value. */
+function generalNames(names: readonly TestGeneralName[]): forge.asn1.Asn1 {
+  return asn1.create(asn1.Class.UNIVERSAL, asn1.Type.SEQUENCE, true, names.map(generalName));
 }

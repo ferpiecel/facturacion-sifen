@@ -26,7 +26,10 @@ beforeAll(() => {
 
 function inspectLeaf(issuer: TestAuthority, options: LeafOptions = {}) {
   const { leafPem } = issueTestPkcs12(issuer, { serialNumber: 'RUC80000005-6', ...options });
-  return inspectCertificate(new X509Certificate(leafPem), [new X509Certificate(issuer.pem)]);
+  return inspectCertificate(
+    new X509Certificate(leafPem),
+    (options.bundle ?? [issuer]).map((authority) => new X509Certificate(authority.pem)),
+  );
 }
 
 function policy(overrides: Partial<CertificatePolicy> = {}): CertificatePolicy {
@@ -58,9 +61,32 @@ describe('validateTenantCertificate (HU-E3-01, ADR-0010, §8.7)', () => {
   it('accepts the RUC carried in the SubjectAlternativeName', () => {
     const inspection = inspectLeaf(psc, {
       serialNumber: 'CI1234567',
-      sanSerialNumber: 'RUC80000005-6',
+      san: [
+        { type: 'email', value: 'juan@example.com' },
+        { type: 'directorySerialNumber', value: 'RUC80000005-6' },
+      ],
     });
     expect(validateTenantCertificate(inspection, policy())).toEqual([]);
+  });
+
+  it.each(['email', 'dns', 'uri', 'otherName'] as const)(
+    'ignores a RUC-looking %s SubjectAltName entry',
+    (type) => {
+      const value = type === 'email' ? 'RUC80000005-6@gmail.com' : 'RUC80000005-6';
+      const inspection = inspectLeaf(psc, { serialNumber: 'CI1234567', san: [{ type, value }] });
+      expect(inspection.subjectRuc).toBeNull();
+      expect(validateTenantCertificate(inspection, policy())).toEqual([
+        { code: 'ruc-mismatch', expected: '80000005-6', actual: null },
+      ]);
+    },
+  );
+
+  it('ignores a directoryName serialNumber that only contains a RUC', () => {
+    const inspection = inspectLeaf(psc, {
+      serialNumber: 'CI1234567',
+      san: [{ type: 'directorySerialNumber', value: 'RUC80000005-6x' }],
+    });
+    expect(inspection.subjectRuc).toBeNull();
   });
 
   it('rejects a certificate issued to another RUC', () => {
@@ -92,6 +118,22 @@ describe('validateTenantCertificate (HU-E3-01, ADR-0010, §8.7)', () => {
     ]);
   });
 
+  // Signing the DE (XMLDSig, §8.7) needs digitalSignature; neither §8.7 nor
+  // ADR-0010 requires nonRepudiation, so it is not checked.
+  it('rejects a certificate whose keyUsage lacks digitalSignature', () => {
+    const inspection = inspectLeaf(psc, { digitalSignature: false });
+    expect(validateTenantCertificate(inspection, policy())).toEqual([
+      { code: 'missing-digital-signature' },
+    ]);
+  });
+
+  it('rejects a certificate without a keyUsage extension', () => {
+    const inspection = inspectLeaf(psc, { omitKeyUsage: true });
+    expect(validateTenantCertificate(inspection, policy())).toEqual([
+      { code: 'missing-digital-signature' },
+    ]);
+  });
+
   it('rejects an expired certificate', () => {
     const notAfter = new Date(Date.now() - DAY_MS);
     const inspection = inspectLeaf(psc, {
@@ -120,12 +162,65 @@ describe('validateTenantCertificate (HU-E3-01, ADR-0010, §8.7)', () => {
   });
 
   it('accepts a certificate issued by a PSC intermediate bundled in the .p12', () => {
-    const intermediate = createTestAuthority('Test PSC Issuing CA', psc);
+    const intermediate = createTestAuthority('Test PSC Issuing CA', { issuer: psc });
     expect(validateTenantCertificate(inspectLeaf(intermediate), policy())).toEqual([]);
   });
 
+  it('backtracks past a cross-signed issuer that leads to an untrusted root', () => {
+    const intermediate = createTestAuthority('Test PSC Issuing CA', { issuer: psc });
+    // Same name and key as the real intermediate, but signed by an untrusted
+    // root and listed first: the leaf verifies against it, the path dead-ends.
+    const deadEnd = createTestAuthority('Test PSC Issuing CA', {
+      issuer: foreign,
+      keysFrom: intermediate,
+    });
+    const inspection = inspectLeaf(intermediate, { bundle: [deadEnd, foreign, intermediate] });
+    expect(validateTenantCertificate(inspection, policy())).toEqual([]);
+  });
+
+  it('rejects a chain through an expired intermediate', () => {
+    const intermediate = createTestAuthority('Test PSC Issuing CA', {
+      issuer: psc,
+      notBefore: new Date(Date.now() - 10 * DAY_MS),
+      notAfter: new Date(Date.now() - DAY_MS),
+    });
+    expect(validateTenantCertificate(inspectLeaf(intermediate), policy())).toEqual([
+      { code: 'untrusted-chain' },
+    ]);
+  });
+
+  it('rejects a chain through an intermediate that is not a CA', () => {
+    const intermediate = createTestAuthority('Test PSC Issuing CA', { issuer: psc, ca: false });
+    expect(validateTenantCertificate(inspectLeaf(intermediate), policy())).toEqual([
+      { code: 'untrusted-chain' },
+    ]);
+  });
+
+  it('honors the pathLenConstraint of the PSC root', () => {
+    const root = createTestAuthority('Test PSC Root 0', { pathLength: 0 });
+    const intermediate = createTestAuthority('Test PSC Issuing CA', { issuer: root });
+    const trusted = policy({ trustedPscRoots: [new X509Certificate(root.pem)] });
+    expect(validateTenantCertificate(inspectLeaf(root), trusted)).toEqual([]);
+    expect(validateTenantCertificate(inspectLeaf(intermediate), trusted)).toEqual([
+      { code: 'untrusted-chain' },
+    ]);
+  });
+
+  it('honors the pathLenConstraint of an intermediate', () => {
+    const upper = createTestAuthority('Test PSC Policy CA', { issuer: psc, pathLength: 0 });
+    const lower = createTestAuthority('Test PSC Issuing CA', { issuer: upper });
+    expect(
+      validateTenantCertificate(inspectLeaf(lower, { bundle: [lower, upper] }), policy()),
+    ).toEqual([{ code: 'untrusted-chain' }]);
+    const allowed = createTestAuthority('Test PSC Policy CA 1', { issuer: psc, pathLength: 1 });
+    const below = createTestAuthority('Test PSC Issuing CA 1', { issuer: allowed });
+    expect(
+      validateTenantCertificate(inspectLeaf(below, { bundle: [below, allowed] }), policy()),
+    ).toEqual([]);
+  });
+
   it('rejects a PSC intermediate chain when the intermediate is not bundled', () => {
-    const intermediate = createTestAuthority('Test PSC Issuing CA', psc);
+    const intermediate = createTestAuthority('Test PSC Issuing CA', { issuer: psc });
     const { leafPem } = issueTestPkcs12(intermediate, { serialNumber: 'RUC80000005-6' });
     const inspection = inspectCertificate(new X509Certificate(leafPem), []);
     expect(validateTenantCertificate(inspection, policy())).toEqual([{ code: 'untrusted-chain' }]);

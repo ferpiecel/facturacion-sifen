@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type { LoadedCertificate, QrGenerator } from '@sifen/sifen-gateway';
 import { validateXml } from '@sifen/sifen-xsd';
 import { TipsDeXmlBuilder, TipsQrGenerator, TipsXmlSigner } from '@sifen/sifen-tips';
+import type { FacturaPocInput } from '@sifen/sifen-gateway';
 import { pocFacturaInput } from '../../../../test/fixtures/poc-factura-input.js';
 import { generateDevCertificate } from '../../../../test/support/dev-certificate.js';
 import { computeQrHash } from '../domain/qr.js';
@@ -11,11 +12,40 @@ const CSC = 'ABCD0000000000000000000000000000';
 const OPTIONS = { environment: 'test', idCsc: '0001', csc: CSC } as const;
 
 let signed: string;
+let signedExempt: string;
+let signedUnnamed: string;
+let cert: LoadedCertificate;
+
+async function sign(input: FacturaPocInput): Promise<string> {
+  return new TipsXmlSigner().sign(await new TipsDeXmlBuilder().buildParaSifen(input), cert);
+}
 
 beforeAll(async () => {
-  const cert: LoadedCertificate = generateDevCertificate();
-  const xml = await new TipsDeXmlBuilder().buildParaSifen(pocFacturaInput);
-  signed = await new TipsXmlSigner().sign(xml, cert);
+  cert = generateDevCertificate();
+  signed = await sign(pocFacturaInput);
+  const item = (pocFacturaInput.data.items as Record<string, unknown>[])[0];
+  signedExempt = await sign({
+    ...pocFacturaInput,
+    data: {
+      ...pocFacturaInput.data,
+      items: [{ ...item, ivaTipo: 3, ivaProporcion: 0, iva: 0 }],
+    },
+  });
+  signedUnnamed = await sign({
+    ...pocFacturaInput,
+    data: {
+      ...pocFacturaInput.data,
+      cliente: {
+        contribuyente: false,
+        razonSocial: 'Sin Nombre',
+        tipoOperacion: 2,
+        pais: 'PRY',
+        paisDescripcion: 'Paraguay',
+        documentoTipo: 5,
+        documentoNumero: '0',
+      },
+    },
+  });
 });
 
 function qrOf(xml: string): string {
@@ -98,5 +128,34 @@ describe('addQrToSignedInvoice', () => {
       addQrToSignedInvoice(generator, '<rDE><DE/></rDE>', OPTIONS),
     ).rejects.toBeInstanceOf(InvoiceQrError);
     expect(addQr).not.toHaveBeenCalled();
+  });
+
+  it('follows the MT for an exempt invoice: dTotIVA=0 and strict XSD', async () => {
+    const xml = await addQrToSignedInvoice(new TipsQrGenerator(), signedExempt, OPTIONS);
+
+    expect(validateXml(xml, 'siRecepDE')).toEqual({ valid: true, errors: [] });
+    expect(qrOf(xml)).toContain('&amp;dTotIVA=0&amp;');
+  });
+
+  it('follows the MT for an unnamed receiver: dNumIDRec=0 and strict XSD', async () => {
+    const xml = await addQrToSignedInvoice(new TipsQrGenerator(), signedUnnamed, OPTIONS);
+
+    expect(validateXml(xml, 'siRecepDE')).toEqual({ valid: true, errors: [] });
+    expect(qrOf(xml)).toContain('&amp;dNumIDRec=0&amp;');
+  });
+
+  it('never echoes the CSC from an XSD error', async () => {
+    const leaky: QrGenerator = {
+      addQr: (xml, config) =>
+        Promise.resolve(xml.replace('<dVerFor>150', `<dVerFor>${config.csc}`)),
+    };
+
+    const message = await addQrToSignedInvoice(leaky, signed, OPTIONS).then(
+      () => '',
+      (e: unknown) => (e instanceof Error ? e.message : ''),
+    );
+
+    expect(message).toContain('Invalid invoice QR');
+    expect(message).not.toContain(CSC);
   });
 });

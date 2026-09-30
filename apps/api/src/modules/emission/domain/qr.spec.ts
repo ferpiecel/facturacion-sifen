@@ -2,6 +2,9 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { computeQrHash, qrBaseUrl, verifyQrUrl, type QrExpectations } from './qr.js';
 
+// The PARAMS format mirrors the official DNIT example
+// (docs/referencia/ejemplos/ejemplo-de-firmado-v150.xml). Its CSC is unknown, so the
+// cHashQR vector below is self-computed (SHA-256 of PARAMS + CSC), not an official one.
 const CSC = 'ABCD0000000000000000000000000000';
 const CDC = '01800000019001001000000122026093010002983980';
 const DIGEST = 'GPj7NvPLG6LjL0Putib/tbLcQFuORds/juNfVug24qk=';
@@ -18,8 +21,8 @@ const EXPECTED: QrExpectations = {
   cdc: CDC,
   issuedAt: '2026-09-30T19:10:55',
   receiver: { kind: 'ruc', value: '80000002' },
-  totalOperation: 10000,
-  totalVat: 909,
+  totalOperation: '10000',
+  totalVat: '909',
   itemCount: 1,
   digestValue: DIGEST,
   idCsc: '0001',
@@ -63,8 +66,8 @@ describe('verifyQrUrl', () => {
     ['dFeEmiDE', { issuedAt: '2026-09-30T19:10:56' }],
     ['dRucRec', { receiver: { kind: 'ruc', value: '80000003' } }],
     ['dNumIDRec', { receiver: { kind: 'document', value: '80000002' } }],
-    ['dTotGralOpe', { totalOperation: 10001 }],
-    ['dTotIVA', { totalVat: 0 }],
+    ['dTotGralOpe', { totalOperation: '10001' }],
+    ['dTotIVA', { totalVat: '0' }],
     ['cItems', { itemCount: 2 }],
     ['DigestValue', { digestValue: 'AAAA' }],
     ['IdCSC', { idCsc: '0002' }],
@@ -88,6 +91,12 @@ describe('verifyQrUrl', () => {
   it('never echoes the CSC in its findings', () => {
     expect(JSON.stringify(verifyQrUrl(URL_TEST, EXPECTED, 'WRONG-SECRET'))).not.toContain(
       'WRONG-SECRET',
+    );
+  });
+
+  it('compares the raw amount strings, not their numeric value', () => {
+    expect(verifyQrUrl(URL_TEST, { ...EXPECTED, totalOperation: '10000.0' }, CSC)).toContain(
+      'dTotGralOpe',
     );
   });
 });

@@ -44,7 +44,7 @@ export const pocFacturaInput: FacturaPocInput = {
     descripcion:
       'DOCUMENTO ELECTRÓNICO SIN VALOR COMERCIAL NI FISCAL - GENERADO EN AMBIENTE DE PRUEBA',
     observacion: '',
-    fecha: new Date().toISOString().slice(0, 19),
+    fecha: '2026-09-30T10:00:00',
     tipoEmision: 1,
     tipoTransaccion: 1,
     tipoImpuesto: 1,

@@ -9,8 +9,11 @@ export default async function setup(): Promise<(() => Promise<void>) | undefined
     return undefined;
   }
 
-  const { GenericContainer } = await import('testcontainers');
+  const { GenericContainer, Wait } = await import('testcontainers');
 
+  // The postgres image logs "ready to accept connections" twice: once for the
+  // temporary init server and once for the real one. Connecting after the
+  // first line races the restart and fails with 57P03 ("starting up").
   const container = await new GenericContainer('postgres:16')
     .withEnvironment({
       POSTGRES_USER: 'sifen',
@@ -18,6 +21,7 @@ export default async function setup(): Promise<(() => Promise<void>) | undefined
       POSTGRES_DB: 'sifen',
     })
     .withExposedPorts(5432)
+    .withWaitStrategy(Wait.forLogMessage(/database system is ready to accept connections/, 2))
     .start();
 
   const mappedPort = container.getMappedPort(5432).toString(10);
@@ -28,6 +32,11 @@ export default async function setup(): Promise<(() => Promise<void>) | undefined
   const admin = new Pool({ connectionString: process.env.DB_TEST_POSTGRES_URL });
   try {
     await admin.query(`CREATE ROLE app_login LOGIN BYPASSRLS PASSWORD 'app_login'`);
+    // Unsafe pre-existing audit_maintenance membership: the migration must revoke it.
+    await admin.query(`CREATE ROLE audit_maintenance NOLOGIN`);
+    await admin.query(`GRANT audit_maintenance TO app_login`);
+    await admin.query(`CREATE ROLE legacy_ops NOLOGIN`);
+    await admin.query(`GRANT audit_maintenance TO legacy_ops`);
   } finally {
     await admin.end();
   }

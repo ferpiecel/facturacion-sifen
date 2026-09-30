@@ -5,6 +5,7 @@ import {
   tenantExpeditionPoints,
   tenantFiscalEconomicActivities,
   tenantFiscalProfiles,
+  tenants,
   tenantTimbrados,
   type Database,
   type DatabaseHandle,
@@ -25,6 +26,7 @@ import {
   issueApiKey,
   revokeApiKey,
   setFiscalProfile,
+  setTenantEnvironment,
 } from './commands.js';
 
 describe('operator CLI command handlers (HU-E1-05)', () => {
@@ -471,5 +473,47 @@ describe('addTimbrado (HU-E2-02)', () => {
     const cause = await rejection.catch((error: unknown) => (error as { cause?: unknown }).cause);
     expect(cause).toBeInstanceOf(Error);
     expect((cause as Error).message).toContain('tenant_timbrados_tenant_number_idx');
+  });
+});
+
+describe('setTenantEnvironment (HU-E2-04)', () => {
+  let handle: DatabaseHandle | undefined;
+
+  afterEach(async () => {
+    await handle?.close();
+    handle = undefined;
+  });
+
+  it('a new tenant defaults to "test"', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Env Tenant');
+
+    const rows = await handle.db.select().from(tenants).where(eq(tenants.id, tenantId));
+    expect(rows).toMatchObject([{ environment: 'test' }]);
+  });
+
+  it('switches a tenant to "production"', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Env Tenant');
+
+    const result = await setTenantEnvironment(handle.db, { tenantId, environment: 'production' });
+
+    expect(result).toEqual({ id: tenantId, environment: 'production' });
+    const rows = await handle.db.select().from(tenants).where(eq(tenants.id, tenantId));
+    expect(rows).toMatchObject([{ environment: 'production' }]);
+  });
+
+  it('rejects an unknown tenant', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+
+    await expect(
+      setTenantEnvironment(handle.db, {
+        tenantId: '00000000-0000-0000-0000-000000000000',
+        environment: 'production',
+      }),
+    ).rejects.toThrow('tenant not found');
   });
 });

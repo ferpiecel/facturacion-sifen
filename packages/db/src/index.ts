@@ -11,6 +11,7 @@ export {
   partners,
   TENANT_TABLES,
   tenantDocumentSequences,
+  tenantEnvironment,
   tenantEstablishments,
   tenantExpeditionPoints,
   tenantFiscalEconomicActivities,

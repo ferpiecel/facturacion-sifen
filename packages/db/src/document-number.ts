@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { tenantDocumentSequences } from './schema.js';
+import { tenantDocumentSequences, tenantEnvironment } from './schema.js';
 import type { TenantTx } from './tenant-transaction.js';
 
 /** Sequence already issued 9999999 (next series is HU-E4-02). */
@@ -15,7 +15,7 @@ export const MAX_DOCUMENT_NUMBER = 9_999_999;
 /** Identifies one numbering sequence (HU-E4-01). */
 export interface DocumentSequenceKey {
   tenantId: string;
-  environment: 'test' | 'production';
+  environment: (typeof tenantEnvironment.enumValues)[number];
   timbradoId: string;
   establishmentId: string;
   expeditionPointId: string;

@@ -153,6 +153,20 @@ describe('runOpsCommand (HU-E1-05)', () => {
 
     expect(output).toMatch(/^timbrado created: [0-9a-f-]{36} \(number 12345678\)$/);
   });
+
+  it('tenant:environment prints the tenant id and new environment', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Env Tenant');
+
+    const output = await runOpsCommand(handle.db, {
+      kind: 'tenant:environment',
+      tenantId,
+      environment: 'production',
+    });
+
+    expect(output).toBe(`tenant environment set: ${tenantId} (production)`);
+  });
 });
 
 describe('formatOpsError (HU-E1-05)', () => {

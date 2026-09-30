@@ -1,13 +1,12 @@
 CREATE TABLE "tenant_document_sequences" (
 	"tenant_id" uuid NOT NULL,
-	"environment" varchar(16) NOT NULL,
+	"environment" "tenant_environment" NOT NULL,
 	"timbrado_id" uuid NOT NULL,
 	"establishment_id" uuid NOT NULL,
 	"expedition_point_id" uuid NOT NULL,
 	"document_type" smallint NOT NULL,
 	"last_number" integer DEFAULT 0 NOT NULL,
 	CONSTRAINT "tenant_document_sequences_pkey" PRIMARY KEY("tenant_id","environment","timbrado_id","establishment_id","expedition_point_id","document_type"),
-	CONSTRAINT "tenant_document_sequences_environment_valid" CHECK ("tenant_document_sequences"."environment" IN ('test', 'production')),
 	CONSTRAINT "tenant_document_sequences_last_number_range" CHECK ("tenant_document_sequences"."last_number" BETWEEN 0 AND 9999999)
 );
 --> statement-breakpoint

@@ -15,6 +15,7 @@ import {
 } from '../modules/fiscal-config/domain/fiscal-profile.js';
 import { parseRuc } from '../modules/fiscal-config/domain/ruc.js';
 import { createTimbrado, type Timbrado } from '../modules/fiscal-config/domain/timbrado.js';
+import type { TenantEnvironment } from '../modules/fiscal-config/domain/document-environment.js';
 import type { ApiKeyEnvironment } from '../modules/identity/domain/api-key.js';
 
 /** Invalid argv or missing environment for the operator CLI (backlog HU-E1-05). */
@@ -34,7 +35,8 @@ export type OpsCommand =
   | { kind: 'fiscal:set'; tenantId: string; profile: FiscalProfile }
   | { kind: 'establishment:add'; tenantId: string; establishment: Establishment }
   | { kind: 'point:add'; tenantId: string; establishmentCode: string; point: ExpeditionPoint }
-  | { kind: 'timbrado:add'; tenantId: string; timbrado: Timbrado };
+  | { kind: 'timbrado:add'; tenantId: string; timbrado: Timbrado }
+  | { kind: 'tenant:environment'; tenantId: string; environment: TenantEnvironment };
 
 function requireOption(value: string | undefined, flag: string): string {
   if (!value) {
@@ -47,6 +49,15 @@ function parseEnvironment(value: string | undefined): ApiKeyEnvironment {
   const environment = requireOption(value, 'env');
   if (environment !== 'live' && environment !== 'test') {
     throw new OpsArgError(`--env must be "live" or "test", got "${environment}"`);
+  }
+  return environment;
+}
+
+/** Parses `--env test|production` for `tenant:environment` (HU-E2-04). */
+function parseTenantEnvironment(value: string | undefined): TenantEnvironment {
+  const environment = requireOption(value, 'env');
+  if (environment !== 'test' && environment !== 'production') {
+    throw new OpsArgError(`--env must be "test" or "production", got "${environment}"`);
   }
   return environment;
 }
@@ -267,6 +278,29 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
         kind: 'timbrado:add',
         tenantId: requireOption(values.tenant, 'tenant'),
         timbrado,
+      };
+    }
+    case 'tenant:environment': {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          env: { type: 'string' },
+          'confirm-production': { type: 'boolean' },
+        },
+      });
+
+      const environment = parseTenantEnvironment(values.env);
+      if (environment === 'production' && !values['confirm-production']) {
+        throw new OpsArgError(
+          '--confirm-production is required to switch --env production (HU-E2-04)',
+        );
+      }
+
+      return {
+        kind: 'tenant:environment',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        environment,
       };
     }
     default:

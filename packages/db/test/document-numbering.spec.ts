@@ -193,7 +193,7 @@ describe('nextDocumentNumber (dNumDoc numbering)', () => {
       'tenant_document_sequences_last_number_range',
     );
     expect(await causeMessage(insert({ environment: 'staging' as 'test' }))).toContain(
-      'tenant_document_sequences_environment_valid',
+      'tenant_environment',
     );
     expect(
       await causeMessage(insert({ timbradoId: '00000000-0000-4000-8000-000000000000' })),

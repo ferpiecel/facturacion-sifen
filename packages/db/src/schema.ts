@@ -31,6 +31,17 @@ export const partners = pgTable('partners', {
 });
 
 /**
+ * `tenants.environment`: which SIFEN environment a tenant's documents are
+ * emitted for (HU-E2-04, ADR-0012). Lives on `tenants` rather than
+ * `tenant_fiscal_profiles` because it is a platform-level identity attribute
+ * that must exist for every tenant from creation (default `'test'`, fail
+ * safe) independently of whether a fiscal profile has been configured yet,
+ * and because it governs behavior outside fiscal data too (which API keys a
+ * tenant may use, `SIFEN_ENVIRONMENT` at the deployment level).
+ */
+export const tenantEnvironment = pgEnum('tenant_environment', ['test', 'production']);
+
+/**
  * Tenants master table: the source of truth every tenant-scoped table
  * references. It has no `tenant_id` column, but RLS still limits `app_user`
  * to its own row (`id = app.current_tenant`).
@@ -42,6 +53,9 @@ export const tenants = pgTable(
     name: varchar('name', { length: 255 }).notNull(),
     // Nullable: direct SaaS tenants have no partner (ADR-0014).
     partnerId: uuid('partner_id').references(() => partners.id),
+    // Defaults to 'test' (fail safe): a tenant must be switched to
+    // 'production' explicitly (HU-E2-04).
+    environment: tenantEnvironment('environment').notNull().default('test'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [index('tenants_partner_id_idx').on(table.partnerId)],
@@ -344,7 +358,7 @@ export const tenantDocumentSequences = pgTable(
     tenantId: uuid('tenant_id')
       .notNull()
       .references(() => tenants.id),
-    environment: varchar('environment', { length: 16 }).$type<'test' | 'production'>().notNull(),
+    environment: tenantEnvironment('environment').notNull(),
     timbradoId: uuid('timbrado_id').notNull(),
     establishmentId: uuid('establishment_id').notNull(),
     expeditionPointId: uuid('expedition_point_id').notNull(),
@@ -377,10 +391,6 @@ export const tenantDocumentSequences = pgTable(
       ],
       name: 'tenant_document_sequences_tenant_point_fk',
     }),
-    check(
-      'tenant_document_sequences_environment_valid',
-      sql`${table.environment} IN ('test', 'production')`,
-    ),
     check(
       'tenant_document_sequences_last_number_range',
       sql`${table.lastNumber} BETWEEN 0 AND 9999999`,

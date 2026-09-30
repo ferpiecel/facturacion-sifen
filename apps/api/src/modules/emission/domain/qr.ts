@@ -28,10 +28,11 @@ export interface QrExpectations {
   cdc: string;
   /** dFeEmiDE as written in the XML, `YYYY-MM-DDThh:mm:ss`. */
   issuedAt: string;
-  /** Contributor RUC (dRucRec, no check digit) or the identity document number (dNumIDRec). */
+  /** Contributor RUC (dRucRec, no check digit) or the identity document number (dNumIDRec, "0" when unnamed). */
   receiver: { kind: 'ruc' | 'document'; value: string };
-  totalOperation: number;
-  totalVat: number;
+  /** Raw element text; "0" when the document has no value (MT 13.8.2 note). */
+  totalOperation: string;
+  totalVat: string;
   itemCount: number;
   /** Base64 DigestValue of the signature. */
   digestValue: string;
@@ -62,8 +63,8 @@ export function verifyQrUrl(url: string, expected: QrExpectations, csc: string):
     ['Id', expected.cdc],
     ['dFeEmiDE', toHex(expected.issuedAt)],
     [receiverName, expected.receiver.value],
-    ['dTotGralOpe', String(expected.totalOperation)],
-    ['dTotIVA', String(expected.totalVat)],
+    ['dTotGralOpe', expected.totalOperation],
+    ['dTotIVA', expected.totalVat],
     ['cItems', String(expected.itemCount)],
     ['DigestValue', toHex(expected.digestValue)],
     ['IdCSC', expected.idCsc],

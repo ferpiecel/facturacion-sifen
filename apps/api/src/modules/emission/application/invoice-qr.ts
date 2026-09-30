@@ -25,16 +25,12 @@ function readExpectations(xml: string, options: InvoiceQrOptions): QrExpectation
   const cdc = /<DE\b[^>]*\bId="(\d{44})"/.exec(xml)?.[1];
   const issuedAt = tag(xml, 'dFeEmiDE');
   const digestValue = tag(xml, 'DigestValue');
-  const totalOperation = tag(xml, 'dTotGralOpe');
-  const totalVat = tag(xml, 'dTotIVA');
   const ruc = tag(xml, 'dRucRec');
-  const document = tag(xml, 'dNumIDRec');
+  // MT 13.8.2: a parameter without a value is completed with "0".
   const receiver = ruc
     ? ({ kind: 'ruc', value: ruc } as const)
-    : document
-      ? ({ kind: 'document', value: document } as const)
-      : undefined;
-  if (!cdc || !issuedAt || !digestValue || !totalOperation || !totalVat || !receiver) {
+    : ({ kind: 'document', value: tag(xml, 'dNumIDRec') || '0' } as const);
+  if (!cdc || !issuedAt || !digestValue) {
     throw new InvoiceQrError('the XML is not a signed invoice with the data the QR needs');
   }
   return {
@@ -42,8 +38,8 @@ function readExpectations(xml: string, options: InvoiceQrOptions): QrExpectation
     cdc,
     issuedAt,
     receiver,
-    totalOperation: Number(totalOperation),
-    totalVat: Number(totalVat),
+    totalOperation: tag(xml, 'dTotGralOpe') || '0',
+    totalVat: tag(xml, 'dTotIVA') || '0',
     itemCount: (xml.match(/<gCamItem>/g) ?? []).length,
     digestValue,
     idCsc: options.idCsc,
@@ -67,6 +63,9 @@ export async function addQrToSignedInvoice(
     ambiente: options.environment === 'production' ? 'prod' : 'test',
   });
 
+  // First, so that no later message (XSD errors echo the offending text) can carry the CSC.
+  if (xml.includes(options.csc)) throw new InvoiceQrError('the CSC leaked into the XML');
+
   const { errors } = validateXml(xml, 'siRecepDE');
   if (errors.length > 0) throw new InvoiceQrError(errors.map((e) => e.message).join('; '));
 
@@ -74,6 +73,5 @@ export async function addQrToSignedInvoice(
   if (!url) throw new InvoiceQrError('the generator did not add dCarQR');
   const findings = verifyQrUrl(url, expected, options.csc);
   if (findings.length > 0) throw new InvoiceQrError(`QR mismatch in ${findings.join(', ')}`);
-  if (xml.includes(options.csc)) throw new InvoiceQrError('the CSC leaked into the XML');
   return xml;
 }

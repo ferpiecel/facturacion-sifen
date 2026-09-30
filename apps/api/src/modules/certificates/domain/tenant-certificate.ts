@@ -27,6 +27,7 @@ export class Pkcs12UnreadableError extends Error {
 export type Pkcs12ContentReason =
   | 'too-large'
   | 'excessive-iterations'
+  | 'excessive-key-derivations'
   | 'too-many-certificates'
   | 'key-count'
   | 'unsupported-key-algorithm'

@@ -23,6 +23,16 @@ export const MAX_PKCS12_BYTES = 64 * 1024;
  */
 export const MAX_KDF_ITERATIONS = 100_000;
 
+/**
+ * Budget for one parse, since a small file can hold many encrypted bags. A
+ * standard `.p12` derives at most 5 keys (MAC, then key and IV for the
+ * certificate SafeContents and for the key bag), so 8 calls and 5 times the
+ * per-call cap (500000 iterations, about a second of forge) admit any
+ * legitimate file while bounding the event-loop time of a hostile one.
+ */
+export const MAX_KEY_DERIVATIONS = 8;
+export const MAX_TOTAL_KDF_ITERATIONS = 5 * MAX_KDF_ITERATIONS;
+
 /** Leaf plus chain; also bounds the chain search in the domain. */
 export const MAX_PKCS12_CERTIFICATES = 10;
 
@@ -118,18 +128,29 @@ type KdfOwner = Record<string, KeyDerivation>;
  * can observe it.
  */
 function withKdfIterationLimit<T>(run: () => T): T {
+  // Counters are per call of this function, never shared between parses.
   const hooks: [KdfOwner, string, number][] = [
     [forge.pkcs12 as unknown as KdfOwner, 'generateKey', 3],
     [(forge.pki as unknown as { pbe: KdfOwner }).pbe, 'generatePkcs12Key', 3],
     [forge.pkcs5 as unknown as KdfOwner, 'pbkdf2', 2],
   ];
   const originals = hooks.map(([owner, name]) => owner[name]);
+  let derivations = 0;
+  let totalIterations = 0;
   hooks.forEach(([owner, name, countIndex], index) => {
     const original = originals[index];
     owner[name] = (...args: unknown[]) => {
       const count = args[countIndex];
       if (typeof count !== 'number' || !Number.isSafeInteger(count) || count > MAX_KDF_ITERATIONS) {
         throw new Pkcs12ContentError('excessive-iterations', 'PKCS#12 iteration count too high');
+      }
+      derivations += 1;
+      totalIterations += count;
+      if (derivations > MAX_KEY_DERIVATIONS || totalIterations > MAX_TOTAL_KDF_ITERATIONS) {
+        throw new Pkcs12ContentError(
+          'excessive-key-derivations',
+          'PKCS#12 needs too many key derivations',
+        );
       }
       return original(...args);
     };

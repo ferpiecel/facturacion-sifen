@@ -19,6 +19,7 @@ const TAG_VERSION = 0xa0;
 const TAG_EXTENSIONS = 0xa3;
 const TAG_DIRECTORY_NAME = 0xa4;
 const TAG_INTEGER = 0x02;
+const TAG_BIT_STRING = 0x03;
 const TAG_OID = 0x06;
 const TAG_UTF8_STRING = 0x0c;
 /** PrintableString and IA5String: ASCII subsets. */
@@ -50,10 +51,15 @@ export function readX509Profile(der: Buffer): X509Profile {
             .filter((name) => name.tag === TAG_DIRECTORY_NAME)
             .flatMap((name) => serialNumbersOf(readDerElement(name.content))),
     pathLength: basicConstraints === undefined ? null : pathLengthOf(basicConstraints),
-    digitalSignature:
-      keyUsage !== undefined &&
-      ((readDerElement(keyUsage).content.at(1) ?? 0) & DIGITAL_SIGNATURE_BIT) !== 0,
+    digitalSignature: keyUsage !== undefined && hasDigitalSignature(keyUsage),
   };
+}
+
+/** keyUsage is a BIT STRING: one unused-bits octet, then digitalSignature as the first bit. */
+function hasDigitalSignature(keyUsage: Buffer): boolean {
+  const bits = readDerElement(keyUsage);
+  if (bits.tag !== TAG_BIT_STRING) throw new DerError();
+  return ((bits.content.at(1) ?? 0) & DIGITAL_SIGNATURE_BIT) !== 0;
 }
 
 function required(node: DerNode | undefined): DerNode {

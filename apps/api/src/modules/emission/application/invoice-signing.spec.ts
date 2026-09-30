@@ -15,6 +15,8 @@ import { buildSignedInvoice, signInvoiceXml } from './invoice-signing.js';
 import { InvoiceXmlError, generateInvoiceXml } from './invoice-xml.js';
 
 const PASSWORD = 'throwaway-test-password';
+const MISSING_QR_GROUP =
+  "Element '{http://ekuatia.set.gov.py/sifen/xsd}rDE': Missing child element(s). Expected is ( {http://ekuatia.set.gov.py/sifen/xsd}gCamFuFD ).";
 const SIGNED_AT = new Date('2026-09-30T13:00:05Z');
 
 /** Throwaway self-signed certificate (RUC in the subject serialNumber, as DNIT issues them). */
@@ -101,11 +103,13 @@ describe('HU-E5-05 invoice signing', () => {
     unsigned = await generateInvoiceXml(builder, draft, context);
   });
 
-  it('signs the DE and returns the signature instant; the full XSD passes with no tolerance', async () => {
+  it('signs the DE and returns the signature instant; only the post-signature QR group is still missing', async () => {
     const result = await signInvoiceXml(signer, unsigned.xml, material, () => SIGNED_AT);
 
     expect(result.signedAt).toEqual(SIGNED_AT);
-    expect(validateXml(result.xml, 'siRecepDE').errors).toEqual([]);
+    expect(validateXml(result.xml, 'siRecepDE').errors.map((e) => e.message)).toEqual([
+      MISSING_QR_GROUP,
+    ]);
   });
 
   it('builds an enveloped RSA-SHA256 signature over #CDC whose digest and value verify', async () => {

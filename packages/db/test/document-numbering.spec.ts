@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import type { DatabaseHandle } from '../src/client.js';
 import {
   DocumentNumberExhaustedError,
+  InvalidDocumentTypeError,
   MAX_DOCUMENT_NUMBER,
   nextDocumentNumber,
   type DocumentSequenceKey,
@@ -118,7 +119,6 @@ describe('nextDocumentNumber (dNumDoc numbering)', () => {
 
     expect(await next(keyA)).toBe(1);
     expect(await next(keyA)).toBe(2);
-    expect(await next({ ...keyA, environment: 'production' })).toBe(1);
     expect(await next({ ...keyA, documentType: 5 })).toBe(1);
     expect(await next({ ...keyA, expeditionPointId: secondPointA })).toBe(1);
     expect(await next(keyA)).toBe(3);
@@ -195,6 +195,15 @@ describe('nextDocumentNumber (dNumDoc numbering)', () => {
     expect(await causeMessage(insert({ environment: 'staging' as 'test' }))).toContain(
       'tenant_environment',
     );
+    expect(await causeMessage(insert({ documentType: 0 }))).toContain(
+      'tenant_document_sequences_document_type_range',
+    );
+    expect(await causeMessage(insert({ documentType: 9 }))).toContain(
+      'tenant_document_sequences_document_type_range',
+    );
+    expect(await causeMessage(insert({ environment: 'production' }))).toContain(
+      'tenant_document_sequences_tenant_environment_fk',
+    );
     expect(
       await causeMessage(insert({ timbradoId: '00000000-0000-4000-8000-000000000000' })),
     ).toContain('tenant_document_sequences_tenant_timbrado_fk');
@@ -206,8 +215,46 @@ describe('nextDocumentNumber (dNumDoc numbering)', () => {
     expect(await causeMessage(insert({}))).toContain('tenant_document_sequences_pkey');
   });
 
+  it('rejects an out-of-range document type with a typed error before hitting the DB', async () => {
+    const { db, keyA } = await seed();
+
+    for (const documentType of [0, 9, 1.5]) {
+      await expect(
+        withTenantTransaction(db, keyA.tenantId, (tx) =>
+          nextDocumentNumber(tx, { ...keyA, documentType }),
+        ),
+      ).rejects.toBeInstanceOf(InvalidDocumentTypeError);
+    }
+  });
+
+  it('rejects tenant-role attempts to rewind or change the counter, and to delete it', async () => {
+    const { db, keyA } = await seed();
+    const next = () =>
+      withTenantTransaction(db, keyA.tenantId, (tx) => nextDocumentNumber(tx, keyA));
+    await next();
+    await next();
+    const update = (set: Partial<typeof tenantDocumentSequences.$inferInsert>) =>
+      causeMessage(
+        withTenantTransaction(db, keyA.tenantId, (tx) =>
+          tx.update(tenantDocumentSequences).set(set),
+        ),
+      );
+
+    for (const lastNumber of [0, 1, 2, 4]) {
+      expect(await update({ lastNumber })).toContain('last_number may only advance by 1');
+    }
+    expect(await update({ documentType: 2 })).toContain('key columns are immutable');
+    expect(
+      await causeMessage(
+        withTenantTransaction(db, keyA.tenantId, (tx) => tx.delete(tenantDocumentSequences)),
+      ),
+    ).toContain('permission denied');
+
+    expect(await next()).toBe(3);
+  });
+
   it.skipIf(process.env.DB_TEST_DRIVER !== 'postgres')(
-    'assigns exactly 1..100 with no gaps or duplicates across 100 parallel emissions (needs real Postgres: PGlite is single-connection)',
+    'assigns exactly 1..100 with no gaps or duplicates across 100 parallel emissions (needs real Postgres: PGlite is single-connection; effective concurrency is the default pg Pool size, 10)',
     async () => {
       const { db, keyA } = await seed();
 
@@ -220,6 +267,32 @@ describe('nextDocumentNumber (dNumDoc numbering)', () => {
       expect([...numbers].sort((x, y) => x - y)).toEqual(
         Array.from({ length: 100 }, (_, i) => i + 1),
       );
+    },
+  );
+
+  it.skipIf(process.env.DB_TEST_DRIVER !== 'postgres')(
+    'keeps committed numbers exactly 1..N when some parallel emissions roll back (effective concurrency: default pg Pool size, 10)',
+    async () => {
+      const { db, keyA } = await seed();
+
+      const results = await Promise.allSettled(
+        Array.from({ length: 60 }, (_, i) =>
+          withTenantTransaction(db, keyA.tenantId, async (tx) => {
+            const number = await nextDocumentNumber(tx, keyA);
+            if (i % 3 === 0) {
+              throw new Error('emission failed');
+            }
+            return number;
+          }),
+        ),
+      );
+
+      const committed = results
+        .filter((r): r is PromiseFulfilledResult<number> => r.status === 'fulfilled')
+        .map((r) => r.value)
+        .sort((x, y) => x - y);
+      expect(committed).toHaveLength(40);
+      expect(committed).toEqual(Array.from({ length: 40 }, (_, i) => i + 1));
     },
   );
 });

@@ -85,7 +85,10 @@ describe('validateInvoiceDraft', () => {
     });
 
     it('accepts rounding down to a multiple of 50', () => {
-      const d = draft({ items: [{ quantity: 1, unitPrice: 107_437, vatRate: 10 }], roundingPyg: 37 });
+      const d = draft({
+        items: [{ quantity: 1, unitPrice: 107_437, vatRate: 10 }],
+        roundingPyg: 37,
+      });
       expect(validateInvoiceDraft(d, {})).toEqual([]);
     });
 
@@ -97,7 +100,10 @@ describe('validateInvoiceDraft', () => {
     });
 
     it('rejects a rounding outside 0..49', () => {
-      const d = draft({ items: [{ quantity: 1, unitPrice: 107_450, vatRate: 10 }], roundingPyg: 50 });
+      const d = draft({
+        items: [{ quantity: 1, unitPrice: 107_450, vatRate: 10 }],
+        roundingPyg: 50,
+      });
       expect(rules(d)).toContain('rounding-multiple-of-50');
     });
   });

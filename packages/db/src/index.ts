@@ -12,6 +12,7 @@ export {
   fiscalTaxpayerType,
   partners,
   TENANT_TABLES,
+  tenantDocumentSequences,
   tenantEnvironment,
   tenantEstablishments,
   tenantExpeditionPoints,
@@ -27,3 +28,4 @@ export { withTenantTransaction, type TenantTx } from './tenant-transaction.js';
 export { withAppRoleTransaction, type AppRoleTx } from './app-role-transaction.js';
 export { assertNonPrivilegedSession } from './session-guard.js';
 export { TenantAwareProcessor, type TenantJob } from './tenant-aware-processor.js';
+export * from './document-number.js';

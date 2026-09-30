@@ -12,6 +12,9 @@ export default defineConfig({
           root: import.meta.dirname,
           include: ['src/**/*.spec.ts', 'test/**/*.spec.ts'],
           exclude: E2E_INCLUDE,
+          // boundaries.spec.ts runs dependency-cruiser over the package; on
+          // loaded CI runners (coverage job) it exceeds the 5 s default.
+          testTimeout: 30_000,
         },
       },
       {

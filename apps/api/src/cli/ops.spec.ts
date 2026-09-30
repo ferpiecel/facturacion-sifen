@@ -1,8 +1,11 @@
 import { createPgliteDatabase, type DatabaseHandle } from '@sifen/db';
 import { afterEach, describe, expect, it } from 'vitest';
+import { createEstablishment } from '../modules/fiscal-config/domain/establishment.js';
+import { createExpeditionPoint } from '../modules/fiscal-config/domain/expedition-point.js';
 import { createFiscalProfile } from '../modules/fiscal-config/domain/fiscal-profile.js';
 import { parseRuc } from '../modules/fiscal-config/domain/ruc.js';
-import { createTenant } from './commands.js';
+import { createTimbrado } from '../modules/fiscal-config/domain/timbrado.js';
+import { addEstablishment, createTenant } from './commands.js';
 import { formatOpsError, runOpsCommand } from './ops.js';
 
 describe('runOpsCommand (HU-E1-05)', () => {
@@ -86,6 +89,83 @@ describe('runOpsCommand (HU-E1-05)', () => {
     const output = await runOpsCommand(handle.db, { kind: 'fiscal:set', tenantId, profile });
 
     expect(output).toBe(`fiscal profile saved: ${tenantId} (RUC 4490207-7)`);
+  });
+
+  it('establishment:add prints the new establishment id and code', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Establishment Tenant');
+    const establishment = createEstablishment({
+      code: '001',
+      address: 'Avda. Siempre Viva 123',
+      houseNumber: '123',
+      departmentCode: 11,
+      districtCode: '145',
+      districtDescription: 'Ciudad del Este',
+      cityCode: '3316',
+      cityDescription: 'Ciudad del Este',
+    });
+
+    const output = await runOpsCommand(handle.db, {
+      kind: 'establishment:add',
+      tenantId,
+      establishment,
+    });
+
+    expect(output).toMatch(/^establishment created: [0-9a-f-]{36} \(code 001\)$/);
+  });
+
+  it('point:add prints the new expedition point id and code', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Point Tenant');
+    await addEstablishment(handle.db, {
+      tenantId,
+      establishment: createEstablishment({
+        code: '001',
+        address: 'Avda. Siempre Viva 123',
+        houseNumber: '123',
+        departmentCode: 11,
+        districtCode: '145',
+        districtDescription: 'Ciudad del Este',
+        cityCode: '3316',
+        cityDescription: 'Ciudad del Este',
+      }),
+    });
+
+    const output = await runOpsCommand(handle.db, {
+      kind: 'point:add',
+      tenantId,
+      establishmentCode: '001',
+      point: createExpeditionPoint({ code: '002' }),
+    });
+
+    expect(output).toMatch(/^expedition point created: [0-9a-f-]{36} \(code 002\)$/);
+  });
+
+  it('timbrado:add prints the new timbrado id and number', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Timbrado Tenant');
+    const timbrado = createTimbrado({ number: '12345678', validityStart: '2024-01-01' });
+
+    const output = await runOpsCommand(handle.db, { kind: 'timbrado:add', tenantId, timbrado });
+
+    expect(output).toMatch(/^timbrado created: [0-9a-f-]{36} \(number 12345678\)$/);
+  });
+
+  it('tenant:environment prints the tenant id and new environment', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Env Tenant');
+
+    const output = await runOpsCommand(handle.db, {
+      kind: 'tenant:environment',
+      tenantId,
+      environment: 'production',
+    });
+
+    expect(output).toBe(`tenant environment set: ${tenantId} (production)`);
   });
 });
 

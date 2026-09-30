@@ -37,71 +37,73 @@ describe('resolveIssuerDocumentContent', () => {
 
 describe('validateIssuerDocumentContent', () => {
   it('accepts a test document that carries the literal on both fields', () => {
-    expect(() =>
+    expect(() => {
       validateIssuerDocumentContent('test', {
         legalName: DEFAULT_TEST_DOCUMENT_LITERAL,
         firstItemDescription: DEFAULT_TEST_DOCUMENT_LITERAL,
-      }),
-    ).not.toThrow();
+      });
+    }).not.toThrow();
   });
 
   it('rejects a test document missing the literal in the legal name', () => {
-    expect(() =>
+    expect(() => {
       validateIssuerDocumentContent('test', {
         legalName: REAL_CONTENT.legalName,
         firstItemDescription: DEFAULT_TEST_DOCUMENT_LITERAL,
-      }),
-    ).toThrow(InvalidDocumentEnvironmentError);
+      });
+    }).toThrow(InvalidDocumentEnvironmentError);
   });
 
   it('rejects a test document missing the literal in the first item description', () => {
-    expect(() =>
+    expect(() => {
       validateIssuerDocumentContent('test', {
         legalName: DEFAULT_TEST_DOCUMENT_LITERAL,
         firstItemDescription: REAL_CONTENT.firstItemDescription,
-      }),
-    ).toThrow(InvalidDocumentEnvironmentError);
+      });
+    }).toThrow(InvalidDocumentEnvironmentError);
   });
 
   it('accepts a production document that carries real values', () => {
-    expect(() => validateIssuerDocumentContent('production', REAL_CONTENT)).not.toThrow();
+    expect(() => {
+      validateIssuerDocumentContent('production', REAL_CONTENT);
+    }).not.toThrow();
   });
 
   it('rejects a production document whose legal name carries the test literal', () => {
-    expect(() =>
+    expect(() => {
       validateIssuerDocumentContent('production', {
         legalName: DEFAULT_TEST_DOCUMENT_LITERAL,
         firstItemDescription: REAL_CONTENT.firstItemDescription,
-      }),
-    ).toThrow(InvalidDocumentEnvironmentError);
+      });
+    }).toThrow(InvalidDocumentEnvironmentError);
   });
 
   it('rejects a production document whose first item description carries the test literal', () => {
-    expect(() =>
+    expect(() => {
       validateIssuerDocumentContent('production', {
         legalName: REAL_CONTENT.legalName,
         firstItemDescription: DEFAULT_TEST_DOCUMENT_LITERAL,
-      }),
-    ).toThrow(InvalidDocumentEnvironmentError);
+      });
+    }).toThrow(InvalidDocumentEnvironmentError);
   });
 
   it('validates against a configured literal instead of the default (D2)', () => {
     const configuredLiteral = 'DE generado en ambiente de prueba - sin valor comercial ni fiscal';
 
-    expect(() =>
+    expect(() => {
       validateIssuerDocumentContent(
         'production',
         { legalName: configuredLiteral, firstItemDescription: REAL_CONTENT.firstItemDescription },
         configuredLiteral,
-      ),
-    ).toThrow(InvalidDocumentEnvironmentError);
+      );
+    }).toThrow(InvalidDocumentEnvironmentError);
 
-    expect(() =>
+    expect(() => {
       validateIssuerDocumentContent(
         'test',
         { legalName: configuredLiteral, firstItemDescription: configuredLiteral },
         configuredLiteral,
-      ),
-    ).not.toThrow();
+      );
+    }).not.toThrow();
   });
 });

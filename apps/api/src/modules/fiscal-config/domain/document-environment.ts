@@ -66,7 +66,10 @@ export function validateIssuerDocumentContent(
   testLiteral: string = DEFAULT_TEST_DOCUMENT_LITERAL,
 ): void {
   if (environment === 'production') {
-    if (content.legalName.includes(testLiteral) || content.firstItemDescription.includes(testLiteral)) {
+    if (
+      content.legalName.includes(testLiteral) ||
+      content.firstItemDescription.includes(testLiteral)
+    ) {
       throw new InvalidDocumentEnvironmentError(
         'a "production" document must not contain the mandatory test literal (dNomEmi/dDesProSer)',
       );

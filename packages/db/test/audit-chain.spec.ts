@@ -2,9 +2,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { asc, eq, sql } from 'drizzle-orm';
 import type { DatabaseHandle } from '../src/client.js';
 import { verifyAuditChain } from '../src/audit-chain.js';
+import { MissingTenantContextError } from '../src/errors.js';
 import { auditLog, tenants } from '../src/schema.js';
 import { withTenantTransaction } from '../src/tenant-transaction.js';
-import { createTestDatabase } from './support/harness.js';
+import { createTestDatabase, queryRows } from './support/harness.js';
 
 const GENESIS = '0'.repeat(64);
 
@@ -107,15 +108,15 @@ describe('audit_log hash chain', () => {
     expect(rows.map((row) => row.seq)).toEqual([1, 2]);
     expect(rows[1]?.prevHash).toBe(rows[0]?.hash);
     expect(rows[1]?.hash).not.toBe('f'.repeat(64));
-    expect(await verifyAuditChain(db, tenantA)).toEqual({ ok: true, rows: 2 });
+    expect(await verifyAuditChain(db, tenantA)).toMatchObject({ ok: true, rows: 2 });
   });
 
   it('verifies an intact chain, and an empty one', async () => {
     const { db, tenantA, tenantB, append } = await seed();
     await append(tenantA, 4);
 
-    expect(await verifyAuditChain(db, tenantA)).toEqual({ ok: true, rows: 4 });
-    expect(await verifyAuditChain(db, tenantB)).toEqual({ ok: true, rows: 0 });
+    expect(await verifyAuditChain(db, tenantA)).toMatchObject({ ok: true, rows: 4 });
+    expect(await verifyAuditChain(db, tenantB)).toMatchObject({ ok: true, rows: 0 });
   });
 
   it('reports the first row whose content was tampered with', async () => {
@@ -137,7 +138,7 @@ describe('audit_log hash chain', () => {
       rows: 4,
       brokenAt: { id: target.id, seq: 2, reason: 'hash_mismatch' },
     });
-    expect(await verifyAuditChain(db, tenantB)).toEqual({ ok: true, rows: 2 });
+    expect(await verifyAuditChain(db, tenantB)).toMatchObject({ ok: true, rows: 2 });
   });
 
   it('reports a deleted row as a broken link', async () => {
@@ -170,7 +171,175 @@ describe('audit_log hash chain', () => {
 
       expect(rows.map((row) => row.seq)).toEqual(Array.from({ length: 24 }, (_, i) => i + 1));
       expect(new Set(rows.map((row) => row.prevHash)).size).toBe(24);
-      expect(await verifyAuditChain(db, tenantA)).toEqual({ ok: true, rows: 24 });
+      expect(await verifyAuditChain(db, tenantA)).toMatchObject({ ok: true, rows: 24 });
+    },
+  );
+
+  it('returns the chain head so it can be anchored externally', async () => {
+    const { db, tenantA, tenantB, append, chainOf } = await seed();
+    await append(tenantA, 3);
+    const rows = await chainOf(tenantA);
+
+    expect(await verifyAuditChain(db, tenantA)).toEqual({
+      ok: true,
+      rows: 3,
+      headSeq: 3,
+      headHash: rows[2]?.hash,
+    });
+    expect(await verifyAuditChain(db, tenantB)).toEqual({
+      ok: true,
+      rows: 0,
+      headSeq: 0,
+      headHash: GENESIS,
+    });
+  });
+
+  it('verifies across keyset batches and still finds tampering in a later batch', async () => {
+    const { db, tenantA, append, chainOf } = await seed();
+    await append(tenantA, 5);
+    const target = required((await chainOf(tenantA))[3], 'row 4 missing');
+
+    expect(await verifyAuditChain(db, tenantA, { batchSize: 2 })).toMatchObject({
+      ok: true,
+      rows: 5,
+      headSeq: 5,
+    });
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`alter table audit_log disable trigger audit_log_append_only`);
+      await tx.execute(sql`update audit_log set actor_id = 'evil' where id = ${target.id}`);
+      await tx.execute(sql`alter table audit_log enable trigger audit_log_append_only`);
+    });
+
+    expect(await verifyAuditChain(db, tenantA, { batchSize: 2 })).toEqual({
+      ok: false,
+      rows: 5,
+      brokenAt: { id: target.id, seq: 4, reason: 'hash_mismatch' },
+    });
+  });
+
+  it('fails loudly when the session has no matching tenant context', async () => {
+    const { db, tenantA, tenantB, append } = await seed();
+    await append(tenantA, 1);
+
+    const noContext: unknown = await db
+      .transaction(async (tx) => {
+        await tx.execute(sql`SET LOCAL ROLE app_user`);
+        return verifyAuditChain(tx, tenantA);
+      })
+      .catch((caught: unknown) => caught);
+    const wrongTenant: unknown = await withTenantTransaction(db, tenantB, (tx) =>
+      verifyAuditChain(tx, tenantA),
+    ).catch((caught: unknown) => caught);
+
+    expect(noContext).toBeInstanceOf(MissingTenantContextError);
+    expect(wrongTenant).toBeInstanceOf(MissingTenantContextError);
+    expect(
+      await withTenantTransaction(db, tenantA, (tx) => verifyAuditChain(tx, tenantA)),
+    ).toMatchObject({
+      ok: true,
+      rows: 1,
+    });
+  });
+
+  it('starts from a trusted checkpoint, so retention purges do not break verification', async () => {
+    const { db, tenantA, append, chainOf } = await seed();
+    await append(tenantA, 4);
+    const rows = await chainOf(tenantA);
+    const second = required(rows[1], 'row 2 missing');
+    const third = required(rows[2], 'row 3 missing');
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL ROLE audit_maintenance`);
+      await tx.execute(sql`delete from audit_log where seq <= 2`);
+    });
+    const checkpoint = { seq: 2, hash: second.hash };
+
+    expect(await verifyAuditChain(db, tenantA)).toEqual({
+      ok: false,
+      rows: 2,
+      brokenAt: { id: third.id, seq: 3, reason: 'broken_link' },
+    });
+    expect(await verifyAuditChain(db, tenantA, { checkpoint })).toMatchObject({
+      ok: true,
+      rows: 2,
+      headSeq: 4,
+    });
+    expect(
+      await verifyAuditChain(db, tenantA, { checkpoint: { seq: 2, hash: 'a'.repeat(64) } }),
+    ).toEqual({
+      ok: false,
+      rows: 2,
+      brokenAt: { id: third.id, seq: 3, reason: 'broken_link' },
+    });
+  });
+
+  it('flags a checkpoint that disagrees with the stored row at that seq', async () => {
+    const { db, tenantA, append, chainOf } = await seed();
+    await append(tenantA, 3);
+    const second = required((await chainOf(tenantA))[1], 'row 2 missing');
+
+    expect(
+      await verifyAuditChain(db, tenantA, { checkpoint: { seq: 2, hash: 'a'.repeat(64) } }),
+    ).toEqual({
+      ok: false,
+      rows: 1,
+      brokenAt: { id: second.id, seq: 2, reason: 'checkpoint_mismatch' },
+    });
+  });
+
+  // pglite runs as a superuser (RLS is bypassed), so only real Postgres can
+  // prove the backfill works for a non-superuser table owner under FORCE RLS.
+  it.runIf(process.env.DB_TEST_DRIVER === 'postgres')(
+    'backfill rebuilds the chain as a non-superuser owner despite FORCE ROW LEVEL SECURITY',
+    async () => {
+      const { db, tenantA, tenantB, append, chainOf } = await seed();
+      await append(tenantA, 3);
+      await append(tenantB, 2);
+      const original = [...(await chainOf(tenantA)), ...(await chainOf(tenantB))].map(
+        (row) => row.hash,
+      );
+      const rollback = new Error('rollback');
+      const outcome: { visible?: string; forced?: boolean; hashes?: string[]; a?: unknown } = {};
+
+      await db
+        .transaction(async (tx) => {
+          await tx.execute(sql`create role chain_owner nologin`);
+          await tx.execute(sql`alter table audit_log owner to chain_owner`);
+          await tx.execute(sql`alter function audit_log_backfill_chain() owner to chain_owner`);
+          await tx.execute(sql`alter table audit_log disable trigger audit_log_append_only`);
+          await tx.execute(sql`update audit_log set seq = -seq, prev_hash = '', hash = ''`);
+          await tx.execute(sql`alter table audit_log enable trigger audit_log_append_only`);
+          await tx.execute(sql`SET LOCAL ROLE chain_owner`);
+          outcome.visible = (
+            await queryRows<{ count: string }>(
+              tx,
+              sql`select count(*)::text as count from audit_log`,
+            )
+          )[0]?.count;
+          await tx.execute(sql`select audit_log_backfill_chain()`);
+          await tx.execute(sql`RESET ROLE`);
+          outcome.forced = (
+            await queryRows<{ f: boolean }>(
+              tx,
+              sql`select relforcerowsecurity as f from pg_class where oid = 'audit_log'::regclass`,
+            )
+          )[0]?.f;
+          outcome.hashes = (
+            await queryRows<{ hash: string }>(
+              tx,
+              sql`select hash from audit_log order by tenant_id = ${tenantB}, seq`,
+            )
+          ).map((row) => row.hash);
+          outcome.a = await verifyAuditChain(tx, tenantA);
+          throw rollback;
+        })
+        .catch((caught: unknown) => {
+          if (caught !== rollback) throw caught;
+        });
+
+      expect(outcome.visible).toBe('0');
+      expect(outcome.forced).toBe(true);
+      expect(outcome.a).toMatchObject({ ok: true, rows: 3, headSeq: 3 });
+      expect(outcome.hashes).toEqual(original);
     },
   );
 

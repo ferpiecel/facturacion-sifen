@@ -68,6 +68,19 @@ Route: inline — a single delegated writer subagent handles every task.
 | Estados sin equivalente en Stitch (borrador, firmado, en lote, observación, rechazado, cancelado, inutilizado, desconocido) usan colores de la paleta de Stitch; "Aprobado con observación" usa los de `tokens.json` | `StatusBadge` | Stitch solo muestra "Aprobado SIFEN" |
 | Chip "Datos de ejemplo" | Hero | Pedido del PO: marcar los datos de ejemplo |
 | Montos con `tabular-nums` | `MoneyPYG` | Alinear columnas de montos (sin cambio visible de forma) |
+| Degradado del hero termina en `primary-container` (#4F46E5) en vez de `surface-container-high`; el párrafo del hero usa blanco | Hero | Accesibilidad: el texto blanco daba 1,2:1 sobre el tramo claro; ahora ≥ 6,3:1 en todo el ancho |
+| KPI "Facturación Hoy" se muestra como `₲ 48.750.000` con un solo estilo (Stitch separaba el `₲` en un span más pequeño) | KPI | Consistencia: usa `MoneyPYG`/`formatPYG` en vez de texto fijo |
+| Región de la tabla enfocable por teclado con nombre accesible, `scope="col"` en encabezados y nombre para la tabla | Tabla de comprobantes | Accesibilidad: scroll horizontal operable por teclado (sin cambio visual) |
+| Botón de copiar CDC con área de 24×24 px (margen negativo, ícono y layout iguales) y estado "copiado" que se reinicia a los 2 s | `CdcDisplay` | Accesibilidad: objetivo táctil mínimo (WCAG 2.5.8) y re-anuncio de una segunda copia |
+| Cabeceras de seguridad y CSP en `next.config.ts` (sin cambio visual) | Configuración | Seguridad: CSP, `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy` |
+
+## Deuda registrada (sin cambios en este PR)
+
+- Sidebar responsivo/móvil: Stitch es solo escritorio.
+- Handlers de ⌘K, campana de notificaciones y cerrar sesión (hoy solo maquetados).
+- Destinos de navegación (`/comercios`, `/comprobantes`, etc.) devuelven 404 hasta que existan las páginas.
+- `next/font/google` descarga las fuentes en el build (requiere red); evaluar fuentes locales.
+- CSP con `'unsafe-inline'` en scripts/estilos hasta migrar a nonces.
 
 ## Progress
 

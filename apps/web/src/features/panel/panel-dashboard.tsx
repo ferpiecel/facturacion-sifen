@@ -16,7 +16,7 @@ import { BRAND } from '../../design-system/brand';
 import { CdcDisplay } from '../../design-system/components/cdc-display';
 import { MoneyPYG } from '../../design-system/components/money-pyg';
 import { StatusBadge } from '../../design-system/components/status-badge';
-import { SAMPLE_RECENT_DOCUMENTS, type DocumentType } from './sample-data';
+import { SAMPLE_BILLING_TODAY, SAMPLE_RECENT_DOCUMENTS, type DocumentType } from './sample-data';
 
 const TYPE_CHIP: Record<DocumentType, string> = {
   FE: 'bg-primary-fixed text-primary',
@@ -32,7 +32,7 @@ const KPI_ICON = 'flex size-10 items-center justify-center rounded-xl bg-surface
 
 function Hero() {
   return (
-    <div className="relative overflow-hidden rounded-xl bg-gradient-to-r from-primary via-primary-container to-surface-container-high p-space-lg text-on-primary shadow-md">
+    <div className="relative overflow-hidden rounded-xl bg-gradient-to-r from-primary to-primary-container p-space-lg text-on-primary shadow-md">
       <div
         aria-hidden="true"
         className="pointer-events-none absolute -right-12 -bottom-16 size-80 rounded-full bg-white/10 blur-2xl"
@@ -57,7 +57,7 @@ function Hero() {
           </span>
         </div>
         <h1 className="font-headline-xl text-headline-xl tracking-tight text-white">{`¡Bienvenido a ${BRAND.name}!`}</h1>
-        <p className="max-w-xl font-body-md text-body-md text-on-primary-container">
+        <p className="max-w-xl font-body-md text-body-md text-white">
           Tu asistente inteligente de facturación electrónica DNIT.
         </p>
       </div>
@@ -75,10 +75,7 @@ function KpiCards() {
         <div className="flex items-start justify-between">
           <div className="flex flex-col gap-1">
             <span className={KPI_LABEL}>Facturación Hoy</span>
-            <div className="flex items-baseline gap-1.5">
-              <span className="font-code-md text-code-md font-bold text-on-surface-variant">₲</span>
-              <span className={KPI_VALUE}>48.750.000</span>
-            </div>
+            <MoneyPYG amount={SAMPLE_BILLING_TODAY} className={KPI_VALUE} />
           </div>
           <div className={`${KPI_ICON} text-primary`}>
             <Banknote aria-hidden="true" className="size-[22px]" />
@@ -201,16 +198,36 @@ function RecentDocuments() {
           </Link>
         </div>
       </div>
-      <div className="-mx-space-lg overflow-x-auto px-space-lg">
-        <table className="w-full border-collapse text-left">
+      <div
+        role="region"
+        aria-label="Tabla de comprobantes recientes"
+        tabIndex={0}
+        className="-mx-space-lg overflow-x-auto px-space-lg"
+      >
+        <table
+          aria-labelledby="recent-documents-title"
+          className="w-full border-collapse text-left"
+        >
           <thead>
             <tr className="bg-surface-container-low font-label-sm text-label-sm tracking-wider text-outline uppercase">
-              <th className="rounded-l-lg px-4 py-3">Tipo &amp; Número</th>
-              <th className="px-4 py-3">Cliente / Receptor</th>
-              <th className="px-4 py-3">CDC (Identificador SIFEN)</th>
-              <th className="px-4 py-3 text-right">Monto Total</th>
-              <th className="px-4 py-3 text-center">Estado DNIT</th>
-              <th className="rounded-r-lg px-4 py-3 text-right">Acciones</th>
+              <th scope="col" className="rounded-l-lg px-4 py-3">
+                Tipo &amp; Número
+              </th>
+              <th scope="col" className="px-4 py-3">
+                Cliente / Receptor
+              </th>
+              <th scope="col" className="px-4 py-3">
+                CDC (Identificador SIFEN)
+              </th>
+              <th scope="col" className="px-4 py-3 text-right">
+                Monto Total
+              </th>
+              <th scope="col" className="px-4 py-3 text-center">
+                Estado DNIT
+              </th>
+              <th scope="col" className="rounded-r-lg px-4 py-3 text-right">
+                Acciones
+              </th>
             </tr>
           </thead>
           <tbody className="font-body-sm text-body-sm">

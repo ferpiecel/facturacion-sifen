@@ -59,7 +59,7 @@ describe('audit_log', () => {
 
     const rows = await queryRows<{ conname: string }>(
       db,
-      sql`select conname from pg_constraint where conrelid = 'audit_log'::regclass order by conname`,
+      sql`select conname from pg_constraint where conrelid = 'audit_log'::regclass and contype <> 'n' order by conname`,
     );
 
     expect(rows.map((row) => row.conname)).toEqual([

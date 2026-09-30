@@ -22,7 +22,7 @@ describe('recordAudit', () => {
     handle = testHandle;
     await testHandle.migrate();
     const [tenant] = await testHandle.db.insert(tenants).values({ name: 'Acme' }).returning();
-    const tenantId = tenant?.id ?? '';
+    const tenantId = tenant.id;
 
     await withTenantTransaction(testHandle.db, tenantId, (tx) =>
       recordAudit(tx, {

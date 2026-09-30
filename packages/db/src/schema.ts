@@ -4,6 +4,7 @@ import {
   date,
   foreignKey,
   index,
+  jsonb,
   pgEnum,
   pgTable,
   smallint,
@@ -322,6 +323,38 @@ export const tenantTimbrados = pgTable(
   ],
 );
 
+/** `audit_log.actor_type`: who performed the audited write. */
+export const auditActorType = pgEnum('audit_actor_type', ['api_key', 'user', 'operator']);
+
+/**
+ * Append-only audit trail (HU-E13-01, RF-16, RNF-08). `before`/`after` are
+ * stored already redacted (the API's `redact`). UPDATE/DELETE/TRUNCATE are
+ * rejected by a trigger (migration 0011) and app_user only has
+ * SELECT/INSERT. HU-E13-02 will add nullable `prev_hash`/`hash` columns.
+ */
+export const auditLog = pgTable(
+  'audit_log',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+    actorType: auditActorType('actor_type').notNull(),
+    actorId: varchar('actor_id', { length: 255 }).notNull(),
+    action: varchar('action', { length: 100 }).notNull(),
+    entityType: varchar('entity_type', { length: 100 }).notNull(),
+    entityId: varchar('entity_id', { length: 255 }).notNull(),
+    before: jsonb('before'),
+    after: jsonb('after'),
+  },
+  (table) => [
+    index('audit_log_tenant_occurred_at_idx').on(table.tenantId, table.occurredAt),
+    check('audit_log_action_not_blank', sql`btrim(${table.action}) <> ''`),
+    check('audit_log_entity_id_not_blank', sql`btrim(${table.entityId}) <> ''`),
+  ],
+);
+
 /**
  * Every table that carries a `tenant_id` column and MUST be covered by
  * `FORCE ROW LEVEL SECURITY` plus a tenant-isolation policy. The
@@ -330,6 +363,7 @@ export const tenantTimbrados = pgTable(
  */
 export const TENANT_TABLES = [
   'api_keys',
+  'audit_log',
   'tenant_establishments',
   'tenant_expedition_points',
   'tenant_fiscal_economic_activities',

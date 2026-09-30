@@ -7,6 +7,8 @@ export {
 export {
   apiKeyEnvironment,
   apiKeys,
+  auditActorType,
+  auditLog,
   fiscalTaxpayerType,
   partners,
   TENANT_TABLES,

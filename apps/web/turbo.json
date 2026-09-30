@@ -1,0 +1,10 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "inputs": ["$TURBO_DEFAULT$", "!**/*.spec.{ts,tsx}", "!coverage/**"],
+      "outputs": [".next/**", "!.next/cache/**"]
+    }
+  }
+}

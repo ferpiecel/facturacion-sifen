@@ -1,0 +1,140 @@
+@import 'tailwindcss';
+
+/*
+ * SifenFlow design tokens, ported 1:1 from the Tailwind config of the Stitch
+ * screen "Panel de Control y Monitoreo SIFEN" so its classes (e.g.
+ * `bg-surface-container-low`, `font-label-sm text-label-sm`, `p-space-md`)
+ * work unchanged. Deviations from Stitch are listed in
+ * odd/tasks/portal-web-foundation.md ("Desviaciones del diseño de Stitch").
+ */
+@theme {
+  --color-primary: #3525cd;
+  --color-on-primary: #ffffff;
+  --color-primary-container: #4f46e5;
+  --color-on-primary-container: #dad7ff;
+  --color-primary-fixed: #e2dfff;
+  --color-primary-fixed-dim: #c3c0ff;
+  --color-on-primary-fixed: #0f0069;
+  --color-on-primary-fixed-variant: #3323cc;
+  --color-inverse-primary: #c3c0ff;
+  --color-surface-tint: #4d44e3;
+
+  --color-secondary: #006c49;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #6cf8bb;
+  --color-on-secondary-container: #00714d;
+  --color-secondary-fixed: #6ffbbe;
+  --color-secondary-fixed-dim: #4edea3;
+  --color-on-secondary-fixed: #002113;
+  --color-on-secondary-fixed-variant: #005236;
+
+  --color-tertiary: #004d70;
+  --color-on-tertiary: #ffffff;
+  --color-tertiary-container: #006693;
+  --color-on-tertiary-container: #b8e0ff;
+  --color-tertiary-fixed: #c9e6ff;
+  --color-tertiary-fixed-dim: #89ceff;
+  --color-on-tertiary-fixed: #001e2f;
+  --color-on-tertiary-fixed-variant: #004c6e;
+
+  --color-error: #ba1a1a;
+  --color-on-error: #ffffff;
+  --color-error-container: #ffdad6;
+  --color-on-error-container: #93000a;
+
+  --color-background: #f8f9ff;
+  --color-on-background: #0b1c30;
+  --color-surface: #f8f9ff;
+  --color-surface-bright: #f8f9ff;
+  --color-surface-dim: #cbdbf5;
+  --color-surface-variant: #d3e4fe;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #eff4ff;
+  --color-surface-container: #e5eeff;
+  --color-surface-container-high: #dce9ff;
+  --color-surface-container-highest: #d3e4fe;
+  --color-on-surface: #0b1c30;
+  --color-on-surface-variant: #464555;
+  --color-inverse-surface: #213145;
+  --color-inverse-on-surface: #eaf1ff;
+  /* Stitch uses #777587 (4.07:1 on surface-container-low) for small text; darkened to pass 4.5:1. */
+  --color-outline: #686679;
+  --color-outline-variant: #c7c4d8;
+
+  /* Test-environment legend (tokens.json fiscalFlow.statusBadges.ambientePrueba). */
+  --color-test-environment: #fffbeb;
+  --color-on-test-environment: #92400e;
+  --color-test-environment-accent: #f59e0b;
+
+  --radius: 0.25rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+
+  --spacing-space-xs: 0.25rem;
+  --spacing-space-sm: 0.5rem;
+  --spacing-space-md: 1rem;
+  --spacing-space-lg: 1.5rem;
+  --spacing-space-xl: 2rem;
+  --spacing-gutter: 1.5rem;
+  --spacing-gutter-mobile: 0.75rem;
+  --spacing-margin: 2rem;
+  --spacing-margin-mobile: 1rem;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+  --font-headline-xl: var(--font-plus-jakarta-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-headline-lg: var(--font-plus-jakarta-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-headline-md: var(--font-plus-jakarta-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-body-lg: var(--font-sans);
+  --font-body-md: var(--font-sans);
+  --font-body-sm: var(--font-sans);
+  --font-label-md: var(--font-sans);
+  --font-label-sm: var(--font-sans);
+  --font-code-md: var(--font-mono);
+  --font-code-sm: var(--font-mono);
+
+  --text-headline-xl: 32px;
+  --text-headline-xl--line-height: 40px;
+  --text-headline-xl--letter-spacing: -0.025em;
+  --text-headline-xl--font-weight: 700;
+  --text-headline-lg: 24px;
+  --text-headline-lg--line-height: 32px;
+  --text-headline-lg--letter-spacing: -0.02em;
+  --text-headline-lg--font-weight: 600;
+  --text-headline-md: 18px;
+  --text-headline-md--line-height: 24px;
+  --text-headline-md--letter-spacing: -0.01em;
+  --text-headline-md--font-weight: 600;
+  --text-body-lg: 16px;
+  --text-body-lg--line-height: 24px;
+  --text-body-md: 14px;
+  --text-body-md--line-height: 20px;
+  --text-body-sm: 13px;
+  --text-body-sm--line-height: 18px;
+  --text-label-md: 12px;
+  --text-label-md--line-height: 16px;
+  --text-label-md--letter-spacing: 0.01em;
+  --text-label-md--font-weight: 500;
+  --text-label-sm: 11px;
+  --text-label-sm--line-height: 14px;
+  --text-label-sm--letter-spacing: 0.03em;
+  --text-label-sm--font-weight: 600;
+  --text-code-md: 13px;
+  --text-code-md--line-height: 20px;
+  --text-code-md--font-weight: 500;
+  --text-code-sm: 11px;
+  --text-code-sm--line-height: 16px;
+  --text-code-sm--font-weight: 500;
+}
+
+@layer base {
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    overscroll-behavior: none;
+  }
+}

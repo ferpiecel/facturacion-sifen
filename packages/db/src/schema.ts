@@ -1,14 +1,19 @@
 import { sql } from 'drizzle-orm';
 import {
+  bigint,
   check,
   date,
   foreignKey,
   index,
+  integer,
+  jsonb,
+  primaryKey,
   pgEnum,
   pgTable,
   smallint,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
   varchar,
@@ -285,6 +290,12 @@ export const tenantExpeditionPoints = pgTable(
       table.establishmentId,
       table.code,
     ),
+    // Composite target for tenant_document_sequences' point FK.
+    uniqueIndex('tenant_expedition_points_tenant_establishment_id_idx').on(
+      table.tenantId,
+      table.establishmentId,
+      table.id,
+    ),
     foreignKey({
       columns: [table.tenantId, table.establishmentId],
       foreignColumns: [tenantEstablishments.tenantId, tenantEstablishments.id],
@@ -325,6 +336,8 @@ export const tenantTimbrados = pgTable(
   (table) => [
     index('tenant_timbrados_tenant_id_idx').on(table.tenantId),
     uniqueIndex('tenant_timbrados_tenant_number_idx').on(table.tenantId, table.number),
+    // Composite target for tenant_document_sequences' timbrado FK.
+    uniqueIndex('tenant_timbrados_tenant_id_id_idx').on(table.tenantId, table.id),
     check(
       'tenant_timbrados_number_format',
       sql`${table.number} ~ '^[0-9]{8}$' AND ${table.number} <> '00000000'`,
@@ -332,6 +345,136 @@ export const tenantTimbrados = pgTable(
     check(
       'tenant_timbrados_valid_to_after_valid_from',
       sql`${table.validTo} IS NULL OR ${table.validTo} >= ${table.validFrom}`,
+    ),
+  ],
+);
+
+/** `audit_log.actor_type`: who performed the audited write. */
+export const auditActorType = pgEnum('audit_actor_type', ['api_key', 'user', 'operator']);
+
+/**
+ * Append-only audit trail (HU-E13-01, RF-16, RNF-08). `before`/`after` are
+ * stored already redacted (the API's `redact`). UPDATE/DELETE/TRUNCATE are
+ * rejected by a trigger (migration 0014) and app_user only has
+ * SELECT/INSERT. `seq`, `prev_hash` and `hash` form a per-tenant SHA-256
+ * chain (HU-E13-02): a BEFORE INSERT trigger (migration 0018) overwrites them,
+ * so values supplied by the app are ignored.
+ */
+export const auditLog = pgTable(
+  'audit_log',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+    actorType: auditActorType('actor_type').notNull(),
+    actorId: varchar('actor_id', { length: 255 }).notNull(),
+    action: varchar('action', { length: 100 }).notNull(),
+    entityType: varchar('entity_type', { length: 100 }).notNull(),
+    entityId: varchar('entity_id', { length: 255 }).notNull(),
+    before: jsonb('before'),
+    after: jsonb('after'),
+    seq: bigint('seq', { mode: 'number' }).notNull().default(0),
+    prevHash: text('prev_hash').notNull().default(''),
+    hash: text('hash').notNull().default(''),
+  },
+  (table) => [
+    unique('audit_log_tenant_seq_unique').on(table.tenantId, table.seq),
+    index('audit_log_tenant_occurred_at_idx').on(table.tenantId, table.occurredAt),
+    check('audit_log_action_not_blank', sql`btrim(${table.action}) <> ''`),
+    check('audit_log_entity_id_not_blank', sql`btrim(${table.entityId}) <> ''`),
+  ],
+);
+
+/**
+ * Last `dId` (SIFEN request id, numeric 1..15 digits) issued per tenant and
+ * environment (HU-E4-03). Only advanced by `nextRequestId` inside the
+ * caller's tenant transaction.
+ */
+export const tenantRequestSequences = pgTable(
+  'tenant_request_sequences',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    environment: tenantEnvironment('environment').notNull(),
+    lastValue: bigint('last_value', { mode: 'bigint' })
+      .notNull()
+      .default(sql`0`),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.tenantId, table.environment],
+      name: 'tenant_request_sequences_pkey',
+    }),
+    check(
+      'tenant_request_sequences_last_value_range',
+      sql`${table.lastValue} BETWEEN 0 AND 999999999999999`,
+    ),
+  ],
+);
+
+/**
+ * Last assigned `dNumDoc` (MT v150 C005, 7 digits: 0000001..9999999) per
+ * (environment, timbrado, establishment, expedition point, document type)
+ * for a tenant (HU-E4-01). Only advanced by `nextDocumentNumber` inside the
+ * caller's tenant transaction. `document_type` is the `iTiDE` code (C002).
+ */
+export const tenantDocumentSequences = pgTable(
+  'tenant_document_sequences',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    environment: tenantEnvironment('environment').notNull(),
+    timbradoId: uuid('timbrado_id').notNull(),
+    establishmentId: uuid('establishment_id').notNull(),
+    expeditionPointId: uuid('expedition_point_id').notNull(),
+    documentType: smallint('document_type').notNull(),
+    /** `dSerieNum`; '' while numbering runs without a series (rule 1110). */
+    series: varchar('series', { length: 2 }).notNull().default(''),
+    seriesStartedAt: timestamp('series_started_at', { withTimezone: true }).notNull().defaultNow(),
+    lastNumber: integer('last_number').notNull().default(0),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.tenantId,
+        table.environment,
+        table.timbradoId,
+        table.establishmentId,
+        table.expeditionPointId,
+        table.documentType,
+        table.series,
+      ],
+      name: 'tenant_document_sequences_pkey',
+    }),
+    foreignKey({
+      columns: [table.tenantId, table.timbradoId],
+      foreignColumns: [tenantTimbrados.tenantId, tenantTimbrados.id],
+      name: 'tenant_document_sequences_tenant_timbrado_fk',
+    }),
+    foreignKey({
+      columns: [table.tenantId, table.establishmentId, table.expeditionPointId],
+      foreignColumns: [
+        tenantExpeditionPoints.tenantId,
+        tenantExpeditionPoints.establishmentId,
+        tenantExpeditionPoints.id,
+      ],
+      name: 'tenant_document_sequences_tenant_point_fk',
+    }),
+    check(
+      'tenant_document_sequences_document_type_range',
+      sql`${table.documentType} BETWEEN 1 AND 8`,
+    ),
+    check(
+      'tenant_document_sequences_series_format',
+      sql`${table.series} = '' OR ${table.series} ~ '^[A-Z]{2}$'`,
+    ),
+    check(
+      'tenant_document_sequences_last_number_range',
+      sql`${table.lastNumber} BETWEEN 0 AND 9999999`,
     ),
   ],
 );
@@ -344,10 +487,13 @@ export const tenantTimbrados = pgTable(
  */
 export const TENANT_TABLES = [
   'api_keys',
+  'audit_log',
+  'tenant_document_sequences',
   'tenant_establishments',
   'tenant_expedition_points',
   'tenant_fiscal_economic_activities',
   'tenant_fiscal_profiles',
   'tenant_probe',
+  'tenant_request_sequences',
   'tenant_timbrados',
 ] as const;

@@ -10,7 +10,7 @@ import { tenantCscs } from '@sifen/db';
 import { EnvelopeCipher } from '../modules/custody/application/envelope-cipher.js';
 import { createLocalKms } from '../modules/custody/infrastructure/adapters/local-kms.adapter.js';
 import { CscVault } from '../modules/custody/infrastructure/csc-vault.js';
-import { createCscVault, formatOpsError, runOpsCommand } from './ops.js';
+import { createCscVault, formatOpsError, runCli, runOpsCommand } from './ops.js';
 
 describe('runOpsCommand (HU-E1-05)', () => {
   let handle: DatabaseHandle | undefined;
@@ -204,6 +204,8 @@ describe('formatOpsError (HU-E1-05)', () => {
   });
 });
 
+const MASTER_KEY = Buffer.alloc(32, 7).toString('base64');
+
 describe('csc:add (HU-E2-03)', () => {
   const CSC = 'ABCD0000000000000000000000000000';
   let handle: DatabaseHandle | undefined;
@@ -255,6 +257,110 @@ describe('csc:add (HU-E2-03)', () => {
   it('builds the vault with the API KMS rules: fail closed outside development/test', () => {
     expect(() => createCscVault({ NODE_ENV: 'production' })).toThrow(/KMS_LOCAL_MASTER_KEY/);
     expect(() => createCscVault({})).toThrow(/KMS_LOCAL_MASTER_KEY/);
-    expect(createCscVault({ NODE_ENV: 'test' })).toBeInstanceOf(CscVault);
+    expect(createCscVault({ NODE_ENV: 'test', KMS_LOCAL_MASTER_KEY: MASTER_KEY })).toBeInstanceOf(
+      CscVault,
+    );
+  });
+
+  it('requires KMS_LOCAL_MASTER_KEY even in development/test (a throwaway key loses the CSC)', () => {
+    expect(() => createCscVault({ NODE_ENV: 'test' })).toThrow(/KMS_LOCAL_MASTER_KEY/);
+    expect(() => createCscVault({ NODE_ENV: 'development' })).toThrow(/KMS_LOCAL_MASTER_KEY/);
+  });
+
+  it('fails for an unknown tenant without the value', async () => {
+    const { db, vault } = await setup();
+    const error = await runOpsCommand(
+      db,
+      {
+        kind: 'csc:add',
+        tenantId: '00000000-0000-4000-8000-000000000000',
+        environment: 'test',
+        idCsc: '0001',
+        csc: CSC,
+      },
+      vault,
+    ).catch((e: unknown) => e);
+    expect(formatOpsError(error)).toContain('tenant not found');
+    expect(formatOpsError(error)).not.toContain(CSC);
+  });
+});
+
+describe('runCli csc:add (HU-E2-03)', () => {
+  const CSC = 'ABCD0000000000000000000000000000';
+  let handle: DatabaseHandle | undefined;
+
+  afterEach(async () => {
+    await handle?.close();
+    handle = undefined;
+  });
+
+  async function run(
+    argv: (tenantId: string) => string[],
+    stdin = '',
+    key: string | undefined = MASTER_KEY,
+  ) {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Cli Tenant');
+    const out: string[] = [];
+    const err: string[] = [];
+    const db = handle.db;
+    const code = await runCli({
+      argv: argv(tenantId),
+      env: { OPS_DATABASE_URL: 'x', KMS_LOCAL_MASTER_KEY: key, NODE_ENV: 'test' },
+      readStdin: () => Promise.resolve(stdin),
+      out: (text) => out.push(text),
+      err: (text) => err.push(text),
+      openDb: () => ({ db, close: () => Promise.resolve() }),
+    });
+    return { code, out: out.join('\n'), err: err.join('\n'), tenantId, db };
+  }
+
+  const args = (tenantId: string, csc: string) => [
+    'csc:add',
+    '--tenant',
+    tenantId,
+    '--env',
+    'test',
+    '--id',
+    '0001',
+    '--csc',
+    csc,
+  ];
+
+  it('succeeds without printing the CSC', async () => {
+    const result = await run((t) => args(t, CSC));
+    expect(result.code).toBe(0);
+    expect(result.out).toContain('csc stored');
+    expect(result.out + result.err).not.toContain(CSC);
+  });
+
+  it('reads the CSC from stdin with --csc - and ignores the trailing newline', async () => {
+    const result = await run((t) => args(t, '-'), `${CSC}\n`);
+    expect(result.code).toBe(0);
+    expect(result.out + result.err).not.toContain(CSC);
+    expect(JSON.stringify(await result.db.select().from(tenantCscs))).not.toContain(CSC);
+  });
+
+  it('fails without leaking the CSC: stray positional, unknown tenant, missing master key, bad stdin', async () => {
+    const positional = await run((t) => [
+      'csc:add',
+      '--tenant',
+      t,
+      '--env',
+      'test',
+      '--id',
+      '0001',
+      CSC,
+    ]);
+    const unknown = await run(() => args('00000000-0000-4000-8000-000000000000', CSC));
+    const noKey = await run((t) => args(t, CSC), '', undefined);
+    const badStdin = await run((t) => args(t, '-'), 'short\n');
+    for (const result of [positional, unknown, noKey, badStdin]) {
+      expect(result.code).toBe(1);
+      expect(result.err).not.toBe('');
+      expect(result.out + result.err).not.toContain(CSC);
+    }
+    expect(noKey.err).toContain('KMS_LOCAL_MASTER_KEY');
   });
 });

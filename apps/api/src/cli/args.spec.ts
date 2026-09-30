@@ -499,3 +499,33 @@ describe('parseOpsArgs csc:add (HU-E2-03)', () => {
     expect(() => parseOpsArgs(argv)).toThrow(new RegExp(`--${flag}`));
   });
 });
+
+describe('parseOpsArgs never echoes argv values (HU-E2-03)', () => {
+  const CSC = 'ABCD0000000000000000000000000000';
+
+  it.each([
+    ['csc:add', ['csc:add', '--tenant', 't-1', '--env', 'test', '--id', '0001', CSC]],
+    ['partner:create', ['partner:create', '--name', 'Acme', CSC]],
+  ])('rejects a stray positional in %s with a fixed message', (_name, argv) => {
+    let message = '';
+    try {
+      parseOpsArgs(argv);
+    } catch (error) {
+      expect(error).toBeInstanceOf(OpsArgError);
+      message = (error as Error).message;
+    }
+    expect(message).not.toBe('');
+    expect(message).not.toContain(CSC);
+  });
+
+  it('does not echo the value of a malformed option either', () => {
+    let message = '';
+    try {
+      parseOpsArgs(['csc:add', `--csc=${CSC}`, '--bogus']);
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).not.toBe('');
+    expect(message).not.toContain(CSC);
+  });
+});

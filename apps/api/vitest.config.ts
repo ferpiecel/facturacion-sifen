@@ -14,6 +14,10 @@ export default defineConfig({
     include: ['src/**/*.spec.ts', 'test/**/*.spec.ts'],
     // Tenancy integration specs boot PGlite and apply every migration; CI
     // runners need more than the 5 s default as migrations accumulate.
+    // Each worker holds several WASM Postgres instances and is CPU-bound;
+    // one worker per core under `turbo` parallelism caused OOM-killed
+    // workers (SIGKILL) and "connection terminated unexpectedly".
+    maxWorkers: 4,
     testTimeout: 30_000,
     hookTimeout: 30_000,
     coverage: {

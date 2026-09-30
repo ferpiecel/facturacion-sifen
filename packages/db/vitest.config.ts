@@ -7,6 +7,10 @@ export default defineConfig({
     globalSetup: ['test/support/global-setup.ts'],
     // Each spec boots PGlite (or Postgres) and applies every migration; CI
     // runners need more than the 5 s default as migrations accumulate.
+    // Each worker holds several WASM Postgres instances (~100 MB each) and is
+    // CPU-bound; one worker per core under `turbo` parallelism oversubscribed
+    // the machine, causing 30 s timeouts and OOM-killed workers (SIGKILL).
+    maxWorkers: 4,
     testTimeout: 30_000,
     hookTimeout: 30_000,
     coverage: {

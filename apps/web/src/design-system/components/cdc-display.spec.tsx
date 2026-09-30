@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -49,6 +49,36 @@ describe('CdcDisplay', () => {
     await user.click(screen.getByRole('button', { name: 'Copiar CDC' }));
 
     expect(await screen.findByText('No se pudo copiar el CDC')).toBeInTheDocument();
+  });
+
+  it('gives the copy button a target of at least 24x24px', () => {
+    render(<CdcDisplay value={CDC} />);
+
+    expect(screen.getByRole('button', { name: 'Copiar CDC' })).toHaveClass('size-6');
+  });
+
+  it('clears the confirmation after 2s so a second copy is announced again', async () => {
+    vi.useFakeTimers();
+    try {
+      const writeText = vi.fn(() => Promise.resolve());
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      render(<CdcDisplay value={CDC} />);
+      const button = screen.getByRole('button', { name: 'Copiar CDC' });
+
+      await user.click(button);
+      expect(screen.getByText('CDC copiado')).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(2000);
+      });
+      expect(screen.queryByText('CDC copiado')).not.toBeInTheDocument();
+
+      await user.click(button);
+      expect(screen.getByText('CDC copiado')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shows type, RUC and last digits in the truncated variant, keeping the full value accessible', () => {

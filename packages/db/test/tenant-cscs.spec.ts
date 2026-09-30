@@ -106,12 +106,12 @@ describe('tenant_cscs', () => {
     await db.insert(tenantCscs).values(csc(a, '0001'));
 
     const attempts = [
-      withTenantTransaction(db, a, (tx) => tx.insert(tenantCscs).values(csc(a, '0002'))),
-      withTenantTransaction(db, a, (tx) => tx.update(tenantCscs).set({ idCsc: '0009' })),
-      withTenantTransaction(db, a, (tx) => tx.delete(tenantCscs)),
+      () => withTenantTransaction(db, a, (tx) => tx.insert(tenantCscs).values(csc(a, '0002'))),
+      () => withTenantTransaction(db, a, (tx) => tx.update(tenantCscs).set({ idCsc: '0009' })),
+      () => withTenantTransaction(db, a, (tx) => tx.delete(tenantCscs)),
     ];
     for (const attempt of attempts) {
-      expect(await causeOf(attempt)).toContain('permission denied for table tenant_cscs');
+      expect(await causeOf(attempt())).toContain('permission denied for table tenant_cscs');
     }
   });
 

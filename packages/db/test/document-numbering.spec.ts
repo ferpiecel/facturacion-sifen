@@ -157,8 +157,8 @@ describe('nextDocumentNumber (dNumDoc numbering)', () => {
     expect(await next()).toBe(MAX_DOCUMENT_NUMBER);
     await expect(next()).rejects.toBeInstanceOf(DocumentNumberExhaustedError);
 
-    const [row] = await db.select().from(tenantDocumentSequences);
-    expect(row?.lastNumber).toBe(MAX_DOCUMENT_NUMBER);
+    const rows = await db.select().from(tenantDocumentSequences);
+    expect(rows.map((row) => row.lastNumber)).toEqual([MAX_DOCUMENT_NUMBER]);
   });
 
   it('isolates tenants: RLS hides and blocks other tenants sequences', async () => {

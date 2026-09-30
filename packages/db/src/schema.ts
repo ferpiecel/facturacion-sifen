@@ -4,6 +4,8 @@ import {
   date,
   foreignKey,
   index,
+  integer,
+  primaryKey,
   pgEnum,
   pgTable,
   smallint,
@@ -271,6 +273,12 @@ export const tenantExpeditionPoints = pgTable(
       table.establishmentId,
       table.code,
     ),
+    // Composite target for tenant_document_sequences' point FK.
+    uniqueIndex('tenant_expedition_points_tenant_establishment_id_idx').on(
+      table.tenantId,
+      table.establishmentId,
+      table.id,
+    ),
     foreignKey({
       columns: [table.tenantId, table.establishmentId],
       foreignColumns: [tenantEstablishments.tenantId, tenantEstablishments.id],
@@ -311,6 +319,8 @@ export const tenantTimbrados = pgTable(
   (table) => [
     index('tenant_timbrados_tenant_id_idx').on(table.tenantId),
     uniqueIndex('tenant_timbrados_tenant_number_idx').on(table.tenantId, table.number),
+    // Composite target for tenant_document_sequences' timbrado FK.
+    uniqueIndex('tenant_timbrados_tenant_id_id_idx').on(table.tenantId, table.id),
     check(
       'tenant_timbrados_number_format',
       sql`${table.number} ~ '^[0-9]{8}$' AND ${table.number} <> '00000000'`,
@@ -323,6 +333,63 @@ export const tenantTimbrados = pgTable(
 );
 
 /**
+ * Last assigned `dNumDoc` (MT v150 C005, 7 digits: 0000001..9999999) per
+ * (environment, timbrado, establishment, expedition point, document type)
+ * for a tenant (HU-E4-01). Only advanced by `nextDocumentNumber`, inside the
+ * caller's tenant transaction, so a rolled-back emission never burns a number.
+ * `document_type` is the `iTiDE` code (C002). Series rollover is HU-E4-02.
+ */
+export const tenantDocumentSequences = pgTable(
+  'tenant_document_sequences',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    environment: varchar('environment', { length: 16 }).$type<'test' | 'production'>().notNull(),
+    timbradoId: uuid('timbrado_id').notNull(),
+    establishmentId: uuid('establishment_id').notNull(),
+    expeditionPointId: uuid('expedition_point_id').notNull(),
+    documentType: smallint('document_type').notNull(),
+    lastNumber: integer('last_number').notNull().default(0),
+  },
+  (table) => [
+    primaryKey({
+      columns: [
+        table.tenantId,
+        table.environment,
+        table.timbradoId,
+        table.establishmentId,
+        table.expeditionPointId,
+        table.documentType,
+      ],
+      name: 'tenant_document_sequences_pkey',
+    }),
+    foreignKey({
+      columns: [table.tenantId, table.timbradoId],
+      foreignColumns: [tenantTimbrados.tenantId, tenantTimbrados.id],
+      name: 'tenant_document_sequences_tenant_timbrado_fk',
+    }),
+    foreignKey({
+      columns: [table.tenantId, table.establishmentId, table.expeditionPointId],
+      foreignColumns: [
+        tenantExpeditionPoints.tenantId,
+        tenantExpeditionPoints.establishmentId,
+        tenantExpeditionPoints.id,
+      ],
+      name: 'tenant_document_sequences_tenant_point_fk',
+    }),
+    check(
+      'tenant_document_sequences_environment_valid',
+      sql`${table.environment} IN ('test', 'production')`,
+    ),
+    check(
+      'tenant_document_sequences_last_number_range',
+      sql`${table.lastNumber} BETWEEN 0 AND 9999999`,
+    ),
+  ],
+);
+
+/**
  * Every table that carries a `tenant_id` column and MUST be covered by
  * `FORCE ROW LEVEL SECURITY` plus a tenant-isolation policy. The
  * `rls-coverage.spec.ts` drift check discovers these tables from the
@@ -330,6 +397,7 @@ export const tenantTimbrados = pgTable(
  */
 export const TENANT_TABLES = [
   'api_keys',
+  'tenant_document_sequences',
   'tenant_establishments',
   'tenant_expedition_points',
   'tenant_fiscal_economic_activities',

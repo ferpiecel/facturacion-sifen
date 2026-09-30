@@ -71,6 +71,20 @@
       "when": 1790708665681,
       "tag": "0009_complex_diamondback",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790767926365,
+      "tag": "0010_broad_hiroim",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1790767936462,
+      "tag": "0011_document_sequences_rls",
+      "breakpoints": true
     }
   ]
 }

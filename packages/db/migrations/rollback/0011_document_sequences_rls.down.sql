@@ -1,6 +1,4 @@
--- Manual rollback for 0011_document_sequences_rls.sql. Not registered in the
--- drizzle journal. Does not drop the table (0010 owns it); only undoes RLS,
--- grants and policies.
+-- Manual rollback for 0011 (RLS/grants only; 0010 owns the table).
 DROP POLICY IF EXISTS "platform_admin_all" ON "tenant_document_sequences";
 DROP POLICY IF EXISTS "tenant_isolation" ON "tenant_document_sequences";
 ALTER TABLE "tenant_document_sequences" NO FORCE ROW LEVEL SECURITY;

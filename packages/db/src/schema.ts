@@ -335,9 +335,8 @@ export const tenantTimbrados = pgTable(
 /**
  * Last assigned `dNumDoc` (MT v150 C005, 7 digits: 0000001..9999999) per
  * (environment, timbrado, establishment, expedition point, document type)
- * for a tenant (HU-E4-01). Only advanced by `nextDocumentNumber`, inside the
- * caller's tenant transaction, so a rolled-back emission never burns a number.
- * `document_type` is the `iTiDE` code (C002). Series rollover is HU-E4-02.
+ * for a tenant (HU-E4-01). Only advanced by `nextDocumentNumber` inside the
+ * caller's tenant transaction. `document_type` is the `iTiDE` code (C002).
  */
 export const tenantDocumentSequences = pgTable(
   'tenant_document_sequences',

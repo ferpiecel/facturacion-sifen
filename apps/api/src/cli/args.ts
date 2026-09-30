@@ -1,5 +1,12 @@
 import { parseArgs } from 'node:util';
-import type { ApiKeyEnvironment } from '../modules/identity/domain/api-key.js';
+import {
+  createEstablishment,
+  type Establishment,
+} from '../modules/fiscal-config/domain/establishment.js';
+import {
+  createExpeditionPoint,
+  type ExpeditionPoint,
+} from '../modules/fiscal-config/domain/expedition-point.js';
 import {
   createFiscalProfile,
   type EconomicActivity,
@@ -7,6 +14,9 @@ import {
   type TaxpayerType,
 } from '../modules/fiscal-config/domain/fiscal-profile.js';
 import { parseRuc } from '../modules/fiscal-config/domain/ruc.js';
+import { createTimbrado, type Timbrado } from '../modules/fiscal-config/domain/timbrado.js';
+import type { TenantEnvironment } from '../modules/fiscal-config/domain/document-environment.js';
+import type { ApiKeyEnvironment } from '../modules/identity/domain/api-key.js';
 
 /** Invalid argv or missing environment for the operator CLI (backlog HU-E1-05). */
 export class OpsArgError extends Error {}
@@ -22,7 +32,11 @@ export type OpsCommand =
       label: string | undefined;
     }
   | { kind: 'apikey:revoke'; keyId: string }
-  | { kind: 'fiscal:set'; tenantId: string; profile: FiscalProfile };
+  | { kind: 'fiscal:set'; tenantId: string; profile: FiscalProfile }
+  | { kind: 'establishment:add'; tenantId: string; establishment: Establishment }
+  | { kind: 'point:add'; tenantId: string; establishmentCode: string; point: ExpeditionPoint }
+  | { kind: 'timbrado:add'; tenantId: string; timbrado: Timbrado }
+  | { kind: 'tenant:environment'; tenantId: string; environment: TenantEnvironment };
 
 function requireOption(value: string | undefined, flag: string): string {
   if (!value) {
@@ -35,6 +49,15 @@ function parseEnvironment(value: string | undefined): ApiKeyEnvironment {
   const environment = requireOption(value, 'env');
   if (environment !== 'live' && environment !== 'test') {
     throw new OpsArgError(`--env must be "live" or "test", got "${environment}"`);
+  }
+  return environment;
+}
+
+/** Parses `--env test|production` for `tenant:environment` (HU-E2-04). */
+function parseTenantEnvironment(value: string | undefined): TenantEnvironment {
+  const environment = requireOption(value, 'env');
+  if (environment !== 'test' && environment !== 'production') {
+    throw new OpsArgError(`--env must be "test" or "production", got "${environment}"`);
   }
   return environment;
 }
@@ -70,6 +93,33 @@ function parseActivities(values: string[] | undefined): EconomicActivity[] {
       description: entry.slice(separatorIndex + 1),
     };
   });
+}
+
+/** Parses `--department <code>` (cDepEmi) into the integer the establishment domain expects. */
+function parseDepartmentCode(value: string | undefined): number {
+  const raw = requireOption(value, 'department');
+  const code = Number(raw);
+  if (!Number.isInteger(code)) {
+    throw new OpsArgError(`--department must be an integer code, got "${raw}"`);
+  }
+  return code;
+}
+
+/**
+ * `--district`/`--district-description` (cDisEmi/dDesDisEmi) mirror the
+ * domain's occurrence-0-1 rule: both present or both absent. Passing only
+ * one is a usage error here rather than a silent domain rejection later.
+ */
+function parseDistrict(
+  district: string | undefined,
+  districtDescription: string | undefined,
+): { districtCode: string | undefined; districtDescription: string | undefined } {
+  if ((district === undefined) !== (districtDescription === undefined)) {
+    throw new OpsArgError(
+      '--district and --district-description must both be provided or both omitted',
+    );
+  }
+  return { districtCode: district, districtDescription };
 }
 
 /** Parses `argv` (without `node`/script) into one typed operator command, or throws {@link OpsArgError}. */
@@ -144,6 +194,113 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
         kind: 'fiscal:set',
         tenantId: requireOption(values.tenant, 'tenant'),
         profile,
+      };
+    }
+    case 'establishment:add': {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          code: { type: 'string' },
+          address: { type: 'string' },
+          'house-number': { type: 'string' },
+          'address-complement-1': { type: 'string' },
+          'address-complement-2': { type: 'string' },
+          department: { type: 'string' },
+          district: { type: 'string' },
+          'district-description': { type: 'string' },
+          city: { type: 'string' },
+          'city-description': { type: 'string' },
+        },
+      });
+
+      const { districtCode, districtDescription } = parseDistrict(
+        values.district,
+        values['district-description'],
+      );
+
+      const establishment = createEstablishment({
+        code: requireOption(values.code, 'code'),
+        address: requireOption(values.address, 'address'),
+        houseNumber: requireOption(values['house-number'], 'house-number'),
+        addressComplement1: values['address-complement-1'],
+        addressComplement2: values['address-complement-2'],
+        departmentCode: parseDepartmentCode(values.department),
+        districtCode,
+        districtDescription,
+        cityCode: requireOption(values.city, 'city'),
+        cityDescription: requireOption(values['city-description'], 'city-description'),
+      });
+
+      return {
+        kind: 'establishment:add',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        establishment,
+      };
+    }
+    case 'point:add': {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          establishment: { type: 'string' },
+          code: { type: 'string' },
+        },
+      });
+
+      const point = createExpeditionPoint({ code: requireOption(values.code, 'code') });
+
+      return {
+        kind: 'point:add',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        establishmentCode: requireOption(values.establishment, 'establishment'),
+        point,
+      };
+    }
+    case 'timbrado:add': {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          number: { type: 'string' },
+          'valid-from': { type: 'string' },
+          'valid-to': { type: 'string' },
+        },
+      });
+
+      const timbrado = createTimbrado({
+        number: requireOption(values.number, 'number'),
+        validityStart: requireOption(values['valid-from'], 'valid-from'),
+        validityEnd: values['valid-to'],
+      });
+
+      return {
+        kind: 'timbrado:add',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        timbrado,
+      };
+    }
+    case 'tenant:environment': {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          env: { type: 'string' },
+          'confirm-production': { type: 'boolean' },
+        },
+      });
+
+      const environment = parseTenantEnvironment(values.env);
+      if (environment === 'production' && !values['confirm-production']) {
+        throw new OpsArgError(
+          '--confirm-production is required to switch --env production (HU-E2-04)',
+        );
+      }
+
+      return {
+        kind: 'tenant:environment',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        environment,
       };
     }
     default:

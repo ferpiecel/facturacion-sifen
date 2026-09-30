@@ -1,11 +1,15 @@
 import { createNodePostgresDatabase, type Database } from '@sifen/db';
 import { getOpsDatabaseUrl, parseOpsArgs, type OpsCommand } from './args.js';
 import {
+  addEstablishment,
+  addExpeditionPoint,
+  addTimbrado,
   createPartner,
   createTenant,
   issueApiKey,
   revokeApiKey,
   setFiscalProfile,
+  setTenantEnvironment,
 } from './commands.js';
 
 /**
@@ -47,6 +51,35 @@ export async function runOpsCommand(db: Database, command: OpsCommand): Promise<
         profile: command.profile,
       });
       return `fiscal profile saved: ${result.tenantId} (RUC ${result.ruc})`;
+    }
+    case 'establishment:add': {
+      const result = await addEstablishment(db, {
+        tenantId: command.tenantId,
+        establishment: command.establishment,
+      });
+      return `establishment created: ${result.id} (code ${result.code})`;
+    }
+    case 'point:add': {
+      const result = await addExpeditionPoint(db, {
+        tenantId: command.tenantId,
+        establishmentCode: command.establishmentCode,
+        point: command.point,
+      });
+      return `expedition point created: ${result.id} (code ${result.code})`;
+    }
+    case 'timbrado:add': {
+      const result = await addTimbrado(db, {
+        tenantId: command.tenantId,
+        timbrado: command.timbrado,
+      });
+      return `timbrado created: ${result.id} (number ${result.number})`;
+    }
+    case 'tenant:environment': {
+      const result = await setTenantEnvironment(db, {
+        tenantId: command.tenantId,
+        environment: command.environment,
+      });
+      return `tenant environment set: ${result.id} (${result.environment})`;
     }
   }
 }

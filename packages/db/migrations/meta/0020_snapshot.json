@@ -1,6 +1,6 @@
 {
-  "id": "66df9526-a078-4611-b068-4cee0452d0c4",
-  "prevId": "c68c2f64-0683-4b41-9081-33fbd30dcb29",
+  "id": "7177943b-ca96-401e-8eca-62a62c269955",
+  "prevId": "5776f94e-e72c-440d-afde-c6534c0fa248",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -345,6 +345,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "slot": {
+          "name": "slot",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": true
+        },
         "sealed": {
           "name": "sealed",
           "type": "jsonb",
@@ -385,10 +391,23 @@
             "id_csc"
           ],
           "nullsNotDistinct": false
+        },
+        "tenant_cscs_tenant_environment_slot_key": {
+          "name": "tenant_cscs_tenant_environment_slot_key",
+          "columns": [
+            "tenant_id",
+            "environment",
+            "slot"
+          ],
+          "nullsNotDistinct": false
         }
       },
       "policies": {},
       "checkConstraints": {
+        "tenant_cscs_slot_range": {
+          "name": "tenant_cscs_slot_range",
+          "value": "\"tenant_cscs\".\"slot\" IN (1, 2)"
+        },
         "tenant_cscs_id_csc_format": {
           "name": "tenant_cscs_id_csc_format",
           "value": "\"tenant_cscs\".\"id_csc\" ~ '^[0-9]{4}$'"

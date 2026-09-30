@@ -11,6 +11,8 @@ export interface SecretContext {
   readonly kind: SecretKind;
   readonly environment: 'test' | 'production';
   readonly version: number;
+  /** Optional slot identity (e.g. a CSC's idCSC); bound into the AAD when present. */
+  readonly label?: string;
 }
 
 export const SEALED_SECRET_FORMAT = 1;
@@ -44,12 +46,16 @@ export class SecretDecryptionError extends Error {
  * @throws RangeError when `version` is not a non-negative safe integer.
  */
 export function encodeAad(context: SecretContext): Buffer {
-  const { tenantId, kind, environment, version } = context;
+  const { tenantId, kind, environment, version, label } = context;
   if (!Number.isSafeInteger(version) || version < 0) {
     throw new RangeError('secret version must be a non-negative safe integer');
   }
   return Buffer.from(
-    JSON.stringify([SEALED_SECRET_FORMAT, tenantId, kind, environment, version]),
+    JSON.stringify(
+      label === undefined
+        ? [SEALED_SECRET_FORMAT, tenantId, kind, environment, version]
+        : [SEALED_SECRET_FORMAT, tenantId, kind, environment, version, label],
+    ),
     'utf8',
   );
 }

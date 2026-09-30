@@ -71,15 +71,13 @@ describe('CscVault (HU-E2-03)', () => {
 
     // Move the blob to tenant B / production: AAD no longer matches.
     await db.insert(tenantCscs).values({ ...row, id: undefined, tenantId: b });
-    await db
-      .insert(tenantCscs)
-      .values({
-        tenantId: a,
-        environment: 'production',
-        idCsc: '0001',
-        slot: 1,
-        sealed: row.sealed,
-      });
+    await db.insert(tenantCscs).values({
+      tenantId: a,
+      environment: 'production',
+      idCsc: '0001',
+      slot: 1,
+      sealed: row.sealed,
+    });
 
     await expect(vault.getPlaintext(db, b, 'test', '0001')).rejects.toThrow(SecretDecryptionError);
     await expect(vault.getPlaintext(db, a, 'production', '0001')).rejects.toThrow(

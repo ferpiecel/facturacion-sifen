@@ -430,6 +430,8 @@ export const tenantCscs = pgTable(
       .references(() => tenants.id),
     environment: tenantEnvironment('environment').notNull(),
     idCsc: char('id_csc', { length: 4 }).notNull(),
+    /** Race-free limit: only slots 1 and 2 exist, each unique per tenant and environment. */
+    slot: smallint('slot').notNull(),
     sealed: jsonb('sealed').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -439,6 +441,12 @@ export const tenantCscs = pgTable(
       table.environment,
       table.idCsc,
     ),
+    unique('tenant_cscs_tenant_environment_slot_key').on(
+      table.tenantId,
+      table.environment,
+      table.slot,
+    ),
+    check('tenant_cscs_slot_range', sql`${table.slot} IN (1, 2)`),
     check('tenant_cscs_id_csc_format', sql`${table.idCsc} ~ '^[0-9]{4}$'`),
   ],
 );

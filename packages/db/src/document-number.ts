@@ -10,7 +10,6 @@ export class DocumentNumberExhaustedError extends Error {
   }
 }
 
-/** Highest `dNumDoc` (MT v150: 7 digits). */
 export const MAX_DOCUMENT_NUMBER = 9_999_999;
 
 /** Identifies one numbering sequence (HU-E4-01). */

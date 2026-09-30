@@ -211,6 +211,12 @@ importers:
       '@sifen/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@sifen/sifen-gateway':
+        specifier: workspace:*
+        version: link:../../packages/sifen-gateway
+      '@sifen/sifen-xsd':
+        specifier: workspace:*
+        version: link:../../packages/sifen-xsd
       drizzle-orm:
         specifier: 0.45.3
         version: 0.45.3(@electric-sql/pglite@0.5.8)(@types/pg@8.23.1)(pg@8.23.0)
@@ -230,6 +236,9 @@ importers:
       '@sifen/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@sifen/sifen-tips':
+        specifier: workspace:*
+        version: link:../../packages/sifen-tips
       '@swc/core':
         specifier: 1.16.2
         version: 1.16.2(@swc/helpers@0.5.23)
@@ -5562,7 +5571,7 @@ snapshots:
     dependencies:
       '@vitest/istanbul-lib-coverage': 1.0.1
 
-  '@vitest/mocker@5.0.1(vite@8.3.0(@types/node@22.20.4)(jiti@2.7.0))':
+  '@vitest/mocker@5.0.1(vite@8.3.0(@types/node@22.20.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))':
     dependencies:
       '@jridgewell/trace-mapping': 0.3.31
       '@vitest/spy': 5.0.1
@@ -7478,7 +7487,7 @@ snapshots:
   vitest@5.0.1(@types/node@22.20.4)(@vitest/coverage-v8@5.0.1)(jsdom@30.1.1)(vite@8.3.0(@types/node@22.20.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)):
     dependencies:
       '@types/chai': 5.2.3
-      '@vitest/mocker': 5.0.1(vite@8.3.0(@types/node@22.20.4)(jiti@2.7.0))
+      '@vitest/mocker': 5.0.1(vite@8.3.0(@types/node@22.20.4)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
       chai: 6.2.2
       es-module-lexer: 2.3.2
       expect-type: 1.4.0

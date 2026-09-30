@@ -92,17 +92,23 @@ describe('tenant_establishments / tenant_expedition_points / tenant_timbrados', 
           tenantId: tenantA,
           code: '001',
           address: 'Av. Mariscal Lopez 123',
+          houseNumber: '123',
           departmentCode: '11',
           districtCode: '145',
+          districtDescription: 'Asuncion',
           cityCode: '3432',
+          cityDescription: 'Asuncion',
         },
         {
           tenantId: tenantB,
           code: '001',
           address: 'Av. Espana 456',
+          houseNumber: '456',
           departmentCode: '1',
           districtCode: '1',
+          districtDescription: 'Distrito 1',
           cityCode: '1',
+          cityDescription: 'Ciudad 1',
         },
       ])
       .returning();
@@ -172,9 +178,12 @@ describe('tenant_establishments / tenant_expedition_points / tenant_timbrados', 
           tenantId: tenantC,
           code: '000',
           address: 'Calle Falsa 123',
+          houseNumber: '123',
           departmentCode: '1',
           districtCode: '1',
+          districtDescription: 'Distrito',
           cityCode: '1',
+          cityDescription: 'Ciudad',
         }),
         'tenant_establishments_code_format',
       );
@@ -188,9 +197,12 @@ describe('tenant_establishments / tenant_expedition_points / tenant_timbrados', 
           tenantId: tenantC,
           code: '002',
           address: 'Calle Falsa 123',
+          houseNumber: '123',
           departmentCode: 'AB',
           districtCode: '1',
+          districtDescription: 'Distrito',
           cityCode: '1',
+          cityDescription: 'Ciudad',
         }),
         'tenant_establishments_department_code_format',
       );
@@ -204,9 +216,12 @@ describe('tenant_establishments / tenant_expedition_points / tenant_timbrados', 
           tenantId: tenantC,
           code: '002',
           address: 'Calle Falsa 123',
+          houseNumber: '123',
           departmentCode: '1',
           districtCode: 'abcd',
+          districtDescription: 'Distrito',
           cityCode: '1',
+          cityDescription: 'Ciudad',
         }),
         'tenant_establishments_district_code_format',
       );
@@ -220,12 +235,71 @@ describe('tenant_establishments / tenant_expedition_points / tenant_timbrados', 
           tenantId: tenantC,
           code: '002',
           address: 'Calle Falsa 123',
+          houseNumber: '123',
           departmentCode: '1',
           districtCode: '1',
+          districtDescription: 'Distrito',
           cityCode: 'abcde',
+          cityDescription: 'Ciudad',
         }),
         'tenant_establishments_city_code_format',
       );
+    });
+
+    it('rejects an establishment with district_code set but district_description null', async () => {
+      const { db, tenantC } = await seed();
+
+      await expectConstraintViolation(
+        db.insert(tenantEstablishments).values({
+          tenantId: tenantC,
+          code: '002',
+          address: 'Calle Falsa 123',
+          houseNumber: '123',
+          departmentCode: '1',
+          districtCode: '1',
+          cityCode: '1',
+          cityDescription: 'Ciudad',
+        }),
+        'tenant_establishments_district_code_description_pairing',
+      );
+    });
+
+    it('rejects an establishment with district_description set but district_code null', async () => {
+      const { db, tenantC } = await seed();
+
+      await expectConstraintViolation(
+        db.insert(tenantEstablishments).values({
+          tenantId: tenantC,
+          code: '002',
+          address: 'Calle Falsa 123',
+          houseNumber: '123',
+          departmentCode: '1',
+          districtDescription: 'Distrito',
+          cityCode: '1',
+          cityDescription: 'Ciudad',
+        }),
+        'tenant_establishments_district_code_description_pairing',
+      );
+    });
+
+    it('accepts an establishment with no district code or description', async () => {
+      const { db, tenantC } = await seed();
+
+      const [row] = await db
+        .insert(tenantEstablishments)
+        .values({
+          tenantId: tenantC,
+          code: '002',
+          address: 'Calle Falsa 123',
+          houseNumber: '123',
+          departmentCode: '1',
+          cityCode: '1',
+          cityDescription: 'Ciudad',
+        })
+        .returning();
+      const inserted = required(row, 'establishment was not inserted');
+      expect(inserted.districtCode).toBeNull();
+      expect(inserted.districtDescription).toBeNull();
     });
 
     it('rejects an expedition point code outside the 3-digit, non-000 format', async () => {
@@ -318,9 +392,12 @@ describe('tenant_establishments / tenant_expedition_points / tenant_timbrados', 
             tenantId: tenantB,
             code: '099',
             address: 'Forged address',
+            houseNumber: '1',
             departmentCode: '1',
             districtCode: '1',
+            districtDescription: 'Distrito',
             cityCode: '1',
+            cityDescription: 'Ciudad',
           }),
         ),
         'tenant_establishments',

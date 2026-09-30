@@ -9,6 +9,7 @@ import {
   issueApiKey,
   revokeApiKey,
   setFiscalProfile,
+  setTenantEnvironment,
 } from './commands.js';
 
 /**
@@ -72,6 +73,13 @@ export async function runOpsCommand(db: Database, command: OpsCommand): Promise<
         timbrado: command.timbrado,
       });
       return `timbrado created: ${result.id} (number ${result.number})`;
+    }
+    case 'tenant:environment': {
+      const result = await setTenantEnvironment(db, {
+        tenantId: command.tenantId,
+        environment: command.environment,
+      });
+      return `tenant environment set: ${result.id} (${result.environment})`;
     }
   }
 }

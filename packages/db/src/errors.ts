@@ -40,14 +40,3 @@ export class PrivilegedSessionError extends Error {
     this.name = 'PrivilegedSessionError';
   }
 }
-
-/**
- * Thrown by `nextDocumentNumber` when a sequence already issued 9999999
- * (MT v150 dNumDoc maximum). Moving to the next series is HU-E4-02.
- */
-export class DocumentNumberExhaustedError extends Error {
-  constructor() {
-    super('dNumDoc exhausted: the sequence already issued 9999999');
-    this.name = 'DocumentNumberExhaustedError';
-  }
-}

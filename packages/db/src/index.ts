@@ -25,9 +25,4 @@ export { withTenantTransaction, type TenantTx } from './tenant-transaction.js';
 export { withAppRoleTransaction, type AppRoleTx } from './app-role-transaction.js';
 export { assertNonPrivilegedSession } from './session-guard.js';
 export { TenantAwareProcessor, type TenantJob } from './tenant-aware-processor.js';
-export {
-  DocumentNumberExhaustedError,
-  MAX_DOCUMENT_NUMBER,
-  nextDocumentNumber,
-  type DocumentSequenceKey,
-} from './document-number.js';
+export * from './document-number.js';

@@ -17,13 +17,6 @@ import {
 import { withTenantTransaction } from '../src/tenant-transaction.js';
 import { createTestDatabase } from './support/harness.js';
 
-function required<T>(value: T | undefined, message: string): T {
-  if (value === undefined) {
-    throw new Error(message);
-  }
-  return value;
-}
-
 async function causeMessage(promise: Promise<unknown>): Promise<string> {
   try {
     await promise;
@@ -47,8 +40,8 @@ describe('nextDocumentNumber (dNumDoc numbering)', () => {
       .insert(tenants)
       .values([{ name: 'Tenant A' }, { name: 'Tenant B' }])
       .returning();
-    const tenantA = required(a, 'tenant A').id;
-    const tenantB = required(b, 'tenant B').id;
+    const tenantA = a.id;
+    const tenantB = b.id;
 
     async function fiscalSetup(tenantId: string) {
       const [est] = await db
@@ -65,7 +58,7 @@ describe('nextDocumentNumber (dNumDoc numbering)', () => {
           cityDescription: 'Asuncion',
         })
         .returning();
-      const establishmentId = required(est, 'establishment').id;
+      const establishmentId = est.id;
       const points = await db
         .insert(tenantExpeditionPoints)
         .values([
@@ -80,12 +73,12 @@ describe('nextDocumentNumber (dNumDoc numbering)', () => {
       const key: DocumentSequenceKey = {
         tenantId,
         environment: 'test',
-        timbradoId: required(tim, 'timbrado').id,
+        timbradoId: tim.id,
         establishmentId,
-        expeditionPointId: required(points[0], 'point 1').id,
+        expeditionPointId: points[0].id,
         documentType: 1,
       };
-      return { key, secondPointId: required(points[1], 'point 2').id };
+      return { key, secondPointId: points[1].id };
     }
 
     const setupA = await fiscalSetup(tenantA);

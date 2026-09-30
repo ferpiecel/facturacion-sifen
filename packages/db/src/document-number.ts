@@ -1,9 +1,17 @@
 import { sql } from 'drizzle-orm';
-import { DocumentNumberExhaustedError } from './errors.js';
 import { tenantDocumentSequences } from './schema.js';
 import type { TenantTx } from './tenant-transaction.js';
 
-export { DocumentNumberExhaustedError };
+/**
+ * Thrown by `nextDocumentNumber` when a sequence already issued 9999999
+ * (MT v150 dNumDoc maximum). Moving to the next series is HU-E4-02.
+ */
+export class DocumentNumberExhaustedError extends Error {
+  constructor() {
+    super('dNumDoc exhausted: the sequence already issued 9999999');
+    this.name = 'DocumentNumberExhaustedError';
+  }
+}
 
 /** Highest `dNumDoc` (MT v150: 7 digits). */
 export const MAX_DOCUMENT_NUMBER = 9_999_999;

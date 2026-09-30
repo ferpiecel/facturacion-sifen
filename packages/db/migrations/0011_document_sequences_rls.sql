@@ -1,6 +1,4 @@
--- RLS + grants for tenant_document_sequences (same pattern as
--- 0008_establishment_tables_rls.sql): app_user is scoped to its own tenant,
--- platform_admin keeps deliberate cross-tenant access.
+-- RLS + grants for tenant_document_sequences (same pattern as 0008).
 ALTER TABLE "tenant_document_sequences" ENABLE ROW LEVEL SECURITY;
 --> statement-breakpoint
 ALTER TABLE "tenant_document_sequences" FORCE ROW LEVEL SECURITY;

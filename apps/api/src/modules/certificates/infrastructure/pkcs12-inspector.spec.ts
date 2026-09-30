@@ -153,6 +153,14 @@ describe('inspectPkcs12 (HU-E3-01)', () => {
     expect(Date.now() - started).toBeLessThan(1_000);
   });
 
+  it('rejects a .p12 bundling more than 10 certificates, bounding chain building', () => {
+    const { p12, password } = issueTestPkcs12(psc, {
+      serialNumber: 'RUC80000005-6',
+      bundle: Array.from({ length: 10 }, () => psc),
+    });
+    expect(rejectionReason(() => inspectPkcs12(p12, password))).toBe('too-many-certificates');
+  });
+
   it('reports a non-RSA private key as unsupported instead of a wrong password', () => {
     const { p12, password } = issueTestPkcs12(psc, {
       serialNumber: 'RUC80000005-6',

@@ -69,9 +69,7 @@ describe('verifyQrUrl', () => {
     ['DigestValue', { digestValue: 'AAAA' }],
     ['IdCSC', { idCsc: '0002' }],
   ] as const)('reports %s when it disagrees with the document', (param, override) => {
-    expect(verifyQrUrl(URL_TEST, { ...EXPECTED, ...override } as QrExpectations, CSC)).toContain(
-      param,
-    );
+    expect(verifyQrUrl(URL_TEST, { ...EXPECTED, ...override }, CSC)).toContain(param);
   });
 
   it('rejects non-hexadecimal encodings and a missing cHashQR', () => {

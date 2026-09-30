@@ -16,7 +16,9 @@ export function qrBaseUrl(environment: QrEnvironment): string {
 
 /** cHashQR: SHA-256 hex of the URL parameters (without cHashQR) concatenated with the CSC. */
 export function computeQrHash(params: string, csc: string): string {
-  return createHash('sha256').update(params + csc).digest('hex');
+  return createHash('sha256')
+    .update(params + csc)
+    .digest('hex');
 }
 
 /** What the signed document says; the QR must agree with it parameter by parameter. */

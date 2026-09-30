@@ -65,7 +65,7 @@ describe('addQrToSignedInvoice', () => {
 
     const message = await addQrToSignedInvoice(tampered, signed, OPTIONS).then(
       () => '',
-      (e: Error) => e.message,
+      (e: unknown) => (e instanceof Error ? e.message : ''),
     );
 
     expect(message).toContain('dTotGralOpe');
@@ -73,7 +73,9 @@ describe('addQrToSignedInvoice', () => {
   });
 
   it('fails when the generator returns XML that breaks the XSD', async () => {
-    const broken: QrGenerator = { addQr: (xml) => Promise.resolve(xml.replace('<dVerFor>150', '<dVerFor>x')) };
+    const broken: QrGenerator = {
+      addQr: (xml) => Promise.resolve(xml.replace('<dVerFor>150', '<dVerFor>x')),
+    };
 
     await expect(addQrToSignedInvoice(broken, signed, OPTIONS)).rejects.toBeInstanceOf(
       InvoiceQrError,

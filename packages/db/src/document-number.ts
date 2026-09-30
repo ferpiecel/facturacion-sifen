@@ -60,7 +60,7 @@ export async function nextDocumentNumber(
     throw new InvalidDocumentTypeError(key.documentType);
   }
   const t = tenantDocumentSequences;
-  const [current]: ({ series: string; lastNumber: number } | undefined)[] = await tx
+  const locked = await tx
     .select({ series: t.series, lastNumber: t.lastNumber })
     .from(t)
     .where(
@@ -77,6 +77,7 @@ export async function nextDocumentNumber(
     .orderBy(desc(t.series))
     .limit(1)
     .for('update');
+  const current = locked.at(0);
 
   const exhausted = current?.lastNumber === MAX_DOCUMENT_NUMBER;
   // Callers queued behind a rollover land here with the same exhausted row:

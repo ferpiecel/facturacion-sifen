@@ -5,6 +5,7 @@ import {
   foreignKey,
   index,
   integer,
+  jsonb,
   primaryKey,
   pgEnum,
   pgTable,
@@ -346,6 +347,38 @@ export const tenantTimbrados = pgTable(
   ],
 );
 
+/** `audit_log.actor_type`: who performed the audited write. */
+export const auditActorType = pgEnum('audit_actor_type', ['api_key', 'user', 'operator']);
+
+/**
+ * Append-only audit trail (HU-E13-01, RF-16, RNF-08). `before`/`after` are
+ * stored already redacted (the API's `redact`). UPDATE/DELETE/TRUNCATE are
+ * rejected by a trigger (migration 0014) and app_user only has
+ * SELECT/INSERT. HU-E13-02 will add nullable `prev_hash`/`hash` columns.
+ */
+export const auditLog = pgTable(
+  'audit_log',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+    actorType: auditActorType('actor_type').notNull(),
+    actorId: varchar('actor_id', { length: 255 }).notNull(),
+    action: varchar('action', { length: 100 }).notNull(),
+    entityType: varchar('entity_type', { length: 100 }).notNull(),
+    entityId: varchar('entity_id', { length: 255 }).notNull(),
+    before: jsonb('before'),
+    after: jsonb('after'),
+  },
+  (table) => [
+    index('audit_log_tenant_occurred_at_idx').on(table.tenantId, table.occurredAt),
+    check('audit_log_action_not_blank', sql`btrim(${table.action}) <> ''`),
+    check('audit_log_entity_id_not_blank', sql`btrim(${table.entityId}) <> ''`),
+  ],
+);
+
 /**
  * Last assigned `dNumDoc` (MT v150 C005, 7 digits: 0000001..9999999) per
  * (environment, timbrado, establishment, expedition point, document type)
@@ -410,6 +443,7 @@ export const tenantDocumentSequences = pgTable(
  */
 export const TENANT_TABLES = [
   'api_keys',
+  'audit_log',
   'tenant_document_sequences',
   'tenant_establishments',
   'tenant_expedition_points',

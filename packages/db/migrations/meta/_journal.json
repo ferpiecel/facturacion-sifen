@@ -92,6 +92,20 @@
       "when": 1790768732979,
       "tag": "0012_document_sequences_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1790769958952,
+      "tag": "0013_audit_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1790769958953,
+      "tag": "0014_audit_log_rls",
+      "breakpoints": true
     }
   ]
 }

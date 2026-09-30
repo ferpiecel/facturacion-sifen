@@ -62,7 +62,7 @@ describe('verifyQrUrl', () => {
     ['Id', { cdc: '1'.repeat(44) }],
     ['dFeEmiDE', { issuedAt: '2026-09-30T19:10:56' }],
     ['dRucRec', { receiver: { kind: 'ruc', value: '80000003' } }],
-    ['dRucRec', { receiver: { kind: 'document', value: '80000002' } }],
+    ['dNumIDRec', { receiver: { kind: 'document', value: '80000002' } }],
     ['dTotGralOpe', { totalOperation: 10001 }],
     ['dTotIVA', { totalVat: 0 }],
     ['cItems', { itemCount: 2 }],

@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type { LoadedCertificate, QrGenerator } from '@sifen/sifen-gateway';
 import { validateXml } from '@sifen/sifen-xsd';
 import { TipsDeXmlBuilder, TipsQrGenerator, TipsXmlSigner } from '@sifen/sifen-tips';
-import { pocFacturaInput } from '../../../../../../packages/sifen-tips/test/fixtures/poc-factura-input.ts';
+import { pocFacturaInput } from '../../../../test/fixtures/poc-factura-input.js';
 import { generateDevCertificate } from '../../../../test/support/dev-certificate.js';
 import { computeQrHash } from '../domain/qr.js';
 import { addQrToSignedInvoice, InvoiceQrError } from './invoice-qr.js';
@@ -56,21 +56,24 @@ describe('addQrToSignedInvoice', () => {
 
   it('fails without leaking the CSC when the generator output is wrong', async () => {
     const tampered: QrGenerator = {
-      addQr: async (xml, config) => {
-        const out = await new TipsQrGenerator().addQr(xml, config);
-        return out.replace(/dTotGralOpe=\d+/, 'dTotGralOpe=1');
+      addQr: (xml, config) => {
+        return new TipsQrGenerator()
+          .addQr(xml, config)
+          .then((out) => out.replace(/dTotGralOpe=\d+/, 'dTotGralOpe=1'));
       },
     };
 
-    const error = await addQrToSignedInvoice(tampered, signed, OPTIONS).catch((e: unknown) => e);
+    const message = await addQrToSignedInvoice(tampered, signed, OPTIONS).then(
+      () => '',
+      (e: Error) => e.message,
+    );
 
-    expect(error).toBeInstanceOf(InvoiceQrError);
-    expect((error as Error).message).toContain('dTotGralOpe');
-    expect((error as Error).message).not.toContain(CSC);
+    expect(message).toContain('dTotGralOpe');
+    expect(message).not.toContain(CSC);
   });
 
   it('fails when the generator returns XML that breaks the XSD', async () => {
-    const broken: QrGenerator = { addQr: async (xml) => xml.replace('<dVerFor>150', '<dVerFor>x') };
+    const broken: QrGenerator = { addQr: (xml) => Promise.resolve(xml.replace('<dVerFor>150', '<dVerFor>x')) };
 
     await expect(addQrToSignedInvoice(broken, signed, OPTIONS)).rejects.toBeInstanceOf(
       InvoiceQrError,
@@ -78,7 +81,7 @@ describe('addQrToSignedInvoice', () => {
   });
 
   it('fails when the generator adds no QR at all', async () => {
-    const none: QrGenerator = { addQr: vi.fn(async (xml: string) => xml) };
+    const none: QrGenerator = { addQr: vi.fn((xml: string) => Promise.resolve(xml)) };
 
     await expect(addQrToSignedInvoice(none, signed, OPTIONS)).rejects.toBeInstanceOf(
       InvoiceQrError,
@@ -86,11 +89,12 @@ describe('addQrToSignedInvoice', () => {
   });
 
   it('rejects an XML that is not a signed invoice before calling the generator', async () => {
-    const generator: QrGenerator = { addQr: vi.fn() };
+    const addQr = vi.fn<QrGenerator['addQr']>();
+    const generator: QrGenerator = { addQr };
 
     await expect(
       addQrToSignedInvoice(generator, '<rDE><DE/></rDE>', OPTIONS),
     ).rejects.toBeInstanceOf(InvoiceQrError);
-    expect(generator.addQr).not.toHaveBeenCalled();
+    expect(addQr).not.toHaveBeenCalled();
   });
 });

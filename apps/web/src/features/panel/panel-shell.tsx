@@ -30,7 +30,11 @@ function Logo() {
   return (
     <Image
       src={BRAND.logoSrc}
+<<<<<<< HEAD
       alt={BRAND.name}
+=======
+      alt=""
+>>>>>>> origin/main
       width={220}
       height={50}
       className="h-8 w-auto object-contain"
@@ -56,6 +60,15 @@ function Sidebar({ activePath }: { activePath: string }) {
       <div className="flex flex-col">
         <div className="flex h-16 items-center gap-space-sm px-space-md">
           <Logo />
+<<<<<<< HEAD
+=======
+          <div className="flex flex-col">
+            <span className="font-headline-md text-headline-md tracking-tight text-on-surface">
+              {BRAND.name}
+            </span>
+            <span className="font-code-sm text-code-sm text-outline">{BRAND.tagline}</span>
+          </div>
+>>>>>>> origin/main
         </div>
         <div className="px-space-md py-space-sm">
           <div className="flex items-center justify-between rounded-lg bg-surface-container-low p-space-sm">
@@ -127,6 +140,12 @@ function Topbar() {
     <header className="flex h-16 items-center justify-between bg-surface-container-lowest/90 px-space-lg shadow-[0_1px_8px_rgba(0,0,0,0.04)] backdrop-blur-xl">
       <div className="flex items-center gap-space-md">
         <Logo />
+<<<<<<< HEAD
+=======
+        <span className="font-headline-md text-headline-md tracking-tight text-on-surface">
+          {BRAND.name}
+        </span>
+>>>>>>> origin/main
         <div className="flex items-center gap-space-xs rounded-full bg-surface-container-low px-space-sm py-1">
           <span
             aria-hidden="true"

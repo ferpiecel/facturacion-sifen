@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import HomePage from './page';
 
 describe('HomePage (Panel de Control)', () => {
+<<<<<<< HEAD
   it('welcomes the user with the brand name in a single top-level heading', () => {
     render(<HomePage />);
 
@@ -21,6 +22,8 @@ describe('HomePage (Panel de Control)', () => {
     expect(screen.queryByText('DNIT FACTURACIÓN PY')).not.toBeInTheDocument();
   });
 
+=======
+>>>>>>> origin/main
   it('shows the non-dismissible test-environment legend and no environment toggle', () => {
     render(<HomePage />);
 
@@ -39,6 +42,7 @@ describe('HomePage (Panel de Control)', () => {
     expect(within(nav).getAllByRole('link')).toHaveLength(3);
   });
 
+<<<<<<< HEAD
   it('lists recent documents with status, 44-digit CDC and Guaraní amounts', () => {
     render(<HomePage />);
 
@@ -52,6 +56,8 @@ describe('HomePage (Panel de Control)', () => {
     expect(within(table).getByText('-₲ 650.000')).toHaveClass('text-error');
   });
 
+=======
+>>>>>>> origin/main
   it('labels icon-only controls for assistive technology', () => {
     render(<HomePage />);
 
@@ -59,6 +65,7 @@ describe('HomePage (Panel de Control)', () => {
     expect(screen.getByRole('button', { name: 'Cerrar sesión' })).toBeInTheDocument();
     expect(screen.getByRole('searchbox', { name: 'Buscar comprobantes' })).toBeInTheDocument();
   });
+<<<<<<< HEAD
 
   it('keeps the hero text readable over the whole gradient', () => {
     render(<HomePage />);
@@ -87,4 +94,6 @@ describe('HomePage (Panel de Control)', () => {
     expect(scroller).toHaveAttribute('tabindex', '0');
     expect(scroller).toContainElement(table);
   });
+=======
+>>>>>>> origin/main
 });

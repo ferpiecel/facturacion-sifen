@@ -1,4 +1,4 @@
-import { parseArgs } from 'node:util';
+import { parseArgs, type ParseArgsConfig } from 'node:util';
 import {
   createEstablishment,
   type Establishment,
@@ -45,6 +45,27 @@ export type OpsCommand =
       idCsc: string;
       csc: string;
     };
+
+/**
+ * `parseArgs` wrapper: stray positionals (a forgotten flag, an unquoted value)
+ * and parser errors become fixed messages, because node's own errors echo the
+ * offending argv value, which for `csc:add` may be the CSC.
+ */
+function parseStrict<T extends ParseArgsConfig>(config: T) {
+  try {
+    const result = parseArgs({ ...config, allowPositionals: true });
+    if (result.positionals.length > 0) {
+      throw new OpsArgError('unexpected positional argument (value hidden)');
+    }
+    return result;
+  } catch (error) {
+    if (error instanceof OpsArgError) {
+      throw error;
+    }
+    const code = (error as { code?: string }).code ?? 'ERR_PARSE_ARGS';
+    throw new OpsArgError(`invalid arguments (${code})`);
+  }
+}
 
 function requireOption(value: string | undefined, flag: string): string {
   if (!value) {
@@ -139,11 +160,11 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
 
   switch (subcommand) {
     case 'partner:create': {
-      const { values } = parseArgs({ args: rest, options: { name: { type: 'string' } } });
+      const { values } = parseStrict({ args: rest, options: { name: { type: 'string' } } });
       return { kind: 'partner:create', name: requireOption(values.name, 'name') };
     }
     case 'tenant:create': {
-      const { values } = parseArgs({
+      const { values } = parseStrict({
         args: rest,
         options: { name: { type: 'string' }, partner: { type: 'string' } },
       });
@@ -154,7 +175,7 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
       };
     }
     case 'apikey:create': {
-      const { values } = parseArgs({
+      const { values } = parseStrict({
         args: rest,
         options: {
           tenant: { type: 'string' },
@@ -172,11 +193,11 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
       };
     }
     case 'apikey:revoke': {
-      const { values } = parseArgs({ args: rest, options: { 'key-id': { type: 'string' } } });
+      const { values } = parseStrict({ args: rest, options: { 'key-id': { type: 'string' } } });
       return { kind: 'apikey:revoke', keyId: requireOption(values['key-id'], 'key-id') };
     }
     case 'fiscal:set': {
-      const { values } = parseArgs({
+      const { values } = parseStrict({
         args: rest,
         options: {
           tenant: { type: 'string' },
@@ -205,7 +226,7 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
       };
     }
     case 'establishment:add': {
-      const { values } = parseArgs({
+      const { values } = parseStrict({
         args: rest,
         options: {
           tenant: { type: 'string' },
@@ -247,7 +268,7 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
       };
     }
     case 'point:add': {
-      const { values } = parseArgs({
+      const { values } = parseStrict({
         args: rest,
         options: {
           tenant: { type: 'string' },
@@ -266,7 +287,7 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
       };
     }
     case 'timbrado:add': {
-      const { values } = parseArgs({
+      const { values } = parseStrict({
         args: rest,
         options: {
           tenant: { type: 'string' },
@@ -289,7 +310,7 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
       };
     }
     case 'tenant:environment': {
-      const { values } = parseArgs({
+      const { values } = parseStrict({
         args: rest,
         options: {
           tenant: { type: 'string' },
@@ -312,7 +333,7 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
       };
     }
     case 'csc:add': {
-      const { values } = parseArgs({
+      const { values } = parseStrict({
         args: rest,
         options: {
           tenant: { type: 'string' },

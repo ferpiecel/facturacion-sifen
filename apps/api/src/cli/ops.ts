@@ -20,6 +20,10 @@ import {
  * closed without `KMS_LOCAL_MASTER_KEY` unless `NODE_ENV` is development/test.
  */
 export function createCscVault(env: NodeJS.ProcessEnv): CscVault {
+  // Unlike the API, never accept the throwaway dev key: a CSC sealed with it is unrecoverable.
+  if (!env.KMS_LOCAL_MASTER_KEY) {
+    throw new Error('csc:add requires KMS_LOCAL_MASTER_KEY (a throwaway key would lose the CSC)');
+  }
   return new CscVault(new EnvelopeCipher(createLocalKms(env.KMS_LOCAL_MASTER_KEY, env.NODE_ENV)));
 }
 
@@ -127,28 +131,73 @@ export function formatOpsError(error: unknown): string {
   return error.message.startsWith('Failed query') ? 'database query failed' : error.message;
 }
 
+/** `--csc -` reads the CSC from stdin so it never lands in shell history or `ps`. */
+async function resolveStdinCsc(
+  argv: string[],
+  readStdin: () => Promise<string>,
+): Promise<string[]> {
+  const index = argv.indexOf('--csc');
+  if (argv[0] !== 'csc:add' || argv[index + 1] !== '-') {
+    return argv;
+  }
+  const value = (await readStdin()).replace(/\r?\n$/, '');
+  return argv.map((arg, position) => (position === index + 1 ? value : arg));
+}
+
+export interface CliIo {
+  argv: string[];
+  env: NodeJS.ProcessEnv;
+  readStdin: () => Promise<string>;
+  out: (text: string) => void;
+  err: (text: string) => void;
+  openDb: (url: string) => { db: Database; close: () => Promise<void> };
+}
+
+/** Runs one CLI invocation; returns the process exit code. Never prints argv values. */
+export async function runCli(io: CliIo): Promise<number> {
+  try {
+    const url = getOpsDatabaseUrl(io.env);
+    const command = parseOpsArgs(await resolveStdinCsc(io.argv, io.readStdin));
+    const vault = command.kind === 'csc:add' ? createCscVault(io.env) : undefined;
+    const handle = io.openDb(url);
+    try {
+      io.out(await runOpsCommand(handle.db, command, vault));
+    } finally {
+      await handle.close();
+    }
+    return 0;
+  } catch (error) {
+    io.err(formatOpsError(error));
+    return 1;
+  }
+}
+
 // Process entrypoint below, exercised by the manual docker check (see
 // README's "Operación" section) and excluded from coverage in
 // vitest.config.ts, not by unit tests.
-async function main(): Promise<void> {
-  const url = getOpsDatabaseUrl(process.env);
-  const command = parseOpsArgs(process.argv.slice(2));
-
-  const handle = createNodePostgresDatabase(url);
-  try {
-    const vault = command.kind === 'csc:add' ? createCscVault(process.env) : undefined;
-    const output = await runOpsCommand(handle.db, command, vault);
-    console.log(output);
-  } finally {
-    await handle.close();
+async function readProcessStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(Buffer.from(chunk as Uint8Array));
   }
+  return Buffer.concat(chunks).toString('utf8');
 }
 
 const isMainModule =
   process.argv[1] && import.meta.url === new URL(process.argv[1], 'file://').href;
 if (isMainModule) {
-  main().catch((error: unknown) => {
-    console.error(formatOpsError(error));
-    process.exitCode = 1;
+  void runCli({
+    argv: process.argv.slice(2),
+    env: process.env,
+    readStdin: readProcessStdin,
+    out: (text) => {
+      console.log(text);
+    },
+    err: (text) => {
+      console.error(text);
+    },
+    openDb: createNodePostgresDatabase,
+  }).then((code) => {
+    process.exitCode = code;
   });
 }

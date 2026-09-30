@@ -294,11 +294,8 @@ describe('runCli csc:add (HU-E2-03)', () => {
     handle = undefined;
   });
 
-  async function run(
-    argv: (tenantId: string) => string[],
-    stdin = '',
-    key: string | undefined = MASTER_KEY,
-  ) {
+  async function run(argv: (tenantId: string) => string[], stdin = '', key = MASTER_KEY) {
+    await handle?.close();
     handle = createPgliteDatabase();
     await handle.migrate();
     const { id: tenantId } = await createTenant(handle.db, 'Cli Tenant');
@@ -354,7 +351,7 @@ describe('runCli csc:add (HU-E2-03)', () => {
       CSC,
     ]);
     const unknown = await run(() => args('00000000-0000-4000-8000-000000000000', CSC));
-    const noKey = await run((t) => args(t, CSC), '', undefined);
+    const noKey = await run((t) => args(t, CSC), '', '');
     const badStdin = await run((t) => args(t, '-'), 'short\n');
     for (const result of [positional, unknown, noKey, badStdin]) {
       expect(result.code).toBe(1);

@@ -1,6 +1,6 @@
--- Manual rollback for 0012_audit_log_rls.sql. Not registered in the drizzle
+-- Manual rollback for 0014_audit_log_rls.sql. Not registered in the drizzle
 -- journal: run by hand if this PR is reverted. Does not drop the table
--- (0011_audit_log.sql owns it) nor the cluster-wide audit_maintenance role.
+-- (0013_audit_log.sql owns it) nor the cluster-wide audit_maintenance role.
 DROP TRIGGER IF EXISTS "audit_log_no_truncate" ON "audit_log";
 DROP TRIGGER IF EXISTS "audit_log_append_only" ON "audit_log";
 DROP FUNCTION IF EXISTS audit_log_reject_mutation();

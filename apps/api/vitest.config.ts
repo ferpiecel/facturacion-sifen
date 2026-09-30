@@ -14,6 +14,9 @@ export default defineConfig({
     include: ['src/**/*.spec.ts', 'test/**/*.spec.ts'],
     // Tenancy integration specs boot PGlite and apply every migration; CI
     // runners need more than the 5 s default as migrations accumulate.
+    // The process timezone must never leak into fiscal timestamps (xmlgen formats
+    // dates with local getters): run the whole suite under UTC, where any leak shows.
+    env: { TZ: 'UTC' },
     testTimeout: 30_000,
     hookTimeout: 30_000,
     coverage: {

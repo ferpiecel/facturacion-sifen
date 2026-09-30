@@ -16,7 +16,7 @@ import {
   type InvoiceXmlContext,
 } from './invoice-xml.js';
 
-const ruc = parseRuc('80000001-9');
+const ruc = parseRuc('80000001-3');
 
 const draft: InvoiceDraft = {
   receiver: { kind: 'named', isPublicEntity: false },
@@ -50,6 +50,7 @@ function context(environment: 'test' | 'production'): InvoiceXmlContext {
       cityCode: '3432',
       cityDescription: 'PUERTO PTE.STROESSNER (MUNIC)',
     }),
+    establishmentContact: { phone: '0973-000000', email: 'emisor@test.com', name: 'Casa Matriz' },
     point: createExpeditionPoint({ code: '001' }),
     timbrado: createTimbrado({ number: '12345678', validityStart: '2024-01-01' }),
     numbering: { documentNumber: '0000001', securityCode: '298398000' },
@@ -81,7 +82,7 @@ describe('generateInvoiceXml', () => {
       buildCdc({
         documentType: '01',
         rucBase: '80000001',
-        rucDv: 9,
+        rucDv: 3,
         establishment: '001',
         point: '001',
         documentNumber: '0000001',
@@ -119,7 +120,7 @@ describe('generateInvoiceXml', () => {
     expect(body).not.toMatch(/<(\w+)><\/\1>/);
     expect(body).not.toMatch(/>-\d/);
     expect(body).not.toMatch(/<\w+:/);
-    expect(body).toMatch(/<dTotOpe>12050<\/dTotOpe>/);
+    expect(body).toMatch(/<dTotOpe>11050<\/dTotOpe>/);
   });
 
   it('rejects an invalid draft before building anything', async () => {
@@ -133,9 +134,7 @@ describe('generateInvoiceXml', () => {
   it('rejects an unnamed receiver, which this mapper does not support yet', async () => {
     const unnamed = { ...draft, receiver: { kind: 'unnamed' } as const };
 
-    await expect(generateInvoiceXml(builder, unnamed, context('test'))).rejects.toThrow(
-      /unnamed/,
-    );
+    await expect(generateInvoiceXml(builder, unnamed, context('test'))).rejects.toThrow(/unnamed/);
   });
 
   it('reports XSD errors other than the not-yet-applied signature', async () => {
@@ -157,7 +156,9 @@ describe('SIFEN and receiver variants (rule 2503, J003)', () => {
   });
 
   it('escapes the additional information', () => {
-    expect(toReceiverXml(withQr, 'A & B <c>')).toContain('<dInfAdic>A &amp; B &lt;c&gt;</dInfAdic>');
+    expect(toReceiverXml(withQr, 'A & B <c>')).toContain(
+      '<dInfAdic>A &amp; B &lt;c&gt;</dInfAdic>',
+    );
   });
 
   it('strips dInfAdic from the SIFEN version and leaves the rest byte-identical', () => {

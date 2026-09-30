@@ -425,6 +425,9 @@ export const tenantDocumentSequences = pgTable(
     establishmentId: uuid('establishment_id').notNull(),
     expeditionPointId: uuid('expedition_point_id').notNull(),
     documentType: smallint('document_type').notNull(),
+    /** `dSerieNum`; '' while numbering runs without a series (rule 1110). */
+    series: varchar('series', { length: 2 }).notNull().default(''),
+    seriesStartedAt: timestamp('series_started_at', { withTimezone: true }).notNull().defaultNow(),
     lastNumber: integer('last_number').notNull().default(0),
   },
   (table) => [
@@ -436,6 +439,7 @@ export const tenantDocumentSequences = pgTable(
         table.establishmentId,
         table.expeditionPointId,
         table.documentType,
+        table.series,
       ],
       name: 'tenant_document_sequences_pkey',
     }),
@@ -456,6 +460,10 @@ export const tenantDocumentSequences = pgTable(
     check(
       'tenant_document_sequences_document_type_range',
       sql`${table.documentType} BETWEEN 1 AND 8`,
+    ),
+    check(
+      'tenant_document_sequences_series_format',
+      sql`${table.series} = '' OR ${table.series} ~ '^[A-Z]{2}$'`,
     ),
     check(
       'tenant_document_sequences_last_number_range',

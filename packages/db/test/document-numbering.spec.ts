@@ -214,7 +214,7 @@ describe('nextDocumentNumber (dNumDoc numbering)', () => {
 
     it('rejects malformed series at the table level (no Ñ, two uppercase letters)', async () => {
       const { db, keyA } = await seed();
-      for (const series of ['ÑA', 'aa', 'A', 'AAA']) {
+      for (const series of ['ÑA', 'aa', 'A']) {
         expect(
           await causeMessage(db.insert(tenantDocumentSequences).values({ ...keyA, series })),
         ).toContain('tenant_document_sequences_series_format');

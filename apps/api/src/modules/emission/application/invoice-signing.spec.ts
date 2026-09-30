@@ -12,12 +12,11 @@ import { createTimbrado } from '../../fiscal-config/domain/timbrado.js';
 import type { InvoiceDraft } from '../domain/invoice-draft.js';
 import type { InvoiceXmlContext } from './invoice-xml.js';
 import { buildSignedInvoice, signInvoiceXml } from './invoice-signing.js';
-import { InvoiceXmlError, generateInvoiceXml } from './invoice-xml.js';
+import { InvoiceXmlError, asuncionTimestamp, generateInvoiceXml } from './invoice-xml.js';
 
 const PASSWORD = 'throwaway-test-password';
 const MISSING_QR_GROUP =
   "Element '{http://ekuatia.set.gov.py/sifen/xsd}rDE': Missing child element(s). Expected is ( {http://ekuatia.set.gov.py/sifen/xsd}gCamFuFD ).";
-const SIGNED_AT = new Date('2026-09-30T13:00:05Z');
 
 /** Throwaway self-signed certificate (RUC in the subject serialNumber, as DNIT issues them). */
 function throwawayMaterial(): { material: LoadedCertificate; certPem: string } {
@@ -103,30 +102,37 @@ describe('HU-E5-05 invoice signing', () => {
     unsigned = await generateInvoiceXml(builder, draft, context);
   });
 
-  it('signs the DE and returns the signature instant; only the post-signature QR group is still missing', async () => {
-    const result = await signInvoiceXml(signer, unsigned.xml, material, () => SIGNED_AT);
+  it('signs the DE; only the post-signature QR group is still missing', async () => {
+    const result = await signInvoiceXml(signer, unsigned.xml, material);
 
-    expect(result.signedAt).toEqual(SIGNED_AT);
     expect(validateXml(result.xml, 'siRecepDE').errors.map((e) => e.message)).toEqual([
       MISSING_QR_GROUP,
     ]);
   });
 
   it('builds an enveloped RSA-SHA256 signature over #CDC whose digest and value verify', async () => {
-    const { xml } = await signInvoiceXml(signer, unsigned.xml, material, () => SIGNED_AT);
+    const { xml } = await signInvoiceXml(signer, unsigned.xml, material);
     const signatureXml = xml.match(/<Signature[\s\S]*?<\/Signature>/)?.[0] ?? '';
 
     expect(signatureXml).toContain(`<Reference URI="#${unsigned.cdc}"`);
     expect(signatureXml).toContain('http://www.w3.org/2000/09/xmldsig#enveloped-signature');
     expect(signatureXml).toContain('http://www.w3.org/2001/04/xmldsig-more#rsa-sha256');
     expect(signatureXml).toContain('http://www.w3.org/2001/04/xmlenc#sha256');
+    expect(signatureXml).toContain(
+      '<CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"',
+    );
+    // D8 (ADR-0015) pending: the library applies two Transforms (enveloped + exc-c14n) whereas NT 016 describes one.
+    expect([...signatureXml.matchAll(/<Transform Algorithm="([^"]*)"/g)].map((m) => m[1])).toEqual([
+      'http://www.w3.org/2000/09/xmldsig#enveloped-signature',
+      'http://www.w3.org/2001/10/xml-exc-c14n#',
+    ]);
     const sig = new SignedXml({ publicCert: certPem });
     sig.loadSignature(signatureXml);
     expect(sig.checkSignature(xml)).toBe(true);
   });
 
   it('carries KeyInfo with X509Certificate only (NT 016: no X509IssuerSerial)', async () => {
-    const { xml } = await signInvoiceXml(signer, unsigned.xml, material, () => SIGNED_AT);
+    const { xml } = await signInvoiceXml(signer, unsigned.xml, material);
     const keyInfo = xml.match(/<KeyInfo[\s\S]*?<\/KeyInfo>/)?.[0] ?? '';
 
     expect(keyInfo).toContain('<X509Certificate>');
@@ -144,17 +150,47 @@ describe('HU-E5-05 invoice signing', () => {
     );
   });
 
-  it('buildSignedInvoice chains generate -> sign -> full validation', async () => {
-    const result = await buildSignedInvoice(
-      { builder, signer },
-      draft,
-      context,
-      material,
-      () => SIGNED_AT,
+  it('invalidates the signature when a schema-valid value changes after signing', async () => {
+    const { xml } = await signInvoiceXml(signer, unsigned.xml, material);
+    const tampered = xml.replace('Receptor Prueba SA', 'Receptor Falso SA');
+    const signatureXml = xml.match(/<Signature[\s\S]*?<\/Signature>/)?.[0] ?? '';
+
+    expect(tampered).not.toBe(xml);
+    expect(validateXml(tampered, 'siRecepDE').errors.map((e) => e.message)).toEqual([
+      MISSING_QR_GROUP,
+    ]);
+    const sig = new SignedXml({ publicCert: certPem });
+    sig.loadSignature(signatureXml);
+    expect(sig.checkSignature(tampered)).toBe(false);
+  });
+
+  it('returns as signedAt the dFecFirma instant the library wrote (America/Asuncion)', async () => {
+    const before = Date.now();
+    const { xml, signedAt } = await signInvoiceXml(signer, unsigned.xml, material);
+
+    const written = xml.match(/<dFecFirma>([^<]*)<\/dFecFirma>/)?.[1];
+    expect(asuncionTimestamp(signedAt)).toBe(written);
+    expect(Math.abs(signedAt.getTime() - before)).toBeLessThan(30_000);
+  });
+
+  it('rejects a signature whose Reference URI is not #<DE Id>', async () => {
+    const wrongReference = {
+      sign: async (xml: string, cert: LoadedCertificate) =>
+        (await signer.sign(xml, cert)).replace(
+          /<Reference URI="#[^"]*"/,
+          '<Reference URI="#other"',
+        ),
+    };
+
+    await expect(signInvoiceXml(wrongReference, unsigned.xml, material)).rejects.toThrow(
+      /Reference URI/,
     );
+  });
+
+  it('buildSignedInvoice chains generate -> sign -> full validation', async () => {
+    const result = await buildSignedInvoice({ builder, signer }, draft, context, material);
 
     expect(result.cdc).toBe(unsigned.cdc);
-    expect(result.signedAt).toEqual(SIGNED_AT);
     expect(result.xml).toContain(`Id="${unsigned.cdc}"`);
     expect(result.xml).toContain('<Signature');
   });

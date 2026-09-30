@@ -1,9 +1,13 @@
 import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { Pool } from 'pg';
+import { PGlite } from '@electric-sql/pglite';
+import { drizzle as drizzlePglite } from 'drizzle-orm/pglite';
+import { migrate as migratePglite } from 'drizzle-orm/pglite/migrator';
+import * as schema from '../../src/schema.js';
 import type { SQLWrapper } from 'drizzle-orm';
 import {
   createNodePostgresDatabase,
-  createPgliteDatabase,
   type Database,
   type DatabaseHandle,
 } from '../../src/client.js';
@@ -26,9 +30,49 @@ export async function createTestDatabase(): Promise<DatabaseHandle> {
     return handle;
   }
 
-  const handle = createPgliteDatabase();
-  await handle.migrate();
-  return handle;
+  return createPgliteFromTemplate();
+}
+
+const MIGRATIONS_FOLDER = fileURLToPath(new URL('../../migrations', import.meta.url));
+
+/**
+ * Applying every migration on a fresh WASM Postgres costs seconds of CPU
+ * and tens of MB per instance; doing it for each of the ~40 databases a
+ * worker creates, across parallel workers, starved the suite (30 s test
+ * timeouts) and exhausted memory (workers SIGKILLed). Migrate once per
+ * worker process, snapshot the data directory, and boot every later
+ * database from that snapshot. `migrate()` on a snapshot is a cheap no-op
+ * (drizzle's journal is part of the dump), so specs that call it still work.
+ */
+let migratedTemplate: Promise<Blob> | undefined;
+
+function migrateClient(client: PGlite): Promise<void> {
+  return migratePglite(drizzlePglite(client, { schema }), {
+    migrationsFolder: MIGRATIONS_FOLDER,
+  });
+}
+
+async function getMigratedTemplate(): Promise<Blob> {
+  migratedTemplate ??= (async () => {
+    const seed = new PGlite();
+    try {
+      await migrateClient(seed);
+      return (await seed.dumpDataDir('none')) as Blob;
+    } finally {
+      await seed.close();
+    }
+  })();
+  return migratedTemplate;
+}
+
+async function createPgliteFromTemplate(): Promise<DatabaseHandle> {
+  const client = new PGlite({ loadDataDir: await getMigratedTemplate() });
+  const db = drizzlePglite(client, { schema });
+  return {
+    db,
+    migrate: () => migrateClient(client),
+    close: () => client.close(),
+  };
 }
 
 async function createPostgresTestDatabase(): Promise<DatabaseHandle> {

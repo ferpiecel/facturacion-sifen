@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildCdc, computeCdcCheckDigit, InvalidCdcError, parseCdc, type CdcParts } from './cdc';
+import { buildCdc, computeCdcCheckDigit, InvalidCdcError, parseCdc, type CdcParts } from './cdc.js';
 
 // Manual Técnico v150, §10.1 worked example.
 const MT_CDC = '01444444017001001001452822017012515873260988';
@@ -13,7 +13,7 @@ const MT_PARTS: CdcParts = {
   taxpayerType: 2,
   issueDate: '2017-01-25',
   emissionType: 1,
-  securityCode: '158732609',
+  securityCode: '587326098',
 };
 
 describe('buildCdc', () => {
@@ -43,7 +43,7 @@ describe('buildCdc', () => {
   it.each([
     ['documentType', { documentType: '00' }],
     ['documentType', { documentType: '09' }],
-    ['rucBase', { rucBase: '12' }],
+    ['rucBase', { rucBase: '123456789' }],
     ['rucDv', { rucDv: 3 }],
     ['establishment', { establishment: '000' }],
     ['establishment', { establishment: '1000' }],

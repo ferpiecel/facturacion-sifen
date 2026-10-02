@@ -1,5 +1,5 @@
-import { and, eq } from 'drizzle-orm';
-import { lotes, withTenantTransaction, type Database } from '@sifen/db';
+import { and, eq, inArray } from 'drizzle-orm';
+import { documents, loteDocuments, lotes, withTenantTransaction, type Database } from '@sifen/db';
 import type { LoteDispatchOutcome, LoteDispatchStore } from '../application/send-lote.js';
 
 const FIRST_POLL_DELAY_MS = 10 * 60 * 1000;
@@ -32,14 +32,34 @@ export function createDrizzleLoteDispatchStore({
     },
 
     async record(loteId, outcome) {
-      const updated = await withTenantTransaction(db, tenantId, (tx) =>
-        tx
+      await withTenantTransaction(db, tenantId, async (tx) => {
+        const updated = await tx
           .update(lotes)
           .set({ ...columnsFor(outcome, now()), updatedAt: now() })
           .where(and(eq(lotes.id, loteId), eq(lotes.status, 'sending')))
-          .returning({ id: lotes.id }),
-      );
-      if (updated.length !== 1) throw new Error(`Lote ${loteId} is not in sending state`);
+          .returning({ id: lotes.id });
+        if (updated.length !== 1) throw new Error(`Lote ${loteId} is not in sending state`);
+        // SIFEN holds the lote: its documents are submitted (HU-E6-03 polls them). Only `queued`
+        // ones move; anything else is left alone because failing here would strand the lote in
+        // `sending`. After a 0301 or no answer they stay `queued` and can be re-queued.
+        if (outcome.status === 'sent') {
+          await tx
+            .update(documents)
+            .set({ status: 'submitted', updatedAt: now() })
+            .where(
+              and(
+                eq(documents.status, 'queued'),
+                inArray(
+                  documents.id,
+                  tx
+                    .select({ id: loteDocuments.documentId })
+                    .from(loteDocuments)
+                    .where(eq(loteDocuments.loteId, loteId)),
+                ),
+              ),
+            );
+        }
+      });
     },
   };
 }

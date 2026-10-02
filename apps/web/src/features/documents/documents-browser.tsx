@@ -3,7 +3,11 @@
 import { RefreshCw } from 'lucide-react';
 import { useState } from 'react';
 
+import { DocumentsDetail } from './documents-detail';
+import { DocumentsFilters } from './documents-filters';
+import { DocumentsPagination } from './documents-pagination';
 import { DocumentsRow } from './documents-row';
+import { filterDocuments, NO_FILTERS, type Filters } from './filters';
 import { SAMPLE_DOCUMENTS_PAGE as PAGE, type DocumentKind } from './sample-documents';
 
 const TABS: readonly {
@@ -23,9 +27,13 @@ const BULK =
 
 /** Type tabs, bulk bar and master list of the Stitch explorer (left column). */
 export function DocumentsBrowser() {
-  const [kind, setKind] = useState<DocumentKind | ''>('');
+  const [filters, setFilters] = useState<Filters>(NO_FILTERS);
+  const [activeId, setActiveId] = useState(PAGE.items[0]?.documentId);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
-  const rows = PAGE.items.filter((doc) => kind === '' || doc.kind === kind);
+  const rows = filterDocuments(PAGE.items, filters);
+  const current =
+    rows.find((doc) => doc.documentId === activeId && doc.status === 'aprobado') ??
+    rows.find((doc) => doc.status === 'aprobado');
   const chosen = rows.filter(({ documentId }) => selected.has(documentId)).length;
 
   const toggle = (id: string) => {
@@ -35,19 +43,25 @@ export function DocumentsBrowser() {
   };
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="overflow-hidden rounded-xl bg-surface-container-lowest shadow-sm">
+    <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-12">
+      <DocumentsFilters
+        filters={filters}
+        onChange={(patch) => {
+          setFilters({ ...filters, ...patch });
+        }}
+      />
+      <div className="overflow-hidden rounded-xl bg-surface-container-lowest shadow-sm xl:col-span-7">
         <div className="flex items-center justify-between bg-surface-container-low px-4 pt-3">
           <div role="group" aria-label="Tipo de comprobante" className="flex items-center gap-1">
             {TABS.map(({ kind: tabKind, label, counted }) => {
-              const active = tabKind === kind;
+              const active = tabKind === filters.kind;
               return (
                 <button
                   key={label}
                   type="button"
                   aria-pressed={active}
                   onClick={() => {
-                    setKind(tabKind);
+                    setFilters({ ...filters, kind: tabKind });
                   }}
                   className={`flex items-center gap-1.5 px-3.5 py-2 font-body-sm text-body-sm transition-colors ${
                     active
@@ -112,6 +126,10 @@ export function DocumentsBrowser() {
                 key={doc.documentId}
                 doc={doc}
                 selected={selected.has(doc.documentId)}
+                current={doc === current}
+                onOpen={() => {
+                  setActiveId(doc.documentId);
+                }}
                 onToggle={() => {
                   toggle(doc.documentId);
                 }}
@@ -119,6 +137,15 @@ export function DocumentsBrowser() {
             ))}
           </ul>
         )}
+        <DocumentsPagination
+          shown={rows.length}
+          total={rows.length === PAGE.items.length ? PAGE.total : rows.length}
+          page={PAGE.page}
+          pageSize={PAGE.pageSize}
+        />
+      </div>
+      <div className="xl:col-span-5">
+        <DocumentsDetail doc={current} />
       </div>
     </div>
   );

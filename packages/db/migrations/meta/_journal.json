@@ -176,6 +176,13 @@
       "when": 1790942955221,
       "tag": "0024_poll_results",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1790959577079,
+      "tag": "0025_signed_xml",
+      "breakpoints": true
     }
   ]
 }

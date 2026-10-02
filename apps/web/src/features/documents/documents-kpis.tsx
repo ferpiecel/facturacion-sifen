@@ -67,7 +67,10 @@ export function DocumentsKpis() {
           aria-valuenow={S.approvedPct}
           className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-surface-container-high"
         >
-          <div className="h-full rounded-full bg-secondary" style={{ width: `%` }} />
+          <div
+            className="h-full rounded-full bg-secondary"
+            style={{ width: `${String(S.approvedPct)}%` }}
+          />
         </div>
       </div>
       <div className={CARD}>
@@ -98,7 +101,7 @@ export function DocumentsKpis() {
         </div>
         <div className="mt-2 flex items-baseline gap-2">
           <span className="font-headline-lg text-headline-lg font-bold text-error">
-            {S.rejected}
+            {integer(S.rejected)}
           </span>
           <span className="font-code-sm text-code-sm text-outline">{`${percent(S.errorRatePct)} tasa error`}</span>
         </div>

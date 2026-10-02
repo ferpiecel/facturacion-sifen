@@ -2,6 +2,9 @@ import { SIFEN_CODES, type SifenGateway, type SifenLoteResult } from '@sifen/sif
 
 /** Lote queries are repeated at least 10 minutes apart (ADR-0007, Guía 2024). */
 const POLL_INTERVAL_MS = 10 * 60 * 1000;
+/** SIFEN text is stored in `last_poll_message`; keep it bounded. */
+const MAX_MESSAGE_LENGTH = 500;
+const capped = (message: string): string => message.slice(0, MAX_MESSAGE_LENGTH);
 
 export type DocumentResolutionStatus = 'approved' | 'approved_with_observations' | 'rejected';
 
@@ -106,14 +109,17 @@ export class PollLoteResult {
   private interpret(answer: SifenLoteResult, cdcs: readonly string[], now: Date): LotePollOutcome {
     switch (answer.dCodRes) {
       case SIFEN_CODES.LOTE_EN_PROCESAMIENTO:
-        return this.pending(now, `${answer.dCodRes}: ${answer.dMsgRes}`);
+        return this.pending(now, `${answer.dCodRes}: ${capped(answer.dMsgRes)}`);
       case SIFEN_CODES.LOTE_CONCLUIDO:
         return resolve(answer, cdcs);
       case SIFEN_CODES.CONSULTA_EXTEMPORANEA:
       case SIFEN_CODES.LOTE_INEXISTENTE:
-        return { status: 'recovery', reason: `${answer.dCodRes}: ${answer.dMsgRes}` };
+        return { status: 'recovery', reason: `${answer.dCodRes}: ${capped(answer.dMsgRes)}` };
       default:
-        return this.pending(now, `Unexpected siResultLoteDE ${answer.dCodRes}: ${answer.dMsgRes}`);
+        return this.pending(
+          now,
+          `Unexpected siResultLoteDE ${answer.dCodRes}: ${capped(answer.dMsgRes)}`,
+        );
     }
   }
 

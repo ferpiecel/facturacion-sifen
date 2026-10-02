@@ -22,9 +22,9 @@ fields of Manual Tecnico v150 chapter 13.
 - No migrations needed in any slice (PDFs are rendered on demand; storing them is a later decision).
 
 ## Tasks (<= 400 lines each, one PR each, chained)
-- [ ] S1a Deps + KudeInvoice model, formatting helpers (CDC groups, PYG, dates) and KudeRenderer port.
+- [x] S1a Deps + KudeInvoice model, formatting helpers (CDC groups, PYG, dates) and KudeRenderer port.
       Branch `feat/hu-e10-01-kude-pdf`.
-- [ ] S1b pdfkit A4 renderer: header (emitter, stamp, document number), general data, receiver, items
+- [x] S1b pdfkit A4 renderer: header (emitter, stamp, document number), general data, receiver, items
       by VAT column, 30 mm QR, deterministic metadata. Branch `feat/hu-e10-01-kude-renderer`.
 - [ ] S1c Renderer: subtotals, IVA breakdown, CDC groups and consultation legend, "n/total" page
       numbers. Branch `feat/hu-e10-01-kude-totals`.

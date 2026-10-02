@@ -3,7 +3,7 @@
 - Feature: `documents-explorer` · Refs: HU-E12-01, HU-E12-02, HU-E12-03
 - Engram mirror: `odd/documents-explorer/tasks`
 - TDD: strict (source: project/session config) · runner: Vitest 5 + Testing Library (`pnpm --filter @sifen/web test`)
-- Delivery: `ask-on-risk`, chain `stacked-to-main`; three chained PRs (each <= 400 authored lines).
+- Delivery: `ask-on-risk`, chain `stacked-to-main`; chained PRs (each <= 400 authored lines).
 
 ## Objective
 
@@ -14,8 +14,10 @@ domain so it can be swapped for the API.
 ## Tasks (PR cut)
 
 - [x] PR 1 `feat/hu-e12-explorer-comprobantes`: fixture, route, header, KPI cards, nav active state.
-- [ ] PR 2 `feat/hu-e12-explorer-list`: filters, type tabs, bulk bar, document list, pagination.
-- [ ] PR 3 `feat/hu-e12-explorer-detail`: detail panel (KuDE / XML / events tabs) and help banner.
+- [x] PR 2 `feat/hu-e12-explorer-list`: fixture rows and document list.
+- [ ] PR 3 `feat/hu-e12-explorer-filters`: type tabs, filter bar (search, selects, chips) and bulk selection bar.
+- [ ] PR 4 `feat/hu-e12-explorer-pagination`: pagination footer.
+- [ ] PR 5 `feat/hu-e12-explorer-detail`: detail panel (KuDE / XML / events tabs) and help banner.
 
 Route: delegated writer (one) per PR; strict TDD, RED commit then GREEN commit.
 

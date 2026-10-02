@@ -185,15 +185,16 @@ describe('POST /v1/documents (e2e)', () => {
     const [timbrado] = await handle.db.select().from(tenantTimbrados);
     await handle.db.insert(tenantDocumentSequences).values({
       tenantId,
-      environment: 'production',
+      environment: 'test',
       timbradoId: timbrado.id,
       establishmentId: est.id,
       expeditionPointId: point.id,
       documentType: 1,
       series: 'ZZ',
-      lastNumber: 9_999_999,
+      lastNumber: 9_999_998,
     });
 
+    expect((await post(BODY)).statusCode).toBe(202);
     const response = await post(BODY);
 
     expect(response.statusCode).toBe(409);

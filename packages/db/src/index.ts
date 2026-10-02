@@ -9,6 +9,8 @@ export {
   apiKeys,
   auditActorType,
   auditLog,
+  DOCUMENT_STATUSES,
+  documents,
   fiscalTaxpayerType,
   partners,
   TENANT_TABLES,

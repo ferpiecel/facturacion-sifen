@@ -1,5 +1,5 @@
 {
-  "id": "c848325a-63f1-4f74-b484-b9b31f69b291",
+  "id": "8468b559-d746-4bb4-8095-3689d174a693",
   "prevId": "c9750c1d-268a-4f41-aa91-5e0332cb0056",
   "version": "7",
   "dialect": "postgresql",
@@ -530,6 +530,10 @@
       },
       "policies": {},
       "checkConstraints": {
+        "documents_signed_pair": {
+          "name": "documents_signed_pair",
+          "value": "(\"documents\".\"signed_xml\" IS NULL) = (\"documents\".\"signed_at\" IS NULL)"
+        },
         "documents_idempotency_pair": {
           "name": "documents_idempotency_pair",
           "value": "(\"documents\".\"idempotency_key\" IS NULL) = (\"documents\".\"request_hash\" IS NULL)"

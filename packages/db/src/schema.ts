@@ -606,6 +606,7 @@ export const documents = pgTable(
       name: 'documents_tenant_point_fk',
     }),
     unique('documents_tenant_idempotency_key_key').on(table.tenantId, table.idempotencyKey),
+    check('documents_signed_pair', sql`(${table.signedXml} IS NULL) = (${table.signedAt} IS NULL)`),
     check(
       'documents_idempotency_pair',
       sql`(${table.idempotencyKey} IS NULL) = (${table.requestHash} IS NULL)`,

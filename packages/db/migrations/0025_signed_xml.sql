@@ -1,5 +1,6 @@
 ALTER TABLE "documents" ADD COLUMN "signed_xml" text;--> statement-breakpoint
-ALTER TABLE "documents" ADD COLUMN "signed_at" timestamp with time zone;
+ALTER TABLE "documents" ADD COLUMN "signed_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "documents" ADD CONSTRAINT "documents_signed_pair" CHECK (("documents"."signed_xml" IS NULL) = ("documents"."signed_at" IS NULL));
 --> statement-breakpoint
 -- documents_guard from 0024 plus the write-once rule; every other protection is unchanged.
 CREATE OR REPLACE FUNCTION "documents_guard"() RETURNS trigger
@@ -40,6 +41,14 @@ BEGIN
     IF (OLD.signed_xml IS NOT NULL AND NEW.signed_xml IS DISTINCT FROM OLD.signed_xml)
       OR (OLD.signed_at IS NOT NULL AND NEW.signed_at IS DISTINCT FROM OLD.signed_at) THEN
       RAISE EXCEPTION 'documents: signed_xml and signed_at are write-once';
+    END IF;
+    -- ...and only while the document is (or becomes) signed (rank below submitted).
+    IF (OLD.signed_xml IS NULL AND NEW.signed_xml IS NOT NULL)
+      OR (OLD.signed_at IS NULL AND NEW.signed_at IS NOT NULL) THEN
+      IF NEW.status IS DISTINCT FROM 'signed'
+        OR public.documents_status_rank(OLD.status) >= public.documents_status_rank('submitted') THEN
+        RAISE EXCEPTION 'documents: signed_xml and signed_at can only be set while signing';
+      END IF;
     END IF;
     -- Statuses only move forward; a SIFEN outcome is entered once, from submitted (HU-E6-03).
     IF NEW.status IS DISTINCT FROM OLD.status THEN

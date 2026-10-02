@@ -220,6 +220,9 @@ importers:
       drizzle-orm:
         specifier: 0.45.3
         version: 0.45.3(@electric-sql/pglite@0.5.8)(@types/pg@8.23.1)(pg@8.23.0)
+      fontkit:
+        specifier: 2.0.4
+        version: 2.0.4
       nestjs-cls:
         specifier: 7.0.0
         version: 7.0.0(@nestjs/common@12.1.0(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(@nestjs/core@12.1.0(@nestjs/common@12.1.0(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@7.2.0))(reflect-metadata@0.2.2)(rxjs@7.8.2))(reflect-metadata@0.2.2)(rxjs@7.8.2)
@@ -254,6 +257,9 @@ importers:
       '@swc/core':
         specifier: 1.16.2
         version: 1.16.2(@swc/helpers@0.5.23)
+      '@types/fontkit':
+        specifier: 2.0.9
+        version: 2.0.9
       '@types/node':
         specifier: 22.20.4
         version: 22.20.4
@@ -2155,6 +2161,9 @@ packages:
 
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
+
+  '@types/fontkit@2.0.9':
+    resolution: {integrity: sha512-qNYerFky3muCmZPq+R+B3cUDRA5OONw/oh6aGGFxx2LOBz6yu8eamKusrhkHnC6rc2fm76+G9z9QoWSB2SaQaw==}
 
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
@@ -5718,6 +5727,10 @@ snapshots:
   '@types/esrecurse@4.3.1': {}
 
   '@types/estree@1.0.9': {}
+
+  '@types/fontkit@2.0.9':
+    dependencies:
+      '@types/node': 22.20.4
 
   '@types/json-schema@7.0.15': {}
 

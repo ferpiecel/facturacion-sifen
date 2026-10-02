@@ -255,7 +255,7 @@ export async function setEstablishmentContact(
 ): Promise<{ id: string; code: string }> {
   const { tenantId, establishmentCode, contact } = params;
   return db.transaction(async (tx) => {
-    const [row] = await tx
+    const updated = await tx
       .update(tenantEstablishments)
       .set({
         phone: contact.phone,
@@ -270,6 +270,7 @@ export async function setEstablishmentContact(
         ),
       )
       .returning({ id: tenantEstablishments.id, code: tenantEstablishments.code });
+    const row = updated.at(0);
     if (!row) {
       throw new Error(`establishment not found: ${establishmentCode}`);
     }

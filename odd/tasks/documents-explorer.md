@@ -13,7 +13,7 @@ domain so it can be swapped for the API.
 
 ## Tasks (PR cut)
 
-- [ ] PR 1 `feat/hu-e12-explorer-comprobantes`: fixture, route, header, KPI cards, nav active state.
+- [x] PR 1 `feat/hu-e12-explorer-comprobantes`: fixture, route, header, KPI cards, nav active state.
 - [ ] PR 2 `feat/hu-e12-explorer-list`: filters, type tabs, bulk bar, document list, pagination.
 - [ ] PR 3 `feat/hu-e12-explorer-detail`: detail panel (KuDE / XML / events tabs) and help banner.
 

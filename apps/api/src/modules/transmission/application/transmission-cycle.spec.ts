@@ -210,7 +210,8 @@ describe('TransmissionCycle', () => {
       'send:l2:2',
       'send:l4:4',
     ]);
-    expect(report.sent.map((s) => s.status)).toEqual(['sent', 'already-claimed']);
+    expect(report.sent.map((s) => s.status)).toEqual(['sent']);
+    expect(report.sendSkipped).toBe(1);
     expect(report.failures).toEqual([
       { step: 'send', id: 'l2', error: 'Error' },
       { step: 'send', id: 'l3', error: 'Error' },
@@ -238,6 +239,7 @@ describe('TransmissionCycle', () => {
       signed: 0,
       signSkipped: 0,
       assembled: 0,
+      sendSkipped: 0,
       sent: [],
       polled: [],
       failures: [],

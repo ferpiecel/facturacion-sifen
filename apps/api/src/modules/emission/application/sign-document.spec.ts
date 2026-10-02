@@ -8,10 +8,6 @@ import { createExpeditionPoint } from '../../fiscal-config/domain/expedition-poi
 import { createFiscalProfile } from '../../fiscal-config/domain/fiscal-profile.js';
 import { parseRuc } from '../../fiscal-config/domain/ruc.js';
 import { createTimbrado } from '../../fiscal-config/domain/timbrado.js';
-import {
-  CertificateNotFoundError,
-  CertificateValidityError,
-} from '../../certificates/infrastructure/certificate-vault.js';
 import type { InvoiceDraft } from '../domain/invoice-draft.js';
 import { InvoiceQrError } from './invoice-qr.js';
 import { generateInvoiceXml, type InvoiceXmlContext } from './invoice-xml.js';
@@ -30,6 +26,10 @@ import {
   SignDocument,
   SigningMismatchError,
 } from './sign-document.js';
+
+/** Stand-ins for the vault's typed errors (the application layer must not import infrastructure). */
+class CertificateNotFoundError extends Error {}
+class CertificateValidityError extends Error {}
 
 const TENANT = '11111111-1111-4111-8111-111111111111';
 const CSC = 'ABCD0000000000000000000000000000';
@@ -208,7 +208,7 @@ describe('SignDocument', () => {
   });
 
   it.each([
-    ['no certificate', () => Promise.reject(new CertificateNotFoundError('test'))],
+    ['no certificate', () => Promise.reject(new CertificateNotFoundError('no active certificate'))],
     ['an expired certificate', () => Promise.reject(new CertificateValidityError('expired'))],
   ])('fails closed with %s: typed error, nothing stored, no CSC opened', async (_name, open) => {
     const { service, store, calls } = setup({ certificate: open });

@@ -8,6 +8,7 @@ import {
 import { createFiscalProfile } from '../modules/fiscal-config/domain/fiscal-profile.js';
 import { parseRuc } from '../modules/fiscal-config/domain/ruc.js';
 import { createTenant, setFiscalProfile } from './commands.js';
+import { BoundedReadError } from './bounded-file.js';
 import { runCli } from './ops.js';
 
 const PASSWORD = 'p12-super-secret';
@@ -34,6 +35,10 @@ describe('runCli certificate:add', () => {
     stdin?: string;
     env?: NodeJS.ProcessEnv;
     p12?: Buffer;
+    /** Password the test .p12 is protected with (default PASSWORD). */
+    p12Password?: string;
+    /** Makes reading the .p12 fail the way the bounded reader does. */
+    readFailure?: BoundedReadError;
     profile?: boolean;
     /** Reuse the tenant of an earlier run. */
     after?: { db: DatabaseHandle['db']; tenantId: string };
@@ -42,7 +47,8 @@ describe('runCli certificate:add', () => {
   async function run(options: RunOptions = {}) {
     const { stdin = `${PASSWORD}\n`, profile = true } = options;
     const p12 =
-      options.p12 ?? issueTestPkcs12(psc, { serialNumber: 'RUC80000005-6' }, PASSWORD).p12;
+      options.p12 ??
+      issueTestPkcs12(psc, { serialNumber: 'RUC80000005-6' }, options.p12Password ?? PASSWORD).p12;
     let db: DatabaseHandle['db'];
     let tenantId: string;
     if (options.after) {
@@ -66,6 +72,8 @@ describe('runCli certificate:add', () => {
     }
     const out: string[] = [];
     const err: string[] = [];
+    const reads: { path: string; maxBytes: number }[] = [];
+    let opened = 0;
     const files = new Map([
       [P12_PATH, p12],
       [ROOTS_PATH, Buffer.from(psc.pem)],
@@ -80,16 +88,21 @@ describe('runCli certificate:add', () => {
         ...options.env,
       },
       readStdin: () => Promise.resolve(stdin),
-      readFile: (path) => {
+      readFile: (path, maxBytes) => {
+        reads.push({ path, maxBytes });
+        if (path === P12_PATH && options.readFailure) throw options.readFailure;
         const file = files.get(path);
         if (!file) throw new Error(`ENOENT ${path}`);
         return file;
       },
       out: (text) => out.push(text),
       err: (text) => err.push(text),
-      openDb: () => ({ db, close: () => Promise.resolve() }),
+      openDb: () => {
+        opened += 1;
+        return { db, close: () => Promise.resolve() };
+      },
     });
-    return { code, out: out.join('\n'), err: err.join('\n'), tenantId, db };
+    return { code, out: out.join('\n'), err: err.join('\n'), tenantId, db, reads, opened };
   }
 
   const args = (tenantId: string, extra: string[] = []) => [
@@ -185,5 +198,29 @@ describe('runCli certificate:add', () => {
     expect(replaced.code).toBe(0);
     const rows = await first.db.select().from(tenantCertificates);
     expect(rows.map((r) => r.status).sort()).toEqual(['active', 'revoked']);
+  });
+
+  it('reads the .p12 with a 64 KiB cap, before touching the database', async () => {
+    const ok = await run();
+    expect(ok.reads.find((r) => r.path === P12_PATH)?.maxBytes).toBe(64 * 1024);
+
+    for (const reason of ['too-large', 'not-a-file', 'unreadable'] as const) {
+      const result = await run({ readFailure: new BoundedReadError(reason) });
+      expect(result.code).toBe(1);
+      expect(result.err).toContain('--p12');
+      expect(result.opened).toBe(0);
+      expect(result.out + result.err).not.toContain(P12_PATH);
+    }
+    const tooLarge = await run({ readFailure: new BoundedReadError('too-large') });
+    expect(tooLarge.err).toContain('64 KiB');
+  });
+
+  it('keeps trailing spaces of the stdin password and strips only the line ending', async () => {
+    const spaced = await run({ p12Password: 'with trailing  ', stdin: 'with trailing  \n' });
+    expect(spaced.code).toBe(0);
+    const crlf = await run({ stdin: `${PASSWORD}\r\n` });
+    expect(crlf.code).toBe(0);
+    const stripped = await run({ p12Password: 'with trailing  ', stdin: 'with trailing\n' });
+    expect(stripped.code).toBe(1);
   });
 });

@@ -1,5 +1,9 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { createTestAuthority, type TestAuthority } from '../../../../test/support/test-pki.js';
+import {
+  createTestAuthority,
+  issueTestPkcs12,
+  type TestAuthority,
+} from '../../../../test/support/test-pki.js';
 import { loadTrustedRoots, parseTrustedRoots, TrustedRootsError } from './trusted-roots.js';
 
 let one: TestAuthority;
@@ -23,6 +27,15 @@ describe('parseTrustedRoots (HU-E3-01)', () => {
   it('refuses a bundle with a corrupt certificate instead of skipping it', () => {
     const corrupt = '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----';
     expect(() => parseTrustedRoots(`${one.pem}\n${corrupt}`)).toThrow(TrustedRootsError);
+  });
+});
+
+describe('parseTrustedRoots CA requirement (HU-E3-01)', () => {
+  it('refuses a bundle that contains a non-CA certificate', () => {
+    const leaf = issueTestPkcs12(one, { serialNumber: 'RUC80000005-6' }).leafPem;
+    expect(() => parseTrustedRoots(`${one.pem}\n${leaf}`)).toThrow(/not a CA/);
+    const notCa = createTestAuthority('Not A CA', { ca: false });
+    expect(() => parseTrustedRoots(notCa.pem)).toThrow(/not a CA/);
   });
 });
 

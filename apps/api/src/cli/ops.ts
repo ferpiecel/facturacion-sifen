@@ -1,10 +1,10 @@
-import { readFileSync } from 'node:fs';
 import { createNodePostgresDatabase, type Database } from '@sifen/db';
 import { EnvelopeCipher } from '../modules/custody/application/envelope-cipher.js';
 import { createLocalKms } from '../modules/custody/infrastructure/adapters/local-kms.adapter.js';
 import { CscVault } from '../modules/custody/infrastructure/csc-vault.js';
 import { CertificateVault } from '../modules/certificates/infrastructure/certificate-vault.js';
 import { loadTrustedRoots } from '../modules/certificates/infrastructure/trusted-roots.js';
+import { readBoundedFile } from './bounded-file.js';
 import { getOpsDatabaseUrl, OpsArgError, parseOpsArgs, type OpsCommand } from './args.js';
 import {
   addEstablishment,
@@ -36,21 +36,23 @@ export function createCscVault(env: NodeJS.ProcessEnv): CscVault {
  */
 export function createCertificateVault(
   env: NodeJS.ProcessEnv,
-  readFile: (path: string) => Buffer,
+  readFile: (path: string, maxBytes: number) => Buffer,
 ): CertificateVault {
   if (!env.KMS_LOCAL_MASTER_KEY) {
     throw new Error(
       'certificate:add requires KMS_LOCAL_MASTER_KEY (a throwaway key would lose the certificate)',
     );
   }
-  const trustedPscRoots = loadTrustedRoots(env, (path) => readFile(path).toString('utf8'));
+  const trustedPscRoots = loadTrustedRoots(env, (path) =>
+    readFile(path, Number.MAX_SAFE_INTEGER).toString('utf8'),
+  );
   const cipher = new EnvelopeCipher(createLocalKms(env.KMS_LOCAL_MASTER_KEY, env.NODE_ENV));
   return new CertificateVault(cipher, { trustedPscRoots });
 }
 
 export interface CertificateDeps {
   readonly vault: CertificateVault;
-  readonly readFile: (path: string) => Buffer;
+  readonly readFile: (path: string, maxBytes: number) => Buffer;
 }
 
 /**
@@ -133,7 +135,7 @@ export async function runOpsCommand(
       }
       let p12: Buffer;
       try {
-        p12 = certificates.readFile(command.p12Path);
+        p12 = certificates.readFile(command.p12Path, Number.MAX_SAFE_INTEGER);
       } catch {
         throw new Error('could not read the --p12 file');
       }
@@ -216,7 +218,8 @@ export interface CliIo {
   argv: string[];
   env: NodeJS.ProcessEnv;
   readStdin: () => Promise<string>;
-  readFile: (path: string) => Buffer;
+  /** Reads a file of at most `maxBytes` (regular files only). */
+  readFile: (path: string, maxBytes: number) => Buffer;
   out: (text: string) => void;
   err: (text: string) => void;
   openDb: (url: string) => { db: Database; close: () => Promise<void> };
@@ -263,7 +266,7 @@ if (isMainModule) {
     argv: process.argv.slice(2),
     env: process.env,
     readStdin: readProcessStdin,
-    readFile: (path) => readFileSync(path),
+    readFile: (path, maxBytes) => readBoundedFile(path, maxBytes),
     out: (text) => {
       console.log(text);
     },

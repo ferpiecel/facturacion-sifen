@@ -8,7 +8,7 @@ import {
   pdfText,
   quietZoneRatio,
   textItems,
-} from './pdf-inspect.js';
+} from './pdf-inspect.test-helper.js';
 import { PdfkitKudeRenderer } from './pdfkit-kude-renderer.js';
 
 const CDC = '01800695631001001000000612021112917595714694';

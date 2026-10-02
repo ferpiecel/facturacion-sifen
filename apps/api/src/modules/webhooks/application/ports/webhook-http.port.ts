@@ -6,7 +6,9 @@ export type WebhookErrorCode =
   | 'connect_failed'
   | 'tls_failure'
   | 'timeout'
-  | 'network_error';
+  | 'network_error'
+  /** Not a transport failure: the signing secret could not be opened, so nothing was sent. */
+  | 'secret_unavailable';
 
 /** What one POST amounted to: the status it got back, or the classified reason it did not. */
 export type WebhookHttpResult =

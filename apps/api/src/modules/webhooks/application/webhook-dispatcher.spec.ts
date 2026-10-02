@@ -48,14 +48,15 @@ function setup(
   secrets: string[] | Error = ['whsec_a'],
 ) {
   const recorded: { id: string; outcome: WebhookAttemptOutcome }[] = [];
-  const store: WebhookDeliveryStore = {
-    claimDue: vi.fn(() => Promise.resolve(due)),
-    record: vi.fn((id, outcome) => {
-      recorded.push({ id, outcome });
-      return Promise.resolve();
-    }),
-  };
-  const post = vi.fn(typeof result === 'function' ? result : () => Promise.resolve(result));
+  const claimDue = vi.fn<WebhookDeliveryStore['claimDue']>(() => Promise.resolve(due));
+  const record = vi.fn<WebhookDeliveryStore['record']>((id, outcome) => {
+    recorded.push({ id, outcome });
+    return Promise.resolve();
+  });
+  const store: WebhookDeliveryStore = { claimDue, record };
+  const post = vi.fn<WebhookHttpPort['post']>(
+    typeof result === 'function' ? result : () => Promise.resolve(result),
+  );
   const http: WebhookHttpPort = { post };
   const vault = {
     signingSecrets: vi.fn(() =>
@@ -71,12 +72,12 @@ function setup(
     random: () => 0.5,
     batchSize: 10,
   });
-  return { dispatcher, store, post, vault, recorded, setNow: (d: Date) => (now = d) };
+  return { dispatcher, claimDue, record, post, vault, recorded, setNow: (d: Date) => (now = d) };
 }
 
 describe('WebhookDispatcher (HU-E11-01)', () => {
   it('claims a bounded batch with a lease', async () => {
-    const { dispatcher, store } = setup([]);
+    const { dispatcher, claimDue } = setup([]);
     expect(await dispatcher.runOnce()).toEqual({
       claimed: 0,
       delivered: 0,
@@ -84,7 +85,7 @@ describe('WebhookDispatcher (HU-E11-01)', () => {
       dead: 0,
       unrecorded: 0,
     });
-    expect(store.claimDue).toHaveBeenCalledWith(NOW, 10, 120_000);
+    expect(claimDue).toHaveBeenCalledWith(NOW, 10, 120_000);
   });
 
   it('signs the frozen payload with a fresh timestamp and marks a 2xx delivered', async () => {
@@ -206,11 +207,11 @@ describe('WebhookDispatcher (HU-E11-01)', () => {
   });
 
   it('classifies a transport that throws, and keeps going when one record fails', async () => {
-    const { dispatcher, store, recorded } = setup(
+    const { dispatcher, record, recorded } = setup(
       [delivery({ id: 'a' }), delivery({ id: 'b' })],
       () => Promise.reject(new Error('x')),
     );
-    vi.mocked(store.record).mockImplementationOnce(() => Promise.reject(new Error('db down')));
+    record.mockImplementationOnce(() => Promise.reject(new Error('db down')));
     expect(await dispatcher.runOnce()).toMatchObject({ claimed: 2, retried: 1, unrecorded: 1 });
     expect(recorded).toHaveLength(1);
     expect(recorded[0].outcome.lastError).toBe('network_error');

@@ -8,6 +8,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   primaryKey,
   pgEnum,
   pgTable,
@@ -515,6 +516,94 @@ export const tenantDocumentSequences = pgTable(
   ],
 );
 
+/** Lifecycle states of a document (plan v1.1 §8.0); `accepted` = validated and numbered, not yet signed. */
+export const DOCUMENT_STATUSES = [
+  'accepted',
+  'signed',
+  'queued',
+  'submitted',
+  'approved',
+  'approved_with_observations',
+  'rejected',
+  'corrected',
+  'number_voided',
+  'cancelled',
+] as const;
+
+/**
+ * Electronic documents accepted through `POST /v1/documents` (HU-E5-01). The
+ * identity columns (CDC, numbering, security code, payload) never change; only
+ * `status` and `updated_at` do. Rows are never deleted.
+ */
+export const documents = pgTable(
+  'documents',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    environment: tenantEnvironment('environment').notNull(),
+    /** 44-digit CDC. */
+    cdc: char('cdc', { length: 44 }).notNull(),
+    /** `iTiDE` (C002). */
+    documentType: smallint('document_type').notNull(),
+    timbradoId: uuid('timbrado_id').notNull(),
+    establishmentId: uuid('establishment_id').notNull(),
+    expeditionPointId: uuid('expedition_point_id').notNull(),
+    /** `dSerieNum`; '' while numbering runs without a series. */
+    series: varchar('series', { length: 2 }).notNull().default(''),
+    /** `dNumDoc`. */
+    number: integer('number').notNull(),
+    /** `dCodSeg`, random, never derived from `dNumDoc`. */
+    securityCode: char('security_code', { length: 9 }).notNull(),
+    status: varchar('status', { length: 32 }).notNull().default('accepted'),
+    receiverRuc: varchar('receiver_ruc', { length: 15 }),
+    issuedAt: timestamp('issued_at', { withTimezone: true }).notNull(),
+    totalAmount: numeric('total_amount', { precision: 23, scale: 8 }).notNull(),
+    currency: char('currency', { length: 3 }).notNull().default('PYG'),
+    /** The request body as received. */
+    payload: jsonb('payload').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('documents_tenant_environment_cdc_key').on(table.tenantId, table.environment, table.cdc),
+    unique('documents_sequence_number_key').on(
+      table.tenantId,
+      table.environment,
+      table.timbradoId,
+      table.establishmentId,
+      table.expeditionPointId,
+      table.documentType,
+      table.series,
+      table.number,
+    ),
+    foreignKey({
+      columns: [table.tenantId, table.timbradoId],
+      foreignColumns: [tenantTimbrados.tenantId, tenantTimbrados.id],
+      name: 'documents_tenant_timbrado_fk',
+    }),
+    foreignKey({
+      columns: [table.tenantId, table.establishmentId, table.expeditionPointId],
+      foreignColumns: [
+        tenantExpeditionPoints.tenantId,
+        tenantExpeditionPoints.establishmentId,
+        tenantExpeditionPoints.id,
+      ],
+      name: 'documents_tenant_point_fk',
+    }),
+    check('documents_cdc_format', sql`${table.cdc} ~ '^[0-9]{44}$'`),
+    check('documents_security_code_format', sql`${table.securityCode} ~ '^[0-9]{9}$'`),
+    check('documents_number_range', sql`${table.number} BETWEEN 1 AND 9999999`),
+    check('documents_document_type_range', sql`${table.documentType} BETWEEN 1 AND 8`),
+    check('documents_series_format', sql`${table.series} = '' OR ${table.series} ~ '^[A-Z]{2}$'`),
+    check(
+      'documents_status_valid',
+      sql`${table.status} IN (${sql.raw(DOCUMENT_STATUSES.map((s) => `'${s}'`).join(', '))})`,
+    ),
+  ],
+);
+
 /**
  * Every table that carries a `tenant_id` column and MUST be covered by
  * `FORCE ROW LEVEL SECURITY` plus a tenant-isolation policy. The
@@ -524,6 +613,7 @@ export const tenantDocumentSequences = pgTable(
 export const TENANT_TABLES = [
   'api_keys',
   'audit_log',
+  'documents',
   'tenant_document_sequences',
   'tenant_establishments',
   'tenant_expedition_points',

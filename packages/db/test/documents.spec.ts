@@ -36,10 +36,10 @@ describe('documents', () => {
   async function seed() {
     handle = await createTestDatabase();
     const { db } = handle;
-    const [a, b] = (await db
+    const [a, b] = await db
       .insert(tenants)
       .values([{ name: 'A' }, { name: 'B' }])
-      .returning()) as [{ id: string }, { id: string }];
+      .returning();
 
     async function fiscalSetup(tenantId: string) {
       const [est] = await db

@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull, lte } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, isNotNull, isNull, lt, lte } from 'drizzle-orm';
 import {
   documents,
   loteDocuments,
@@ -14,12 +14,14 @@ import type { PendingLote, TransmissionCycleStore } from '../application/transmi
 export interface DrizzleTransmissionCycleStoreOptions {
   readonly db: Database;
   readonly tenantId: string;
+  readonly now?: () => Date;
 }
 
 /** `TransmissionCycleStore` over `documents`, `lotes` and the dId sequence, run as app_user inside the tenant's transaction. */
 export function createDrizzleTransmissionCycleStore({
   db,
   tenantId,
+  now = () => new Date(),
 }: DrizzleTransmissionCycleStoreOptions): TransmissionCycleStore {
   return {
     async acceptedDocumentIds(limit) {
@@ -32,7 +34,13 @@ export function createDrizzleTransmissionCycleStore({
             tenants,
             and(eq(tenants.id, documents.tenantId), eq(tenants.environment, documents.environment)),
           )
-          .where(and(eq(documents.tenantId, tenantId), eq(documents.status, 'accepted')))
+          .where(
+            and(
+              eq(documents.tenantId, tenantId),
+              eq(documents.status, 'accepted'),
+              isNull(documents.transmissionHold),
+            ),
+          )
           .orderBy(asc(documents.createdAt), asc(documents.id))
           .limit(limit),
       );
@@ -45,7 +53,7 @@ export function createDrizzleTransmissionCycleStore({
           .select({ id: lotes.id, documentType: lotes.documentType })
           .from(lotes)
           .where(and(eq(lotes.tenantId, tenantId), eq(lotes.status, 'pending')))
-          .orderBy(asc(lotes.createdAt), asc(lotes.id))
+          .orderBy(asc(lotes.updatedAt), asc(lotes.createdAt), asc(lotes.id))
           .limit(limit);
         if (pending.length === 0) return [];
 
@@ -102,6 +110,60 @@ export function createDrizzleTransmissionCycleStore({
           .limit(limit),
       );
       return rows.map((row) => row.id);
+    },
+
+    async holdDocument(documentId, reason) {
+      await withTenantTransaction(db, tenantId, (tx) =>
+        tx
+          .update(documents)
+          .set({ transmissionHold: reason, updatedAt: now() })
+          .where(
+            and(
+              eq(documents.tenantId, tenantId),
+              eq(documents.id, documentId),
+              eq(documents.status, 'accepted'),
+            ),
+          ),
+      );
+    },
+
+    async heldDocuments(limit) {
+      const rows = await withTenantTransaction(db, tenantId, (tx) =>
+        tx
+          .select({ documentId: documents.id, reason: documents.transmissionHold })
+          .from(documents)
+          .where(and(eq(documents.tenantId, tenantId), isNotNull(documents.transmissionHold)))
+          .orderBy(asc(documents.updatedAt), asc(documents.id))
+          .limit(limit),
+      );
+      return rows.map((row) => ({ documentId: row.documentId, reason: row.reason ?? '' }));
+    },
+
+    async deferPendingLote(loteId) {
+      await withTenantTransaction(db, tenantId, (tx) =>
+        tx
+          .update(lotes)
+          .set({ updatedAt: now() })
+          .where(
+            and(eq(lotes.tenantId, tenantId), eq(lotes.id, loteId), eq(lotes.status, 'pending')),
+          ),
+      );
+    },
+
+    async pendingOlderThan(cutoff) {
+      const rows = await withTenantTransaction(db, tenantId, (tx) =>
+        tx
+          .select({ total: count() })
+          .from(lotes)
+          .where(
+            and(
+              eq(lotes.tenantId, tenantId),
+              eq(lotes.status, 'pending'),
+              lt(lotes.createdAt, cutoff),
+            ),
+          ),
+      );
+      return rows.at(0)?.total ?? 0;
     },
 
     nextRequestId() {

@@ -85,16 +85,22 @@ export class LoteAssembler {
     for (const { lote, ids } of planned) {
       const cdcs = lote.documents.map((d) => d.cdc);
       let loteId: string | null;
+      let error: string | undefined;
       try {
         loteId = await this.deps.store.createLote({
           documentType: Number(lote.documentType),
           documentIds: ids,
         });
-      } catch {
+      } catch (cause) {
         // Nothing was committed for this lote; its documents stay ready for the next run.
         loteId = null;
+        error = describeError(cause);
+        this.deps.logger?.warn(
+          `LoteAssembler: createLote failed for ${String(cdcs.length)} document(s): ${error}`,
+        );
       }
-      if (loteId === null) conflicted.push(...cdcs.map((cdc) => ({ cdc })));
+      if (loteId === null)
+        conflicted.push(...cdcs.map((cdc) => (error ? { cdc, error } : { cdc })));
       else lotes.push({ loteId, documentType: lote.documentType, cdcs });
     }
     return { lotes, skipped, conflicted };
@@ -140,6 +146,15 @@ export class LoteAssembler {
 interface Planned {
   readonly lote: Lote;
   readonly ids: readonly string[];
+}
+
+const MAX_ERROR_LENGTH = 200;
+
+/** Error class and message on one line, capped: enough to diagnose, bounded to store or log. */
+function describeError(cause: unknown): string {
+  const name = cause instanceof Error ? cause.name : 'Error';
+  const message = cause instanceof Error ? cause.message : String(cause);
+  return `${name}: ${message}`.replace(/\s+/g, ' ').slice(0, MAX_ERROR_LENGTH);
 }
 
 function isValidCdc(cdc: string): boolean {

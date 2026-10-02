@@ -1,5 +1,12 @@
-import { and, asc, eq, inArray, isNotNull } from 'drizzle-orm';
-import { documents, loteDocuments, lotes, withTenantTransaction, type Database } from '@sifen/db';
+import { and, asc, eq, inArray, isNotNull, notExists, sql } from 'drizzle-orm';
+import {
+  documents,
+  loteDocuments,
+  lotes,
+  tenants,
+  withTenantTransaction,
+  type Database,
+} from '@sifen/db';
 import type { LoteAssemblyStore } from '../application/assemble-lotes.js';
 
 export interface DrizzleLoteAssemblyStoreOptions {
@@ -20,6 +27,7 @@ export function createDrizzleLoteAssemblyStore({
   db,
   tenantId,
   batchSize = DEFAULT_BATCH_SIZE,
+  now = () => new Date(),
 }: DrizzleLoteAssemblyStoreOptions): LoteAssemblyStore {
   return {
     async readyDocuments() {
@@ -27,7 +35,36 @@ export function createDrizzleLoteAssemblyStore({
         tx
           .select({ documentId: documents.id, cdc: documents.cdc, xml: documents.signedXml })
           .from(documents)
-          .where(and(inArray(documents.status, READY_STATUSES), isNotNull(documents.signedXml)))
+          // Only the tenant's current environment: documents of a previous one must never be picked
+          // (nor starve the batch).
+          .innerJoin(
+            tenants,
+            and(eq(tenants.id, documents.tenantId), eq(tenants.environment, documents.environment)),
+          )
+          .where(
+            and(
+              inArray(documents.status, READY_STATUSES),
+              isNotNull(documents.signedXml),
+              notExists(
+                tx
+                  .select({ one: sql`1` })
+                  .from(loteDocuments)
+                  .innerJoin(
+                    lotes,
+                    and(
+                      eq(lotes.tenantId, loteDocuments.tenantId),
+                      eq(lotes.id, loteDocuments.loteId),
+                    ),
+                  )
+                  .where(
+                    and(
+                      eq(loteDocuments.documentId, documents.id),
+                      inArray(lotes.status, IN_PROCESS_LOTE_STATUSES),
+                    ),
+                  ),
+              ),
+            ),
+          )
           .orderBy(asc(documents.createdAt), asc(documents.id))
           .limit(batchSize),
       );
@@ -58,7 +95,8 @@ export function createDrizzleLoteAssemblyStore({
       return new Set(rows.map((row) => row.cdc));
     },
 
-    async createLote({ documentType, documentIds }) {
+    async createLote({ documentType, documentIds: requested }) {
+      const documentIds = [...new Set(requested)];
       if (documentIds.length === 0) throw new Error('A lote needs at least one document');
       return withTenantTransaction(db, tenantId, async (tx) => {
         // Row locks serialize concurrent assemblers: the loser re-reads after the winner commits.
@@ -69,14 +107,21 @@ export function createDrizzleLoteAssemblyStore({
             status: documents.status,
           })
           .from(documents)
+          .innerJoin(
+            tenants,
+            and(eq(tenants.id, documents.tenantId), eq(tenants.environment, documents.environment)),
+          )
           .where(
             and(
               inArray(documents.id, documentIds),
+              eq(documents.documentType, documentType),
               inArray(documents.status, READY_STATUSES),
               isNotNull(documents.signedXml),
             ),
           )
-          .for('update');
+          // Same lock order for every assembler, so two of them cannot deadlock.
+          .orderBy(asc(documents.id))
+          .for('update', { of: documents });
         if (locked.length !== documentIds.length) return null;
 
         const taken = await tx
@@ -110,7 +155,7 @@ export function createDrizzleLoteAssemblyStore({
           .values(documentIds.map((documentId) => ({ tenantId, loteId: lote.id, documentId })));
         await tx
           .update(documents)
-          .set({ status: 'queued' })
+          .set({ status: 'queued', updatedAt: now() })
           .where(and(inArray(documents.id, documentIds), eq(documents.status, 'signed')));
         return lote.id;
       });

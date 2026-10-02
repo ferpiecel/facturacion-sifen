@@ -36,9 +36,20 @@ lotes in process), plan v1.1 §8.1, backlog HU-E6-01/02/03.
       `lote_documents` x `lotes` with status in (`pending`,`sending`,`sent`,`unknown`,`recovery`);
       `createLote` inserts the lote (tenant environment) + links and moves documents `signed -> queued`
       conditionally, returning null (rollback) if any is no longer ready.
-- [ ] **S4 — Signing integration (`SignDocument`).** Loads an `accepted` document, rebuilds the draft
-      from `payload`, `generateInvoiceXml` + `signInvoiceXml` (+ QR), stores `signed_xml`/`signed_at`,
-      `accepted -> signed`. Needs the tenant certificate store and the QR generator.
+- [ ] **S4 — Signing integration (`SignDocument`).** Split in two:
+  - [x] **S4a — port-based service** (`emission/application/sign-document.ts`): `SigningStore`
+        (`load`, `markSigned`), `CertificateSource` (over `CertificateVault.open`), `CscSource` (over
+        `CscVault`), `DeXmlBuilder`/`XmlSigner`/`QrGenerator`. For an `accepted` document it opens the
+        active certificate for the document's environment, builds the DE (`generateInvoiceXml`), signs
+        (`signInvoiceXml`, dFecFirma Asuncion), adds the QR (`addQrToSignedInvoice`: strict XSD + hash
+        check) and stores `signed_xml`/`signed_at` with `accepted -> signed` in one store call. Fails
+        closed (typed errors, document stays `accepted`); p12 and CSC buffers are zeroized.
+  - [ ] **S4b — Drizzle `SigningStore` + sources.** `load` rebuilds `InvoiceDraft` and
+        `InvoiceXmlContext` (issuer profile, establishment, point, timbrado, numbering from the document row,
+        receiver data and line codes from `payload`; the establishment contact is a known gap, ADR-0012
+        note in `invoice-xml.ts`); `markSigned` is one tenant transaction (`UPDATE ... WHERE status =
+        'accepted'`, guard 0025). `CscSource` picks the lowest slot of the tenant's CSCs for the
+        environment (decision to confirm).
 - [ ] **S5 — Worker wiring** (`lote-build` queue: assemble, then `SendLote` per lote).
 
 ## Decisions

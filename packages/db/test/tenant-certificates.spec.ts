@@ -62,7 +62,7 @@ describe('tenant_certificates', () => {
   const asPlatformAdmin = <T>(db: DatabaseHandle['db'], work: (tx: typeof db) => Promise<T>) =>
     db.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL ROLE platform_admin`);
-      return work(tx as unknown as typeof db);
+      return work(tx);
     });
 
   it('has only the expected columns, the key material only inside sealed', async () => {

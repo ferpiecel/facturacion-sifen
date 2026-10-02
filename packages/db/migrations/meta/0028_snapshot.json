@@ -2240,7 +2240,7 @@
         },
         "webhook_endpoints_events_valid": {
           "name": "webhook_endpoints_events_valid",
-          "value": "\"webhook_endpoints\".\"events\" <@ ARRAY['document.approved', 'document.approved_with_observations', 'document.rejected', 'document.cancelled', 'document.number_voided', 'document.transmission_deadline_warning']::text[]"
+          "value": "\"webhook_endpoints\".\"events\" <@ ARRAY['document.created', 'document.signed', 'document.submitted', 'document.approved', 'document.approved_with_observations', 'document.rejected', 'document.cancelled', 'document.number_voided', 'document.transmission_deadline_warning', 'document.notification.delivered', 'document.notification.failed']::text[]"
         },
         "webhook_endpoints_previous_pair": {
           "name": "webhook_endpoints_previous_pair",

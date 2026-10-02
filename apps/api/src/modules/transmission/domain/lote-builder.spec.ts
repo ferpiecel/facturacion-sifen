@@ -11,7 +11,7 @@ import {
 } from './lote-builder.js';
 
 const RUC_A = { rucBase: '44444401', rucDv: 7 };
-const RUC_B = { rucBase: '80000001', rucDv: 4 };
+const RUC_B = { rucBase: '80000001', rucDv: 3 };
 
 function cdcFor(n: number, opts: { ruc?: typeof RUC_A; type?: string } = {}): string {
   return buildCdc({
@@ -27,7 +27,10 @@ function cdcFor(n: number, opts: { ruc?: typeof RUC_A; type?: string } = {}): st
   });
 }
 
-const doc = (n: number, opts: { ruc?: typeof RUC_A; type?: string; bytes?: number } = {}): LoteDocument => ({
+const doc = (
+  n: number,
+  opts: { ruc?: typeof RUC_A; type?: string; bytes?: number } = {},
+): LoteDocument => ({
   cdc: cdcFor(n, opts),
   xml: 'x'.repeat(opts.bytes ?? 10),
 });
@@ -136,7 +139,9 @@ describe('LoteBuilder invariants (property-based)', () => {
           expect(cdcs.some((cdc) => busy.has(cdc))).toBe(false);
           expect(new Set(cdcs.map((cdc) => parseCdc(cdc).rucBase)).size).toBe(1);
           expect(new Set(cdcs.map((cdc) => parseCdc(cdc).documentType)).size).toBe(1);
-          expect(bytes(built.documents.map((d) => d.xml))).toBeLessThanOrEqual(MAX_LOTE_MESSAGE_BYTES);
+          expect(bytes(built.documents.map((d) => d.xml))).toBeLessThanOrEqual(
+            MAX_LOTE_MESSAGE_BYTES,
+          );
         },
       ),
     );

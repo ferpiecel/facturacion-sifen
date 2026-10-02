@@ -7,6 +7,8 @@ import {
   formatDocumentNumber,
   formatPyg,
   formatQuantity,
+  groupCdc,
+  KUDE_CONSULT_URL,
   KUDE_TITLE,
   type KudeInvoice,
   type KudeItem,
@@ -17,6 +19,7 @@ const PT_PER_MM = 72 / 25.4;
 const QR_MM = 30;
 const MARGIN = 36;
 const BOTTOM = 60;
+const FOOTER_BLOCK = 190;
 
 const COLUMNS = [
   { key: 'code', title: 'Cód.', width: 45, align: 'left' },
@@ -80,8 +83,10 @@ export class PdfkitKudeRenderer implements KudeRenderer {
     });
 
     this.header(doc, invoice, qr);
-    const y = this.general(doc, invoice, 160);
-    this.items(doc, invoice.items, y);
+    let y = this.general(doc, invoice, 160);
+    y = this.items(doc, invoice.items, y);
+    this.totals(doc, invoice, y);
+    this.pageNumbers(doc);
     doc.end();
     return done;
   }
@@ -208,5 +213,66 @@ export class PdfkitKudeRenderer implements KudeRenderer {
       y += height + 3;
     }
     return y;
+  }
+
+  private totals(doc: Doc, invoice: KudeInvoice, start: number): void {
+    const { totals } = invoice;
+    let y = start;
+    if (y + FOOTER_BLOCK > doc.page.height - BOTTOM) {
+      doc.addPage();
+      y = MARGIN;
+    }
+    const width = doc.page.width - 2 * MARGIN;
+    doc
+      .moveTo(MARGIN, y)
+      .lineTo(MARGIN + width, y)
+      .stroke();
+    y += 5;
+    const subtotals: [string, number][] = [
+      ['exempt', totals.subtotalExempt],
+      ['vat5', totals.subtotal5],
+      ['vat10', totals.subtotal10],
+    ];
+    this.line(doc, 'SUBTOTAL', MARGIN, y, { bold: true });
+    let x = MARGIN + COLUMNS.slice(0, 6).reduce((sum, column) => sum + column.width, 0);
+    for (const [key, amount] of subtotals) {
+      const column = COLUMNS.find((c) => c.key === key);
+      this.line(doc, formatPyg(amount), x, y, { width: (column?.width ?? 50) - 3, align: 'right' });
+      x += column?.width ?? 50;
+    }
+    const summary = [
+      `TOTAL DE LA OPERACIÓN: ${formatPyg(totals.totalOperation)}`,
+      `TOTAL EN GUARANÍES: ${formatPyg(totals.totalGs)}`,
+      `LIQUIDACIÓN IVA: (5%) ${formatPyg(totals.vat5)} (10%) ${formatPyg(totals.vat10)}`,
+      `TOTAL IVA: ${formatPyg(totals.totalVat)}`,
+    ];
+    summary.forEach((text, i) => {
+      this.line(doc, text, MARGIN, y + 16 + i * 12, { bold: true, size: 9 });
+    });
+    y += 16 + summary.length * 12 + 12;
+    this.line(doc, 'Información de consulta en SIFEN', MARGIN, y, { bold: true });
+    this.line(
+      doc,
+      'Consulte la validez de esta Factura Electrónica con el número de CDC impreso abajo en:',
+      MARGIN,
+      y + 12,
+      {},
+    );
+    this.line(doc, KUDE_CONSULT_URL[invoice.environment], MARGIN, y + 24, { bold: true });
+    this.line(doc, groupCdc(invoice.cdc), MARGIN, y + 38, { bold: true, size: 10 });
+  }
+
+  /** MT 13.3: "n/total" on every page; written after layout, when the total is known. */
+  private pageNumbers(doc: Doc): void {
+    const { count } = doc.bufferedPageRange();
+    for (let i = 0; i < count; i += 1) {
+      doc.switchToPage(i);
+      // Drawing inside the bottom margin would make pdfkit open a new page.
+      doc.page.margins.bottom = 0;
+      this.line(doc, `Página ${String(i + 1)}/${String(count)}`, MARGIN, doc.page.height - 30, {
+        width: doc.page.width - 2 * MARGIN,
+        align: 'right',
+      });
+    }
   }
 }

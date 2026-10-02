@@ -585,6 +585,38 @@ describe('establishment contact (HU-E6-02)', () => {
     expect(await rowOf(db, second.id)).toMatchObject({ phone: null, email: null });
   });
 
+  it('keeps the existing commercial name when --name is not given', async () => {
+    const { db, tenantId } = await setup();
+    const created = await addEstablishment(db, {
+      tenantId,
+      establishment: createEstablishment({ ...base, ...contact }),
+    });
+    await setEstablishmentContact(db, {
+      tenantId,
+      establishmentCode: '001',
+      contact: createEstablishmentContact({ phone: '021-123456', email: 'otro@test.com' }),
+    });
+    expect(await rowOf(db, created.id)).toMatchObject({
+      phone: '021-123456',
+      email: 'otro@test.com',
+      commercialName: 'Casa Matriz',
+    });
+  });
+
+  it('replaces the commercial name when --name is given', async () => {
+    const { db, tenantId } = await setup();
+    const created = await addEstablishment(db, {
+      tenantId,
+      establishment: createEstablishment({ ...base, ...contact }),
+    });
+    await setEstablishmentContact(db, {
+      tenantId,
+      establishmentCode: '001',
+      contact: createEstablishmentContact({ ...contact, commercialName: 'Sucursal Norte' }),
+    });
+    expect((await rowOf(db, created.id)).commercialName).toBe('Sucursal Norte');
+  });
+
   it('fails clearly for an unknown establishment or tenant', async () => {
     const { db, tenantId } = await setup();
     await expect(

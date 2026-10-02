@@ -124,6 +124,22 @@ describe('establishment contact (gEmis dTelEmi, dEmailE, dDenSuc)', () => {
     );
   });
 
+  it.each(['0973\n000000', '0973\r\n00000', '0973\t000000', '0973\u0000000000'])(
+    'rejects a phone with control characters %j',
+    (phone) => {
+      expect(() => createEstablishmentContact({ ...contact, phone })).toThrow(/phone/);
+    },
+  );
+
+  it('validates the commercial name length even without phone and email', () => {
+    expect(() => createEstablishment({ ...validInput(), commercialName: 'x'.repeat(31) })).toThrow(
+      /commercialName/,
+    );
+    expect(
+      createEstablishment({ ...validInput(), commercialName: ' Sucursal ' }).commercialName,
+    ).toBe('Sucursal');
+  });
+
   it.each(['plain', 'a@b', '@test.com', 'a b@test.com', 'a@test.c'])(
     'rejects the email %j (tEmail)',
     (email) => {

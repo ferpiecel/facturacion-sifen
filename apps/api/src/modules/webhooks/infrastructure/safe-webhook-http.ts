@@ -41,6 +41,10 @@ const failure = (code: WebhookErrorCode): WebhookHttpResult => ({ kind: 'error',
  * addresses (the lookup is pinned, so DNS cannot answer differently between check and connect) while
  * Host and SNI keep the original hostname; never follow redirects; bound connect and total time;
  * read at most `maxBodyBytes` of the response and discard it (only the status matters).
+ *
+ * Production constructs it with at most the three limits (`connectTimeoutMs`, `totalTimeoutMs`,
+ * `maxBodyBytes`). `resolve`, `isBlocked`, `request` and `ca` exist for tests only: setting any of
+ * them in production would weaken or bypass the SSRF policy.
  */
 export class SafeWebhookHttp implements WebhookHttpPort {
   private readonly resolve: (hostname: string) => Promise<readonly string[]>;
@@ -77,10 +81,21 @@ export class SafeWebhookHttp implements WebhookHttpPort {
     const host = url.hostname.replace(/^\[|\]$/g, '');
     let addresses: readonly string[] = [host];
     if (isIP(host) === 0) {
+      // getaddrinfo cannot be cancelled, so the lookup is raced against the total deadline.
+      let timer: NodeJS.Timeout | undefined;
+      const deadline = new Promise<'timeout'>((resolve) => {
+        timer = setTimeout(() => {
+          resolve('timeout');
+        }, this.limits.total);
+      });
       try {
-        addresses = await this.resolve(host);
+        const answer = await Promise.race([this.resolve(host), deadline]);
+        if (answer === 'timeout') return failure('timeout');
+        addresses = answer;
       } catch {
         return failure('dns_failure');
+      } finally {
+        clearTimeout(timer);
       }
     }
     if (addresses.length === 0) return failure('dns_failure');
@@ -113,6 +128,8 @@ export class SafeWebhookHttp implements WebhookHttpPort {
           host: url.host,
           'content-length': Buffer.byteLength(request.body),
         },
+        // `agent: false` = a fresh, private Agent per request. Never the global agent: Node can route that
+        // through HTTPS_PROXY / NODE_USE_ENV_PROXY, which would bypass the vetted-address pinning.
         agent: false,
         ca: this.options.ca,
         servername: isIP(host) === 0 ? host : undefined,

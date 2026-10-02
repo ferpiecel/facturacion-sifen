@@ -194,21 +194,14 @@ describe('SafeWebhookHttp (HU-E11-01)', () => {
       proxied++;
     });
     await new Promise<void>((r) => proxy.listen(0, '127.0.0.1', r));
-    const saved = { p: process.env.HTTPS_PROXY, u: process.env.NODE_USE_ENV_PROXY };
-    process.env.HTTPS_PROXY = `http://127.0.0.1:${String((proxy.address() as AddressInfo).port)}`;
-    process.env.NODE_USE_ENV_PROXY = '1';
+    vi.stubEnv('HTTPS_PROXY', `http://127.0.0.1:${String((proxy.address() as AddressInfo).port)}`);
+    vi.stubEnv('NODE_USE_ENV_PROXY', '1');
     try {
       const { port } = await listen((_req, res) => res.end());
       expect(await post(local(), port)).toEqual({ kind: 'response', status: 200 });
       expect(proxied).toBe(0);
     } finally {
-      for (const [key, value] of [
-        ['HTTPS_PROXY', saved.p],
-        ['NODE_USE_ENV_PROXY', saved.u],
-      ] as const) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
-      }
+      vi.unstubAllEnvs();
       await new Promise((r) => proxy.close(r));
     }
   });

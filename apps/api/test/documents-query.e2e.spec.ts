@@ -2,7 +2,7 @@ import { type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
 import {
   createPgliteDatabase,
-  documents,
+  tenants,
   tenantEstablishments,
   tenantExpeditionPoints,
   tenantFiscalProfiles,
@@ -83,6 +83,7 @@ describe('GET /v1/documents (e2e)', () => {
 
   let writer: string;
   let reader: string;
+  let tenantId: string;
   let other: string;
 
   beforeEach(async () => {
@@ -91,6 +92,7 @@ describe('GET /v1/documents (e2e)', () => {
     await handle.migrate();
     writer = await seedTenant('Acme SA', ['documents:write', 'documents:read']);
     reader = writer;
+    tenantId = (await handle.db.select().from(tenants).where(eq(tenants.name, 'Acme SA')))[0].id;
     other = await seedTenant('Other SA', ['documents:read']);
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(DATABASE_HANDLE)
@@ -179,10 +181,11 @@ describe('GET /v1/documents (e2e)', () => {
 
   it("answers 404 for a document of the tenant's other environment, by id and by cdc", async () => {
     const { document_id: id, cdc } = await create(writer);
+    // The tenant later moves to production: its test-environment documents are no longer current.
     await handle.db
-      .update(documents)
+      .update(tenants)
       .set({ environment: 'production' })
-      .where(eq(documents.id, id));
+      .where(eq(tenants.id, tenantId));
 
     expect((await get(`/v1/documents/${id}`, reader)).statusCode).toBe(404);
     expect((await get(`/v1/documents?cdc=${cdc}`, reader)).statusCode).toBe(404);

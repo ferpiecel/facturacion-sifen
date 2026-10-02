@@ -96,7 +96,7 @@ export function createDrizzleLoteAssemblyStore({
 
         const environments = new Set(locked.map((row) => row.environment));
         const [environment] = [...environments];
-        if (environments.size !== 1 || !environment) {
+        if (environments.size !== 1) {
           throw new Error('A lote cannot mix documents of different environments');
         }
 

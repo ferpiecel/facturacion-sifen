@@ -21,9 +21,10 @@ function unescapeXml(text: string): string {
   return text.replace(
     /&(?:#x([\da-f]+)|#(\d+)|(\w+));/gi,
     (whole, hex?: string, dec?: string, named?: string) => {
-      if (named !== undefined) return ENTITIES[named] ?? whole;
+      if (named !== undefined) return Object.hasOwn(ENTITIES, named) ? ENTITIES[named] : whole;
       const code = hex !== undefined ? parseInt(hex, 16) : Number(dec);
-      return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+      const surrogate = code >= 0xd800 && code <= 0xdfff;
+      return code > 0 && code <= 0x10ffff && !surrogate ? String.fromCodePoint(code) : whole;
     },
   );
 }
@@ -56,7 +57,7 @@ function section(source: string, name: string): string {
   const match = new RegExp(`<${NAME}${name}(?:\\s[^>]*)?>([\\s\\S]*?)</${NAME}${name}>`).exec(
     source,
   );
-  if (!match?.[1]) throw new KudeSourceError(name, 'is missing');
+  if (!match) throw new KudeSourceError(name, 'is missing');
   return match[1];
 }
 
@@ -90,7 +91,7 @@ export function readKudeInvoice(xml: string, options: { stampValidTo?: string } 
   const timbrado = section(xml, 'gTimb');
   if (required(timbrado, 'iTiDE') !== '1')
     throw new KudeSourceError('iTiDE', 'unsupported: only the FE KuDE exists');
-  const qrUrl = required(xml, 'dCarQR');
+  const qrUrl = required(section(xml, 'gCamFuFD'), 'dCarQR');
   const environment = qrUrl.startsWith(qrBaseUrl('production'))
     ? 'production'
     : qrUrl.startsWith(qrBaseUrl('test'))
@@ -102,6 +103,13 @@ export function readKudeInvoice(xml: string, options: { stampValidTo?: string } 
   const emitter = section(xml, 'gEmis');
   const receiverBlock = section(xml, 'gDatRec');
   const totals = section(xml, 'gTotSub');
+  const general = section(xml, 'gDatGralOpe');
+  const operation = section(general, 'gOpeCom');
+  const condition = section(xml, 'gCamCond');
+  const currency = required(operation, 'cMoneOpe');
+  if (currency !== 'PYG') {
+    throw new KudeSourceError('cMoneOpe', `is ${currency}: only PYG KuDEs are supported`);
+  }
   const items = [
     ...xml.matchAll(
       new RegExp(`<${NAME}gCamItem(?:\\s[^>]*)?>([\\s\\S]*?)</${NAME}gCamItem>`, 'g'),
@@ -146,16 +154,17 @@ export function readKudeInvoice(xml: string, options: { stampValidTo?: string } 
     establishment: required(timbrado, 'dEst'),
     point: required(timbrado, 'dPunExp'),
     documentNumber: required(timbrado, 'dNumDoc'),
-    issuedAt: required(xml, 'dFeEmiDE'),
-    operationCondition: required(xml, 'dDCondOpe'),
-    installments: optional(xml, 'dCuotas') === undefined ? undefined : pyg(xml, 'dCuotas'),
-    currency: required(xml, 'cMoneOpe'),
-    exchangeRate: optional(xml, 'dTiCam'),
+    issuedAt: required(general, 'dFeEmiDE'),
+    operationCondition: required(condition, 'dDCondOpe'),
+    installments:
+      optional(condition, 'dCuotas') === undefined ? undefined : pyg(condition, 'dCuotas'),
+    currency,
+    exchangeRate: optional(operation, 'dTiCam'),
     receiver,
-    transactionType: required(xml, 'dDesTipTra'),
+    transactionType: required(operation, 'dDesTipTra'),
     items,
     totals: {
-      subtotalExempt: pyg(totals, 'dSubExe', 0),
+      subtotalExempt: pyg(totals, 'dSubExe', 0) + pyg(totals, 'dSubExo', 0),
       subtotal5: pyg(totals, 'dSub5', 0),
       subtotal10: pyg(totals, 'dSub10', 0),
       totalOperation: total,

@@ -158,4 +158,35 @@ describe('readKudeInvoice', () => {
       /unsupported/,
     );
   });
+
+  it('reads each field only from its own group, ignoring look-alike elements elsewhere', () => {
+    const decoys =
+      '<dFeEmiDE>1999-01-01T00:00:00</dFeEmiDE><dDCondOpe>Decoy</dDCondOpe><cMoneOpe>USD</cMoneOpe>' +
+      '<dDesTipTra>Decoy</dDesTipTra><dCuotas>9</dCuotas><dTiCam>9</dTiCam><dCarQR>https://decoy</dCarQR>';
+    expect(readKudeInvoice(xml.replace('<gTimb>', `${decoys}<gTimb>`))).toEqual(
+      readKudeInvoice(xml),
+    );
+  });
+
+  it('leaves unknown, inherited and surrogate character references as literal text', () => {
+    const odd = xml.replace(
+      'Receptor Prueba SA</dNomRec>',
+      'A &constructor; &toString; &#xD800; &#55357; B</dNomRec>',
+    );
+    expect(readKudeInvoice(odd).receiver).toMatchObject({
+      name: 'A &constructor; &toString; &#xD800; &#55357; B',
+    });
+  });
+
+  it('adds the exonerated subtotal to the exempt column', () => {
+    const split = xml
+      .replace('<dSubExe>0</dSubExe>', '<dSubExe>100</dSubExe>')
+      .replace('<dSubExo>0</dSubExo>', '<dSubExo>200</dSubExo>');
+    expect(readKudeInvoice(split).totals.subtotalExempt).toBe(300);
+  });
+
+  it('rejects foreign currencies explicitly (PYG-only MVP)', () => {
+    const usd = xml.replace('<cMoneOpe>PYG</cMoneOpe>', '<cMoneOpe>USD</cMoneOpe>');
+    expect(() => readKudeInvoice(usd)).toThrow(/cMoneOpe.*PYG/);
+  });
 });

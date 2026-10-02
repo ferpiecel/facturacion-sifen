@@ -301,6 +301,18 @@ describe('PollLoteResult', () => {
     expect(store.outcomes).toHaveLength(1);
   });
 
+  it.each([
+    ['0361', sifenScenarios.loteEnProcesamiento()],
+    ['0364', sifenScenarios.consultaExtemporanea()],
+    ['0999', { dCodRes: '0999', dMsgRes: '', resultados: [] }],
+  ])('caps the SIFEN message kept in the %s reason at 500 characters', async (_code, base) => {
+    const { poll, gateway } = setup(sentLote(), 11 * MINUTE);
+    gateway.enqueue('consultarLote', { ...base, dMsgRes: 'x'.repeat(2000) });
+    const reason = reasonOf(await run(poll));
+    expect(reason).toContain('x'.repeat(500));
+    expect(reason).not.toContain('x'.repeat(501));
+  });
+
   it('calls SIFEN once per execution', async () => {
     const { poll, gateway } = setup(sentLote(), 11 * MINUTE);
     gateway.enqueue('consultarLote', sifenScenarios.loteEnProcesamiento());

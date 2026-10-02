@@ -146,4 +146,65 @@ describe('webhook_deliveries', () => {
       .returning();
     expect(row.status).toBe('pending');
   });
+
+  it.each([99, 600, 0, -1])('rejects the response status code %i', async (code) => {
+    const { db, a, endpointFor } = await seed();
+    expect(
+      await causeOf(
+        db
+          .insert(webhookDeliveries)
+          .values(delivery(a, await endpointFor(a), { lastStatusCode: code })),
+      ),
+    ).toContain('webhook_deliveries_status_code_range');
+  });
+
+  it('never lowers attempt_count, replay included, and freezes first_attempt_at and delivered_at', async () => {
+    const { db, a, endpointFor } = await seed();
+    const first = new Date('2026-09-22T00:00:00Z');
+    await db.insert(webhookDeliveries).values(
+      delivery(a, await endpointFor(a), {
+        status: 'dead',
+        nextAttemptAt: null,
+        attemptCount: 14,
+        firstAttemptAt: first,
+      }),
+    );
+    expect(
+      await causeOf(
+        db
+          .update(webhookDeliveries)
+          .set({ status: 'pending', nextAttemptAt: new Date(), attemptCount: 0 }),
+      ),
+    ).toContain('attempt_count');
+    expect(
+      await causeOf(db.update(webhookDeliveries).set({ firstAttemptAt: new Date() })),
+    ).toContain('immutable');
+    const [replayed] = await db
+      .update(webhookDeliveries)
+      .set({ status: 'pending', nextAttemptAt: new Date() })
+      .returning();
+    expect(replayed.attemptCount).toBe(14);
+    const [done] = await db
+      .update(webhookDeliveries)
+      .set({ status: 'delivered', nextAttemptAt: null, deliveredAt: first, attemptCount: 15 })
+      .returning();
+    expect(done.status).toBe('delivered');
+    expect(await causeOf(db.update(webhookDeliveries).set({ deliveredAt: new Date() }))).toContain(
+      'immutable',
+    );
+  });
+
+  it('sets first_attempt_at once when it was empty, and maintains updated_at', async () => {
+    const { db, a, endpointFor } = await seed();
+    const past = new Date('2020-01-01T00:00:00Z');
+    await db
+      .insert(webhookDeliveries)
+      .values(delivery(a, await endpointFor(a), { updatedAt: past }));
+    const [row] = await db
+      .update(webhookDeliveries)
+      .set({ firstAttemptAt: new Date(), attemptCount: 1, updatedAt: past })
+      .returning();
+    expect(row.firstAttemptAt).not.toBeNull();
+    expect(row.updatedAt.getTime()).toBeGreaterThan(past.getTime());
+  });
 });

@@ -504,12 +504,17 @@ export const tenantCertificates = pgTable(
 
 /** Lifecycle events a webhook can carry; mirrors the API's `WEBHOOK_EVENT_TYPES` (parity spec in apps/api). */
 export const WEBHOOK_EVENT_TYPES = [
+  'document.created',
+  'document.signed',
+  'document.submitted',
   'document.approved',
   'document.approved_with_observations',
   'document.rejected',
   'document.cancelled',
   'document.number_voided',
   'document.transmission_deadline_warning',
+  'document.notification.delivered',
+  'document.notification.failed',
 ] as const;
 
 /**

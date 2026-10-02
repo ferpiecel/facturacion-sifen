@@ -12,7 +12,7 @@ CREATE TABLE "webhook_endpoints" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "webhook_endpoints_tenant_id_key" UNIQUE("tenant_id","id"),
 	CONSTRAINT "webhook_endpoints_url_https" CHECK ("webhook_endpoints"."url" ~ '^https://[^[:space:]]+$' AND "webhook_endpoints"."url" !~ '^https://[^/]*@' AND length("webhook_endpoints"."url") <= 2048),
-	CONSTRAINT "webhook_endpoints_events_valid" CHECK ("webhook_endpoints"."events" <@ ARRAY['document.approved', 'document.approved_with_observations', 'document.rejected', 'document.cancelled', 'document.number_voided', 'document.transmission_deadline_warning']::text[]),
+	CONSTRAINT "webhook_endpoints_events_valid" CHECK ("webhook_endpoints"."events" <@ ARRAY['document.created', 'document.signed', 'document.submitted', 'document.approved', 'document.approved_with_observations', 'document.rejected', 'document.cancelled', 'document.number_voided', 'document.transmission_deadline_warning', 'document.notification.delivered', 'document.notification.failed']::text[]),
 	CONSTRAINT "webhook_endpoints_previous_pair" CHECK (("webhook_endpoints"."previous_sealed" IS NULL) = ("webhook_endpoints"."previous_expires_at" IS NULL))
 );
 --> statement-breakpoint

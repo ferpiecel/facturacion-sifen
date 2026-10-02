@@ -563,6 +563,13 @@ export const documents = pgTable(
     currency: char('currency', { length: 3 }).notNull().default('PYG'),
     /** The request body as received. */
     payload: jsonb('payload').notNull(),
+    /**
+     * `Idempotency-Key` of the request that created the document (HU-E5-02),
+     * unique per tenant. Null only for rows that predate the story.
+     */
+    idempotencyKey: varchar('idempotency_key', { length: 255 }),
+    /** sha-256 hex of the canonical JSON of the validated body, to detect a reused key. */
+    requestHash: char('request_hash', { length: 64 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -592,6 +599,14 @@ export const documents = pgTable(
       ],
       name: 'documents_tenant_point_fk',
     }),
+    unique('documents_tenant_idempotency_key_key').on(table.tenantId, table.idempotencyKey),
+    check(
+      'documents_idempotency_pair',
+      sql`(${table.idempotencyKey} IS NULL) = (${table.requestHash} IS NULL)`,
+    ),
+    // 1-255 printable ASCII without spaces.
+    check('documents_idempotency_key_format', sql`${table.idempotencyKey} ~ '^[!-~]{1,255}$'`),
+    check('documents_idempotency_hash_format', sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`),
     check('documents_cdc_format', sql`${table.cdc} ~ '^[0-9]{44}$'`),
     check('documents_security_code_format', sql`${table.securityCode} ~ '^[0-9]{9}$'`),
     check('documents_number_range', sql`${table.number} BETWEEN 1 AND 9999999`),

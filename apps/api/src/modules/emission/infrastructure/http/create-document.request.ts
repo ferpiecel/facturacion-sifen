@@ -70,7 +70,7 @@ export function parseCreateDocument(
 /** Maps a parsed body onto the use case input (the draft's `vatRate` is checked by the domain). */
 export function toAcceptInvoiceInput(
   body: CreateDocumentBody,
-  context: Pick<AcceptInvoiceInput, 'tenantId' | 'actor' | 'payload'>,
+  context: Pick<AcceptInvoiceInput, 'tenantId' | 'actor' | 'payload' | 'idempotencyKey'>,
 ): AcceptInvoiceInput {
   return {
     ...context,

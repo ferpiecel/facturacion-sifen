@@ -97,12 +97,21 @@ describe('POST /v1/documents (e2e)', () => {
     else process.env.SIFEN_ENVIRONMENT = originalEnvironment;
   });
 
-  const post = (body: unknown, key: string | null = bearer) =>
+  let sequence = 0;
+  /** Posts with a fresh `Idempotency-Key` unless one is given (`null` omits the header). */
+  const post = (
+    body: unknown,
+    key: string | null = bearer,
+    idempotencyKey: string | null = `auto-${String(++sequence)}`,
+  ) =>
     app.inject({
       method: 'POST',
       url: '/v1/documents',
       payload: body as object,
-      headers: key ? { authorization: `Bearer ${key}` } : {},
+      headers: {
+        ...(key ? { authorization: `Bearer ${key}` } : {}),
+        ...(idempotencyKey === null ? {} : { 'idempotency-key': idempotencyKey }),
+      },
     });
 
   it('accepts a valid invoice with 202, a document id and a 44-digit CDC', async () => {
@@ -255,5 +264,78 @@ describe('POST /v1/documents (e2e)', () => {
 
     expect(response.statusCode).toBe(409);
     expect(response.json<{ message: string }>().message).toMatch(/exhausted/i);
+  });
+
+  describe('Idempotency-Key (HU-E5-02)', () => {
+    it('answers 400 when the header is missing or malformed, persisting nothing', async () => {
+      for (const key of [null, '', 'k'.repeat(256), 'has space']) {
+        const response = await post(BODY, bearer, key);
+        expect(response.statusCode).toBe(400);
+        expect(response.json<{ message: string }>().message).toContain('Idempotency-Key');
+      }
+      expect(await handle.db.select().from(documents)).toHaveLength(0);
+    });
+
+    it('replays the same 202 body for a retry and creates a single document', async () => {
+      const first = await post(BODY, bearer, 'retry-1');
+      const second = await post(BODY, bearer, 'retry-1');
+
+      expect([first.statusCode, second.statusCode]).toEqual([202, 202]);
+      expect(second.json()).toEqual(first.json());
+      expect(await handle.db.select().from(documents)).toHaveLength(1);
+    });
+
+    it('answers 409 when the same key arrives with a different payload', async () => {
+      await post(BODY, bearer, 'retry-2');
+
+      const response = await post(
+        { ...BODY, items: [{ quantity: 2, unitPrice: 110_000, vatRate: 10 }] },
+        bearer,
+        'retry-2',
+      );
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json<{ message: string }>().message).toMatch(/Idempotency-Key/);
+      expect(await handle.db.select().from(documents)).toHaveLength(1);
+    });
+
+    it('treats defaults and key order as the same request (canonical hash of the validated body)', async () => {
+      const first = await post(BODY, bearer, 'retry-3');
+      const reordered = Object.fromEntries(Object.entries(BODY).reverse());
+      const second = await post({ ...reordered, currency: 'PYG' }, bearer, 'retry-3');
+
+      expect(second.statusCode).toBe(202);
+      expect(second.json()).toEqual(first.json());
+    });
+
+    it('creates one document when two identical requests race', async () => {
+      const [a, b] = await Promise.all([
+        post(BODY, bearer, 'race-1'),
+        post(BODY, bearer, 'race-1'),
+      ]);
+
+      expect([a.statusCode, b.statusCode]).toEqual([202, 202]);
+      expect(a.json()).toEqual(b.json());
+      expect(await handle.db.select().from(documents)).toHaveLength(1);
+    });
+
+    it('scopes the key per tenant', async () => {
+      const other = await seedTenant('Other SA', true);
+
+      const mine = await post(BODY, bearer, 'same-key');
+      const theirs = await post(BODY, other.formattedKey, 'same-key');
+
+      expect([mine.statusCode, theirs.statusCode]).toEqual([202, 202]);
+      expect(mine.json<{ cdc: string }>().cdc).not.toBe(theirs.json<{ cdc: string }>().cdc);
+      expect(await handle.db.select().from(documents)).toHaveLength(2);
+    });
+
+    it('does not consume the key when the request fails validation', async () => {
+      const bad = await post({ ...BODY, items: [] }, bearer, 'retry-4');
+      expect(bad.statusCode).toBe(422);
+
+      const good = await post(BODY, bearer, 'retry-4');
+      expect(good.statusCode).toBe(202);
+    });
   });
 });

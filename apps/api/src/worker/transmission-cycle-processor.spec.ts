@@ -7,6 +7,7 @@ const TENANT = '11111111-1111-4111-8111-111111111111';
 const empty: CycleReport = {
   signed: 0,
   signSkipped: 0,
+  sendSkipped: 0,
   assembled: 0,
   sent: [],
   polled: [],

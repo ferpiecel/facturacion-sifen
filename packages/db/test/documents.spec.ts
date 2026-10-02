@@ -198,9 +198,52 @@ describe('documents', () => {
       );
     });
 
+    it('sets the XML only while the document becomes or is signed', async () => {
+      const signedAt = new Date('2026-01-01T12:00:05Z');
+      for (const [from, to] of [
+        ['accepted', 'accepted'],
+        ['accepted', 'queued'],
+        ['queued', 'queued'],
+        ['queued', 'submitted'],
+        ['submitted', 'submitted'],
+      ]) {
+        const { db, a, setupA, doc } = await seed();
+        await db.insert(documents).values(doc(a, setupA, { status: from }));
+        expect(
+          await causeOf(update(db, a, { status: to, signedXml: '<rDE/>', signedAt })),
+        ).toContain('while signing');
+      }
+    });
+
+    it('lets a signed document without XML receive it', async () => {
+      const { db, a, setupA, doc } = await seed();
+      await db.insert(documents).values(doc(a, setupA, { status: 'signed' }));
+      const signedAt = new Date('2026-01-01T12:00:05Z');
+      const [row] = await update(db, a, { signedXml: '<rDE/>', signedAt });
+      expect(row).toMatchObject({ signedXml: '<rDE/>', signedAt });
+    });
+
+    it('requires signed_xml and signed_at together', async () => {
+      const { db, a, setupA, doc } = await seed();
+      expect(
+        await causeOf(db.insert(documents).values(doc(a, setupA, { signedXml: '<rDE/>' }))),
+      ).toContain('documents_signed_pair');
+      expect(
+        await causeOf(
+          db.insert(documents).values(doc(a, setupA, { signedAt: new Date('2026-01-01') })),
+        ),
+      ).toContain('documents_signed_pair');
+    });
+
     it('keeps the status guard: no regression even with the XML present', async () => {
       const { db, a, setupA, doc } = await seed();
-      await db.insert(documents).values(doc(a, setupA, { status: 'queued', signedXml: '<rDE/>' }));
+      await db.insert(documents).values(
+        doc(a, setupA, {
+          status: 'queued',
+          signedXml: '<rDE/>',
+          signedAt: new Date('2026-01-01T12:00:05Z'),
+        }),
+      );
       expect(await causeOf(update(db, a, { status: 'accepted' }))).toContain(
         'invalid status transition',
       );

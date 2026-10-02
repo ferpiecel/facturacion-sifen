@@ -21,7 +21,7 @@ Sources: backlog HU-E6-02, plan §8.1 "Envío y consulta" and §8.5, ADR-0007.
     0300 without protocol) -> `unknown`, never resent. In-memory store fake in tests.
     Acceptance: one gateway call per lote under every outcome; replay of a claimed lote makes no
     call; cdcs/dId forwarded to the gateway.
-- [ ] **S2 — Persistence adapter for `LoteDispatchStore`.** `lotes_sifen` (plan §8 data model:
+- [x] **S2 — Persistence adapter for `LoteDispatchStore`.** `lotes_sifen` (plan §8 data model:
       `numero_lote_sifen`, `estado`, `enviado_at`, `proxima_consulta_at`, `vence_consulta_at`) needs a
       migration for the states `pending|sending|sent|rejected|unknown` plus `motivo`/`codigo_respuesta`
       columns; atomic claim via `UPDATE ... WHERE estado='pending'`. Migration proposed to the tech
@@ -37,3 +37,10 @@ Sources: backlog HU-E6-02, plan §8.1 "Envío y consulta" and §8.5, ADR-0007.
   (HU-E6-04) must treat as `unknown`. Never retry from `sending`.
 - Transport errors (not only timeouts) map to `unknown`: after TLS/network failure we cannot
   prove SIFEN did not receive the lote (plan §8.1 step 2, ADR-0007).
+- S2: table `lotes` (English columns, like `documents`) plus `lote_documents`; `documents` gained
+  `UNIQUE(tenant_id, id)` so the link table can use tenant-scoped composite FKs. A partial
+  `UNIQUE(document_id)` over non-terminal lotes is not expressible (the status lives in another
+  table), so the link is `PRIMARY KEY(lote_id, document_id)` and "no CDC in two lotes in process"
+  stays in `LoteBuilder` / the lote-creation step.
+- S2: `SendLote` records `unknown` for every gateway error (cause kept) and rejects an empty lote
+  before claiming; a failing `record` propagates and leaves `sending`, recovered by HU-E6-04.

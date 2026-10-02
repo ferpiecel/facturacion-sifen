@@ -10,7 +10,11 @@ import {
 import type { AuthenticateApiKeyUseCase } from '../../application/authenticate-api-key.use-case.js';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator.js';
 import { REQUIRED_SCOPES_KEY } from '../decorators/require-scopes.decorator.js';
-import { API_KEY_SCOPES_CLS_KEY, type IdentityClsStore } from '../identity-cls-store.js';
+import {
+  API_KEY_ID_CLS_KEY,
+  API_KEY_SCOPES_CLS_KEY,
+  type IdentityClsStore,
+} from '../identity-cls-store.js';
 
 const AUTHORIZATION_HEADER = 'authorization';
 const GENERIC_UNAUTHORIZED = 'Invalid or missing API key';
@@ -99,6 +103,7 @@ export class ApiKeyGuard implements CanActivate {
 
     this.cls.set(TENANT_ID_CLS_KEY, authenticated.tenantId);
     this.cls.set(API_KEY_SCOPES_CLS_KEY, authenticated.scopes);
+    this.cls.set(API_KEY_ID_CLS_KEY, authenticated.apiKeyId);
 
     // getAllAndMerge (not getAllAndOverride): a class-level @RequireScopes()
     // is a baseline every handler in it must still satisfy, not a default

@@ -43,6 +43,7 @@ describe('AuthenticateApiKeyUseCase', () => {
     const result = await useCase.execute(RAW_KEY);
 
     expect(result).toEqual({
+      apiKeyId: 'record-id',
       tenantId: 'tenant-id',
       scopes: ['documents:write'],
       environment: 'live',
@@ -107,6 +108,7 @@ describe('AuthenticateApiKeyUseCase', () => {
     const result = await useCase.execute(RAW_KEY);
 
     expect(result).toEqual({
+      apiKeyId: 'record-id',
       tenantId: 'tenant-id',
       scopes: ['documents:write'],
       environment: 'live',

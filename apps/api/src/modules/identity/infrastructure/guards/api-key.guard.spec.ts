@@ -14,7 +14,11 @@ import {
 } from '../../../tenancy/infrastructure/tenancy-cls-store.js';
 import { Public } from '../decorators/public.decorator.js';
 import { RequireScopes } from '../decorators/require-scopes.decorator.js';
-import { API_KEY_SCOPES_CLS_KEY, type IdentityClsStore } from '../identity-cls-store.js';
+import {
+  API_KEY_ID_CLS_KEY,
+  API_KEY_SCOPES_CLS_KEY,
+  type IdentityClsStore,
+} from '../identity-cls-store.js';
 import { ApiKeyGuard } from './api-key.guard.js';
 
 type Store = TenancyClsStore & IdentityClsStore;
@@ -91,6 +95,7 @@ function getResponseBody(error: unknown): unknown {
 }
 
 const AUTHENTICATED: AuthenticatedApiKey = {
+  apiKeyId: 'key-1',
   tenantId: 'tenant-1',
   scopes: ['documents:write'],
   environment: 'live',
@@ -239,10 +244,16 @@ describe('ApiKeyGuard', () => {
         activated,
         tenantId: cls.get(TENANT_ID_CLS_KEY),
         scopes: cls.get(API_KEY_SCOPES_CLS_KEY),
+        apiKeyId: cls.get(API_KEY_ID_CLS_KEY),
       };
     });
 
-    expect(outcome).toEqual({ activated: true, tenantId: 'tenant-1', scopes: ['documents:write'] });
+    expect(outcome).toEqual({
+      activated: true,
+      tenantId: 'tenant-1',
+      scopes: ['documents:write'],
+      apiKeyId: 'key-1',
+    });
   });
 
   it('allows a scoped route when the key has the required scope', async () => {

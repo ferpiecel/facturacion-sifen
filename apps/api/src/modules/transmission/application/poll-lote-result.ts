@@ -2,6 +2,9 @@ import { SIFEN_CODES, type SifenGateway, type SifenLoteResult } from '@sifen/sif
 
 /** Lote queries are repeated at least 10 minutes apart (ADR-0007, Guía 2024). */
 const POLL_INTERVAL_MS = 10 * 60 * 1000;
+/** SIFEN text is stored in `last_poll_message`; keep it bounded. */
+const MAX_MESSAGE_LENGTH = 500;
+const capped = (message: string): string => message.slice(0, MAX_MESSAGE_LENGTH);
 
 export type DocumentResolutionStatus = 'approved' | 'approved_with_observations' | 'rejected';
 
@@ -35,10 +38,20 @@ export interface LotePollState {
   readonly cdcs: readonly string[];
 }
 
+export interface LotePollGuard {
+  /** The `next_poll_at` the lote had when it was loaded; the write only applies if it still has it. */
+  readonly expectedNextPollAt: Date;
+  readonly polledAt: Date;
+}
+
 export interface LotePollStore {
   load(loteId: string): Promise<LotePollState | null>;
-  /** Atomically stores the lote transition and the document updates it implies. */
-  record(loteId: string, outcome: LotePollOutcome): Promise<void>;
+  /**
+   * Atomically stores the lote transition and the document updates it implies, only while the
+   * lote is still `sent` with `guard.expectedNextPollAt`. Returns false (nothing written) when a
+   * concurrent poll already moved it.
+   */
+  record(loteId: string, outcome: LotePollOutcome, guard: LotePollGuard): Promise<boolean>;
 }
 
 export interface PollLoteResultDeps {
@@ -53,7 +66,7 @@ export interface PollLoteResultCommand {
 }
 
 export type PollLoteResultResult =
-  LotePollOutcome | { readonly status: 'not-found' | 'not-pollable' | 'not-due' };
+  LotePollOutcome | { readonly status: 'not-found' | 'not-pollable' | 'not-due' | 'stale' };
 
 /**
  * Queries a due lote once and decides what happens next (plan 8.1, ADR-0007):
@@ -71,11 +84,12 @@ export class PollLoteResult {
       return { status: 'not-pollable' };
     }
 
+    const { nextPollAt } = lote;
     const now = this.now();
-    if (now < lote.nextPollAt) return { status: 'not-due' };
+    if (now < nextPollAt) return { status: 'not-due' };
 
     if (lote.pollDeadlineAt && now > lote.pollDeadlineAt) {
-      return this.settle(loteId, {
+      return this.settle(lote.loteId, nextPollAt, {
         status: 'recovery',
         reason: 'The 48 h lote query window elapsed; query each CDC (0364 would follow)',
       });
@@ -85,23 +99,27 @@ export class PollLoteResult {
     try {
       answer = await this.deps.gateway.consultarLote({ dId, dProtConsLote: lote.dProtConsLote });
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      return this.settle(loteId, this.pending(now, `Lote query failed: ${reason}`));
+      // Only the error class is kept: messages may carry hosts, paths or certificate details.
+      const kind = error instanceof Error ? error.name : 'unknown error';
+      return this.settle(lote.loteId, nextPollAt, this.pending(now, `Lote query failed (${kind})`));
     }
-    return this.settle(loteId, this.interpret(answer, lote.cdcs, now));
+    return this.settle(lote.loteId, nextPollAt, this.interpret(answer, lote.cdcs, now));
   }
 
   private interpret(answer: SifenLoteResult, cdcs: readonly string[], now: Date): LotePollOutcome {
     switch (answer.dCodRes) {
       case SIFEN_CODES.LOTE_EN_PROCESAMIENTO:
-        return this.pending(now, `${answer.dCodRes}: ${answer.dMsgRes}`);
+        return this.pending(now, `${answer.dCodRes}: ${capped(answer.dMsgRes)}`);
       case SIFEN_CODES.LOTE_CONCLUIDO:
         return resolve(answer, cdcs);
       case SIFEN_CODES.CONSULTA_EXTEMPORANEA:
       case SIFEN_CODES.LOTE_INEXISTENTE:
-        return { status: 'recovery', reason: `${answer.dCodRes}: ${answer.dMsgRes}` };
+        return { status: 'recovery', reason: `${answer.dCodRes}: ${capped(answer.dMsgRes)}` };
       default:
-        return this.pending(now, `Unexpected siResultLoteDE ${answer.dCodRes}: ${answer.dMsgRes}`);
+        return this.pending(
+          now,
+          `Unexpected siResultLoteDE ${answer.dCodRes}: ${capped(answer.dMsgRes)}`,
+        );
     }
   }
 
@@ -109,9 +127,16 @@ export class PollLoteResult {
     return { status: 'pending', nextPollAt: new Date(now.getTime() + POLL_INTERVAL_MS), reason };
   }
 
-  private async settle(loteId: string, outcome: LotePollOutcome): Promise<LotePollOutcome> {
-    await this.deps.store.record(loteId, outcome);
-    return outcome;
+  private async settle(
+    loteId: string,
+    expectedNextPollAt: Date,
+    outcome: LotePollOutcome,
+  ): Promise<PollLoteResultResult> {
+    const applied = await this.deps.store.record(loteId, outcome, {
+      expectedNextPollAt,
+      polledAt: this.now(),
+    });
+    return applied ? outcome : { status: 'stale' };
   }
 
   private now(): Date {
@@ -121,18 +146,27 @@ export class PollLoteResult {
 
 function resolve(answer: SifenLoteResult, cdcs: readonly string[]): LotePollOutcome {
   const expected = new Set(cdcs);
-  const resolutions: DocumentResolution[] = [];
-  const settled = new Set<string>();
+  // Duplicates that agree collapse to the first; any disagreement or unknown dEstRes leaves the CDC unsettled.
+  const byCdc = new Map<string, DocumentResolution | null>();
   for (const result of answer.resultados) {
+    if (!expected.has(result.cdc)) continue;
     const status = documentStatusOf(result.dEstRes);
-    if (!status || !expected.has(result.cdc) || settled.has(result.cdc)) continue;
-    settled.add(result.cdc);
-    resolutions.push({
-      cdc: result.cdc,
-      status,
-      messages: result.mensajes.map((m) => ({ code: m.dCodRes, message: m.dMsgRes })),
-    });
+    const previous = byCdc.get(result.cdc);
+    if (previous === null || (previous && previous.status !== status)) {
+      byCdc.set(result.cdc, null);
+    } else if (!previous) {
+      byCdc.set(
+        result.cdc,
+        status && {
+          cdc: result.cdc,
+          status,
+          messages: result.mensajes.map((m) => ({ code: m.dCodRes, message: m.dMsgRes })),
+        },
+      );
+    }
   }
+  const resolutions = [...byCdc.values()].filter((r): r is DocumentResolution => r !== null);
+  const settled = new Set(resolutions.map((r) => r.cdc));
   return {
     status: 'processed',
     resolutions,

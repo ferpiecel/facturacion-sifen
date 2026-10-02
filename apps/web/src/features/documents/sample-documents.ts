@@ -63,7 +63,25 @@ export interface DocumentRow {
   batch?: string;
   latencyMs?: number;
   rejection?: { code: string; message: string };
+  detail?: DocumentDetail;
 }
+
+export interface DocumentDetail {
+  saleCondition: string;
+  items: readonly { quantity: number; description: string; unitPrice: number; total: number }[];
+  amountInWords: string;
+  /** Email the KuDE and XML were delivered to (HU-E11-02), when sent. */
+  notifiedTo?: string;
+}
+
+export const SAMPLE_ISSUER = {
+  name: 'ACME PARAGUAY S.A.',
+  activity: 'Soluciones Tecnológicas & Facturación Electrónica',
+  address: 'Av. Mariscal López 1250 esq. Malutín • Asunción',
+  contact: 'Tel: +595 21 600 450 • info@acme.com.py',
+  ruc: '80012345-0',
+  timbradoValidity: '01/01/2026 al 31/12/2026',
+} as const;
 
 export interface DocumentsPage {
   items: readonly DocumentRow[];
@@ -99,6 +117,25 @@ export const SAMPLE_DOCUMENTS_PAGE: DocumentsPage = {
       receiver: { kind: 'ruc', name: 'TELECOMUNICACIONES DEL SUR S.A.', id: '80034567-3' },
       total: 16_100_000,
       latencyMs: 118,
+      detail: {
+        saleCondition: 'Crédito (30 días)',
+        amountInWords: 'Dieciséis millones cien mil guaraníes',
+        notifiedTo: 'facturacion@teledelsur.com.py',
+        items: [
+          {
+            quantity: 1,
+            description: 'Servidor dedicado en la nube (mes de octubre)',
+            unitPrice: 11_000_000,
+            total: 11_000_000,
+          },
+          {
+            quantity: 1,
+            description: 'Bolsa de 50.000 firmas electrónicas',
+            unitPrice: 5_100_000,
+            total: 5_100_000,
+          },
+        ],
+      },
     },
     {
       documentId: 'b1c1f2a0-6a0d-4a57-9f0e-0a1f5d1c2e02',

@@ -23,7 +23,7 @@ function subtitle(doc: DocumentRow): string {
   return `Emitido ${issued} • Timbrado N° ${doc.timbrado}`;
 }
 
-function Actions({ doc }: { doc: DocumentRow }) {
+function Actions({ doc, onOpen }: { doc: DocumentRow; onOpen: () => void }) {
   if (doc.status === 'rechazado') {
     return (
       <div className="flex items-center gap-2">
@@ -51,7 +51,7 @@ function Actions({ doc }: { doc: DocumentRow }) {
   }
   return (
     <div className="flex items-center gap-2">
-      <button type="button" className={ACTION}>
+      <button type="button" onClick={onOpen} className={ACTION}>
         Ver KuDE
       </button>
       <button type="button" className={ACTION}>
@@ -65,10 +65,12 @@ function Actions({ doc }: { doc: DocumentRow }) {
 interface DocumentsRowProps {
   doc: DocumentRow;
   selected: boolean;
+  current: boolean;
   onToggle: () => void;
+  onOpen: () => void;
 }
 
-export function DocumentsRow({ doc, selected, onToggle }: DocumentsRowProps) {
+export function DocumentsRow({ doc, selected, current, onToggle, onOpen }: DocumentsRowProps) {
   const rejected = doc.rejection !== undefined;
   const Icon = doc.receiver.kind === 'ruc' ? Building2 : User;
   const signed = doc.kind === 'NCE' ? -doc.total : doc.total;
@@ -76,10 +78,11 @@ export function DocumentsRow({ doc, selected, onToggle }: DocumentsRowProps) {
   return (
     <li
       aria-label={`${doc.kind} ${doc.number}`}
+      aria-current={current ? 'true' : undefined}
       className={`flex flex-col gap-2.5 p-4 transition-colors ${
         rejected
           ? 'bg-error-container/20 hover:bg-error-container/30'
-          : selected
+          : selected || current
             ? 'bg-primary/5 hover:bg-primary/10'
             : 'hover:bg-surface-container-low'
       }`}
@@ -142,7 +145,7 @@ export function DocumentsRow({ doc, selected, onToggle }: DocumentsRowProps) {
         <CdcDisplay value={doc.cdc} variant="truncated" />
       </div>
       <div className="flex items-center justify-between pt-1">
-        <Actions doc={doc} />
+        <Actions doc={doc} onOpen={onOpen} />
         <div className="flex items-center gap-1 text-outline">
           {doc.latencyMs !== undefined && (
             <span className="font-code-sm text-code-sm text-secondary">{`${String(doc.latencyMs)}ms SIFEN`}</span>

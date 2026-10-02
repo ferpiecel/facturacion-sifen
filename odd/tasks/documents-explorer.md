@@ -16,9 +16,10 @@ domain so it can be swapped for the API.
 - [x] PR 1 `feat/hu-e12-explorer-comprobantes`: fixture, route, header, KPI cards, nav active state.
 - [x] PR 2 `feat/hu-e12-explorer-list`: fixture rows and document list.
 - [x] PR 3 `feat/hu-e12-explorer-selection`: type tabs with period counts and bulk selection bar.
-- [ ] PR 4 `feat/hu-e12-explorer-filters`: filter bar (search, selects, chips).
-- [ ] PR 5 `feat/hu-e12-explorer-pagination`: pagination footer.
-- [ ] PR 6 `feat/hu-e12-explorer-detail`: detail panel (KuDE / XML / events tabs) and help banner.
+- [x] PR 4 `feat/hu-e12-explorer-filters`: filter bar (search, selects, chips).
+- [x] PR 5 `feat/hu-e12-explorer-pagination`: pagination footer and help banner.
+- [x] PR 6 `feat/hu-e12-explorer-detail`: detail panel header and KuDE preview, active row.
+- [x] PR 7 `feat/hu-e12-explorer-detail-tabs`: XML and events tabs of the detail panel.
 
 Route: delegated writer (one) per PR; strict TDD, RED commit then GREEN commit.
 
@@ -39,5 +40,13 @@ Route: delegated writer (one) per PR; strict TDD, RED commit then GREEN commit.
 | "Aprobado DNIT" pill | "Aprobado SIFEN" (`StatusBadge`) | Design-system component |
 | "Emitido hoy a las 15:42 hs" | Absolute date `02/10/2026 15:42` (America/Asuncion) | Deterministic, no clock dependency |
 | "Solo con discrepancias fiscales" | "Solo con observaciones o rechazos" | "Discrepancy" has no domain meaning |
+| Help banner "hasta 72hs de emitido" | "hasta 48 hs desde la aprobación para facturas y 168 hs para el resto" | HU-E8-02, plan §cancelación: FE ≤ 48 h, others ≤ 168 h from approval |
 | "Ver Log DNIT" | "Ver respuesta SIFEN" | Wording |
 | "Sucursales: 001-002 POS Ciudad del Este" | Establishment 002 "Sucursal Ciudad del Este" | est-point-number: 002 is the establishment |
+| "Certificado: CODE100 PARAGUAY S.A." / "PKCS#7 SHA-256" | "Certificado: ACME PARAGUAY S.A." / "XMLDSig RSA-SHA256" | The DE is signed with the issuer's certificate using XMLDSig RSA-SHA256 |
+| KuDE issuer "RUC: 80012345-6", validity 2024 | "RUC: 80012345-0" (valid DV), validity 2026 | Valid modulo-11 check digit; 2026 data |
+| Detail "Inutilizar Número" action | Removed; "Emitir Cancelación DNIT" became "Cancelar en SIFEN" with its window (FE 48 h, others 168 h) | Voiding only applies to numbers never approved (HU-E8-03) |
+| XML tab "XAdES-BES", event "sifeRecepcionLote", protocol number | "XMLDSig RSA-SHA256", "Código 0260", no protocol | Verified SIFEN codes only; nothing invented |
+| "WhatsApp al Cliente" (button and event) | "Enviar por email" | WhatsApp is not in the backlog; email is HU-E11-02 |
+| Item names "Cloud SIFEN Enterprise", "HSM FIPS 140-2" | Neutral service descriptions | Infrastructure jargon in user-facing sample data |
+| KuDE QR image (external URL) | QR icon placeholder | The real QR comes with HU-E5-06 / HU-E10-01 |

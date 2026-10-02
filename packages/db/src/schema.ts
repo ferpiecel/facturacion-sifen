@@ -272,10 +272,11 @@ export const tenantEstablishments = pgTable(
       'tenant_establishments_phone_length',
       sql`char_length(${table.phone}) BETWEEN 6 AND 15 AND ${table.phone} !~ '^[[:space:]]*$'`,
     ),
-    // XSD tEmail pattern (DE_Types_v150.xsd), anchored.
+    // XSD tEmail pattern (DE_Types_v150.xsd), anchored; written without backslashes (a sql`` template
+    // would swallow them): `.` and `-` live inside bracket expressions.
     check(
       'tenant_establishments_email_format',
-      sql`${table.email} ~ '^[0-9a-zA-Z]([0-9a-zA-Z.\-_])*@([0-9a-zA-Z][0-9a-zA-Z\-_]*\.)+[a-zA-Z]{2,9}$'`,
+      sql`${table.email} ~ '^[0-9a-zA-Z]([0-9a-zA-Z._-])*@([0-9a-zA-Z][0-9a-zA-Z_-]*[.])+[a-zA-Z]{2,9}$'`,
     ),
     check(
       'tenant_establishments_commercial_name_length',

@@ -190,6 +190,13 @@
       "when": 1790959993969,
       "tag": "0026_tenant_certificates",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1790965231065,
+      "tag": "0027_establishment_contact",
+      "breakpoints": true
     }
   ]
 }

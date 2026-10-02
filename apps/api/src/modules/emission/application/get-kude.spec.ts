@@ -1,6 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { signedInvoiceWithQr } from '../../../../test/support/signed-invoice.js';
-import type { KudeInvoice } from '../domain/kude-model.js';
 import { createGetKude } from './get-kude.js';
 import type { KudeRenderer } from './ports/kude-renderer.port.js';
 import type { SignedDocument, SignedXmlReader } from './ports/signed-xml-reader.port.js';
@@ -43,7 +42,7 @@ describe('getKude', () => {
       filename: 'kude-001-002-0000007.pdf',
     });
     expect(findSignedXml).toHaveBeenCalledWith('t1', 'd1');
-    const model = render.mock.calls[0]?.[0] as KudeInvoice;
+    const model = render.mock.calls[0]?.[0];
     expect(model.cdc).toMatch(/^\d{44}$/);
     expect(model.items).toHaveLength(1);
   });

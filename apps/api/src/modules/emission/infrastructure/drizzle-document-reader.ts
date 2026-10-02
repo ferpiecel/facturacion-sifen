@@ -9,6 +9,7 @@ import {
   type TenantTx,
 } from '@sifen/db';
 import type { DocumentReader, DocumentView } from '../application/ports/document-reader.port.js';
+import type { SignedXmlReader } from '../application/ports/signed-xml-reader.port.js';
 
 function select(tx: TenantTx) {
   return (
@@ -25,6 +26,7 @@ function select(tx: TenantTx) {
         totalAmount: documents.totalAmount,
         currency: documents.currency,
         receiverRuc: documents.receiverRuc,
+        signedXml: documents.signedXml,
       })
       .from(documents)
       // The CDC key is (tenant, environment, cdc): only the tenant's current environment is visible.
@@ -50,22 +52,38 @@ function select(tx: TenantTx) {
 }
 
 /** Reads inside `withTenantTransaction`; the explicit tenant filter backs up RLS. */
-export function createDrizzleDocumentReader(db: Database): DocumentReader {
-  const find = (tenantId: string, condition: ReturnType<typeof eq>) =>
+export function createDrizzleDocumentReader(db: Database): DocumentReader & SignedXmlReader {
+  const row = (tenantId: string, condition: ReturnType<typeof eq>) =>
     withTenantTransaction(db, tenantId, async (tx) => {
       const rows = await select(tx)
         .where(and(eq(documents.tenantId, tenantId), condition))
         .limit(1);
-      const row = rows.at(0);
-      if (!row) return null;
-      const { establishment, point, number, ...rest } = row;
-      const view: DocumentView = {
-        ...rest,
-        number: `${establishment}-${point}-${String(number).padStart(7, '0')}`,
-      };
-      return view;
+      return rows.at(0) ?? null;
     });
+  const numberOf = (r: { establishment: string; point: string; number: number | string }) =>
+    `${r.establishment}-${r.point}-${String(r.number).padStart(7, '0')}`;
+  const find = async (tenantId: string, condition: ReturnType<typeof eq>) => {
+    const found = await row(tenantId, condition);
+    if (!found) return null;
+    // The signed XML stays inside the signed-XML port: the query side never exposes it.
+    const view: DocumentView = {
+      documentId: found.documentId,
+      cdc: found.cdc,
+      number: numberOf(found),
+      status: found.status,
+      environment: found.environment,
+      issuedAt: found.issuedAt,
+      totalAmount: found.totalAmount,
+      currency: found.currency,
+      receiverRuc: found.receiverRuc,
+    };
+    return view;
+  };
   return {
+    findSignedXml: async (tenantId, id) => {
+      const found = await row(tenantId, eq(documents.id, id));
+      return found ? { number: numberOf(found), signedXml: found.signedXml } : null;
+    },
     findById: (tenantId, id) => find(tenantId, eq(documents.id, id)),
     findByCdc: (tenantId, cdc) => find(tenantId, eq(documents.cdc, cdc)),
   };

@@ -19,6 +19,7 @@ export {
   tenantFiscalEconomicActivities,
   tenantFiscalProfiles,
   tenantProbe,
+  tenantCscs,
   tenantRequestSequences,
   tenants,
   tenantTimbrados,

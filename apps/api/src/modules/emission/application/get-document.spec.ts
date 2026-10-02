@@ -14,14 +14,17 @@ const VIEW: DocumentView = {
   receiverRuc: '80069563-1',
 };
 
-function readerWith(view: DocumentView | null): DocumentReader {
-  return { findById: vi.fn(() => Promise.resolve(view)), findByCdc: vi.fn(() => Promise.resolve(view)) };
+function readerWith(view: DocumentView | null) {
+  const findById = vi.fn<DocumentReader['findById']>(() => Promise.resolve(view));
+  const findByCdc = vi.fn<DocumentReader['findByCdc']>(() => Promise.resolve(view));
+  const reader: DocumentReader = { findById, findByCdc };
+  return { reader, findById, findByCdc };
 }
 
 /** Spec: HU-E5-07. */
 describe('getDocument', () => {
   it('shapes the stored document without the payload; SIFEN fields and urls are null until they exist', async () => {
-    const result = await createGetDocument({ reader: readerWith(VIEW) })('t1', { id: 'd1' });
+    const result = await createGetDocument({ reader: readerWith(VIEW).reader })('t1', { id: 'd1' });
 
     expect(result).toEqual({
       document_id: 'd1',
@@ -39,7 +42,7 @@ describe('getDocument', () => {
 
   it('keeps decimals and omits the receiver when there is none', async () => {
     const result = await createGetDocument({
-      reader: readerWith({ ...VIEW, totalAmount: '10.50000000', receiverRuc: null }),
+      reader: readerWith({ ...VIEW, totalAmount: '10.50000000', receiverRuc: null }).reader,
     })('t1', { cdc: VIEW.cdc });
 
     expect(result?.totals.amount).toBe('10.5');
@@ -47,12 +50,12 @@ describe('getDocument', () => {
   });
 
   it('looks up by id or by cdc inside the given tenant, and returns null when absent', async () => {
-    const reader = readerWith(null);
+    const { reader, findById, findByCdc } = readerWith(null);
     const get = createGetDocument({ reader });
 
     expect(await get('t1', { id: 'd1' })).toBeNull();
     expect(await get('t1', { cdc: VIEW.cdc })).toBeNull();
-    expect(reader.findById).toHaveBeenCalledWith('t1', 'd1');
-    expect(reader.findByCdc).toHaveBeenCalledWith('t1', VIEW.cdc);
+    expect(findById).toHaveBeenCalledWith('t1', 'd1');
+    expect(findByCdc).toHaveBeenCalledWith('t1', VIEW.cdc);
   });
 });

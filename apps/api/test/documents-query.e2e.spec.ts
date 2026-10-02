@@ -113,13 +113,14 @@ describe('GET /v1/documents (e2e)', () => {
     const response = await get(`/v1/documents/${id}`, reader);
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({
+    const { issued_at: issuedAt, ...body } = response.json<{ issued_at: string }>();
+    expect(issuedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(body).toEqual({
       document_id: id,
       cdc,
       number: '001-002-0000001',
       status: 'accepted',
-      environment: 'production',
-      issued_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+      environment: 'test',
       totals: { amount: '110000', currency: 'PYG' },
       receiver: { ruc: '80069563-1' },
       sifen: null,

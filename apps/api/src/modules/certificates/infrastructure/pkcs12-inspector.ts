@@ -6,6 +6,7 @@ import {
   Pkcs12UnreadableError,
   type CertificateInspection,
 } from '../domain/tenant-certificate.js';
+import { DerError } from '../domain/der.js';
 
 /**
  * A tenant `.p12` holds one key, its certificate and a short PSC chain,
@@ -41,7 +42,8 @@ export const MAX_PKCS12_CERTIFICATES = 10;
  * node-forge only unpacks the container) and inspects the certificate that
  * matches its private key. The key never leaves this function.
  *
- * @throws Pkcs12UnreadableError on a wrong password or malformed bytes.
+ * @throws Pkcs12UnreadableError on a wrong password or malformed bytes,
+ *   including certificate DER the domain cannot parse.
  * @throws Pkcs12ContentError when the file is too large or too costly to
  *   open, or does not hold exactly one RSA key with its certificate.
  */
@@ -68,10 +70,16 @@ export function inspectPkcs12(p12: Uint8Array, password: string): CertificateIns
       'PKCS#12 holds no certificate for its private key',
     );
   }
-  return inspectCertificate(
-    leaf,
-    certificates.filter((certificate) => certificate !== leaf),
-  );
+  try {
+    return inspectCertificate(
+      leaf,
+      certificates.filter((certificate) => certificate !== leaf),
+    );
+  } catch (error) {
+    // A leaf whose DER extensions do not parse is a malformed file.
+    if (error instanceof DerError) throw new Pkcs12UnreadableError();
+    throw error;
+  }
 }
 
 function openPkcs12(

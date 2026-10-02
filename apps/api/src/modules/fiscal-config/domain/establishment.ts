@@ -68,15 +68,15 @@ export function createEstablishmentContact(input: EstablishmentContactInput): Es
   if (phone.length < 6 || phone.length > 15) {
     throw new InvalidEstablishmentError('phone (dTelEmi) must be 6 to 15 characters');
   }
+  // eslint-disable-next-line no-control-regex -- rejecting control characters is the point
+  if (/[\u0000-\u001F\u007F]/.test(phone)) {
+    throw new InvalidEstablishmentError('phone (dTelEmi) must not contain control characters');
+  }
   const email = input.email.trim();
   if (!EMAIL_PATTERN.test(email)) {
     throw new InvalidEstablishmentError('email (dEmailE) is not a valid address');
   }
-  const commercialName = normalizeOptional(input.commercialName);
-  if (commercialName !== null && commercialName.length > 30) {
-    throw new InvalidEstablishmentError('commercialName (dDenSuc) must be 1 to 30 characters');
-  }
-  return { phone, email, commercialName };
+  return { phone, email, commercialName: normalizeCommercialName(input.commercialName) };
 }
 
 export interface CreateEstablishmentInput {
@@ -149,7 +149,7 @@ export function createEstablishment(input: CreateEstablishmentInput): Establishm
         email: input.email ?? '',
         commercialName: input.commercialName,
       })
-    : { phone: null, email: null, commercialName: normalizeOptional(input.commercialName) };
+    : { phone: null, email: null, commercialName: normalizeCommercialName(input.commercialName) };
 
   return {
     code,
@@ -165,6 +165,15 @@ export function createEstablishment(input: CreateEstablishmentInput): Establishm
     cityDescription,
     ...contact,
   };
+}
+
+/** dDenSuc: optional, 1-30 characters once trimmed. */
+function normalizeCommercialName(raw: string | null | undefined): string | null {
+  const name = normalizeOptional(raw);
+  if (name !== null && name.length > 30) {
+    throw new InvalidEstablishmentError('commercialName (dDenSuc) must be 1 to 30 characters');
+  }
+  return name;
 }
 
 function requireNonEmpty(raw: string, field: string, maxLength: number): string {

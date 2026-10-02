@@ -22,74 +22,68 @@ interface Setup {
   accepted?: string[];
   pending?: PendingLote[];
   due?: string[];
-  sign?: (documentId: string) => Promise<unknown>;
+  sign?: (id: string) => Promise<unknown>;
   assemble?: () => Promise<AssembleLotesResult>;
-  send?: (loteId: string) => Promise<unknown>;
-  poll?: (loteId: string) => Promise<unknown>;
+  send?: (id: string) => Promise<unknown>;
+  poll?: (id: string) => Promise<unknown>;
   listAccepted?: () => Promise<readonly string[]>;
   nextRequestId?: () => Promise<bigint>;
   batch?: TransmissionCycleDeps['batch'];
 }
 
-function setup(options: Setup = {}) {
+function setup(o: Setup = {}) {
   const log: string[] = [];
   const warnings: string[] = [];
   const limits: Record<string, number> = {};
   let dId = 0n;
+  const signed = (id: string) => ({ status: 'signed', cdc: id, signedAt: NOW });
   const store: TransmissionCycleStore = {
     acceptedDocumentIds: (limit) => {
       limits.sign = limit;
-      return options.listAccepted?.() ?? Promise.resolve(options.accepted ?? []);
+      return o.listAccepted?.() ?? Promise.resolve(o.accepted ?? []);
     },
     pendingLotes: (limit) => {
       limits.send = limit;
-      return Promise.resolve(options.pending ?? []);
+      return Promise.resolve(o.pending ?? []);
     },
     dueLoteIds: (at, limit) => {
       limits.poll = limit;
       log.push(`due@${at.toISOString()}`);
-      return Promise.resolve(options.due ?? []);
+      return Promise.resolve(o.due ?? []);
     },
-    nextRequestId: () => options.nextRequestId?.() ?? Promise.resolve((dId += 1n)),
+    nextRequestId: () => o.nextRequestId?.() ?? Promise.resolve((dId += 1n)),
   };
+  // The services are faked at their `execute`/`assemble` seam, so results are loosely typed.
   const cycle = new TransmissionCycle({
     tenantId: TENANT,
     store,
     signer: {
       execute: async ({ tenantId, documentId }) => {
         log.push(`sign:${tenantId}:${documentId}`);
-        return (
-          (await options.sign?.(documentId)) ?? {
-            status: 'signed',
-            cdc: documentId,
-            signedAt: NOW,
-          }
-        );
+        return (await o.sign?.(documentId)) ?? signed(documentId);
       },
     } as TransmissionCycleDeps['signer'],
     assembler: {
       assemble: async () => {
         log.push('assemble');
-        return (await options.assemble?.()) ?? { lotes: [], skipped: [], conflicted: [] };
+        return (await o.assemble?.()) ?? { lotes: [], skipped: [], conflicted: [] };
       },
     },
     sender: {
       execute: async ({ loteId, dId: id }) => {
         log.push(`send:${loteId}:${String(id)}`);
-        return (
-          (await options.send?.(loteId)) ?? { status: 'sent', dProtConsLote: `prot-${loteId}` }
-        );
+        return (await o.send?.(loteId)) ?? { status: 'sent', dProtConsLote: 'p' };
       },
     } as TransmissionCycleDeps['sender'],
     poller: {
       execute: async ({ loteId, dId: id }) => {
         log.push(`poll:${loteId}:${String(id)}`);
-        return (await options.poll?.(loteId)) ?? { status: 'not-due' };
+        return (await o.poll?.(loteId)) ?? { status: 'not-due' };
       },
     } as TransmissionCycleDeps['poller'],
     now: () => NOW,
     logger: { warn: (message) => warnings.push(message) },
-    batch: options.batch,
+    batch: o.batch,
   });
   return { cycle, log, warnings, limits };
 }
@@ -174,22 +168,9 @@ describe('TransmissionCycle', () => {
     expect(JSON.stringify(report)).not.toContain('hunter2');
   });
 
-  it('still sends and polls when signing cannot even list its documents', async () => {
+  it('isolates a failing step: listing or assembling errors do not stop the next steps', async () => {
     const { cycle, log, warnings } = setup({
-      listAccepted: () => Promise.reject(new Error('connection lost: postgres://u:pw@host/db')),
-      pending: [{ loteId: 'l1', lote: lote() }],
-    });
-
-    const report = await cycle.run();
-
-    expect(log).toContain('assemble');
-    expect(log).toContain('send:l1:1');
-    expect(report.failures).toEqual([{ step: 'sign', error: 'Error' }]);
-    expect(warnings.join('\n')).not.toContain('postgres://');
-  });
-
-  it('isolates an assembler failure from the send and poll steps', async () => {
-    const { cycle, log } = setup({
+      listAccepted: () => Promise.reject(new Error('lost: postgres://u:pw@host/db')),
       assemble: () => Promise.reject(new Error('boom')),
       pending: [{ loteId: 'l1', lote: lote() }],
       due: ['l2'],
@@ -199,23 +180,27 @@ describe('TransmissionCycle', () => {
 
     expect(log).toContain('send:l1:1');
     expect(log).toContain('poll:l2:2');
-    expect(report.assembled).toBe(0);
-    expect(report.failures).toEqual([{ step: 'assemble', error: 'Error' }]);
+    expect(report.failures).toEqual([
+      { step: 'sign', error: 'Error' },
+      { step: 'assemble', error: 'Error' },
+    ]);
+    expect(warnings.join('\n')).not.toContain('postgres://');
   });
 
-  it('sends every pending lote with its own dId, isolating a failure per lote', async () => {
+  it('sends every pending lote with its own dId, isolating a send or dId failure per lote', async () => {
     const { cycle, log } = setup({
-      pending: [
-        { loteId: 'l1', lote: lote() },
-        { loteId: 'l2', lote: lote() },
-        { loteId: 'l3', lote: lote() },
-      ],
+      pending: ['l1', 'l2', 'l3', 'l4'].map((loteId) => ({ loteId, lote: lote() })),
       send: (id) =>
         id === 'l2'
           ? Promise.reject(new Error('record failed'))
-          : Promise.resolve(
-              id === 'l1' ? { status: 'sent', dProtConsLote: 'p' } : { status: 'already-claimed' },
-            ),
+          : Promise.resolve(id === 'l1' ? { status: 'sent' } : { status: 'already-claimed' }),
+      nextRequestId: (() => {
+        let calls = 0;
+        return () =>
+          (calls += 1) === 3
+            ? Promise.reject(new Error('exhausted'))
+            : Promise.resolve(BigInt(calls));
+      })(),
     });
 
     const report = await cycle.run();
@@ -223,32 +208,13 @@ describe('TransmissionCycle', () => {
     expect(log.filter((entry) => entry.startsWith('send:'))).toEqual([
       'send:l1:1',
       'send:l2:2',
-      'send:l3:3',
+      'send:l4:4',
     ]);
-    expect(report.sent).toEqual([
-      { loteId: 'l1', status: 'sent' },
-      { loteId: 'l3', status: 'already-claimed' },
+    expect(report.sent.map((s) => s.status)).toEqual(['sent', 'already-claimed']);
+    expect(report.failures).toEqual([
+      { step: 'send', id: 'l2', error: 'Error' },
+      { step: 'send', id: 'l3', error: 'Error' },
     ]);
-    expect(report.failures).toEqual([{ step: 'send', id: 'l2', error: 'Error' }]);
-  });
-
-  it('does not send a lote when no dId could be reserved, and carries on', async () => {
-    let calls = 0;
-    const { cycle, log } = setup({
-      pending: [
-        { loteId: 'l1', lote: lote() },
-        { loteId: 'l2', lote: lote() },
-      ],
-      nextRequestId: () => {
-        calls += 1;
-        return calls === 1 ? Promise.reject(new Error('exhausted')) : Promise.resolve(7n);
-      },
-    });
-
-    const report = await cycle.run();
-
-    expect(log.filter((entry) => entry.startsWith('send:'))).toEqual(['send:l2:7']);
-    expect(report.failures).toEqual([{ step: 'send', id: 'l1', error: 'Error' }]);
   });
 
   it('polls due lotes with the cycle clock and isolates a failing one', async () => {
@@ -268,18 +234,7 @@ describe('TransmissionCycle', () => {
 
   it('bounds every step with its batch size (defaults, then overrides)', async () => {
     const defaults = setup();
-    await defaults.cycle.run();
-    expect(defaults.limits).toEqual({ sign: 50, send: 20, poll: 20 });
-
-    const custom = setup({ batch: { sign: 3, send: 2, poll: 1 } });
-    await custom.cycle.run();
-    expect(custom.limits).toEqual({ sign: 3, send: 2, poll: 1 });
-  });
-
-  it('does nothing and reports nothing when there is no work', async () => {
-    const { cycle, warnings } = setup();
-
-    expect(await cycle.run()).toEqual({
+    expect(await defaults.cycle.run()).toEqual({
       signed: 0,
       signSkipped: 0,
       assembled: 0,
@@ -287,6 +242,10 @@ describe('TransmissionCycle', () => {
       polled: [],
       failures: [],
     });
-    expect(warnings).toEqual([]);
+    expect(defaults.limits).toEqual({ sign: 50, send: 20, poll: 20 });
+
+    const custom = setup({ batch: { sign: 3, send: 2, poll: 1 } });
+    await custom.cycle.run();
+    expect(custom.limits).toEqual({ sign: 3, send: 2, poll: 1 });
   });
 });

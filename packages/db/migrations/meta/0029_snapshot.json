@@ -1,6 +1,6 @@
 {
-  "id": "7360a6c9-5290-4ade-9868-d5c110dbea64",
-  "prevId": "66291337-aba1-48c1-b2a4-b2b6e7227872",
+  "id": "66291337-aba1-48c1-b2a4-b2b6e7227872",
+  "prevId": "0338280a-dd29-42d1-b7d2-74f0b1873a61",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -405,25 +405,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "transmission_attempts": {
-          "name": "transmission_attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "next_transmission_at": {
-          "name": "next_transmission_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "transmission_hold": {
-          "name": "transmission_hold",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": false
-        },
         "sifen_messages": {
           "name": "sifen_messages",
           "type": "jsonb",
@@ -549,14 +530,6 @@
       },
       "policies": {},
       "checkConstraints": {
-        "documents_transmission_attempts_range": {
-          "name": "documents_transmission_attempts_range",
-          "value": "\"documents\".\"transmission_attempts\" >= 0"
-        },
-        "documents_transmission_hold_format": {
-          "name": "documents_transmission_hold_format",
-          "value": "\"documents\".\"transmission_hold\" ~ '^[A-Za-z0-9:_-]{1,64}$'"
-        },
         "documents_signed_pair": {
           "name": "documents_signed_pair",
           "value": "(\"documents\".\"signed_xml\" IS NULL) = (\"documents\".\"signed_at\" IS NULL)"

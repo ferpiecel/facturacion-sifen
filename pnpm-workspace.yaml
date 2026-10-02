@@ -11,6 +11,8 @@ allowBuilds:
   # their install scripts avoids running unneeded native builds.
   cpu-features: false
   esbuild: true
+  # Optional native speed-up of bullmq's msgpackr; it falls back to pure JS without it.
+  msgpackr-extract: false
   protobufjs: false
   ssh2: false
 

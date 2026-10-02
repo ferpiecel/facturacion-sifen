@@ -20,10 +20,14 @@ delivery history (backlog HU-E11-01; ADR-0011 anti-replay 5 min; plan v1.1 §19 
 - [x] S2b `feat/hu-e11-01-webhook-deliveries` (stacked on S2) — migration 0029 `webhook_deliveries` (retry queue, DLQ
       as `dead`, history columns), composite tenant FK, FORCE RLS. A per-attempt history table is a follow-up if
       the last-attempt columns prove too thin for the S5 history endpoint.
-- [ ] S3 dispatcher service + `WebhookHttpPort` (fake in tests): SSRF guard (https only; resolve DNS, block
-      private/loopback/link-local/CGNAT/metadata; connect to the vetted IP; no redirects; timeout; response cap),
-      re-checked on EVERY attempt (DNS can change; pin the vetted IP); 2xx = delivered, else `nextRetryAt`, null = dead;
-      the db only checks the url shape, all SSRF defence lives here; secret opened with `EnvelopeCipher` (new kind `webhook`).
+- [x] S3 dispatcher, stacked branches (each <= 400 lines): `feat/hu-e11-01-webhook-dispatcher` (SSRF address policy +
+      `WebhookSecretVault`, custody kind `webhook`, AAD tenant + endpoint id + version), `-dispatcher-http`
+      (`SafeWebhookHttp`: https only, resolve + block every private/loopback/link-local/CGNAT/multicast/mapped address,
+      pinned connect with original Host/SNI, no redirects, 5 s connect / 10 s total, 64 KiB body cap, re-checked per
+      attempt), `-dispatcher-service` (`WebhookDispatcher`: bounded claim with lease, fresh `t` per attempt, both secrets
+      during overlap, 2xx = delivered, else `nextRetryAt` or dead; stores only a code or `HTTP <status>`),
+      `-dispatcher-store` (Drizzle claim with `FOR UPDATE SKIP LOCKED` + lease, record).
+      Not wired yet: the Nest module and the BullMQ `webhook-delivery` worker/scheduler come with S4/S5.
 - [ ] S4 outbox: enqueue `webhook_deliveries` rows in the same tenant transaction as the document status change
       (approved / approved_with_observations / rejected / cancelled / number_voided), idempotent per (event, endpoint).
 - [ ] S5 API: register endpoint (secret returned once), rotate secret (overlap window), list/replay deliveries.

@@ -177,12 +177,18 @@ export class CertificateVault {
    * should zeroize it. Never logged, never persisted.
    *
    * @throws CertificateNotFoundError when there is no active certificate.
+   * @throws CertificateValidityError when it is expired or not yet valid at `now`.
    * @throws SecretDecryptionError when the stored blob does not match its row identity.
    */
   async open(db: Database, tenantId: string, environment: Environment): Promise<OpenedCertificate> {
     const rows = await withTenantTransaction(db, tenantId, (tx) =>
       tx
-        .select({ sealed: tenantCertificates.sealed, fingerprint: tenantCertificates.fingerprint })
+        .select({
+          sealed: tenantCertificates.sealed,
+          fingerprint: tenantCertificates.fingerprint,
+          notBefore: tenantCertificates.notBefore,
+          notAfter: tenantCertificates.notAfter,
+        })
         .from(tenantCertificates)
         .where(
           and(
@@ -193,6 +199,9 @@ export class CertificateVault {
     );
     const row = rows.at(0);
     if (!row) throw new CertificateNotFoundError(environment);
+    const now = (this.options.now ?? (() => new Date()))();
+    if (now > row.notAfter) throw new CertificateValidityError('expired');
+    if (now < row.notBefore) throw new CertificateValidityError('not-yet-valid');
     const plaintext = await this.cipher.open(
       row.sealed as SealedSecret,
       this.context(tenantId, environment, row.fingerprint),

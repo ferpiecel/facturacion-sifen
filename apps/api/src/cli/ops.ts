@@ -2,9 +2,10 @@ import { createNodePostgresDatabase, type Database } from '@sifen/db';
 import { EnvelopeCipher } from '../modules/custody/application/envelope-cipher.js';
 import { createLocalKms } from '../modules/custody/infrastructure/adapters/local-kms.adapter.js';
 import { CscVault } from '../modules/custody/infrastructure/csc-vault.js';
+import { MAX_PKCS12_BYTES } from '../modules/certificates/infrastructure/pkcs12-inspector.js';
 import { CertificateVault } from '../modules/certificates/infrastructure/certificate-vault.js';
 import { loadTrustedRoots } from '../modules/certificates/infrastructure/trusted-roots.js';
-import { readBoundedFile } from './bounded-file.js';
+import { BoundedReadError, readBoundedFile } from './bounded-file.js';
 import { getOpsDatabaseUrl, OpsArgError, parseOpsArgs, type OpsCommand } from './args.js';
 import {
   addEstablishment,
@@ -44,15 +45,34 @@ export function createCertificateVault(
     );
   }
   const trustedPscRoots = loadTrustedRoots(env, (path) =>
-    readFile(path, Number.MAX_SAFE_INTEGER).toString('utf8'),
+    readFile(path, MAX_ROOTS_BUNDLE_BYTES).toString('utf8'),
   );
   const cipher = new EnvelopeCipher(createLocalKms(env.KMS_LOCAL_MASTER_KEY, env.NODE_ENV));
   return new CertificateVault(cipher, { trustedPscRoots });
 }
 
+/** A PEM bundle of a handful of roots is a few KiB; anything near this is not one. */
+const MAX_ROOTS_BUNDLE_BYTES = 1024 * 1024;
+
 export interface CertificateDeps {
   readonly vault: CertificateVault;
-  readonly readFile: (path: string, maxBytes: number) => Buffer;
+  /** The `.p12`, already read within its size cap before any database work; zeroized after use. */
+  readonly p12: Buffer;
+}
+
+/** Reads the `--p12` file within the PKCS#12 size cap, with errors that never carry the path. */
+function readP12(io: Pick<CliIo, 'readFile'>, path: string): Buffer {
+  try {
+    return io.readFile(path, MAX_PKCS12_BYTES);
+  } catch (error) {
+    // The cause is dropped on purpose: formatOpsError prints causes, and a path must not leak.
+    /* eslint-disable preserve-caught-error */
+    if (error instanceof BoundedReadError && error.reason === 'too-large') {
+      throw new Error('the --p12 file is larger than 64 KiB; it is not a tenant certificate');
+    }
+    throw new Error('could not read the --p12 file (it must be a regular file)');
+    /* eslint-enable preserve-caught-error */
+  }
 }
 
 /**
@@ -133,12 +153,7 @@ export async function runOpsCommand(
       if (!certificates) {
         throw new Error('certificate:add requires a certificate vault');
       }
-      let p12: Buffer;
-      try {
-        p12 = certificates.readFile(command.p12Path, Number.MAX_SAFE_INTEGER);
-      } catch {
-        throw new Error('could not read the --p12 file');
-      }
+      const { p12 } = certificates;
       try {
         const stored = await certificates.vault.add(db, {
           tenantId: command.tenantId,
@@ -233,7 +248,10 @@ export async function runCli(io: CliIo): Promise<number> {
     const vault = command.kind === 'csc:add' ? createCscVault(io.env) : undefined;
     const certificates =
       command.kind === 'certificate:add'
-        ? { vault: createCertificateVault(io.env, io.readFile), readFile: io.readFile }
+        ? {
+            vault: createCertificateVault(io.env, io.readFile),
+            p12: readP12(io, command.p12Path),
+          }
         : undefined;
     const handle = io.openDb(url);
     try {

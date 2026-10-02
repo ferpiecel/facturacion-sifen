@@ -19,11 +19,17 @@ export function parseTrustedRoots(pem: string): X509Certificate[] {
   const blocks = pem.match(PEM_BLOCK) ?? [];
   if (blocks.length === 0) throw new TrustedRootsError('trusted roots bundle has no certificate');
   return blocks.map((block) => {
+    let certificate: X509Certificate;
     try {
-      return new X509Certificate(block);
+      certificate = new X509Certificate(block);
     } catch {
       throw new TrustedRootsError('trusted roots bundle has an unreadable certificate');
     }
+    // A leaf or a copy of a tenant certificate must never become a trust anchor.
+    if (!certificate.ca) {
+      throw new TrustedRootsError('trusted roots bundle has a certificate that is not a CA');
+    }
+    return certificate;
   });
 }
 

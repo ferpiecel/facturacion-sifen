@@ -40,3 +40,5 @@ export {
   parseSoapBody,
 } from './soap/response-parsers.ts';
 export type { ParseOptions } from './soap/response-parsers.ts';
+export { sifenEndpoints } from './soap/endpoints.ts';
+export type { SifenEndpoints } from './soap/endpoints.ts';

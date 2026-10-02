@@ -35,8 +35,12 @@ export type {
 } from './types.ts';
 export {
   DEFAULT_MAX_RESPONSE_BYTES,
+  parseConsultaDE,
+  parseConsultaRUC,
+  parseEventos,
   parseLoteReceipt,
   parseLoteResult,
+  parseProtocoloDE,
   parseSoapBody,
 } from './soap/response-parsers.ts';
 export type { ParseOptions } from './soap/response-parsers.ts';

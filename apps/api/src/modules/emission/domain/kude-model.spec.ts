@@ -29,10 +29,22 @@ describe('KuDE formatting', () => {
     expect(formatPyg(-5000)).toBe('-5.000');
   });
 
+  it('rejects PYG amounts that are not safe integers', () => {
+    for (const bad of [1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 60]) {
+      expect(() => formatPyg(bad)).toThrow(/integer/);
+    }
+  });
+
   it('formats quantities with a decimal comma only when fractional', () => {
     expect(formatQuantity(2)).toBe('2');
     expect(formatQuantity(1500)).toBe('1.500');
     expect(formatQuantity(1.25)).toBe('1,25');
+  });
+
+  it('never uses exponent notation for quantities and rejects non-finite ones', () => {
+    expect(formatQuantity(1e21)).toBe('1.000.000.000.000.000.000.000');
+    expect(formatQuantity(0.0000001)).toBe('0,0000001');
+    expect(() => formatQuantity(Number.NaN)).toThrow(/finite/);
   });
 
   it('formats the document number as est-point-number', () => {
@@ -46,7 +58,7 @@ describe('KuDE formatting', () => {
 
   it('keeps the MT 13.3 title and the production consultation URL', () => {
     expect(KUDE_TITLE).toBe('KuDE de Factura Electrónica');
-    expect(KUDE_CONSULT_URL.production).toBe('https://ekuatia.set.gov.py/consultas');
-    expect(KUDE_CONSULT_URL.test).toBe('https://ekuatia.set.gov.py/consultas-test');
+    expect(KUDE_CONSULT_URL.production).toBe('https://ekuatia.set.gov.py/consultas/');
+    expect(KUDE_CONSULT_URL.test).toBe('https://ekuatia.set.gov.py/consultas-test/');
   });
 });

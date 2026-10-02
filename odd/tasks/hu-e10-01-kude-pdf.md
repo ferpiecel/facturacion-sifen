@@ -26,7 +26,7 @@ fields of Manual Tecnico v150 chapter 13.
       Branch `feat/hu-e10-01-kude-pdf`.
 - [x] S1b pdfkit A4 renderer: header (emitter, stamp, document number), general data, receiver, items
       by VAT column, 30 mm QR, deterministic metadata. Branch `feat/hu-e10-01-kude-renderer`.
-- [ ] S1c Renderer: subtotals, IVA breakdown, CDC groups and consultation legend, "n/total" page
+- [x] S1c Renderer: subtotals, IVA breakdown, CDC groups and consultation legend, "n/total" page
       numbers. Branch `feat/hu-e10-01-kude-totals`.
 - [ ] S2 Signed XML (+ dCarQR) -> KudeInvoice reader in application (regex tag reading, like
       invoice-qr.ts); fails closed on missing mandatory fields.
@@ -34,4 +34,5 @@ fields of Manual Tecnico v150 chapter 13.
 - [ ] S4 (F2, HU-E10-02, out of scope) carta/cinta formats and the other 4 document types.
 
 ## Progress
+S1a-S1c implemented (renderer complete for FE/A4). Next: S2.
 Full slice-1 implementation was 696 lines, so it was split into S1a-S1c (each under 400).

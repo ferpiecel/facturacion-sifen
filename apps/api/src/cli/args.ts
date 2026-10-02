@@ -368,8 +368,26 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
         throw error;
       }
     }
-    case 'certificate:add':
-      throw new OpsArgError('not implemented');
+    case 'certificate:add': {
+      const { values } = parseStrict({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          env: { type: 'string' },
+          p12: { type: 'string' },
+          password: { type: 'string' },
+          replace: { type: 'boolean' },
+        },
+      });
+      return {
+        kind: 'certificate:add',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        environment: parseTenantEnvironment(values.env),
+        p12Path: requireOption(values.p12, 'p12'),
+        password: requireOption(values.password, 'password'),
+        replace: values.replace === true,
+      };
+    }
     default:
       throw new OpsArgError(`unknown subcommand "${subcommand}"`);
   }

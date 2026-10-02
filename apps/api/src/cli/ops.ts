@@ -3,7 +3,9 @@ import { createNodePostgresDatabase, type Database } from '@sifen/db';
 import { EnvelopeCipher } from '../modules/custody/application/envelope-cipher.js';
 import { createLocalKms } from '../modules/custody/infrastructure/adapters/local-kms.adapter.js';
 import { CscVault } from '../modules/custody/infrastructure/csc-vault.js';
-import { getOpsDatabaseUrl, parseOpsArgs, type OpsCommand } from './args.js';
+import { CertificateVault } from '../modules/certificates/infrastructure/certificate-vault.js';
+import { loadTrustedRoots } from '../modules/certificates/infrastructure/trusted-roots.js';
+import { getOpsDatabaseUrl, OpsArgError, parseOpsArgs, type OpsCommand } from './args.js';
 import {
   addEstablishment,
   addExpeditionPoint,
@@ -29,6 +31,29 @@ export function createCscVault(env: NodeJS.ProcessEnv): CscVault {
 }
 
 /**
+ * Builds the certificate vault: same KMS rules as the CSC vault, plus the PSC trusted roots from
+ * `PSC_TRUSTED_ROOTS_PATH` (fails closed without them).
+ */
+export function createCertificateVault(
+  env: NodeJS.ProcessEnv,
+  readFile: (path: string) => Buffer,
+): CertificateVault {
+  if (!env.KMS_LOCAL_MASTER_KEY) {
+    throw new Error(
+      'certificate:add requires KMS_LOCAL_MASTER_KEY (a throwaway key would lose the certificate)',
+    );
+  }
+  const trustedPscRoots = loadTrustedRoots(env, (path) => readFile(path).toString('utf8'));
+  const cipher = new EnvelopeCipher(createLocalKms(env.KMS_LOCAL_MASTER_KEY, env.NODE_ENV));
+  return new CertificateVault(cipher, { trustedPscRoots });
+}
+
+export interface CertificateDeps {
+  readonly vault: CertificateVault;
+  readonly readFile: (path: string) => Buffer;
+}
+
+/**
  * Dispatches one parsed {@link OpsCommand} to its handler and formats the
  * operator-facing output (backlog HU-E1-05). `apikey:create`'s formatted
  * key is the only place the raw secret ever appears — the caller must
@@ -38,6 +63,7 @@ export async function runOpsCommand(
   db: Database,
   command: OpsCommand,
   vault?: CscVault,
+  certificates?: CertificateDeps,
 ): Promise<string> {
   switch (command.kind) {
     case 'partner:create': {
@@ -101,8 +127,30 @@ export async function runOpsCommand(
       });
       return `tenant environment set: ${result.id} (${result.environment})`;
     }
-    case 'certificate:add':
-      throw new Error('not implemented');
+    case 'certificate:add': {
+      if (!certificates) {
+        throw new Error('certificate:add requires a certificate vault');
+      }
+      let p12: Buffer;
+      try {
+        p12 = certificates.readFile(command.p12Path);
+      } catch {
+        throw new Error('could not read the --p12 file');
+      }
+      try {
+        const stored = await certificates.vault.add(db, {
+          tenantId: command.tenantId,
+          environment: command.environment,
+          p12,
+          password: command.password,
+          replace: command.replace,
+        });
+        // Only public facts: the .p12 and its password exist in clear only in memory.
+        return `certificate stored: tenant ${command.tenantId} (${command.environment}, RUC ${stored.subjectRuc}, fingerprint ${stored.fingerprint}, valid until ${stored.notAfter.toISOString()})`;
+      } finally {
+        p12.fill(0);
+      }
+    }
     case 'csc:add': {
       if (!vault) {
         throw new Error('csc:add requires a CSC vault');
@@ -134,11 +182,28 @@ export function formatOpsError(error: unknown): string {
   return error.message.startsWith('Failed query') ? 'database query failed' : error.message;
 }
 
-/** `--csc -` reads the CSC from stdin so it never lands in shell history or `ps`. */
-async function resolveStdinCsc(
+/**
+ * `--csc -` reads the CSC from stdin so it never lands in shell history or `ps`. For
+ * `certificate:add` the `.p12` password may only come that way: `--password -` is mandatory.
+ */
+async function resolveStdinSecrets(
   argv: string[],
   readStdin: () => Promise<string>,
 ): Promise<string[]> {
+  if (argv[0] === 'certificate:add') {
+    const index = argv.indexOf('--password');
+    if (
+      argv.some((arg) => arg.startsWith('--password=')) ||
+      (index >= 0 && argv[index + 1] !== '-')
+    ) {
+      throw new OpsArgError(
+        '--password must be "-": the .p12 password is read from stdin, never from argv (value hidden)',
+      );
+    }
+    if (index < 0) return argv;
+    const value = (await readStdin()).replace(/\r?\n$/, '');
+    return argv.map((arg, position) => (position === index + 1 ? value : arg));
+  }
   const index = argv.indexOf('--csc');
   if (argv[0] !== 'csc:add' || argv[index + 1] !== '-') {
     return argv;
@@ -161,11 +226,15 @@ export interface CliIo {
 export async function runCli(io: CliIo): Promise<number> {
   try {
     const url = getOpsDatabaseUrl(io.env);
-    const command = parseOpsArgs(await resolveStdinCsc(io.argv, io.readStdin));
+    const command = parseOpsArgs(await resolveStdinSecrets(io.argv, io.readStdin));
     const vault = command.kind === 'csc:add' ? createCscVault(io.env) : undefined;
+    const certificates =
+      command.kind === 'certificate:add'
+        ? { vault: createCertificateVault(io.env, io.readFile), readFile: io.readFile }
+        : undefined;
     const handle = io.openDb(url);
     try {
-      io.out(await runOpsCommand(handle.db, command, vault));
+      io.out(await runOpsCommand(handle.db, command, vault, certificates));
     } finally {
       await handle.close();
     }

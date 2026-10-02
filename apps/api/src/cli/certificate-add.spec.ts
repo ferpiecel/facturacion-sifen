@@ -59,7 +59,7 @@ describe('runCli certificate:add', () => {
             ruc: parseRuc('80000005-6'),
             legalName: 'Tenant S.A.',
             taxpayerType: 'persona_juridica',
-            economicActivities: [],
+            economicActivities: [{ code: '62010', description: 'Programación informática' }],
           }),
         });
       }

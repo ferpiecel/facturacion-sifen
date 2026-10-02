@@ -84,6 +84,13 @@ describe('parseCreateDocument', () => {
     ['cityCode', 123456],
     ['districtDescription', 'x'.repeat(31)],
     ['cityDescription', '   '],
+    ['address', 'Av. Mariscal\nLopez'],
+    ['name', 'Cliente\rSA'],
+    ['districtDescription', 'ASU\u0000NCION'],
+    ['districtCode', 1.5],
+    ['districtCode', '1'],
+    ['cityCode', 1.5],
+    ['cityCode', Number.NaN],
   ])('rejects receiver.%s = %j (XSD limits)', (key, value) => {
     expect(fields({ ...BODY, receiver: { ...NAMED, [key]: value } })).toContain(`receiver.${key}`);
   });
@@ -95,6 +102,10 @@ describe('parseCreateDocument', () => {
     ['description', 'x'.repeat(2001)],
     ['unitCode', 1],
     ['unitCode', 77.5],
+    ['unitCode', '77'],
+    ['unitCode', Number.NaN],
+    ['description', 'linea\none'],
+    ['code', 'A\t001'],
   ])('rejects items[0].%s = %j (XSD limits)', (key, value) => {
     expect(fields({ ...BODY, items: [{ ...ITEM, [key]: value }] })).toContain(`items[0].${key}`);
   });

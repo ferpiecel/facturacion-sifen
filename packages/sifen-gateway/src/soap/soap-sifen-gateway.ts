@@ -1,4 +1,4 @@
-import { SifenProtocolError, SifenTransportError } from '../errors.ts';
+import { SifenFaultError, SifenTransportError } from '../errors.ts';
 import type { SifenGateway, SifenOperation } from '../port.ts';
 import type { SifenEndpoints } from './endpoints.ts';
 import { buildLoteMessage } from './lote-message.ts';
@@ -52,16 +52,14 @@ export class SoapSifenGateway implements Pick<SifenGateway, 'enviarLote' | 'cons
       url: this.options.endpoints[operation],
       body,
     });
+    const ok = status >= 200 && status < 300;
     try {
-      return parse(xml);
+      const parsed = parse(xml);
+      if (ok) return parsed;
     } catch (error) {
-      // A Fault is a real answer even on HTTP 500; any other unusable body on a non-2xx is a transport failure.
-      if (error instanceof SifenProtocolError && (status < 200 || status >= 300)) {
-        throw new SifenTransportError(operation, {
-          cause: new Error(`HTTP ${String(status)}`, { cause: error }),
-        });
-      }
-      throw error;
+      // A Fault is a real answer even on HTTP 500; any other failure on a non-2xx is a transport failure.
+      if (ok || error instanceof SifenFaultError) throw error;
     }
+    throw new SifenTransportError(operation, { cause: new Error(`HTTP ${String(status)}`) });
   }
 }

@@ -21,19 +21,58 @@ const PATHS: Readonly<Record<SifenOperation, string>> = {
   consultarRUC: '/de/ws/consultas/consulta-ruc.wsdl',
 };
 
+export interface EndpointOptions {
+  /**
+   * Lets overrides point at a host other than the official one of the environment. For tests only:
+   * never derive it from configuration or request data.
+   */
+  readonly allowCustomHost?: boolean;
+}
+
+function checkOverride(
+  operation: SifenOperation,
+  value: string,
+  ambiente: Ambiente,
+  options: EndpointOptions,
+): void {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch (cause) {
+    throw new RangeError(`Endpoint for "${operation}" is not a valid URL`, { cause });
+  }
+  if (url.protocol !== 'https:') {
+    throw new RangeError(`Endpoint for "${operation}" must use https`);
+  }
+  if (url.username !== '' || url.password !== '') {
+    throw new RangeError(`Endpoint for "${operation}" must not carry credentials`);
+  }
+  if (options.allowCustomHost !== true && url.origin !== HOSTS[ambiente]) {
+    throw new RangeError(
+      `Endpoint for "${operation}" must be on ${HOSTS[ambiente]} for "${ambiente}"`,
+    );
+  }
+}
+
 /**
- * Endpoint URL per operation for an environment, with optional per-operation overrides.
- * @throws RangeError when an override is not an `https:` URL: mutual TLS is mandatory (MT §7.4)
+ * Endpoint URL per operation for an environment, with optional per-operation overrides. An override
+ * must be an https URL on the official host of THAT environment, so `test` can never reach production
+ * and vice versa, unless `allowCustomHost` is set explicitly (tests only).
+ * @throws RangeError for an override that is not acceptable
  */
 export function sifenEndpoints(
   ambiente: Ambiente,
   overrides: Partial<Record<SifenOperation, string>> = {},
+  options: EndpointOptions = {},
 ): SifenEndpoints {
   const endpoints = { ...PATHS };
   for (const operation of Object.keys(PATHS) as SifenOperation[]) {
-    endpoints[operation] = overrides[operation] ?? `${HOSTS[ambiente]}${PATHS[operation]}`;
-    if (!endpoints[operation].startsWith('https://')) {
-      throw new RangeError(`Endpoint for "${operation}" must use https`);
+    const override = overrides[operation];
+    if (override === undefined) {
+      endpoints[operation] = `${HOSTS[ambiente]}${PATHS[operation]}`;
+    } else {
+      checkOverride(operation, override, ambiente, options);
+      endpoints[operation] = override;
     }
   }
   return endpoints;

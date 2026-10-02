@@ -563,6 +563,10 @@ export const documents = pgTable(
     currency: char('currency', { length: 3 }).notNull().default('PYG'),
     /** The request body as received. */
     payload: jsonb('payload').notNull(),
+    /** Final signed DE XML (signature and QR included), set once when the document is signed. */
+    signedXml: text('signed_xml'),
+    /** The `dFecFirma` of that signature, as an instant. */
+    signedAt: timestamp('signed_at', { withTimezone: true }),
     /** SIFEN's `dCodRes`/`dMsgRes` pairs for the final result, as `[{code, message}]` (HU-E6-03). */
     sifenMessages: jsonb('sifen_messages'),
     /**
@@ -602,6 +606,7 @@ export const documents = pgTable(
       name: 'documents_tenant_point_fk',
     }),
     unique('documents_tenant_idempotency_key_key').on(table.tenantId, table.idempotencyKey),
+    check('documents_signed_pair', sql`(${table.signedXml} IS NULL) = (${table.signedAt} IS NULL)`),
     check(
       'documents_idempotency_pair',
       sql`(${table.idempotencyKey} IS NULL) = (${table.requestHash} IS NULL)`,

@@ -112,7 +112,8 @@ describe('documents transmission retry state', () => {
     expect(await causeOf(set({ transmissionAttempts: -1 }))).toContain(
       'documents_transmission_attempts_range',
     );
-    for (const hold of ['', 'x'.repeat(65), 'has space', 'p12 password hunter2']) {
+    expect(await causeOf(set({ transmissionHold: 'x'.repeat(65) }))).toContain('too long');
+    for (const hold of ['', 'has space', 'p12 password hunter2']) {
       expect(await causeOf(set({ transmissionHold: hold }))).toContain(
         'documents_transmission_hold_format',
       );

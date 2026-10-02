@@ -21,6 +21,7 @@ import {
   ActiveCertificateExistsError,
   CertificateNotFoundError,
   CertificateRejectedError,
+  CertificateValidityError,
   CertificateVault,
 } from './certificate-vault.js';
 
@@ -67,7 +68,7 @@ describe('CertificateVault', () => {
     ]);
     const cipher = new EnvelopeCipher(createLocalKms(undefined, 'test', () => undefined));
     const vault = new CertificateVault(cipher, { trustedPscRoots: [new X509Certificate(psc.pem)] });
-    return { db: handle.db, vault, a, b, noProfile };
+    return { db: handle.db, vault, cipher, a, b, noProfile };
   }
 
   const issue = (serialNumber = 'RUC80000005-6') =>
@@ -220,6 +221,30 @@ describe('CertificateVault', () => {
       .set({ status: 'revoked', revokedAt: new Date() })
       .where(eq(tenantCertificates.tenantId, a));
     await expect(vault.open(db, a, 'test')).rejects.toThrow(CertificateNotFoundError);
+  });
+
+  it('refuses to open a certificate outside its validity window at the clock time', async () => {
+    const { db, vault, cipher, a } = await setup();
+    const { p12 } = issue();
+    await vault.add(db, { tenantId: a, environment: 'test', p12, password: PASSWORD });
+    const day = 86_400_000;
+    const at = (offset: number) =>
+      new CertificateVault(cipher, {
+        trustedPscRoots: [new X509Certificate(psc.pem)],
+        now: () => new Date(Date.now() + offset),
+      });
+
+    const expired = await at(400 * day)
+      .open(db, a, 'test')
+      .catch((e: unknown) => e);
+    expect(expired).toBeInstanceOf(CertificateValidityError);
+    expect((expired as CertificateValidityError).reason).toBe('expired');
+    const early = await at(-5 * day)
+      .open(db, a, 'test')
+      .catch((e: unknown) => e);
+    expect(early).toBeInstanceOf(CertificateValidityError);
+    expect((early as CertificateValidityError).reason).toBe('not-yet-valid');
+    expect((await at(0).open(db, a, 'test')).password).toBe(PASSWORD);
   });
 
   it("does not open a blob moved to another tenant's row (AAD)", async () => {

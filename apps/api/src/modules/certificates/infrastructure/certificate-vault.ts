@@ -35,6 +35,14 @@ export class ActiveCertificateExistsError extends Error {
   }
 }
 
+/** The stored certificate is outside its validity window; signing with it would be rejected. */
+export class CertificateValidityError extends Error {
+  constructor(readonly reason: 'expired' | 'not-yet-valid') {
+    super(`stored certificate is ${reason}`);
+    this.name = 'CertificateValidityError';
+  }
+}
+
 export class CertificateNotFoundError extends Error {
   constructor(environment: Environment) {
     super(`no active certificate for ${environment}`);

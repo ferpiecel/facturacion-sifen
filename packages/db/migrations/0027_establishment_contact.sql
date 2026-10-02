@@ -1,0 +1,6 @@
+ALTER TABLE "tenant_establishments" ADD COLUMN "phone" varchar(15);--> statement-breakpoint
+ALTER TABLE "tenant_establishments" ADD COLUMN "email" varchar(255);--> statement-breakpoint
+ALTER TABLE "tenant_establishments" ADD COLUMN "commercial_name" varchar(30);--> statement-breakpoint
+ALTER TABLE "tenant_establishments" ADD CONSTRAINT "tenant_establishments_phone_length" CHECK (char_length("tenant_establishments"."phone") BETWEEN 6 AND 15 AND "tenant_establishments"."phone" !~ '^[[:space:]]*$' AND "tenant_establishments"."phone" !~ '[[:cntrl:]]');--> statement-breakpoint
+ALTER TABLE "tenant_establishments" ADD CONSTRAINT "tenant_establishments_email_format" CHECK ("tenant_establishments"."email" ~ '^[0-9a-zA-Z]([0-9a-zA-Z._-])*@([0-9a-zA-Z][0-9a-zA-Z_-]*[.])+[a-zA-Z]{2,9}$');--> statement-breakpoint
+ALTER TABLE "tenant_establishments" ADD CONSTRAINT "tenant_establishments_commercial_name_length" CHECK (char_length("tenant_establishments"."commercial_name") >= 1 AND "tenant_establishments"."commercial_name" !~ '^[[:space:]]*$');

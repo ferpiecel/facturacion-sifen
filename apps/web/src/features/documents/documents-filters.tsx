@@ -50,7 +50,7 @@ export function DocumentsFilters({ filters, onChange }: DocumentsFiltersProps) {
   return (
     <section
       aria-label="Filtros"
-      className="flex flex-col gap-3 rounded-xl bg-surface-container-lowest p-4 shadow-sm"
+      className="flex flex-col gap-3 rounded-xl bg-surface-container-lowest p-4 shadow-sm xl:col-span-12"
     >
       <div className="flex flex-col items-stretch gap-3 lg:flex-row lg:items-center">
         <div className="flex flex-1 items-center gap-2 rounded-lg bg-surface-container-low px-3 py-2 text-on-surface focus-within:ring-2 focus-within:ring-primary">

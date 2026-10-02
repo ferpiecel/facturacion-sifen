@@ -100,10 +100,18 @@ export function createDrizzleSigningStore({
         db,
         tenantId,
         async (tx): Promise<SignableDocument | NotAcceptedDocument | null> => {
+          // RLS already scopes every query; the explicit tenant predicates are defence in depth.
           const document = first(
-            await tx.select().from(documents).where(eq(documents.id, documentId)),
+            await tx
+              .select()
+              .from(documents)
+              .where(and(eq(documents.tenantId, tenantId), eq(documents.id, documentId))),
           );
           if (!document) return null;
+          // Nothing to sign: do not touch the configuration or parse the payload again.
+          if (document.status !== 'accepted') {
+            return { documentId: document.id, status: document.status };
+          }
           const tenant = first(
             await tx
               .select({ environment: tenants.environment })
@@ -125,19 +133,34 @@ export function createDrizzleSigningStore({
             await tx
               .select()
               .from(tenantEstablishments)
-              .where(eq(tenantEstablishments.id, document.establishmentId)),
+              .where(
+                and(
+                  eq(tenantEstablishments.tenantId, tenantId),
+                  eq(tenantEstablishments.id, document.establishmentId),
+                ),
+              ),
           );
           const point = first(
             await tx
               .select()
               .from(tenantExpeditionPoints)
-              .where(eq(tenantExpeditionPoints.id, document.expeditionPointId)),
+              .where(
+                and(
+                  eq(tenantExpeditionPoints.tenantId, tenantId),
+                  eq(tenantExpeditionPoints.id, document.expeditionPointId),
+                ),
+              ),
           );
           const timbrado = first(
             await tx
               .select()
               .from(tenantTimbrados)
-              .where(eq(tenantTimbrados.id, document.timbradoId)),
+              .where(
+                and(
+                  eq(tenantTimbrados.tenantId, tenantId),
+                  eq(tenantTimbrados.id, document.timbradoId),
+                ),
+              ),
           );
           if (!tenant || !profile || !establishment || !point || !timbrado) {
             throw new SigningDataIncompleteError(['fiscal configuration']);
@@ -230,7 +253,13 @@ export function createDrizzleSigningStore({
         tx
           .update(documents)
           .set({ status: 'signed', signedXml, signedAt, updatedAt: now() })
-          .where(and(eq(documents.id, documentId), eq(documents.status, 'accepted')))
+          .where(
+            and(
+              eq(documents.tenantId, tenantId),
+              eq(documents.id, documentId),
+              eq(documents.status, 'accepted'),
+            ),
+          )
           .returning({ id: documents.id }),
       );
       return updated.length === 1;

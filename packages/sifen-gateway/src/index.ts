@@ -58,3 +58,5 @@ export type {
 export { buildLoteMessage, buildLoteZip, measureLoteMessage } from './soap/lote-message.ts';
 export { SoapSifenGateway } from './soap/soap-sifen-gateway.ts';
 export type { SoapSifenGatewayOptions } from './soap/soap-sifen-gateway.ts';
+export { createSoapSifenGateway } from './soap/create-soap-gateway.ts';
+export type { CreateSoapSifenGatewayOptions } from './soap/create-soap-gateway.ts';

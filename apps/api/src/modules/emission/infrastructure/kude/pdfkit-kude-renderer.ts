@@ -5,6 +5,7 @@ import QRCode from 'qrcode';
 import type { KudeRenderer } from '../../application/ports/kude-renderer.port.js';
 import { fromAsuncionTimestamp } from '../../application/invoice-xml.js';
 import {
+  assertValidKudeInvoice,
   formatDateDmy,
   formatDocumentNumber,
   formatPyg,
@@ -17,8 +18,10 @@ import {
 } from '../../domain/kude-model.js';
 
 const PT_PER_MM = 72 / 25.4;
-/** MT v150 13.8.1: printed QR at least 25 mm wide (22 mm content + 3 mm quiet zone). */
-const QR_MM = 30;
+/** MT v150 13.8.1: printed QR at least 25 mm wide, 22 mm of content plus the quiet zone. */
+const QR_CONTENT_MM = 24;
+/** Quiet zone per side, as a share of the QR content (about 12% of the printed width). */
+const QR_QUIET_SHARE = 0.16;
 const MARGIN = 36;
 const BOTTOM = 60;
 const FOOTER_BLOCK = 190;
@@ -87,12 +90,18 @@ function cells(item: KudeItem): Record<(typeof COLUMNS)[number]['key'], string> 
 /** KuDE of an FE on A4 (MT v150 chapter 13, "Formato 1"), drawn with embedded Noto Sans. */
 export class PdfkitKudeRenderer implements KudeRenderer {
   async render(invoice: KudeInvoice): Promise<Uint8Array> {
-    const qr = await QRCode.toBuffer(invoice.qrUrl, {
-      type: 'png',
-      errorCorrectionLevel: 'M',
-      margin: 4,
-      scale: 4,
-    });
+    assertValidKudeInvoice(invoice);
+    const modules = QRCode.create(invoice.qrUrl, { errorCorrectionLevel: 'M' }).modules.size;
+    const quiet = Math.ceil(modules * QR_QUIET_SHARE);
+    const qr = {
+      png: await QRCode.toBuffer(invoice.qrUrl, {
+        type: 'png',
+        errorCorrectionLevel: 'M',
+        margin: quiet,
+        scale: 4,
+      }),
+      size: ((QR_CONTENT_MM * (modules + 2 * quiet)) / modules) * PT_PER_MM,
+    };
     const created = fromAsuncionTimestamp(invoice.issuedAt);
     const doc = new PDFDocument({
       size: 'A4',
@@ -161,7 +170,7 @@ export class PdfkitKudeRenderer implements KudeRenderer {
   }
 
   /** Draws the header and returns the y below its lowest block. */
-  private header(doc: Doc, invoice: KudeInvoice, qr: Buffer): number {
+  private header(doc: Doc, invoice: KudeInvoice, qr: { png: Buffer; size: number }): number {
     const { issuer, stamp } = invoice;
     this.line(doc, KUDE_TITLE, MARGIN, MARGIN, {
       width: doc.page.width - 2 * MARGIN,
@@ -195,9 +204,11 @@ export class PdfkitKudeRenderer implements KudeRenderer {
     stampLines.forEach((text, i) => {
       middle = this.put(doc, text, 285, middle, { width: 180, bold: i === 0 || i === 4 });
     });
-    const size = QR_MM * PT_PER_MM;
-    doc.image(qr, doc.page.width - MARGIN - size, top - 4, { width: size, height: size });
-    return Math.max(left, middle, top - 4 + size);
+    doc.image(qr.png, doc.page.width - MARGIN - qr.size, top - 4, {
+      width: qr.size,
+      height: qr.size,
+    });
+    return Math.max(left, middle, top - 4 + qr.size);
   }
 
   private general(doc: Doc, invoice: KudeInvoice, top: number): number {
@@ -208,7 +219,15 @@ export class PdfkitKudeRenderer implements KudeRenderer {
       .lineTo(MARGIN + width, top - 4)
       .stroke();
     const rows: string[] = [
-      `Fecha y hora de emisión: ${invoice.issuedAt}    Condición de Venta: ${invoice.operationCondition}    Moneda: ${invoice.currency}`,
+      [
+        `Fecha y hora de emisión: ${invoice.issuedAt}`,
+        `Condición de Venta: ${invoice.operationCondition}`,
+        invoice.installments === undefined ? '' : `Cuotas: ${String(invoice.installments)}`,
+        `Moneda: ${invoice.currency}`,
+        invoice.exchangeRate === undefined ? '' : `Tipo de Cambio: ${invoice.exchangeRate}`,
+      ]
+        .filter(Boolean)
+        .join('    '),
     ];
     if (receiver.kind === 'named') {
       rows.push(

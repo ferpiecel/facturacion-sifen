@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { KudeInvoice, KudeItem } from '../../domain/kude-model.js';
-import { imageSizes, overlaps, pdfText, textItems } from './pdf-inspect.test-helper.js';
+import {
+  decodeQr,
+  firstImage,
+  imageSizes,
+  overlaps,
+  pdfText,
+  quietZoneRatio,
+  textItems,
+} from './pdf-inspect.test-helper.js';
 import { PdfkitKudeRenderer } from './pdfkit-kude-renderer.js';
 
 const CDC = '01800695631001001000000612021112917595714694';
@@ -208,5 +216,40 @@ describe('PdfkitKudeRenderer (FE, A4)', () => {
       items.filter((i) => i.str.includes('999.999.999.999.999')).length,
     ).toBeGreaterThanOrEqual(3);
     expect(overlaps(items)).toEqual([]);
+  });
+
+  it('embeds a QR that decodes to the exact dCarQR URL', async () => {
+    expect(await decodeQr(await renderer.render(invoice()))).toBe(QR_URL);
+  });
+
+  it('keeps a quiet zone of at least 10% per side and 22 mm of QR content (MT 13.8.1)', async () => {
+    const pdf = await renderer.render(invoice());
+    const image = await firstImage(pdf);
+    const ratio = quietZoneRatio(image as NonNullable<typeof image>);
+    expect(ratio).toBeGreaterThanOrEqual(0.1);
+    const widthPt = imageSizes(pdf)[0]?.w ?? 0;
+    expect(widthPt * (1 - 2 * ratio)).toBeGreaterThanOrEqual((22 / 25.4) * 72);
+  });
+
+  it('prints cuotas and tipo de cambio only when present (MT 13.4.1)', async () => {
+    const plain = await pdfText(await renderer.render(invoice()));
+    expect(plain).not.toContain('Cuotas');
+    expect(plain).not.toContain('Tipo de Cambio');
+    const credit = {
+      ...invoice(),
+      operationCondition: 'Crédito',
+      installments: 3,
+      exchangeRate: '1',
+    };
+    const text = await pdfText(await renderer.render(credit));
+    expect(text).toContain('Cuotas: 3');
+    expect(text).toContain('Tipo de Cambio: 1');
+  });
+
+  it('rejects an invalid model before drawing anything', async () => {
+    await expect(renderer.render({ ...invoice(), cdc: '123' })).rejects.toThrow(/cdc/);
+    await expect(renderer.render({ ...invoice(), issuedAt: '2026-01-02' })).rejects.toThrow(
+      /issuedAt/,
+    );
   });
 });

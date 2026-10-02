@@ -22,7 +22,7 @@ HU-E6-04 recovery (query by CDC). Sources: backlog HU-E6-03, plan v1.1 §8.1 (st
       `approved | approved_with_observations | rejected` + code/message; DEs missing from the answer
       or with an unknown `dEstRes` go to `needsRecovery`), `recovery` (0364, 0360 or `now >
       pollDeadlineAt`; the deadline check makes no call). In-memory store fake in tests.
-- [ ] **S2 — Drizzle `LotePollStore` + migration 0024.** `lotes.status` gains `processed` and
+- [x] **S2 — Drizzle `LotePollStore` + migration 0024.** `lotes.status` gains `processed` and
       `recovery`; `lotes_guard` allows `sent -> processed | recovery` (and `sent -> sent` stays a
       non-transition for reschedules); `lotes` gets `last_polled_at`/`poll_attempts` only if needed.
       Documents `submitted -> approved | approved_with_observations | rejected` in the same
@@ -40,3 +40,15 @@ HU-E6-04 recovery (query by CDC). Sources: backlog HU-E6-03, plan v1.1 §8.1 (st
   repeat; the 48 h deadline eventually forces recovery.
 - `dEstRes` matched accent/case-insensitively; anything else is not guessed and goes to `needsRecovery`.
 - The request `dId` is supplied by the caller (tenant sequence), not generated here.
+
+## Decisions (S2)
+
+- Migration 0024: lote statuses `processed` and `recovery`, both terminal in `lotes_guard`
+  (`sent -> processed | recovery`). `recovery -> processed` is NOT allowed: recovery by CDC (HU-E6-04)
+  settles each document on its own, and HU-E6-04 can add that transition with its own migration if it needs it.
+- `documents_guard` now rejects status regressions and SIFEN outcomes not entered from `submitted`
+  (rank: accepted < signed < queued < submitted < approved/approved_with_observations/rejected < corrected/number_voided/cancelled).
+  `documents.sifen_messages jsonb` keeps every `{code, message}` pair; `lotes.last_polled_at`/`last_poll_message` keep the poll trail.
+- `LotePollStore.record` is compare-and-set on `status = 'sent'` and the loaded `next_poll_at`; the lote update and document updates share one tenant transaction.
+  A document not in `submitted` aborts the transaction (a document already settled the same way is accepted).
+- Follow-up: nothing moves documents to `submitted` yet; the dispatch store must do it when a lote becomes `sent`.

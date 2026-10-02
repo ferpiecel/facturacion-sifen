@@ -15,17 +15,17 @@ Never commit real certificates; tests use `apps/api/test/support/test-pki.ts`.
 
 ## Slices (stacked branches)
 
-- [ ] **A — `feat/hu-e3-01-certs-db`: migration 0026 + schema + db specs.** `tenant_certificates`
+- [x] **A — `feat/hu-e3-01-certs-db`: migration 0026 + schema + db specs.** `tenant_certificates`
       (`tenant_id`, `environment`, `sealed jsonb`, `fingerprint` sha-256 hex of the certificate DER,
       `subject_ruc`, `not_before`, `not_after`, `status` active|revoked, `revoked_at`, `created_at`),
       FORCE RLS, partial unique index (one `active` per tenant + environment), immutability trigger
       (only `status`/`revoked_at` change, active -> revoked only), no DELETE.
-- [ ] **B — `feat/hu-e3-01-certificate-vault`: `CertificateVault` + trusted roots loader.**
+- [x] **B — `feat/hu-e3-01-certificate-vault`: `CertificateVault` + trusted roots loader.**
       `add` (inspect + validate against the tenant's fiscal-profile RUC and the PSC roots, seal, insert;
       optional replace revokes the previous active one in the same transaction), `open` (key+cert in
       memory, tenant RLS scope, AAD = tenant/kind/environment/version/fingerprint), `loadTrustedRoots`
       (PEM bundle from `PSC_TRUSTED_ROOTS_PATH`, fail closed when absent/empty).
-- [ ] **C — `feat/hu-e3-01-certificate-add-cli`: `certificate:add`.** `--tenant --env --p12 <path>
+- [x] **C — `feat/hu-e3-01-certificate-add-cli`: `certificate:add`.** `--tenant --env --p12 <path>
       --password -` (password read from stdin, never argv), `--replace`; invalid certificates refused
       with every validator reason; docs in the README "Operación" section.
 

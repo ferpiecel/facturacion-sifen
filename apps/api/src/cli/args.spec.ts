@@ -529,3 +529,48 @@ describe('parseOpsArgs never echoes argv values (HU-E2-03)', () => {
     expect(message).not.toContain(CSC);
   });
 });
+
+describe('parseOpsArgs certificate:add (HU-E3-01)', () => {
+  const base = [
+    'certificate:add',
+    '--tenant',
+    't-1',
+    '--env',
+    'test',
+    '--p12',
+    '/secure/tenant.p12',
+    '--password',
+    'resolved-from-stdin',
+  ];
+
+  it('parses tenant, environment, .p12 path and password', () => {
+    expect(parseOpsArgs(base)).toEqual({
+      kind: 'certificate:add',
+      tenantId: 't-1',
+      environment: 'test',
+      p12Path: '/secure/tenant.p12',
+      password: 'resolved-from-stdin',
+      replace: false,
+    });
+  });
+
+  it('parses --replace', () => {
+    expect(parseOpsArgs([...base, '--replace'])).toMatchObject({ replace: true });
+  });
+
+  it.each(['tenant', 'env', 'p12', 'password'])('rejects missing --%s', (flag) => {
+    const index = base.indexOf(`--${flag}`);
+    const argv = base.filter((_, i) => i !== index && i !== index + 1);
+    expect(() => parseOpsArgs(argv)).toThrow(`missing required --${flag}`);
+  });
+
+  it('rejects an invalid --env and stray positionals without echoing the password', () => {
+    expect(() => parseOpsArgs(base.map((a) => (a === 'test' ? 'live' : a)))).toThrow(OpsArgError);
+    expect(() => parseOpsArgs([...base, 'oops'])).toThrow(/unexpected positional/);
+    try {
+      parseOpsArgs([...base, 'oops']);
+    } catch (error) {
+      expect((error as Error).message).not.toContain('resolved-from-stdin');
+    }
+  });
+});

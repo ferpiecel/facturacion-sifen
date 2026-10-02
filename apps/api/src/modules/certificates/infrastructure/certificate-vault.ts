@@ -23,8 +23,21 @@ type Environment = 'test' | 'production';
 /** The certificate failed validation; carries every reason, never the file or its password. */
 export class CertificateRejectedError extends Error {
   constructor(readonly rejections: readonly CertificateRejection[]) {
-    super(`certificate rejected: ${rejections.map((r) => r.code).join(', ')}`);
+    super(`certificate rejected: ${rejections.map(describeRejection).join('; ')}`);
     this.name = 'CertificateRejectedError';
+  }
+}
+
+function describeRejection(rejection: CertificateRejection): string {
+  switch (rejection.code) {
+    case 'ruc-mismatch':
+      return `ruc-mismatch (tenant ${rejection.expected}, certificate ${rejection.actual ?? 'none'})`;
+    case 'expired':
+      return `expired (notAfter ${rejection.notAfter.toISOString()})`;
+    case 'not-yet-valid':
+      return `not-yet-valid (notBefore ${rejection.notBefore.toISOString()})`;
+    default:
+      return rejection.code;
   }
 }
 

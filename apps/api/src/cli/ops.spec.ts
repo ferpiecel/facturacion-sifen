@@ -309,6 +309,7 @@ describe('runCli csc:add (HU-E2-03)', () => {
       argv: argv(tenantId),
       env: { OPS_DATABASE_URL: 'x', KMS_LOCAL_MASTER_KEY: key, NODE_ENV: 'test' },
       readStdin: () => Promise.resolve(stdin),
+      readFile: () => Buffer.alloc(0),
       out: (text) => out.push(text),
       err: (text) => err.push(text),
       openDb: () => ({ db, close: () => Promise.resolve() }),

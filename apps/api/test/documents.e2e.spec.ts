@@ -18,12 +18,25 @@ import { AppModule } from '../src/app.module.js';
 import { DATABASE, DATABASE_HANDLE } from '../src/modules/database/database.module.js';
 import { parseCdc } from '../src/modules/emission/domain/cdc.js';
 
+const LINE = { code: 'A-001', description: 'Servicio de consultoria', unitCode: 77 };
+
 const BODY = {
   establishment: '001',
   expeditionPoint: '002',
   operationType: 'B2B',
-  receiver: { kind: 'named', ruc: '80069563-1', isPublicEntity: false },
-  items: [{ quantity: 1, unitPrice: 110_000, vatRate: 10 }],
+  receiver: {
+    kind: 'named',
+    ruc: '80069563-1',
+    isPublicEntity: false,
+    name: 'Cliente SA',
+    address: 'Av. Mariscal Lopez',
+    houseNumber: '123',
+    districtCode: 1,
+    districtDescription: 'ASUNCION (DISTRITO)',
+    cityCode: 1,
+    cityDescription: 'ASUNCION (DISTRITO)',
+  },
+  items: [{ ...LINE, quantity: 1, unitPrice: 110_000, vatRate: 10 }],
   roundingPyg: 0,
   location: { departmentCode: 11 },
 };
@@ -143,7 +156,7 @@ describe('POST /v1/documents (e2e)', () => {
     const response = await post({
       ...BODY,
       receiver: { kind: 'unnamed' },
-      items: [{ quantity: 1, unitPrice: 8_000_000, vatRate: 10 }],
+      items: [{ ...LINE, quantity: 1, unitPrice: 8_000_000, vatRate: 10 }],
       roundingPyg: 20,
     });
 
@@ -207,7 +220,7 @@ describe('POST /v1/documents (e2e)', () => {
   it('answers 422 amount-range for amounts beyond the numeric column, never a 500', async () => {
     const response = await post({
       ...BODY,
-      items: [{ quantity: 1, unitPrice: 1e20, vatRate: 10 }],
+      items: [{ ...LINE, quantity: 1, unitPrice: 1e20, vatRate: 10 }],
     });
 
     expect(response.statusCode).toBe(422);
@@ -217,7 +230,7 @@ describe('POST /v1/documents (e2e)', () => {
   });
 
   it('caps the items at 999 (MT v150 E001 gCamItem 1-999)', async () => {
-    const item = { quantity: 1, unitPrice: 50, vatRate: 10 };
+    const item = { ...LINE, quantity: 1, unitPrice: 50, vatRate: 10 };
 
     const response = await post({ ...BODY, items: Array.from({ length: 1000 }, () => item) });
 
@@ -242,6 +255,37 @@ describe('POST /v1/documents (e2e)', () => {
       );
     }
     expect(await handle.db.select().from(documents)).toHaveLength(0);
+  });
+
+  it('answers 422 naming every missing receiver and item field of the DE XML', async () => {
+    const response = await post({
+      ...BODY,
+      receiver: { kind: 'named', ruc: '80069563-1' },
+      items: [{ quantity: 1, unitPrice: 110_000, vatRate: 10 }],
+    });
+
+    expect(response.statusCode).toBe(422);
+    const { errors } = response.json<{ errors: Array<{ field: string }> }>();
+    expect(errors.map((e) => e.field)).toEqual(
+      expect.arrayContaining([
+        'receiver.name',
+        'receiver.address',
+        'items[0].code',
+        'items[0].unitCode',
+      ]),
+    );
+    expect(await handle.db.select().from(documents)).toHaveLength(0);
+  });
+
+  it('stores the receiver and item XML data in the payload', async () => {
+    const response = await post(BODY);
+
+    const { document_id: id } = response.json<{ document_id: string }>();
+    const [row] = await handle.db.select().from(documents).where(eq(documents.id, id));
+    expect(row.payload).toMatchObject({
+      receiver: { name: 'Cliente SA', districtCode: 1 },
+      items: [{ code: 'A-001', unitCode: 77 }],
+    });
   });
 
   it('answers 409 when the sequence of the point is exhausted, never a raw 500', async () => {
@@ -289,7 +333,7 @@ describe('POST /v1/documents (e2e)', () => {
       await post(BODY, bearer, 'retry-2');
 
       const response = await post(
-        { ...BODY, items: [{ quantity: 2, unitPrice: 110_000, vatRate: 10 }] },
+        { ...BODY, items: [{ ...LINE, quantity: 2, unitPrice: 110_000, vatRate: 10 }] },
         bearer,
         'retry-2',
       );

@@ -452,6 +452,55 @@ export const tenantCscs = pgTable(
   ],
 );
 
+export const CERTIFICATE_STATUSES = ['active', 'revoked'] as const;
+
+/**
+ * A tenant's `.p12`, sealed with the custody envelope (ADR-0009, HU-E3-01). Only the sealed
+ * blob holds the key; the other columns are public facts read from the certificate. At most one
+ * `active` certificate per tenant and environment; rotation revokes the old one. Never deleted.
+ */
+export const tenantCertificates = pgTable(
+  'tenant_certificates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    environment: tenantEnvironment('environment').notNull(),
+    /** `EnvelopeCipher` output for `{ p12, password }`, bound to this row's identity (AAD). */
+    sealed: jsonb('sealed').notNull(),
+    /** sha-256 hex of the certificate's DER encoding. */
+    fingerprint: char('fingerprint', { length: 64 }).notNull(),
+    /** Formatted RUC (`base-dv`) read from the certificate subject. */
+    subjectRuc: varchar('subject_ruc', { length: 12 }).notNull(),
+    notBefore: timestamp('not_before', { withTimezone: true }).notNull(),
+    notAfter: timestamp('not_after', { withTimezone: true }).notNull(),
+    status: varchar('status', { length: 16 }).notNull().default('active'),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('tenant_certificates_one_active_idx')
+      .on(table.tenantId, table.environment)
+      .where(sql`${table.status} = 'active'`),
+    unique('tenant_certificates_tenant_environment_fingerprint_key').on(
+      table.tenantId,
+      table.environment,
+      table.fingerprint,
+    ),
+    check('tenant_certificates_fingerprint_format', sql`${table.fingerprint} ~ '^[0-9a-f]{64}$'`),
+    check(
+      'tenant_certificates_status_valid',
+      sql`${table.status} IN (${sql.raw(CERTIFICATE_STATUSES.map((s) => `'${s}'`).join(', '))})`,
+    ),
+    check(
+      'tenant_certificates_revoked_pair',
+      sql`(${table.status} = 'revoked') = (${table.revokedAt} IS NOT NULL)`,
+    ),
+    check('tenant_certificates_validity_order', sql`${table.notBefore} < ${table.notAfter}`),
+  ],
+);
+
 /**
  * Last assigned `dNumDoc` (MT v150 C005, 7 digits: 0000001..9999999) per
  * (environment, timbrado, establishment, expedition point, document type)
@@ -731,6 +780,7 @@ export const TENANT_TABLES = [
   'tenant_expedition_points',
   'tenant_fiscal_economic_activities',
   'tenant_fiscal_profiles',
+  'tenant_certificates',
   'tenant_cscs',
   'tenant_probe',
   'tenant_request_sequences',

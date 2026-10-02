@@ -59,6 +59,8 @@ describe('ComprobantesPage (explorer header and KPIs)', () => {
       'aria-valuenow',
       '97.9',
     );
+    const bar = screen.getByRole('progressbar', { name: 'Aprobados por SIFEN' });
+    expect(bar.firstElementChild).toHaveStyle({ width: '97.9%' });
     expect(screen.getByRole('button', { name: /Ver motivos \(1321\)/ })).toBeInTheDocument();
   });
 });

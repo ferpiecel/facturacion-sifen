@@ -266,4 +266,66 @@ describe('CertificateVault', () => {
       .where(and(eq(tenantCertificates.tenantId, b), eq(tenantCertificates.environment, 'test')));
     await expect(vault.open(db, b, 'test')).rejects.toThrow(SecretDecryptionError);
   });
+
+  describe('sealed blob identity (AAD)', () => {
+    async function swapSealed(
+      db: DatabaseHandle['db'],
+      from: typeof tenantCertificates.$inferSelect,
+      to: typeof tenantCertificates.$inferSelect,
+    ) {
+      // The guard makes the sealed column immutable; emulate a tampered database as its owner.
+      await db.execute(
+        sql`alter table tenant_certificates disable trigger tenant_certificates_guard`,
+      );
+      await db
+        .update(tenantCertificates)
+        .set({ sealed: from.sealed })
+        .where(eq(tenantCertificates.id, to.id));
+    }
+
+    it("does not open a blob moved to the same tenant's other environment", async () => {
+      const { db, vault, a } = await setup();
+      await vault.add(db, {
+        tenantId: a,
+        environment: 'test',
+        p12: issue().p12,
+        password: PASSWORD,
+      });
+      await vault.add(db, {
+        tenantId: a,
+        environment: 'production',
+        p12: issue().p12,
+        password: PASSWORD,
+      });
+      const rows = await db.select().from(tenantCertificates);
+      const test = rows.find((r) => r.environment === 'test');
+      const production = rows.find((r) => r.environment === 'production');
+      if (!test || !production) throw new Error('seed failed');
+      await swapSealed(db, production, test);
+      await expect(vault.open(db, a, 'test')).rejects.toThrow(SecretDecryptionError);
+    });
+
+    it('does not open a blob moved under another fingerprint of the same tenant', async () => {
+      const { db, vault, a } = await setup();
+      await vault.add(db, {
+        tenantId: a,
+        environment: 'test',
+        p12: issue().p12,
+        password: PASSWORD,
+      });
+      await vault.add(db, {
+        tenantId: a,
+        environment: 'test',
+        p12: issue().p12,
+        password: PASSWORD,
+        replace: true,
+      });
+      const rows = await db.select().from(tenantCertificates);
+      const active = rows.find((r) => r.status === 'active');
+      const revoked = rows.find((r) => r.status === 'revoked');
+      if (!active || !revoked) throw new Error('seed failed');
+      await swapSealed(db, revoked, active);
+      await expect(vault.open(db, a, 'test')).rejects.toThrow(SecretDecryptionError);
+    });
+  });
 });

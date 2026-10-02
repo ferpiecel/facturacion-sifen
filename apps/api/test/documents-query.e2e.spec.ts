@@ -16,12 +16,25 @@ import { createHttpAdapter } from '../src/bootstrap/http.js';
 import { AppModule } from '../src/app.module.js';
 import { DATABASE, DATABASE_HANDLE } from '../src/modules/database/database.module.js';
 
+const LINE = { code: 'A-001', description: 'Servicio de consultoria', unitCode: 77 };
+
 const BODY = {
   establishment: '001',
   expeditionPoint: '002',
   operationType: 'B2B',
-  receiver: { kind: 'named', ruc: '80069563-1', isPublicEntity: false },
-  items: [{ quantity: 1, unitPrice: 110_000, vatRate: 10 }],
+  receiver: {
+    kind: 'named',
+    ruc: '80069563-1',
+    isPublicEntity: false,
+    name: 'Cliente SA',
+    address: 'Av. Mariscal Lopez',
+    houseNumber: '123',
+    districtCode: 1,
+    districtDescription: 'ASUNCION (DISTRITO)',
+    cityCode: 1,
+    cityDescription: 'ASUNCION (DISTRITO)',
+  },
+  items: [{ ...LINE, quantity: 1, unitPrice: 110_000, vatRate: 10 }],
   roundingPyg: 0,
   location: { departmentCode: 11 },
 };

@@ -1,6 +1,6 @@
 {
-  "id": "15d92276-5fb7-4287-b09e-ab36cf149292",
-  "prevId": "5f046f8d-c382-4c98-9dc6-085be7297244",
+  "id": "66291337-aba1-48c1-b2a4-b2b6e7227872",
+  "prevId": "0338280a-dd29-42d1-b7d2-74f0b1873a61",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2255,6 +2255,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
         }
       },
       "indexes": {
@@ -2337,6 +2344,10 @@
         "webhook_deliveries_attempts_nonneg": {
           "name": "webhook_deliveries_attempts_nonneg",
           "value": "\"webhook_deliveries\".\"attempt_count\" >= 0"
+        },
+        "webhook_deliveries_status_code_range": {
+          "name": "webhook_deliveries_status_code_range",
+          "value": "\"webhook_deliveries\".\"last_status_code\" IS NULL OR \"webhook_deliveries\".\"last_status_code\" BETWEEN 100 AND 599"
         }
       },
       "isRLSEnabled": false
@@ -2449,11 +2460,15 @@
       "checkConstraints": {
         "webhook_endpoints_url_https": {
           "name": "webhook_endpoints_url_https",
-          "value": "\"webhook_endpoints\".\"url\" ~ '^https://[^[:space:]]+$' AND \"webhook_endpoints\".\"url\" !~ '^https://[^/]*@' AND length(\"webhook_endpoints\".\"url\") <= 2048"
+          "value": "\"webhook_endpoints\".\"url\" ~ '^https://[^/?#:@[:space:]]+(:[0-9]{1,5})?([/?#][^[:space:]]*)?$' AND length(\"webhook_endpoints\".\"url\") <= 2048"
         },
         "webhook_endpoints_events_valid": {
           "name": "webhook_endpoints_events_valid",
           "value": "\"webhook_endpoints\".\"events\" <@ ARRAY['document.created', 'document.signed', 'document.submitted', 'document.approved', 'document.approved_with_observations', 'document.rejected', 'document.cancelled', 'document.number_voided', 'document.transmission_deadline_warning', 'document.notification.delivered', 'document.notification.failed']::text[]"
+        },
+        "webhook_endpoints_events_unique": {
+          "name": "webhook_endpoints_events_unique",
+          "value": "webhook_events_unique(\"webhook_endpoints\".\"events\")"
         },
         "webhook_endpoints_previous_pair": {
           "name": "webhook_endpoints_previous_pair",

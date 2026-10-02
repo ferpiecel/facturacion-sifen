@@ -14,20 +14,24 @@ CREATE TABLE "webhook_deliveries" (
 	"last_error" varchar(500),
 	"delivered_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "webhook_deliveries_endpoint_event_key" UNIQUE("endpoint_id","event_id"),
 	CONSTRAINT "webhook_deliveries_status_valid" CHECK ("webhook_deliveries"."status" IN ('pending', 'failed', 'delivered', 'dead')),
 	CONSTRAINT "webhook_deliveries_event_type_valid" CHECK ("webhook_deliveries"."event_type" IN ('document.created', 'document.signed', 'document.submitted', 'document.approved', 'document.approved_with_observations', 'document.rejected', 'document.cancelled', 'document.number_voided', 'document.transmission_deadline_warning', 'document.notification.delivered', 'document.notification.failed')),
 	CONSTRAINT "webhook_deliveries_next_attempt_pair" CHECK (("webhook_deliveries"."status" IN ('pending', 'failed')) = ("webhook_deliveries"."next_attempt_at" IS NOT NULL)),
 	CONSTRAINT "webhook_deliveries_delivered_pair" CHECK (("webhook_deliveries"."status" = 'delivered') = ("webhook_deliveries"."delivered_at" IS NOT NULL)),
-	CONSTRAINT "webhook_deliveries_attempts_nonneg" CHECK ("webhook_deliveries"."attempt_count" >= 0)
+	CONSTRAINT "webhook_deliveries_attempts_nonneg" CHECK ("webhook_deliveries"."attempt_count" >= 0),
+	CONSTRAINT "webhook_deliveries_status_code_range" CHECK ("webhook_deliveries"."last_status_code" IS NULL OR "webhook_deliveries"."last_status_code" BETWEEN 100 AND 599)
 );
 --> statement-breakpoint
 ALTER TABLE "webhook_deliveries" ADD CONSTRAINT "webhook_deliveries_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "webhook_deliveries" ADD CONSTRAINT "webhook_deliveries_tenant_endpoint_fk" FOREIGN KEY ("tenant_id","endpoint_id") REFERENCES "public"."webhook_endpoints"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "webhook_deliveries_due_idx" ON "webhook_deliveries" USING btree ("next_attempt_at") WHERE "webhook_deliveries"."status" IN ('pending', 'failed');
 --> statement-breakpoint
--- A delivery's identity and payload are frozen (retries sign the same event); it only moves
--- forward, except that the DLQ (dead) can be replayed back to pending.
+-- A delivery's identity and payload are frozen (retries sign the same event). It only moves
+-- forward: attempt_count never decreases (replaying a dead delivery keeps it), first_attempt_at and
+-- delivered_at are write-once, and the DLQ (dead) can be replayed back to pending. updated_at is
+-- maintained here.
 CREATE FUNCTION "webhook_deliveries_guard"() RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = pg_catalog, pg_temp
@@ -42,12 +46,20 @@ BEGIN
     OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
     RAISE EXCEPTION 'webhook_deliveries: identity and payload columns are immutable';
   END IF;
+  IF (OLD.first_attempt_at IS NOT NULL AND NEW.first_attempt_at IS DISTINCT FROM OLD.first_attempt_at)
+    OR (OLD.delivered_at IS NOT NULL AND NEW.delivered_at IS DISTINCT FROM OLD.delivered_at) THEN
+    RAISE EXCEPTION 'webhook_deliveries: first_attempt_at and delivered_at are immutable once set';
+  END IF;
+  IF NEW.attempt_count < OLD.attempt_count THEN
+    RAISE EXCEPTION 'webhook_deliveries: attempt_count never decreases';
+  END IF;
   IF NEW.status IS DISTINCT FROM OLD.status AND NOT (
     (OLD.status IN ('pending', 'failed') AND NEW.status IN ('failed', 'delivered', 'dead'))
     OR (OLD.status = 'dead' AND NEW.status = 'pending')
   ) THEN
     RAISE EXCEPTION 'webhook_deliveries: invalid status transition % -> %', OLD.status, NEW.status;
   END IF;
+  NEW.updated_at := now();
   RETURN NEW;
 END;
 $$;

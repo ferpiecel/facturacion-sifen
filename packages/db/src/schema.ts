@@ -622,6 +622,7 @@ export const webhookDeliveries = pgTable(
     lastError: varchar('last_error', { length: 500 }),
     deliveredAt: timestamp('delivered_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     foreignKey({
@@ -650,6 +651,10 @@ export const webhookDeliveries = pgTable(
       sql`(${table.status} = 'delivered') = (${table.deliveredAt} IS NOT NULL)`,
     ),
     check('webhook_deliveries_attempts_nonneg', sql`${table.attemptCount} >= 0`),
+    check(
+      'webhook_deliveries_status_code_range',
+      sql`${table.lastStatusCode} IS NULL OR ${table.lastStatusCode} BETWEEN 100 AND 599`,
+    ),
   ],
 );
 

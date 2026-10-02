@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { eq } from 'drizzle-orm';
 import {
   createPgliteDatabase,
   documents,
@@ -82,6 +83,7 @@ describe('DrizzleTransmissionCycleStore', () => {
         securityCode: '123456789',
         status,
         signedXml: status === 'accepted' ? null : `<DE n="${String(n)}"/>`,
+        signedAt: status === 'accepted' ? null : at(0),
         issuedAt: at(0),
         totalAmount: '1000',
         payload: {},
@@ -110,6 +112,7 @@ describe('DrizzleTransmissionCycleStore', () => {
   }
 
   beforeEach(async () => {
+    n = 0;
     handle = createPgliteDatabase();
     await handle.migrate();
     const [a, b] = await handle.db
@@ -132,11 +135,18 @@ describe('DrizzleTransmissionCycleStore', () => {
     const late = await addDocument(tenantId, 'accepted', 5);
     const early = await addDocument(tenantId, 'accepted', 1);
     await addDocument(tenantId, 'signed', 0);
-    await addDocument(tenantId, 'accepted', 2, 'production');
     await addDocument(otherTenantId, 'accepted', 0);
 
     expect(await store().acceptedDocumentIds(10)).toEqual([early, late]);
     expect(await store().acceptedDocumentIds(1)).toEqual([early]);
+
+    // After an environment switch only the documents of the new one are worked on.
+    await handle.db
+      .update(tenants)
+      .set({ environment: 'production' })
+      .where(eq(tenants.id, tenantId));
+    const current = await addDocument(tenantId, 'accepted', 9, 'production');
+    expect(await store().acceptedDocumentIds(10)).toEqual([current]);
   });
 
   it('lists pending lotes with their signed documents and the issuer RUC', async () => {

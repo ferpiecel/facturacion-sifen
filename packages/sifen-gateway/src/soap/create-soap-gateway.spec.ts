@@ -20,14 +20,22 @@ describe('createSoapSifenGateway', () => {
 
   it('cannot reach production through an override while running as test', () => {
     const endpoints = { enviarLote: 'https://sifen.set.gov.py/de/ws/async/recibe-lote.wsdl' };
-    expect(() => createSoapSifenGateway({ ambiente: 'test', credentials, endpoints })).toThrow(RangeError);
+    expect(() => createSoapSifenGateway({ ambiente: 'test', credentials, endpoints })).toThrow(
+      RangeError,
+    );
     expect(() =>
-      createSoapSifenGateway({ ambiente: 'prod', credentials, endpoints: { enviarLote: 'https://127.0.0.1/x' } }),
+      createSoapSifenGateway({
+        ambiente: 'prod',
+        credentials,
+        endpoints: { enviarLote: 'https://127.0.0.1/x' },
+      }),
     ).toThrow();
   });
 
   it('keeps the production gate even with an official production override', () => {
     const endpoints = { enviarLote: 'https://sifen.set.gov.py/de/ws/async/recibe-lote.wsdl' };
-    expect(() => createSoapSifenGateway({ ambiente: 'prod', credentials, endpoints })).toThrow(/production/i);
+    expect(() => createSoapSifenGateway({ ambiente: 'prod', credentials, endpoints })).toThrow(
+      /production/i,
+    );
   });
 });

@@ -1,5 +1,5 @@
 {
-  "id": "5f046f8d-c382-4c98-9dc6-085be7297244",
+  "id": "0338280a-dd29-42d1-b7d2-74f0b1873a61",
   "prevId": "edb61a48-2e1a-4c7b-bd7c-2f61462a22a9",
   "version": "7",
   "dialect": "postgresql",
@@ -2266,11 +2266,15 @@
       "checkConstraints": {
         "webhook_endpoints_url_https": {
           "name": "webhook_endpoints_url_https",
-          "value": "\"webhook_endpoints\".\"url\" ~ '^https://[^[:space:]]+$' AND \"webhook_endpoints\".\"url\" !~ '^https://[^/]*@' AND length(\"webhook_endpoints\".\"url\") <= 2048"
+          "value": "\"webhook_endpoints\".\"url\" ~ '^https://[^/?#:@[:space:]]+(:[0-9]{1,5})?([/?#][^[:space:]]*)?$' AND length(\"webhook_endpoints\".\"url\") <= 2048"
         },
         "webhook_endpoints_events_valid": {
           "name": "webhook_endpoints_events_valid",
           "value": "\"webhook_endpoints\".\"events\" <@ ARRAY['document.created', 'document.signed', 'document.submitted', 'document.approved', 'document.approved_with_observations', 'document.rejected', 'document.cancelled', 'document.number_voided', 'document.transmission_deadline_warning', 'document.notification.delivered', 'document.notification.failed']::text[]"
+        },
+        "webhook_endpoints_events_unique": {
+          "name": "webhook_endpoints_events_unique",
+          "value": "webhook_events_unique(\"webhook_endpoints\".\"events\")"
         },
         "webhook_endpoints_previous_pair": {
           "name": "webhook_endpoints_previous_pair",

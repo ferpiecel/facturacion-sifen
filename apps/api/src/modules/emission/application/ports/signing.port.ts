@@ -50,3 +50,19 @@ export interface CscSource {
   /** Null when the tenant has no CSC for the environment. */
   get(tenantId: string, environment: TenantEnvironment): Promise<CscSecret | null>;
 }
+
+/** The stored document lacks data the DE needs (e.g. receiver address, item descriptions). */
+export class SigningDataIncompleteError extends Error {
+  constructor(readonly missing: readonly string[]) {
+    super(`document data incomplete for signing: ${missing.join(', ')}`);
+    this.name = 'SigningDataIncompleteError';
+  }
+}
+
+/** gEmis requires dTelEmi and dEmailE; the document's establishment has none (see `establishment:contact`). */
+export class EstablishmentContactMissingError extends Error {
+  constructor(readonly establishmentCode: string) {
+    super(`establishment ${establishmentCode} has no phone/email (dTelEmi/dEmailE)`);
+    this.name = 'EstablishmentContactMissingError';
+  }
+}

@@ -210,6 +210,22 @@ describe('inspectPkcs12 (HU-E3-01)', () => {
     expect(rejectionReason(() => inspectPkcs12(p12, password))).toBe('too-many-certificates');
   });
 
+  it('reports a leaf with malformed DER extensions as unreadable, not as an unclassified error', () => {
+    const { asn1 } = forge;
+    const keyUsageValue = asn1.create(
+      asn1.Class.UNIVERSAL,
+      asn1.Type.OCTETSTRING,
+      false,
+      '\x07\x80',
+    );
+    const { p12, password } = issueTestPkcs12(psc, {
+      serialNumber: 'RUC80000005-6',
+      keyUsageValue,
+    });
+
+    expect(() => inspectPkcs12(p12, password)).toThrow(Pkcs12UnreadableError);
+  });
+
   it('reports a non-RSA private key as unsupported instead of a wrong password', () => {
     const { p12, password } = issueTestPkcs12(psc, {
       serialNumber: 'RUC80000005-6',

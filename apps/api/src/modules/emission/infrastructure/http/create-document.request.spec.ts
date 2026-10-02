@@ -31,6 +31,9 @@ const BODY = {
   location: { departmentCode: 11 },
 };
 
+const without = (value: object, key: string) =>
+  Object.fromEntries(Object.entries(value).filter(([k]) => k !== key));
+
 const fields = (body: unknown) => {
   const result = parseCreateDocument(body);
   return result.ok ? [] : result.errors.map((e) => e.field);
@@ -61,12 +64,12 @@ describe('parseCreateDocument', () => {
     'cityCode',
     'cityDescription',
   ])('requires receiver.%s for a named receiver', (key) => {
-    const { [key]: _omitted, ...receiver } = NAMED as Record<string, unknown>;
+    const receiver = without(NAMED, key);
     expect(fields({ ...BODY, receiver })).toContain(`receiver.${key}`);
   });
 
   it.each(['code', 'description', 'unitCode'])('requires items[0].%s', (key) => {
-    const { [key]: _omitted, ...item } = ITEM as Record<string, unknown>;
+    const item = without(ITEM, key);
     expect(fields({ ...BODY, items: [item] })).toContain(`items[0].${key}`);
   });
 

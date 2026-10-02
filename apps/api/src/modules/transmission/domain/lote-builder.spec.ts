@@ -93,6 +93,27 @@ describe('LoteBuilder', () => {
     expect(lote.add(doc(2))).toEqual({ accepted: false, reason: 'size-exceeded' });
   });
 
+  it('accepts a message of exactly the size limit on an empty builder', () => {
+    expect(builder().add(doc(1, { bytes: MAX_LOTE_MESSAGE_BYTES }))).toEqual({ accepted: true });
+  });
+
+  it('does not fix the lote identity on a first document rejected as too big', () => {
+    const lote = builder();
+    expect(lote.add(doc(1, { bytes: MAX_LOTE_MESSAGE_BYTES + 1 }))).toEqual({
+      accepted: false,
+      reason: 'size-exceeded',
+    });
+    expect(lote.add(doc(2, { ruc: RUC_B, type: '04' }))).toEqual({ accepted: true });
+    expect(lote.build()).toMatchObject({ rucBase: '80000001', documentType: '04' });
+  });
+
+  it('does not fix the lote identity on a first document rejected as in process', () => {
+    const lote = builder({ isInProcess: (cdc) => cdc === cdcFor(1) });
+    expect(lote.add(doc(1))).toEqual({ accepted: false, reason: 'cdc-in-process' });
+    expect(lote.add(doc(2, { ruc: RUC_B, type: '04' }))).toEqual({ accepted: true });
+    expect(lote.build()).toMatchObject({ rucBase: '80000001', documentType: '04' });
+  });
+
   it('rejects a single document that alone exceeds the size limit', () => {
     expect(builder().add(doc(1, { bytes: MAX_LOTE_MESSAGE_BYTES + 1 }))).toEqual({
       accepted: false,
@@ -119,6 +140,47 @@ describe('LoteBuilder invariants (property-based)', () => {
     ruc: fc.constantFrom(RUC_A, RUC_B),
     type: fc.constantFrom('01', '04'),
     bytes: fc.integer({ min: 1, max: 400_000 }),
+  });
+
+  it('accepts a candidate if and only if no rejection condition holds (reference model)', () => {
+    fc.assert(
+      fc.property(
+        fc.array(candidate, { minLength: 1, maxLength: 200 }),
+        fc.uniqueArray(fc.integer({ min: 1, max: 80 }), { maxLength: 20 }),
+        (candidates, busyNumbers) => {
+          const busy = new Set(busyNumbers.flatMap((n) => [cdcFor(n), cdcFor(n, { ruc: RUC_B })]));
+          const lote = builder({ isInProcess: (cdc) => busy.has(cdc) });
+          const model = {
+            ruc: undefined as string | undefined,
+            type: undefined as string | undefined,
+          };
+          const cdcs = new Set<string>();
+          let total = 0;
+          for (const c of candidates) {
+            const d = doc(c.n, c);
+            const holding = new Set<string>();
+            if (model.ruc !== undefined && model.ruc !== c.ruc.rucBase) holding.add('ruc-mismatch');
+            if (model.type !== undefined && model.type !== c.type) holding.add('type-mismatch');
+            if (cdcs.size >= MAX_LOTE_DOCUMENTS) holding.add('lote-full');
+            if (cdcs.has(d.cdc)) holding.add('duplicate-cdc');
+            if (busy.has(d.cdc)) holding.add('cdc-in-process');
+            if (total + c.bytes > MAX_LOTE_MESSAGE_BYTES) holding.add('size-exceeded');
+
+            const result = lote.add(d);
+            expect(result.accepted).toBe(holding.size === 0);
+            if (result.accepted) {
+              model.ruc = c.ruc.rucBase;
+              model.type = c.type;
+              cdcs.add(d.cdc);
+              total += c.bytes;
+            } else {
+              expect(holding.has(result.reason)).toBe(true);
+            }
+          }
+          expect(lote.size).toBe(cdcs.size);
+        },
+      ),
+    );
   });
 
   it('never builds a lote that violates an invariant, whatever is offered', () => {

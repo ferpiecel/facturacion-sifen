@@ -40,7 +40,14 @@ describe('webhook event envelope (HU-E11-01)', () => {
     ['Infinity', { n: Number.POSITIVE_INFINITY }],
     ['a Date', { d: new Date() }],
     ['a Map', { m: new Map() }],
-    ['a class instance', { c: new (class X {})() }],
+    [
+      'a class instance',
+      {
+        c: new (class X {
+          a = 1;
+        })(),
+      },
+    ],
     ['a symbol', { s: Symbol('x') }],
     ['an array holding a bigint', { a: [1n] }],
   ])('rejects data holding %s', (_name, data) => {

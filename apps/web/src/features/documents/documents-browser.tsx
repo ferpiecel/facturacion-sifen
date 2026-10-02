@@ -4,6 +4,7 @@ import { RefreshCw } from 'lucide-react';
 import { useState } from 'react';
 
 import { DocumentsFilters } from './documents-filters';
+import { DocumentsPagination } from './documents-pagination';
 import { DocumentsRow } from './documents-row';
 import { filterDocuments, NO_FILTERS, type Filters } from './filters';
 import { SAMPLE_DOCUMENTS_PAGE as PAGE, type DocumentKind } from './sample-documents';
@@ -127,6 +128,12 @@ export function DocumentsBrowser() {
             ))}
           </ul>
         )}
+        <DocumentsPagination
+          shown={rows.length}
+          total={rows.length === PAGE.items.length ? PAGE.total : rows.length}
+          page={PAGE.page}
+          pageSize={PAGE.pageSize}
+        />
       </div>
     </div>
   );

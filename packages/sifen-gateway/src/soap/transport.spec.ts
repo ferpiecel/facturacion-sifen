@@ -162,4 +162,51 @@ describe('createHttpsSoapTransport', () => {
     ).rejects.toBeInstanceOf(SifenTransportError);
     expect(seen).toHaveLength(0);
   });
+
+  it('counts a stalled credential load inside the whole-call deadline', async () => {
+    const url = await start();
+    const transport = createHttpsSoapTransport({
+      timeoutMs: 100,
+      credentials: { load: () => new Promise(() => undefined) },
+    });
+
+    await expect(
+      transport.post({ operation: 'enviarLote', url, body: 'x' }),
+    ).rejects.toBeInstanceOf(SifenTimeoutError);
+  });
+
+  it('maps a synchronous request() failure (invalid URL) to SifenTransportError', async () => {
+    await start();
+
+    await expect(
+      transportFor().post({ operation: 'enviarLote', url: 'not a url', body: 'x' }),
+    ).rejects.toBeInstanceOf(SifenTransportError);
+  });
+
+  it('rejects a response body that is not valid UTF-8 instead of replacing bytes', async () => {
+    const url = await start();
+    respond = (res) => res.writeHead(200).end(Buffer.from([0x3c, 0xff, 0xfe, 0x3e]));
+
+    await expect(
+      transportFor().post({ operation: 'enviarLote', url, body: 'x' }),
+    ).rejects.toBeInstanceOf(SifenProtocolError);
+  });
+
+  it('ignores proxy environment variables: the tenant certificate is never sent through a proxy', async () => {
+    const url = await start();
+    const saved = { ...process.env };
+    process.env.HTTPS_PROXY = 'http://127.0.0.1:1';
+    process.env.https_proxy = 'http://127.0.0.1:1';
+    process.env.NODE_USE_ENV_PROXY = '1';
+    try {
+      await expect(
+        transportFor().post({ operation: 'enviarLote', url, body: 'x' }),
+      ).resolves.toMatchObject({
+        status: 200,
+      });
+      expect(seen).toHaveLength(1);
+    } finally {
+      process.env = saved;
+    }
+  });
 });

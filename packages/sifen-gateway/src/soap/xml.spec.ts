@@ -27,6 +27,13 @@ describe('parseXml', () => {
     ['trailing content', '<r/><s/>'],
     ['no root', '   '],
     ['text outside the root', 'x<r/>'],
+    ['a closing tag with attributes', '<r></r x="1">'],
+    ['a NUL character reference', '<r>&#0;</r>'],
+    ['a lone surrogate reference', '<r>&#xD800;</r>'],
+    ['a reference past U+10FFFF', '<r>&#x110000;</r>'],
+    ['a bare ampersand', '<r>a & b</r>'],
+    ['a tag name without a delimiter', '<r><a'],
+    ['a less-than inside a tag', '<r><a b<c></a></r>'],
   ])('rejects %s', (_label, xml) => {
     expect(() => parseXml(xml)).toThrow(XmlParseError);
   });
@@ -34,5 +41,19 @@ describe('parseXml', () => {
   it('rejects documents nested deeper than the limit', () => {
     const deep = '<a>'.repeat(200) + '</a>'.repeat(200);
     expect(() => parseXml(deep)).toThrow(XmlParseError);
+  });
+});
+
+describe('parseXml on adversarial input', () => {
+  const MB = 'a'.repeat(1_000_000);
+  it.each([
+    ['an unterminated tag name', `<r><${MB}`],
+    ['repeated unterminated tags', `<r>x${'<x'.repeat(500_000)}`],
+    ['an unterminated attribute run', `<r><a ${'b="c" '.repeat(160_000)}`],
+    ['an unterminated comment', `<r><!--${MB}`],
+  ])('fails in linear time on %s', (_label, xml) => {
+    const started = performance.now();
+    expect(() => parseXml(xml)).toThrow(XmlParseError);
+    expect(performance.now() - started).toBeLessThan(100);
   });
 });

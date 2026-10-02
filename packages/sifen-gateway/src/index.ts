@@ -33,3 +33,10 @@ export type {
   SifenResultadoEvento,
   SifenRespuesta,
 } from './types.ts';
+export {
+  DEFAULT_MAX_RESPONSE_BYTES,
+  parseLoteReceipt,
+  parseLoteResult,
+  parseSoapBody,
+} from './soap/response-parsers.ts';
+export type { ParseOptions } from './soap/response-parsers.ts';

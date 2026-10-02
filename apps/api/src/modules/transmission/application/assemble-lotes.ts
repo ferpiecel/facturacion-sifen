@@ -1,4 +1,5 @@
-import type { LoteBuilderDeps } from '../domain/lote-builder.js';
+import { parseCdc } from '../../emission/domain/cdc.js';
+import { LoteBuilder, type Lote, type LoteBuilderDeps } from '../domain/lote-builder.js';
 
 export interface ReadyDocument {
   readonly documentId: string;
@@ -45,10 +46,88 @@ export interface AssembleLotesResult {
   readonly conflicted: readonly string[];
 }
 
+/**
+ * Turns ready documents into `pending` lotes (ADR-0007, plan 8.1): one RUC and one type per lote,
+ * at most 50 documents and 1000 KB, and no CDC that another lote in process already carries.
+ * Each lote is persisted atomically with the queuing of its documents; a lote whose documents
+ * stopped being ready is reported as conflicted and the rest still go ahead.
+ */
 export class LoteAssembler {
   constructor(private readonly deps: LoteAssemblerDeps) {}
 
-  assemble(): Promise<AssembleLotesResult> {
-    return Promise.reject(new Error('not implemented'));
+  async assemble(): Promise<AssembleLotesResult> {
+    const ready = await this.deps.store.readyDocuments();
+    if (ready.length === 0) return { lotes: [], skipped: [], conflicted: [] };
+    const inProcess = await this.deps.store.cdcsInProcess(ready.map((d) => d.cdc));
+
+    const skipped: SkippedDocument[] = [];
+    const planned: Planned[] = [];
+    for (const group of groupByRucAndType(ready).values()) {
+      planned.push(...this.fill(group, inProcess, skipped));
+    }
+
+    const lotes: AssembledLote[] = [];
+    const conflicted: string[] = [];
+    for (const { lote, ids } of planned) {
+      const cdcs = lote.documents.map((d) => d.cdc);
+      const loteId = await this.deps.store.createLote({
+        documentType: Number(lote.documentType),
+        documentIds: ids,
+      });
+      if (loteId === null) conflicted.push(...cdcs);
+      else lotes.push({ loteId, documentType: lote.documentType, cdcs });
+    }
+    return { lotes, skipped, conflicted };
   }
+
+  private fill(
+    group: readonly ReadyDocument[],
+    inProcess: ReadonlySet<string>,
+    skipped: SkippedDocument[],
+  ): Planned[] {
+    const newBuilder = () =>
+      new LoteBuilder({
+        isInProcess: (cdc) => inProcess.has(cdc),
+        measureMessage: this.deps.measureMessage,
+      });
+    const planned: Planned[] = [];
+    let builder = newBuilder();
+    let ids: string[] = [];
+    const flush = () => {
+      if (builder.size > 0) planned.push({ lote: builder.build(), ids });
+      builder = newBuilder();
+      ids = [];
+    };
+
+    for (const document of group) {
+      let result = builder.add(document);
+      if (
+        !result.accepted &&
+        (result.reason === 'lote-full' || result.reason === 'size-exceeded')
+      ) {
+        const wasEmpty = builder.size === 0;
+        flush();
+        if (!wasEmpty) result = builder.add(document);
+      }
+      if (result.accepted) ids.push(document.documentId);
+      else skipped.push({ cdc: document.cdc, reason: result.reason });
+    }
+    flush();
+    return planned;
+  }
+}
+
+interface Planned {
+  readonly lote: Lote;
+  readonly ids: readonly string[];
+}
+
+function groupByRucAndType(documents: readonly ReadyDocument[]): Map<string, ReadyDocument[]> {
+  const groups = new Map<string, ReadyDocument[]>();
+  for (const document of documents) {
+    const { rucBase, documentType } = parseCdc(document.cdc);
+    const key = `${rucBase}:${documentType}`;
+    groups.set(key, [...(groups.get(key) ?? []), document]);
+  }
+  return groups;
 }

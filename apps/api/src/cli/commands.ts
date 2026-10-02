@@ -1,6 +1,7 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import {
   apiKeys,
+  documents,
   partners,
   tenantEstablishments,
   tenantExpeditionPoints,
@@ -407,4 +408,44 @@ export async function setTenantEnvironment(
   }
   const row = required(rows[0], 'tenant update returned no row');
   return { id: row.id, environment: row.environment };
+}
+
+export interface ReleaseDocumentHoldParams {
+  tenantId: string;
+  documentId: string;
+}
+
+/**
+ * Operator CLI handler (HU-E6-02, S5f): clears the pipeline hold of a document and resets its 0301
+ * attempts and backoff, so the next transmission cycle works on it again. Refuses a document that
+ * is not held; a document of another tenant is reported as not found.
+ */
+export async function releaseDocumentHold(
+  db: Database,
+  { tenantId, documentId }: ReleaseDocumentHoldParams,
+): Promise<{ id: string; hold: string }> {
+  return db.transaction(async (tx) => {
+    const found = await tx
+      .select({ id: documents.id, hold: documents.transmissionHold })
+      .from(documents)
+      .where(and(eq(documents.tenantId, tenantId), eq(documents.id, documentId)))
+      .for('update');
+    const document = found.at(0);
+    if (!document) {
+      throw new Error(`document not found: ${documentId}`);
+    }
+    if (document.hold === null) {
+      throw new Error(`document is not held: ${documentId}`);
+    }
+    await tx
+      .update(documents)
+      .set({
+        transmissionHold: null,
+        transmissionAttempts: 0,
+        nextTransmissionAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(documents.id, documentId));
+    return { id: document.id, hold: document.hold };
+  });
 }

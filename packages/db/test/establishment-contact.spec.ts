@@ -72,6 +72,17 @@ describe('tenant_establishments contact columns', () => {
     expect(message).toMatch(/tenant_establishments_phone_length|value too long/);
   });
 
+  it.each(['0973\n000000', '0973\r000000', '0973\t000000', '0973\u0000000000'])(
+    'rejects a phone with control characters %j',
+    async (phone) => {
+      const { db, establishment } = await seed();
+      const message = await causeOf(
+        db.insert(tenantEstablishments).values(establishment({ phone })),
+      );
+      expect(message).toMatch(/tenant_establishments_phone_length|invalid byte sequence/);
+    },
+  );
+
   it.each(['no-at-sign', 'a@b', '@test.com', 'a b@test.com', 'a@test.c'])(
     'rejects the email %j',
     async (email) => {

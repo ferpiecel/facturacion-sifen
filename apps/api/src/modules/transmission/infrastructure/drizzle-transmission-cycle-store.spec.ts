@@ -179,6 +179,33 @@ describe('DrizzleTransmissionCycleStore', () => {
     expect(await store().dueLoteIds(at(30), 1)).toEqual([first]);
   });
 
+  it('ignores lotes of an environment the tenant has left', async () => {
+    await addLote(tenantId, 'pending', [await addDocument(tenantId, 'queued', 1)]);
+    await addLote(tenantId, 'sent', [await addDocument(tenantId, 'submitted', 2)], at(1));
+    expect(await store().pendingLotes(10)).toHaveLength(1);
+    expect(await store().dueLoteIds(at(30), 10)).toHaveLength(1);
+
+    await handle.db
+      .update(tenants)
+      .set({ environment: 'production' })
+      .where(eq(tenants.id, tenantId));
+
+    expect(await store().pendingLotes(10)).toEqual([]);
+    expect(await store().dueLoteIds(at(30), 10)).toEqual([]);
+  });
+
+  it('skips a pending lote whose documents are not all signed instead of sending fewer', async () => {
+    const complete = await addLote(tenantId, 'pending', [await addDocument(tenantId, 'queued', 1)]);
+    await addLote(tenantId, 'pending', [
+      await addDocument(tenantId, 'queued', 2),
+      await addDocument(tenantId, 'accepted', 3),
+    ]);
+
+    const found = await store().pendingLotes(10);
+
+    expect(found.map((p) => p.loteId)).toEqual([complete]);
+  });
+
   it('reserves consecutive dIds per tenant', async () => {
     const mine = await Promise.all([store().nextRequestId(), store().nextRequestId()]);
     const theirs = createDrizzleTransmissionCycleStore({

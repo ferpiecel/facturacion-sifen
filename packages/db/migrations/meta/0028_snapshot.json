@@ -1,5 +1,5 @@
 {
-  "id": "661d8ff5-13a2-4d05-a001-413b32867ac4",
+  "id": "0338280a-dd29-42d1-b7d2-74f0b1873a61",
   "prevId": "edb61a48-2e1a-4c7b-bd7c-2f61462a22a9",
   "version": "7",
   "dialect": "postgresql",
@@ -405,25 +405,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "transmission_attempts": {
-          "name": "transmission_attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "next_transmission_at": {
-          "name": "next_transmission_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "transmission_hold": {
-          "name": "transmission_hold",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": false
-        },
         "sifen_messages": {
           "name": "sifen_messages",
           "type": "jsonb",
@@ -549,14 +530,6 @@
       },
       "policies": {},
       "checkConstraints": {
-        "documents_transmission_attempts_range": {
-          "name": "documents_transmission_attempts_range",
-          "value": "\"documents\".\"transmission_attempts\" >= 0"
-        },
-        "documents_transmission_hold_format": {
-          "name": "documents_transmission_hold_format",
-          "value": "\"documents\".\"transmission_hold\" ~ '^[A-Za-z0-9:_-]{1,64}$'"
-        },
         "documents_signed_pair": {
           "name": "documents_signed_pair",
           "value": "(\"documents\".\"signed_xml\" IS NULL) = (\"documents\".\"signed_at\" IS NULL)"
@@ -2183,6 +2156,131 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.webhook_endpoints": {
+      "name": "webhook_endpoints",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "events": {
+          "name": "events",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "sealed": {
+          "name": "sealed",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "secret_version": {
+          "name": "secret_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "previous_sealed": {
+          "name": "previous_sealed",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "previous_expires_at": {
+          "name": "previous_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "active": {
+          "name": "active",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "webhook_endpoints_tenant_id_tenants_id_fk": {
+          "name": "webhook_endpoints_tenant_id_tenants_id_fk",
+          "tableFrom": "webhook_endpoints",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "webhook_endpoints_tenant_id_key": {
+          "name": "webhook_endpoints_tenant_id_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "webhook_endpoints_url_https": {
+          "name": "webhook_endpoints_url_https",
+          "value": "\"webhook_endpoints\".\"url\" ~ '^https://[^/?#:@[:space:]]+(:[0-9]{1,5})?([/?#][^[:space:]]*)?$' AND length(\"webhook_endpoints\".\"url\") <= 2048"
+        },
+        "webhook_endpoints_events_valid": {
+          "name": "webhook_endpoints_events_valid",
+          "value": "\"webhook_endpoints\".\"events\" <@ ARRAY['document.created', 'document.signed', 'document.submitted', 'document.approved', 'document.approved_with_observations', 'document.rejected', 'document.cancelled', 'document.number_voided', 'document.transmission_deadline_warning', 'document.notification.delivered', 'document.notification.failed']::text[]"
+        },
+        "webhook_endpoints_events_unique": {
+          "name": "webhook_endpoints_events_unique",
+          "value": "webhook_events_unique(\"webhook_endpoints\".\"events\")"
+        },
+        "webhook_endpoints_previous_pair": {
+          "name": "webhook_endpoints_previous_pair",
+          "value": "(\"webhook_endpoints\".\"previous_sealed\" IS NULL) = (\"webhook_endpoints\".\"previous_expires_at\" IS NULL)"
+        }
+      },
       "isRLSEnabled": false
     }
   },

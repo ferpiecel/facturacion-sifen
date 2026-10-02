@@ -121,7 +121,8 @@ export class PdfkitKudeRenderer implements KudeRenderer {
     doc.on('data', (chunk: Buffer) => {
       chunks.push(chunk);
     });
-    const done = new Promise<Uint8Array>((resolve) => {
+    const done = new Promise<Uint8Array>((resolve, reject) => {
+      doc.on('error', reject);
       doc.on('end', () => {
         resolve(new Uint8Array(Buffer.concat(chunks)));
       });

@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull, lte } from 'drizzle-orm';
+import { and, asc, eq, inArray, lte } from 'drizzle-orm';
 import {
   documents,
   loteDocuments,
@@ -44,6 +44,11 @@ export function createDrizzleTransmissionCycleStore({
         const pending = await tx
           .select({ id: lotes.id, documentType: lotes.documentType })
           .from(lotes)
+          // Only the tenant's current environment: a lote of a left one must not be sent.
+          .innerJoin(
+            tenants,
+            and(eq(tenants.id, lotes.tenantId), eq(tenants.environment, lotes.environment)),
+          )
           .where(and(eq(lotes.tenantId, tenantId), eq(lotes.status, 'pending')))
           .orderBy(asc(lotes.createdAt), asc(lotes.id))
           .limit(limit);
@@ -67,26 +72,31 @@ export function createDrizzleTransmissionCycleStore({
             ),
           )
           .where(
-            and(
-              inArray(
-                loteDocuments.loteId,
-                pending.map((lote) => lote.id),
-              ),
-              isNotNull(documents.signedXml),
+            inArray(
+              loteDocuments.loteId,
+              pending.map((lote) => lote.id),
             ),
           )
           .orderBy(asc(documents.createdAt), asc(documents.id));
 
-        return pending.map((lote) => ({
-          loteId: lote.id,
-          lote: {
-            ...profile,
-            documentType: String(lote.documentType).padStart(2, '0'),
-            documents: rows
-              .filter((row) => row.loteId === lote.id)
-              .map((row) => ({ cdc: row.cdc, xml: row.xml ?? '' })),
-          },
-        }));
+        // A lote with an unsigned document is skipped, never sent short: it is picked up again once complete.
+        return pending.flatMap((lote) => {
+          const members = rows.filter((row) => row.loteId === lote.id);
+          const signed = members.flatMap((row) =>
+            row.xml === null ? [] : [{ cdc: row.cdc, xml: row.xml }],
+          );
+          if (signed.length === 0 || signed.length < members.length) return [];
+          return [
+            {
+              loteId: lote.id,
+              lote: {
+                ...profile,
+                documentType: String(lote.documentType).padStart(2, '0'),
+                documents: signed,
+              },
+            },
+          ];
+        });
       });
     },
 
@@ -95,6 +105,10 @@ export function createDrizzleTransmissionCycleStore({
         tx
           .select({ id: lotes.id })
           .from(lotes)
+          .innerJoin(
+            tenants,
+            and(eq(tenants.id, lotes.tenantId), eq(tenants.environment, lotes.environment)),
+          )
           .where(
             and(eq(lotes.tenantId, tenantId), eq(lotes.status, 'sent'), lte(lotes.nextPollAt, now)),
           )

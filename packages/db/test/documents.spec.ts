@@ -162,4 +162,64 @@ describe('documents', () => {
     const [row] = await db.update(documents).set({ status: 'signed' }).returning();
     expect(row.status).toBe('signed');
   });
+  it('rejects an environment that differs from the tenant environment on insert', async () => {
+    const { db, a, setupA, doc } = await seed();
+    const message = await causeOf(
+      db.insert(documents).values(doc(a, setupA, { environment: 'production' })),
+    );
+    expect(message).toContain('environment must match');
+  });
+
+  it('makes receiver_ruc, currency and created_at immutable too', async () => {
+    const { db, a, setupA, doc } = await seed();
+    await db.insert(documents).values(doc(a, setupA));
+    expect(await causeOf(db.update(documents).set({ receiverRuc: '1234567-8' }))).toContain(
+      'immutable',
+    );
+    expect(await causeOf(db.update(documents).set({ currency: 'USD' }))).toContain('immutable');
+    expect(
+      await causeOf(db.update(documents).set({ createdAt: new Date('2020-01-01T00:00:00Z') })),
+    ).toContain('immutable');
+  });
+
+  it('enforces immutability for app_user inside a tenant transaction', async () => {
+    const { db, a, setupA, doc } = await seed();
+    await db.insert(documents).values(doc(a, setupA));
+    const attempt = withTenantTransaction(db, a, (tx) =>
+      tx.update(documents).set({ cdc: CDC_B }).where(eq(documents.cdc, CDC_A)),
+    );
+    expect(await causeOf(attempt)).toContain('immutable');
+  });
+
+  it('does not let another tenant update a document (0 rows affected)', async () => {
+    const { db, a, b, setupA, doc } = await seed();
+    await db.insert(documents).values(doc(a, setupA));
+    const updated = await withTenantTransaction(db, b, (tx) =>
+      tx
+        .update(documents)
+        .set({ status: 'signed' })
+        .where(eq(documents.cdc, CDC_A))
+        .returning({ id: documents.id }),
+    );
+    expect(updated).toEqual([]);
+    const [row] = await db.select().from(documents);
+    expect(row.status).toBe('accepted');
+  });
+
+  it("rejects a document that references another tenant's timbrado or expedition point", async () => {
+    const { db, a, setupA, setupB, doc } = await seed();
+    expect(
+      await causeOf(db.insert(documents).values(doc(a, setupA, { timbradoId: setupB.timbradoId }))),
+    ).toContain('documents_tenant_timbrado_fk');
+    expect(
+      await causeOf(
+        db.insert(documents).values(
+          doc(a, setupA, {
+            establishmentId: setupB.establishmentId,
+            expeditionPointId: setupB.expeditionPointId,
+          }),
+        ),
+      ),
+    ).toContain('documents_tenant_point_fk');
+  });
 });

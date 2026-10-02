@@ -20,7 +20,7 @@ import {
 import type { createAcceptInvoice } from '../../application/accept-invoice.js';
 import { ACCEPT_INVOICE } from '../../emission.tokens.js';
 import { parseCreateDocument, toAcceptInvoiceInput } from './create-document.request.js';
-import { toHttpException } from './document-http-errors.js';
+import { toHttpException, validationProblem } from './document-http-errors.js';
 
 @Controller('v1/documents')
 @RequireScopes('documents:write')
@@ -37,10 +37,7 @@ export class DocumentsController {
   async create(@Body() body: unknown) {
     const parsed = parseCreateDocument(body);
     if (!parsed.ok) {
-      throw new HttpException(
-        { statusCode: 422, message: 'Validation failed', errors: parsed.errors },
-        HttpStatus.UNPROCESSABLE_ENTITY,
-      );
+      throw validationProblem(parsed.errors);
     }
     try {
       const accepted = await this.acceptInvoice(

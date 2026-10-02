@@ -1,5 +1,6 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { DocumentNumberExhaustedError } from '@sifen/db';
+import type { ValidationError } from '../../domain/invoice-draft.js';
 import {
   InvoiceValidationError,
   IssuerNotConfiguredError,
@@ -10,6 +11,11 @@ const UNIQUE_VIOLATION = '23505';
 
 function problem(status: HttpStatus, message: string, extra: object = {}): HttpException {
   return new HttpException({ statusCode: status, message, ...extra }, status);
+}
+
+/** 422 body shared by shape errors (Zod) and domain errors. */
+export function validationProblem(errors: ValidationError[]): HttpException {
+  return problem(HttpStatus.UNPROCESSABLE_ENTITY, 'Validation failed', { errors });
 }
 
 function isUniqueViolation(error: unknown): boolean {
@@ -29,7 +35,7 @@ function isUniqueViolation(error: unknown): boolean {
  */
 export function toHttpException(error: unknown): HttpException | null {
   if (error instanceof InvoiceValidationError) {
-    return problem(HttpStatus.UNPROCESSABLE_ENTITY, 'Validation failed', { errors: error.errors });
+    return validationProblem(error.errors);
   }
   if (error instanceof IssuerNotConfiguredError) {
     return problem(HttpStatus.UNPROCESSABLE_ENTITY, error.message);

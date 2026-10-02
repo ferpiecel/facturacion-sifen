@@ -595,6 +595,7 @@ export const documents = pgTable(
     check('documents_cdc_format', sql`${table.cdc} ~ '^[0-9]{44}$'`),
     check('documents_security_code_format', sql`${table.securityCode} ~ '^[0-9]{9}$'`),
     check('documents_number_range', sql`${table.number} BETWEEN 1 AND 9999999`),
+    // iTiDE (C002) range: 1..8.
     check('documents_document_type_range', sql`${table.documentType} BETWEEN 1 AND 8`),
     check('documents_series_format', sql`${table.series} = '' OR ${table.series} ~ '^[A-Z]{2}$'`),
     check(

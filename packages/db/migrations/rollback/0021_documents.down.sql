@@ -5,6 +5,6 @@ ALTER TABLE "documents" NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE "documents" DISABLE ROW LEVEL SECURITY;
 REVOKE ALL ON "documents" FROM app_user;
 REVOKE ALL ON "documents" FROM platform_admin;
-DROP TRIGGER IF EXISTS "documents_immutable_identity" ON "documents";
-DROP FUNCTION IF EXISTS "documents_immutable_identity"();
+DROP TRIGGER IF EXISTS "documents_guard" ON "documents";
+DROP FUNCTION IF EXISTS "documents_guard"();
 DROP TABLE IF EXISTS "documents";

@@ -38,6 +38,10 @@ E6); the document is stored as `accepted` until they exist.
   from the request or from the API key's default point? Decided in S2 design.
 - Idempotency (`Idempotency-Key`) belongs to HU-E5-02; the table leaves room for it.
 
+## Follow-ups
+
+- Lifecycle slice: status transition guard (allowed `documents.status` moves, §8.0) and `updated_at` maintenance.
+
 ## Progress
 
 See commits on `feat/hu-e5-01-post-documents`.

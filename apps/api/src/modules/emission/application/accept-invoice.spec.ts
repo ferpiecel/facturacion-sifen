@@ -3,15 +3,19 @@ import { parseCdc } from '../domain/cdc.js';
 import type { InvoiceDraft } from '../domain/invoice-draft.js';
 import {
   createAcceptInvoice,
+  IdempotencyKeyReusedError,
   InvoiceValidationError,
   IssuerNotConfiguredError,
   type AcceptInvoiceInput,
 } from './accept-invoice.js';
-import type {
-  AcceptanceUnit,
-  AcceptanceUnitOfWork,
-  IssuerContext,
-  NewDocument,
+import { requestHash } from '../domain/request-hash.js';
+import {
+  IdempotencyKeyCollisionError,
+  type AcceptanceUnit,
+  type AcceptanceUnitOfWork,
+  type IssuerContext,
+  type NewDocument,
+  type StoredAcceptance,
 } from './ports/acceptance-unit-of-work.port.js';
 
 const ISSUER: IssuerContext = {
@@ -43,7 +47,14 @@ function setup(issuer: IssuerContext | null = ISSUER) {
     return Promise.resolve({ id: 'doc-1' });
   });
   const recordAudit = vi.fn(() => Promise.resolve());
-  const unit: AcceptanceUnit = { resolveIssuer, nextNumber, insertDocument, recordAudit };
+  const findByIdempotencyKey = vi.fn(() => Promise.resolve<StoredAcceptance | null>(null));
+  const unit: AcceptanceUnit = {
+    findByIdempotencyKey,
+    resolveIssuer,
+    nextNumber,
+    insertDocument,
+    recordAudit,
+  };
   const run = vi.fn();
   const unitOfWork: AcceptanceUnitOfWork = {
     run: <T>(tenantId: string, work: (u: AcceptanceUnit) => Promise<T>) => {
@@ -64,11 +75,12 @@ function setup(issuer: IssuerContext | null = ISSUER) {
     draft: DRAFT,
     receiverRuc: '1234567-8',
     payload: { hello: 'world' },
+    idempotencyKey: 'key-1',
   };
   return {
     acceptInvoice,
     input,
-    mocks: { resolveIssuer, nextNumber, insertDocument, recordAudit, run },
+    mocks: { resolveIssuer, nextNumber, insertDocument, recordAudit, findByIdempotencyKey, run },
     inserted,
   };
 }
@@ -113,6 +125,8 @@ describe('acceptInvoice', () => {
       totalAmount: '110000',
       currency: 'PYG',
       payload: { hello: 'world' },
+      idempotencyKey: 'key-1',
+      requestHash: requestHash({ hello: 'world' }),
     });
     expect(inserted[0].issuedAt).toEqual(new Date('2026-03-06T01:30:00Z'));
   });
@@ -164,5 +178,79 @@ describe('acceptInvoice', () => {
     await expect(acceptInvoice(input)).rejects.toBeInstanceOf(IssuerNotConfiguredError);
     expect(mocks.nextNumber).not.toHaveBeenCalled();
     expect(mocks.insertDocument).not.toHaveBeenCalled();
+  });
+
+  describe('idempotency (HU-E5-02)', () => {
+    const stored = (payload: unknown): StoredAcceptance => ({
+      documentId: 'doc-0',
+      cdc: '1'.repeat(44),
+      requestHash: requestHash(payload),
+    });
+
+    it('looks the key up inside the transaction before numbering anything', async () => {
+      const { acceptInvoice, input, mocks } = setup();
+      await acceptInvoice(input);
+      expect(mocks.findByIdempotencyKey).toHaveBeenCalledWith('key-1');
+      expect(mocks.findByIdempotencyKey.mock.invocationCallOrder[0]).toBeLessThan(
+        mocks.resolveIssuer.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('replays the stored response, creating, numbering and auditing nothing', async () => {
+      const { acceptInvoice, input, mocks } = setup();
+      mocks.findByIdempotencyKey.mockResolvedValue(stored(input.payload));
+
+      const result = await acceptInvoice(input);
+
+      expect(result).toEqual({ documentId: 'doc-0', cdc: '1'.repeat(44) });
+      expect(mocks.resolveIssuer).not.toHaveBeenCalled();
+      expect(mocks.nextNumber).not.toHaveBeenCalled();
+      expect(mocks.insertDocument).not.toHaveBeenCalled();
+      expect(mocks.recordAudit).not.toHaveBeenCalled();
+    });
+
+    it('rejects the same key with a different payload', async () => {
+      const { acceptInvoice, input, mocks } = setup();
+      mocks.findByIdempotencyKey.mockResolvedValue(stored({ other: true }));
+      await expect(acceptInvoice(input)).rejects.toBeInstanceOf(IdempotencyKeyReusedError);
+      expect(mocks.insertDocument).not.toHaveBeenCalled();
+    });
+
+    it('still validates the draft first: an invalid retry is a 422, not a replay', async () => {
+      const { acceptInvoice, input, mocks } = setup();
+      await expect(
+        acceptInvoice({ ...input, draft: { ...DRAFT, items: [] } }),
+      ).rejects.toBeInstanceOf(InvoiceValidationError);
+      expect(mocks.findByIdempotencyKey).not.toHaveBeenCalled();
+    });
+
+    it('after losing a concurrent insert race, re-reads in a new transaction and replays', async () => {
+      const { acceptInvoice, input, mocks } = setup();
+      mocks.insertDocument.mockRejectedValueOnce(new IdempotencyKeyCollisionError());
+      mocks.findByIdempotencyKey
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(stored(input.payload));
+
+      const result = await acceptInvoice(input);
+
+      expect(result).toEqual({ documentId: 'doc-0', cdc: '1'.repeat(44) });
+      expect(mocks.run).toHaveBeenCalledTimes(2);
+    });
+
+    it('after losing the race to a different payload, answers the reuse conflict', async () => {
+      const { acceptInvoice, input, mocks } = setup();
+      mocks.insertDocument.mockRejectedValueOnce(new IdempotencyKeyCollisionError());
+      mocks.findByIdempotencyKey
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(stored({ other: true }));
+      await expect(acceptInvoice(input)).rejects.toBeInstanceOf(IdempotencyKeyReusedError);
+    });
+
+    it('does not loop when the collision persists', async () => {
+      const { acceptInvoice, input, mocks } = setup();
+      mocks.insertDocument.mockRejectedValue(new IdempotencyKeyCollisionError());
+      await expect(acceptInvoice(input)).rejects.toBeInstanceOf(IdempotencyKeyCollisionError);
+      expect(mocks.run).toHaveBeenCalledTimes(2);
+    });
   });
 });

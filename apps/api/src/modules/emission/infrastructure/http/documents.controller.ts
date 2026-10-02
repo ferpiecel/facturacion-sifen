@@ -1,12 +1,4 @@
-import {
-  Body,
-  Controller,
-  HttpCode,
-  HttpException,
-  HttpStatus,
-  Inject,
-  Post,
-} from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Inject, Post } from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
 import { RequireScopes } from '../../../identity/infrastructure/decorators/require-scopes.decorator.js';
 import {

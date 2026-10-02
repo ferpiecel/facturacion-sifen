@@ -38,7 +38,7 @@ const PAYLOAD = {
   operationType: 'B2B',
   receiver: {
     kind: 'named',
-    ruc: '80000002-7',
+    ruc: '80000005-6',
     isPublicEntity: false,
     name: 'Receptor Prueba SA',
     address: 'Avda Prueba',
@@ -176,7 +176,7 @@ describe('DrizzleSigningStore', () => {
             name: 'Casa Matriz',
           },
           receiver: {
-            ruc: '80000002-7',
+            ruc: '80000005-6',
             name: 'Receptor Prueba SA',
             districtCode: 143,
             cityCode: 3344,
@@ -218,8 +218,10 @@ describe('DrizzleSigningStore', () => {
   });
 
   it('lists the missing receiver and item data instead of guessing it', async () => {
-    const { name: _n, address: _a, ...receiver } = PAYLOAD.receiver;
-    const { code: _c, description: _d, ...item } = PAYLOAD.items[0];
+    const without = (value: object, ...keys: string[]) =>
+      Object.fromEntries(Object.entries(value).filter(([key]) => !keys.includes(key)));
+    const receiver = without(PAYLOAD.receiver, 'name', 'address');
+    const item = without(PAYLOAD.items[0], 'code', 'description');
     await seed({ payload: { ...PAYLOAD, receiver, items: [item] } });
     const error = await storeFor(tenantId)
       .load(tenantId, documentId)

@@ -16,7 +16,7 @@ CREATE TABLE "webhook_deliveries" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "webhook_deliveries_endpoint_event_key" UNIQUE("endpoint_id","event_id"),
 	CONSTRAINT "webhook_deliveries_status_valid" CHECK ("webhook_deliveries"."status" IN ('pending', 'failed', 'delivered', 'dead')),
-	CONSTRAINT "webhook_deliveries_event_type_valid" CHECK ("webhook_deliveries"."event_type" IN ('document.approved', 'document.approved_with_observations', 'document.rejected', 'document.cancelled', 'document.number_voided', 'document.transmission_deadline_warning')),
+	CONSTRAINT "webhook_deliveries_event_type_valid" CHECK ("webhook_deliveries"."event_type" IN ('document.created', 'document.signed', 'document.submitted', 'document.approved', 'document.approved_with_observations', 'document.rejected', 'document.cancelled', 'document.number_voided', 'document.transmission_deadline_warning', 'document.notification.delivered', 'document.notification.failed')),
 	CONSTRAINT "webhook_deliveries_next_attempt_pair" CHECK (("webhook_deliveries"."status" IN ('pending', 'failed')) = ("webhook_deliveries"."next_attempt_at" IS NOT NULL)),
 	CONSTRAINT "webhook_deliveries_delivered_pair" CHECK (("webhook_deliveries"."status" = 'delivered') = ("webhook_deliveries"."delivered_at" IS NOT NULL)),
 	CONSTRAINT "webhook_deliveries_attempts_nonneg" CHECK ("webhook_deliveries"."attempt_count" >= 0)

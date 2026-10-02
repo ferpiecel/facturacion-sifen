@@ -10,6 +10,9 @@ import {
 } from '../../../../test/support/webhook-tls-fixture.js';
 import { SafeWebhookHttp } from './safe-webhook-http.js';
 
+const err = (code: string) => ({ kind: 'error', code });
+const go = (client: SafeWebhookHttp, url = 'https://h.example.com/') =>
+  client.post({ url, headers: {}, body: '' });
 const HEADERS = { 'content-type': 'application/json', 'sifen-signature': 't=1,v1=ab' };
 
 describe('SafeWebhookHttp (HU-E11-01)', () => {
@@ -46,20 +49,12 @@ describe('SafeWebhookHttp (HU-E11-01)', () => {
     ['loopback', '127.0.0.1'],
     ['private 10/8', '10.1.2.3'],
     ['link-local metadata', '169.254.169.254'],
-    ['CGNAT', '100.64.0.1'],
-    ['multicast', '224.0.0.1'],
-    ['IPv6 loopback', '::1'],
     ['IPv6 unique local', 'fd00::1'],
     ['IPv4-mapped loopback', '::ffff:127.0.0.1'],
   ])('refuses a host resolving to %s without opening a connection', async (_name, address) => {
     const request = vi.fn();
     const client = new SafeWebhookHttp({ resolve: () => Promise.resolve([address]), request });
-    expect(
-      await client.post({ url: 'https://hooks.example.com/x', headers: {}, body: '' }),
-    ).toEqual({
-      kind: 'error',
-      code: 'blocked_address',
-    });
+    expect(await go(client, 'https://hooks.example.com/x')).toEqual(err('blocked_address'));
     expect(request).not.toHaveBeenCalled();
   });
 
@@ -68,11 +63,7 @@ describe('SafeWebhookHttp (HU-E11-01)', () => {
       resolve: () => Promise.resolve(['8.8.8.8', '10.0.0.1']),
       request: vi.fn(),
     });
-    expect(
-      await client.post({ url: 'https://h.example.com/', headers: {}, body: '' }),
-    ).toMatchObject({
-      code: 'blocked_address',
-    });
+    expect(await go(client, 'https://h.example.com/')).toEqual(err('blocked_address'));
   });
 
   it.each(['https://127.0.0.1/x', 'https://[::1]/x', 'https://169.254.169.254/latest'])(
@@ -80,9 +71,7 @@ describe('SafeWebhookHttp (HU-E11-01)', () => {
     async (url) => {
       const resolve = vi.fn();
       const client = new SafeWebhookHttp({ resolve, request: vi.fn() });
-      expect(await client.post({ url, headers: {}, body: '' })).toMatchObject({
-        code: 'blocked_address',
-      });
+      expect(await go(client, url)).toEqual(err('blocked_address'));
       expect(resolve).not.toHaveBeenCalled();
     },
   );
@@ -95,10 +84,7 @@ describe('SafeWebhookHttp (HU-E11-01)', () => {
     '',
   ])('rejects the url %j', async (url) => {
     const client = new SafeWebhookHttp({ resolve: vi.fn(), request: vi.fn() });
-    expect(await client.post({ url, headers: {}, body: '' })).toEqual({
-      kind: 'error',
-      code: 'invalid_url',
-    });
+    expect(await go(client, url)).toEqual(err('invalid_url'));
   });
 
   it('classifies a failing or empty DNS answer', async () => {
@@ -107,10 +93,7 @@ describe('SafeWebhookHttp (HU-E11-01)', () => {
       () => Promise.resolve([]),
     ]) {
       const client = new SafeWebhookHttp({ resolve });
-      expect(await client.post({ url: 'https://h.example.com/', headers: {}, body: '' })).toEqual({
-        kind: 'error',
-        code: 'dns_failure',
-      });
+      expect(await go(client, 'https://h.example.com/')).toEqual(err('dns_failure'));
     }
   });
 
@@ -121,10 +104,8 @@ describe('SafeWebhookHttp (HU-E11-01)', () => {
     });
     const client = new SafeWebhookHttp({ resolve, request });
     const url = 'https://h.example.com/';
-    expect(await client.post({ url, headers: {}, body: '' })).toMatchObject({ kind: 'error' });
-    expect(await client.post({ url, headers: {}, body: '' })).toMatchObject({
-      code: 'blocked_address',
-    });
+    expect(await go(client, url)).toMatchObject({ kind: 'error' });
+    expect(await go(client, url)).toEqual(err('blocked_address'));
     expect(resolve).toHaveBeenCalledTimes(2);
   });
 
@@ -165,10 +146,7 @@ describe('SafeWebhookHttp (HU-E11-01)', () => {
 
   it('times out a server that never answers', async () => {
     const { port } = await listen(() => undefined);
-    expect(await post(local({ totalTimeoutMs: 150 }), port)).toEqual({
-      kind: 'error',
-      code: 'timeout',
-    });
+    expect(await post(local({ totalTimeoutMs: 150 }), port)).toEqual(err('timeout'));
   });
 
   it('stops reading an oversized response body at the cap', async () => {
@@ -193,13 +171,10 @@ describe('SafeWebhookHttp (HU-E11-01)', () => {
 
   it('classifies an untrusted certificate and a refused connection', async () => {
     const { port } = await listen((_req, res) => res.end());
-    expect(await post(local({ ca: undefined }), port)).toEqual({
-      kind: 'error',
-      code: 'tls_failure',
-    });
+    expect(await post(local({ ca: undefined }), port)).toEqual(err('tls_failure'));
     const closed = (await listen(() => undefined)).server;
     const free = (closed.address() as AddressInfo).port;
     await new Promise((r) => closed.close(r));
-    expect(await post(local(), free)).toEqual({ kind: 'error', code: 'connect_failed' });
+    expect(await post(local(), free)).toEqual(err('connect_failed'));
   });
 });

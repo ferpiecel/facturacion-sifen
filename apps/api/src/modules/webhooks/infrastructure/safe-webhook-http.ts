@@ -9,14 +9,11 @@ import type {
   WebhookRequest,
 } from '../application/ports/webhook-http.port.js';
 
+/** `isBlocked`, `request` and `ca` exist for tests only; production uses the SSRF policy and the system CAs. */
 export interface SafeWebhookHttpOptions {
-  /** Hostname to addresses. Default: the system resolver, every address. */
   readonly resolve?: (hostname: string) => Promise<readonly string[]>;
-  /** Override only in tests; production always uses the SSRF policy. */
   readonly isBlocked?: (address: string) => boolean;
-  /** Override only in tests. */
   readonly request?: typeof httpsRequest;
-  /** Extra trusted CA, tests only. */
   readonly ca?: string | Buffer;
   readonly connectTimeoutMs?: number;
   readonly totalTimeoutMs?: number;
@@ -28,20 +25,12 @@ const systemResolve = async (hostname: string): Promise<readonly string[]> =>
 
 const TLS_CODES =
   /^(ERR_TLS|ERR_SSL|ERR_OSSL|CERT_|DEPTH_ZERO|UNABLE_TO_|SELF_SIGNED|HOSTNAME_MISMATCH)/;
-const CONNECT_CODES = new Set([
-  'ECONNREFUSED',
-  'ECONNRESET',
-  'ECONNABORTED',
-  'EHOSTUNREACH',
-  'ENETUNREACH',
-  'ETIMEDOUT',
-  'EPIPE',
-]);
+const CONNECT_CODES = /^(ECONN|EHOSTUNREACH|ENETUNREACH|ETIMEDOUT|EPIPE)/;
 
 function classify(error: unknown): WebhookErrorCode {
   const code = (error as NodeJS.ErrnoException).code ?? '';
   if (TLS_CODES.test(code)) return 'tls_failure';
-  return CONNECT_CODES.has(code) ? 'connect_failed' : 'network_error';
+  return CONNECT_CODES.test(code) ? 'connect_failed' : 'network_error';
 }
 
 const failure = (code: WebhookErrorCode): WebhookHttpResult => ({ kind: 'error', code });
@@ -57,17 +46,17 @@ export class SafeWebhookHttp implements WebhookHttpPort {
   private readonly resolve: (hostname: string) => Promise<readonly string[]>;
   private readonly isBlocked: (address: string) => boolean;
   private readonly requestFn: typeof httpsRequest;
-  private readonly connectTimeoutMs: number;
-  private readonly totalTimeoutMs: number;
-  private readonly maxBodyBytes: number;
+  private readonly limits: { connect: number; total: number; body: number };
 
   constructor(private readonly options: SafeWebhookHttpOptions = {}) {
     this.resolve = options.resolve ?? systemResolve;
     this.isBlocked = options.isBlocked ?? isBlockedAddress;
     this.requestFn = options.request ?? httpsRequest;
-    this.connectTimeoutMs = options.connectTimeoutMs ?? 5_000;
-    this.totalTimeoutMs = options.totalTimeoutMs ?? 10_000;
-    this.maxBodyBytes = options.maxBodyBytes ?? 64 * 1024;
+    this.limits = {
+      connect: options.connectTimeoutMs ?? 5_000,
+      total: options.totalTimeoutMs ?? 10_000,
+      body: options.maxBodyBytes ?? 64 * 1024,
+    };
   }
 
   async post(request: WebhookRequest): Promise<WebhookHttpResult> {
@@ -86,10 +75,8 @@ export class SafeWebhookHttp implements WebhookHttpPort {
       return failure('invalid_url');
     }
     const host = url.hostname.replace(/^\[|\]$/g, '');
-    let addresses: readonly string[];
-    if (isIP(host) !== 0) {
-      addresses = [host];
-    } else {
+    let addresses: readonly string[] = [host];
+    if (isIP(host) === 0) {
       try {
         addresses = await this.resolve(host);
       } catch {
@@ -116,7 +103,6 @@ export class SafeWebhookHttp implements WebhookHttpPort {
         resolve(result);
       };
       const family = isIP(address);
-      const isLiteral = isIP(host) !== 0;
       const options: RequestOptions = {
         method: 'POST',
         host,
@@ -129,7 +115,7 @@ export class SafeWebhookHttp implements WebhookHttpPort {
         },
         agent: false,
         ca: this.options.ca,
-        servername: isLiteral ? undefined : host,
+        servername: isIP(host) === 0 ? host : undefined,
         // Pinned: the vetted address is the only one this connection can use.
         lookup: ((
           _hostname: string,
@@ -151,21 +137,16 @@ export class SafeWebhookHttp implements WebhookHttpPort {
           let read = 0;
           response.on('data', (chunk: Buffer) => {
             read += chunk.length;
-            if (read > this.maxBodyBytes) response.destroy();
+            if (read > this.limits.body) response.destroy();
           });
           response.on('error', () => undefined);
         });
-        const stop = (): void => {
+        const timeout = (): void => {
           outgoing.destroy();
+          done(failure('timeout'));
         };
-        connectTimer = setTimeout(() => {
-          stop();
-          done(failure('timeout'));
-        }, this.connectTimeoutMs);
-        totalTimer = setTimeout(() => {
-          stop();
-          done(failure('timeout'));
-        }, this.totalTimeoutMs);
+        connectTimer = setTimeout(timeout, this.limits.connect);
+        totalTimer = setTimeout(timeout, this.limits.total);
         outgoing.on('socket', (socket) => {
           socket.once('secureConnect', () => {
             clearTimeout(connectTimer);

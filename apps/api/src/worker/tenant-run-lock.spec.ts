@@ -6,7 +6,7 @@ function fakeRedis() {
   const store = new Map<string, string>();
   const ttls: number[] = [];
   const client: RedisLockClient = {
-    set: (key, value, _px, ttl, _nx) => {
+    set: (key, value, _px, ttl) => {
       ttls.push(ttl);
       if (store.has(key)) return Promise.resolve(null);
       store.set(key, value);

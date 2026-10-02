@@ -8,10 +8,16 @@ import type { AcceptInvoiceInput } from '../../application/accept-invoice.js';
 const MAX_ITEMS = 999;
 
 /** `noEmptyString` (DE_Types_v150.xsd:1724): at least one non-whitespace character. */
+// eslint-disable-next-line no-control-regex -- XSD `.` excludes line breaks; control characters never sign
+const CONTROL_CHARS = /[\u0000-\u001F\u007F]/;
+
 const text = (max: number, min = 1) =>
   z
     .string()
     .max(max)
+    .refine((value) => !CONTROL_CHARS.test(value), {
+      error: 'Must not contain line breaks or control characters',
+    })
     .refine((value) => value.trim().length >= min && value.trim().length > 0, {
       error: `Must have at least ${String(min)} non-blank characters`,
     });

@@ -73,17 +73,37 @@ export function imageSizes(pdf: Uint8Array): { w: number; h: number }[] {
   });
 }
 
-/** Decodes the first image of page 1 as a QR code; null when none is readable. */
-export async function decodeQr(pdf: Uint8Array): Promise<string | null> {
+export interface QrImage {
+  width: number;
+  height: number;
+  data: Uint8ClampedArray;
+}
+
+/** The first image of page 1 (RGBA), null when there is none. */
+export async function firstImage(pdf: Uint8Array): Promise<QrImage | null> {
   const page = await (await pdfjs.getDocument({ data: new Uint8Array(pdf) }).promise).getPage(1);
   const ops = await page.getOperatorList();
   const at = ops.fnArray.indexOf(pdfjs.OPS.paintImageXObject);
   const name = (ops.argsArray[at] as string[] | undefined)?.[0];
   if (name === undefined) return null;
-  const image = await new Promise<{ width: number; height: number; data: Uint8ClampedArray }>(
-    (resolve) => {
-      page.objs.get(name, resolve);
-    },
-  );
-  return jsQR(image.data, image.width, image.height)?.data ?? null;
+  return new Promise<QrImage>((resolve) => {
+    page.objs.get(name, resolve);
+  });
+}
+
+/** Decodes the first image of page 1 as a QR code; null when none is readable. */
+export async function decodeQr(pdf: Uint8Array): Promise<string | null> {
+  const image = await firstImage(pdf);
+  return image ? (jsQR(image.data, image.width, image.height)?.data ?? null) : null;
+}
+
+/** Share of the image width that is blank before the first dark pixel (quiet zone per side). */
+export function quietZoneRatio(image: QrImage): number {
+  let first = image.width;
+  for (let y = 0; y < image.height; y += 1) {
+    for (let x = 0; x < first; x += 1) {
+      if ((image.data[(y * image.width + x) * 4] ?? 255) < 128) first = x;
+    }
+  }
+  return first / image.width;
 }

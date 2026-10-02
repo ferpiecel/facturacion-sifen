@@ -1,6 +1,6 @@
 {
-  "id": "7360a6c9-5290-4ade-9868-d5c110dbea64",
-  "prevId": "66291337-aba1-48c1-b2a4-b2b6e7227872",
+  "id": "0338280a-dd29-42d1-b7d2-74f0b1873a61",
+  "prevId": "edb61a48-2e1a-4c7b-bd7c-2f61462a22a9",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -405,25 +405,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "transmission_attempts": {
-          "name": "transmission_attempts",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "next_transmission_at": {
-          "name": "next_transmission_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "transmission_hold": {
-          "name": "transmission_hold",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": false
-        },
         "sifen_messages": {
           "name": "sifen_messages",
           "type": "jsonb",
@@ -549,14 +530,6 @@
       },
       "policies": {},
       "checkConstraints": {
-        "documents_transmission_attempts_range": {
-          "name": "documents_transmission_attempts_range",
-          "value": "\"documents\".\"transmission_attempts\" >= 0"
-        },
-        "documents_transmission_hold_format": {
-          "name": "documents_transmission_hold_format",
-          "value": "\"documents\".\"transmission_hold\" ~ '^[A-Za-z0-9:_-]{1,64}$'"
-        },
         "documents_signed_pair": {
           "name": "documents_signed_pair",
           "value": "(\"documents\".\"signed_xml\" IS NULL) = (\"documents\".\"signed_at\" IS NULL)"
@@ -2183,200 +2156,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.webhook_deliveries": {
-      "name": "webhook_deliveries",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "endpoint_id": {
-          "name": "endpoint_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "event_id": {
-          "name": "event_id",
-          "type": "varchar(68)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "event_type": {
-          "name": "event_type",
-          "type": "varchar(48)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "payload": {
-          "name": "payload",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "varchar(16)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'pending'"
-        },
-        "attempt_count": {
-          "name": "attempt_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "first_attempt_at": {
-          "name": "first_attempt_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "next_attempt_at": {
-          "name": "next_attempt_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_attempt_at": {
-          "name": "last_attempt_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_status_code": {
-          "name": "last_status_code",
-          "type": "smallint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "last_error": {
-          "name": "last_error",
-          "type": "varchar(500)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "delivered_at": {
-          "name": "delivered_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "webhook_deliveries_due_idx": {
-          "name": "webhook_deliveries_due_idx",
-          "columns": [
-            {
-              "expression": "next_attempt_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"webhook_deliveries\".\"status\" IN ('pending', 'failed')",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "webhook_deliveries_tenant_id_tenants_id_fk": {
-          "name": "webhook_deliveries_tenant_id_tenants_id_fk",
-          "tableFrom": "webhook_deliveries",
-          "tableTo": "tenants",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "webhook_deliveries_tenant_endpoint_fk": {
-          "name": "webhook_deliveries_tenant_endpoint_fk",
-          "tableFrom": "webhook_deliveries",
-          "tableTo": "webhook_endpoints",
-          "columnsFrom": [
-            "tenant_id",
-            "endpoint_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "webhook_deliveries_endpoint_event_key": {
-          "name": "webhook_deliveries_endpoint_event_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "endpoint_id",
-            "event_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "webhook_deliveries_status_valid": {
-          "name": "webhook_deliveries_status_valid",
-          "value": "\"webhook_deliveries\".\"status\" IN ('pending', 'failed', 'delivered', 'dead')"
-        },
-        "webhook_deliveries_event_type_valid": {
-          "name": "webhook_deliveries_event_type_valid",
-          "value": "\"webhook_deliveries\".\"event_type\" IN ('document.created', 'document.signed', 'document.submitted', 'document.approved', 'document.approved_with_observations', 'document.rejected', 'document.cancelled', 'document.number_voided', 'document.transmission_deadline_warning', 'document.notification.delivered', 'document.notification.failed')"
-        },
-        "webhook_deliveries_next_attempt_pair": {
-          "name": "webhook_deliveries_next_attempt_pair",
-          "value": "(\"webhook_deliveries\".\"status\" IN ('pending', 'failed')) = (\"webhook_deliveries\".\"next_attempt_at\" IS NOT NULL)"
-        },
-        "webhook_deliveries_delivered_pair": {
-          "name": "webhook_deliveries_delivered_pair",
-          "value": "(\"webhook_deliveries\".\"status\" = 'delivered') = (\"webhook_deliveries\".\"delivered_at\" IS NOT NULL)"
-        },
-        "webhook_deliveries_attempts_nonneg": {
-          "name": "webhook_deliveries_attempts_nonneg",
-          "value": "\"webhook_deliveries\".\"attempt_count\" >= 0"
-        },
-        "webhook_deliveries_status_code_range": {
-          "name": "webhook_deliveries_status_code_range",
-          "value": "\"webhook_deliveries\".\"last_status_code\" IS NULL OR \"webhook_deliveries\".\"last_status_code\" BETWEEN 100 AND 599"
-        }
-      },
       "isRLSEnabled": false
     },
     "public.webhook_endpoints": {

@@ -29,6 +29,10 @@ export {
   tenantRequestSequences,
   tenants,
   tenantTimbrados,
+  WEBHOOK_DELIVERY_STATUSES,
+  WEBHOOK_EVENT_TYPES,
+  webhookDeliveries,
+  webhookEndpoints,
 } from './schema.js';
 export {
   InvalidTenantIdError,

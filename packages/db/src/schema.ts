@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import {
   bigint,
+  boolean,
   char,
   check,
   date,
@@ -522,6 +523,141 @@ export const tenantCertificates = pgTable(
   ],
 );
 
+/** Lifecycle events a webhook can carry; mirrors the API's `WEBHOOK_EVENT_TYPES` (parity spec in apps/api). */
+export const WEBHOOK_EVENT_TYPES = [
+  'document.created',
+  'document.signed',
+  'document.submitted',
+  'document.approved',
+  'document.approved_with_observations',
+  'document.rejected',
+  'document.cancelled',
+  'document.number_voided',
+  'document.transmission_deadline_warning',
+  'document.notification.delivered',
+  'document.notification.failed',
+] as const;
+
+/**
+ * `pending` = never attempted, `failed` = attempted and a retry is scheduled, `delivered`, and
+ * `dead` = retries exhausted (the DLQ; it can be replayed back to `pending`).
+ */
+export const WEBHOOK_DELIVERY_STATUSES = ['pending', 'failed', 'delivered', 'dead'] as const;
+
+const sqlList = (values: readonly string[]) => sql.raw(values.map((v) => `'${v}'`).join(', '));
+
+/**
+ * Where a tenant receives its lifecycle events (HU-E11-01). The HMAC signing secret is stored only
+ * as an `EnvelopeCipher` blob (`sealed`), never in clear. A rotation keeps the old secret in
+ * `previous_sealed` until `previous_expires_at` so receivers can switch without dropping events.
+ */
+export const webhookEndpoints = pgTable(
+  'webhook_endpoints',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    /** HTTPS only, no userinfo; the SSRF checks run at delivery time (DNS), not here. */
+    url: text('url').notNull(),
+    /** Subscribed event types; empty = every event. */
+    events: text('events')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    sealed: jsonb('sealed').notNull(),
+    /** Bound into the sealed secret's AAD; bumped on every rotation. */
+    secretVersion: integer('secret_version').notNull().default(1),
+    previousSealed: jsonb('previous_sealed'),
+    previousExpiresAt: timestamp('previous_expires_at', { withTimezone: true }),
+    active: boolean('active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('webhook_endpoints_tenant_id_key').on(table.tenantId, table.id),
+    // Lowercase `https://` only (the scheme is case-insensitive in RFC 3986, but accepting one
+    // spelling keeps the check, the SSRF guard and the docs in agreement); non-empty host, no
+    // userinfo, optional port, no whitespace. DNS and address checks belong to the dispatcher.
+    check(
+      'webhook_endpoints_url_https',
+      sql`${table.url} ~ '^https://[^/?#:@[:space:]]+(:[0-9]{1,5})?([/?#][^[:space:]]*)?$' AND length(${table.url}) <= 2048`,
+    ),
+    check(
+      'webhook_endpoints_events_valid',
+      sql`${table.events} <@ ARRAY[${sqlList(WEBHOOK_EVENT_TYPES)}]::text[]`,
+    ),
+    check('webhook_endpoints_events_unique', sql`webhook_events_unique(${table.events})`),
+    check(
+      'webhook_endpoints_previous_pair',
+      sql`(${table.previousSealed} IS NULL) = (${table.previousExpiresAt} IS NULL)`,
+    ),
+  ],
+);
+
+/**
+ * One event to one endpoint: the retry queue (`next_attempt_at`) and the delivery history in a
+ * single row. Enqueued by the outbox in the same transaction as the document change; `payload`
+ * is the full event envelope. Never deleted.
+ */
+export const webhookDeliveries = pgTable(
+  'webhook_deliveries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    endpointId: uuid('endpoint_id').notNull(),
+    eventId: varchar('event_id', { length: 68 }).notNull(),
+    eventType: varchar('event_type', { length: 48 }).notNull(),
+    payload: jsonb('payload').notNull(),
+    status: varchar('status', { length: 16 }).notNull().default('pending'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    /** Anchor of the 24 h retry window. */
+    firstAttemptAt: timestamp('first_attempt_at', { withTimezone: true }),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }),
+    lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+    lastStatusCode: smallint('last_status_code'),
+    /** Short, secret-free reason of the last failure (timeout, blocked address, ...). */
+    lastError: varchar('last_error', { length: 500 }),
+    deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'webhook_deliveries_tenant_endpoint_fk',
+      columns: [table.tenantId, table.endpointId],
+      foreignColumns: [webhookEndpoints.tenantId, webhookEndpoints.id],
+    }),
+    unique('webhook_deliveries_endpoint_event_key').on(table.endpointId, table.eventId),
+    index('webhook_deliveries_due_idx')
+      .on(table.nextAttemptAt)
+      .where(sql`${table.status} IN ('pending', 'failed')`),
+    check(
+      'webhook_deliveries_status_valid',
+      sql`${table.status} IN (${sqlList(WEBHOOK_DELIVERY_STATUSES)})`,
+    ),
+    check(
+      'webhook_deliveries_event_type_valid',
+      sql`${table.eventType} IN (${sqlList(WEBHOOK_EVENT_TYPES)})`,
+    ),
+    check(
+      'webhook_deliveries_next_attempt_pair',
+      sql`(${table.status} IN ('pending', 'failed')) = (${table.nextAttemptAt} IS NOT NULL)`,
+    ),
+    check(
+      'webhook_deliveries_delivered_pair',
+      sql`(${table.status} = 'delivered') = (${table.deliveredAt} IS NOT NULL)`,
+    ),
+    check('webhook_deliveries_attempts_nonneg', sql`${table.attemptCount} >= 0`),
+    check(
+      'webhook_deliveries_status_code_range',
+      sql`${table.lastStatusCode} IS NULL OR ${table.lastStatusCode} BETWEEN 100 AND 599`,
+    ),
+  ],
+);
+
 /**
  * Last assigned `dNumDoc` (MT v150 C005, 7 digits: 0000001..9999999) per
  * (environment, timbrado, establishment, expedition point, document type)
@@ -820,4 +956,6 @@ export const TENANT_TABLES = [
   'tenant_probe',
   'tenant_request_sequences',
   'tenant_timbrados',
+  'webhook_deliveries',
+  'webhook_endpoints',
 ] as const;

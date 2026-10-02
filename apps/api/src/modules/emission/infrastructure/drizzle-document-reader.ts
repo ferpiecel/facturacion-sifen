@@ -1,4 +1,5 @@
 import { and, eq } from 'drizzle-orm';
+import type { PgColumn } from 'drizzle-orm/pg-core';
 import {
   documents,
   tenantEstablishments,
@@ -11,7 +12,7 @@ import {
 import type { DocumentReader, DocumentView } from '../application/ports/document-reader.port.js';
 import type { SignedXmlReader } from '../application/ports/signed-xml-reader.port.js';
 
-function select(tx: TenantTx) {
+function select<Extra extends Record<string, PgColumn>>(tx: TenantTx, extra: Extra) {
   return (
     tx
       .select({
@@ -26,7 +27,7 @@ function select(tx: TenantTx) {
         totalAmount: documents.totalAmount,
         currency: documents.currency,
         receiverRuc: documents.receiverRuc,
-        signedXml: documents.signedXml,
+        ...extra,
       })
       .from(documents)
       // The CDC key is (tenant, environment, cdc): only the tenant's current environment is visible.
@@ -53,9 +54,13 @@ function select(tx: TenantTx) {
 
 /** Reads inside `withTenantTransaction`; the explicit tenant filter backs up RLS. */
 export function createDrizzleDocumentReader(db: Database): DocumentReader & SignedXmlReader {
-  const row = (tenantId: string, condition: ReturnType<typeof eq>) =>
+  const row = <Extra extends Record<string, PgColumn>>(
+    tenantId: string,
+    condition: ReturnType<typeof eq>,
+    extra: Extra,
+  ) =>
     withTenantTransaction(db, tenantId, async (tx) => {
-      const rows = await select(tx)
+      const rows = await select(tx, extra)
         .where(and(eq(documents.tenantId, tenantId), condition))
         .limit(1);
       return rows.at(0) ?? null;
@@ -63,7 +68,7 @@ export function createDrizzleDocumentReader(db: Database): DocumentReader & Sign
   const numberOf = (r: { establishment: string; point: string; number: number | string }) =>
     `${r.establishment}-${r.point}-${String(r.number).padStart(7, '0')}`;
   const find = async (tenantId: string, condition: ReturnType<typeof eq>) => {
-    const found = await row(tenantId, condition);
+    const found = await row(tenantId, condition, {});
     if (!found) return null;
     // The signed XML stays inside the signed-XML port: the query side never exposes it.
     const view: DocumentView = {
@@ -81,8 +86,11 @@ export function createDrizzleDocumentReader(db: Database): DocumentReader & Sign
   };
   return {
     findSignedXml: async (tenantId, id) => {
-      const found = await row(tenantId, eq(documents.id, id));
-      return found ? { number: numberOf(found), signedXml: found.signedXml } : null;
+      // The signed XML is selected here only: the shared query side never carries it.
+      const found = await row(tenantId, eq(documents.id, id), { signedXml: documents.signedXml });
+      return found
+        ? { number: numberOf(found), environment: found.environment, signedXml: found.signedXml }
+        : null;
     },
     findById: (tenantId, id) => find(tenantId, eq(documents.id, id)),
     findByCdc: (tenantId, cdc) => find(tenantId, eq(documents.cdc, cdc)),

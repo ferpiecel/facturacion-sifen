@@ -2,6 +2,7 @@
 export interface SignedDocument {
   /** `est-point-number`, e.g. `001-002-0000007`. */
   number: string;
+  environment: 'test' | 'production';
   /** Null until the document is signed. */
   signedXml: string | null;
 }

@@ -1,4 +1,4 @@
-import { readKudeInvoice } from './kude-reader.js';
+import { KudeSourceError, readKudeInvoice } from './kude-reader.js';
 import type { KudeRenderer } from './ports/kude-renderer.port.js';
 import type { SignedXmlReader } from './ports/signed-xml-reader.port.js';
 
@@ -14,7 +14,12 @@ export function createGetKude(deps: { reader: SignedXmlReader; renderer: KudeRen
     const found = await deps.reader.findSignedXml(tenantId, id);
     if (!found) return { kind: 'not-found' };
     if (found.signedXml === null) return { kind: 'not-signed' };
-    const pdf = await deps.renderer.render(readKudeInvoice(found.signedXml));
+    const model = readKudeInvoice(found.signedXml);
+    // The QR environment is the one the document was signed for; it must be the stored one.
+    if (model.environment !== found.environment) {
+      throw new KudeSourceError('dCarQR', 'environment does not match the document environment');
+    }
+    const pdf = await deps.renderer.render(model);
     return { kind: 'ok', pdf, filename: `kude-${found.number}.pdf` };
   };
 }

@@ -124,3 +124,48 @@ export function formatDateDmy(date: string): string {
   if (!match) throw new Error('Date must be YYYY-MM-DD');
   return `${match[3]}/${match[2]}/${match[1]}`;
 }
+
+/** The model cannot be drawn; `field` names the offender. */
+export class InvalidKudeInvoiceError extends Error {
+  constructor(
+    readonly field: string,
+    reason: string,
+  ) {
+    super(`Invalid KuDE ${field}: ${reason}`);
+    this.name = 'InvalidKudeInvoiceError';
+  }
+}
+
+const isDate = (value: string): boolean => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+  );
+};
+
+/** Up-front checks, so a bad model fails before any PDF byte is produced. */
+export function assertValidKudeInvoice(invoice: KudeInvoice): void {
+  if (!/^\d{44}$/.test(invoice.cdc)) throw new InvalidKudeInvoiceError('cdc', 'expected 44 digits');
+  if (
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(invoice.issuedAt) ||
+    !isDate(invoice.issuedAt.slice(0, 10))
+  ) {
+    throw new InvalidKudeInvoiceError('issuedAt', 'expected a real YYYY-MM-DDThh:mm:ss');
+  }
+  if (!isDate(invoice.stamp.validFrom) || !isDate(invoice.stamp.validTo)) {
+    throw new InvalidKudeInvoiceError('stamp', 'validity dates must be YYYY-MM-DD');
+  }
+  if (invoice.currency !== 'PYG') {
+    throw new InvalidKudeInvoiceError('currency', 'only PYG is supported');
+  }
+  if (invoice.qrUrl === '') throw new InvalidKudeInvoiceError('qrUrl', 'required');
+  if (
+    invoice.installments !== undefined &&
+    (!Number.isInteger(invoice.installments) || invoice.installments < 1)
+  ) {
+    throw new InvalidKudeInvoiceError('installments', 'must be a positive integer');
+  }
+}

@@ -8,6 +8,7 @@ import {
   groupCdc,
   KUDE_CONSULT_URL,
   KUDE_TITLE,
+  type KudeInvoice,
 } from './kude-model.js';
 
 describe('KuDE formatting', () => {

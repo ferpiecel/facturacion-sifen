@@ -164,6 +164,62 @@ describe('documents', () => {
     const [row] = await db.update(documents).set({ status: 'signed' }).returning();
     expect(row.status).toBe('signed');
   });
+  /** Spec: HU-E6-03. SIFEN outcomes are entered once, from `submitted`, and never regress. */
+  describe('status transitions', () => {
+    const move = (
+      db: DatabaseHandle['db'],
+      tenantId: string,
+      set: Partial<typeof documents.$inferInsert>,
+    ) =>
+      withTenantTransaction(db, tenantId, (tx) =>
+        tx.update(documents).set(set).where(eq(documents.cdc, CDC_A)).returning(),
+      );
+
+    it.each([
+      ['accepted', 'signed'],
+      ['accepted', 'submitted'],
+      ['signed', 'queued'],
+      ['queued', 'submitted'],
+      ['submitted', 'approved'],
+      ['submitted', 'approved_with_observations'],
+      ['submitted', 'rejected'],
+      ['approved', 'cancelled'],
+      ['rejected', 'corrected'],
+    ])('allows %s -> %s', async (from, to) => {
+      const { db, a, setupA, doc } = await seed();
+      await db.insert(documents).values(doc(a, setupA, { status: from }));
+      const [row] = await move(db, a, { status: to });
+      expect(row.status).toBe(to);
+    });
+
+    it.each([
+      ['accepted', 'approved'],
+      ['signed', 'rejected'],
+      ['submitted', 'accepted'],
+      ['approved', 'submitted'],
+      ['approved', 'rejected'],
+      ['rejected', 'approved'],
+      ['approved_with_observations', 'approved'],
+      ['cancelled', 'approved'],
+      ['cancelled', 'accepted'],
+    ])('rejects %s -> %s', async (from, to) => {
+      const { db, a, setupA, doc } = await seed();
+      await db.insert(documents).values(doc(a, setupA, { status: from }));
+      expect(await causeOf(move(db, a, { status: to }))).toContain('invalid status transition');
+    });
+
+    it('stores the SIFEN messages next to the outcome', async () => {
+      const { db, a, setupA, doc } = await seed();
+      await db.insert(documents).values(doc(a, setupA, { status: 'submitted' }));
+      const messages = [{ code: '1005', message: 'Extemporáneo' }];
+      const [row] = await move(db, a, {
+        status: 'approved_with_observations',
+        sifenMessages: messages,
+      });
+      expect(row.sifenMessages).toEqual(messages);
+    });
+  });
+
   it('rejects an environment that differs from the tenant environment on insert', async () => {
     const { db, a, setupA, doc } = await seed();
     const message = await causeOf(

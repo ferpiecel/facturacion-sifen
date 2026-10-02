@@ -169,6 +169,13 @@
       "when": 1790942327845,
       "tag": "0023_documents_idempotency",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1790942955221,
+      "tag": "0024_poll_results",
+      "breakpoints": true
     }
   ]
 }

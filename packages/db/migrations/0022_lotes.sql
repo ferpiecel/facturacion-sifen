@@ -51,6 +51,18 @@ BEGIN
       OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
       RAISE EXCEPTION 'lotes: identity columns are immutable';
     END IF;
+    IF NEW.status IS DISTINCT FROM OLD.status AND NOT (
+      (OLD.status = 'pending' AND NEW.status = 'sending')
+      OR (OLD.status = 'sending' AND NEW.status IN ('sent', 'rejected', 'unknown'))
+      -- HU-E6-04 recovery of a lote whose answer was lost.
+      OR (OLD.status = 'unknown' AND NEW.status IN ('sent', 'rejected'))
+    ) THEN
+      RAISE EXCEPTION 'lotes: invalid status transition % -> %', OLD.status, NEW.status;
+    END IF;
+    IF (OLD.sent_at IS NOT NULL AND NEW.sent_at IS DISTINCT FROM OLD.sent_at)
+      OR (OLD.sifen_protocol IS NOT NULL AND NEW.sifen_protocol IS DISTINCT FROM OLD.sifen_protocol) THEN
+      RAISE EXCEPTION 'lotes: sent_at and sifen_protocol are write-once';
+    END IF;
   END IF;
   RETURN NEW;
 END;
@@ -58,6 +70,8 @@ $$;
 --> statement-breakpoint
 CREATE TRIGGER "lotes_guard" BEFORE INSERT OR UPDATE ON "lotes"
 FOR EACH ROW EXECUTE FUNCTION "lotes_guard"();
+--> statement-breakpoint
+CREATE INDEX "lote_documents_document_id_idx" ON "lote_documents" USING btree ("document_id");
 --> statement-breakpoint
 -- RLS + grants (same pattern as 0021; no DELETE: lotes are transmission records).
 ALTER TABLE "lotes" ENABLE ROW LEVEL SECURITY;

@@ -542,7 +542,23 @@
           "notNull": true
         }
       },
-      "indexes": {},
+      "indexes": {
+        "lote_documents_document_id_idx": {
+          "name": "lote_documents_document_id_idx",
+          "columns": [
+            {
+              "expression": "document_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "lote_documents_tenant_id_tenants_id_fk": {
           "name": "lote_documents_tenant_id_tenants_id_fk",

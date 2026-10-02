@@ -664,6 +664,7 @@ export const loteDocuments = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.loteId, table.documentId] }),
+    index('lote_documents_document_id_idx').on(table.documentId),
     foreignKey({
       columns: [table.tenantId, table.loteId],
       foreignColumns: [lotes.tenantId, lotes.id],

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { DatabaseHandle } from '../src/client.js';
 import {
   documents,
@@ -143,18 +143,111 @@ describe('lotes', () => {
     expect(message).toContain('environment must match');
   });
 
-  it('makes the identity columns immutable but lets the state advance', async () => {
+  /** Runs the update as app_user inside the tenant's transaction (the guard must hold there). */
+  const update = (
+    db: DatabaseHandle['db'],
+    tenantId: string,
+    id: string,
+    set: Partial<typeof lotes.$inferInsert>,
+  ) =>
+    withTenantTransaction(db, tenantId, (tx) =>
+      tx.update(lotes).set(set).where(eq(lotes.id, id)).returning(),
+    );
+
+  it('makes the identity columns immutable for app_user', async () => {
     const { db, a, lote } = await seed();
-    await db.insert(lotes).values(lote(a));
-    expect(await causeOf(db.update(lotes).set({ documentType: 2 }))).toContain('immutable');
-    expect(await causeOf(db.update(lotes).set({ environment: 'production' }))).toContain(
+    const [row] = await db.insert(lotes).values(lote(a)).returning();
+    expect(await causeOf(update(db, a, row.id, { documentType: 2 }))).toContain('immutable');
+    expect(await causeOf(update(db, a, row.id, { environment: 'production' }))).toContain(
       'environment must match',
     );
+    expect(
+      await causeOf(update(db, a, row.id, { createdAt: new Date('2020-01-01T00:00:00Z') })),
+    ).toContain('immutable');
+  });
+
+  it('lets the status advance pending, sending, sent and records the write-once fields', async () => {
+    const { db, a, lote } = await seed();
+    const [row] = await db.insert(lotes).values(lote(a)).returning();
+    await update(db, a, row.id, { status: 'sending' });
+    const sentAt = new Date('2026-10-01T12:00:00Z');
+    const [sent] = await update(db, a, row.id, {
+      status: 'sent',
+      sifenProtocol: '4500123',
+      sentAt,
+    });
+    expect(sent).toMatchObject({ status: 'sent', sifenProtocol: '4500123', sentAt });
+  });
+
+  it.each([
+    ['pending', 'sent'],
+    ['pending', 'rejected'],
+    ['sending', 'pending'],
+    ['sent', 'pending'],
+    ['sent', 'sending'],
+    ['sent', 'rejected'],
+    ['sent', 'unknown'],
+    ['rejected', 'sent'],
+    ['rejected', 'pending'],
+    ['unknown', 'pending'],
+    ['unknown', 'sending'],
+  ])('rejects the transition %s -> %s', async (from, to) => {
+    const { db, a, lote } = await seed();
     const [row] = await db
-      .update(lotes)
-      .set({ status: 'sent', sifenProtocol: '4500123' })
+      .insert(lotes)
+      .values(lote(a, { status: from }))
       .returning();
-    expect(row.sifenProtocol).toBe('4500123');
+    expect(await causeOf(update(db, a, row.id, { status: to }))).toContain(
+      'invalid status transition',
+    );
+  });
+
+  it.each([
+    ['pending', 'sending'],
+    ['sending', 'sent'],
+    ['sending', 'rejected'],
+    ['sending', 'unknown'],
+    ['unknown', 'sent'],
+    ['unknown', 'rejected'],
+  ])('allows the transition %s -> %s', async (from, to) => {
+    const { db, a, lote } = await seed();
+    const [row] = await db
+      .insert(lotes)
+      .values(lote(a, { status: from }))
+      .returning();
+    const [updated] = await update(db, a, row.id, { status: to });
+    expect(updated.status).toBe(to);
+  });
+
+  it('allows updating other columns without changing the status', async () => {
+    const { db, a, lote } = await seed();
+    const [row] = await db
+      .insert(lotes)
+      .values(lote(a, { status: 'sent' }))
+      .returning();
+    const [updated] = await update(db, a, row.id, { responseMessage: 'note' });
+    expect(updated.responseMessage).toBe('note');
+  });
+
+  it('makes sent_at and sifen_protocol write-once', async () => {
+    const { db, a, lote } = await seed();
+    const [row] = await db
+      .insert(lotes)
+      .values(lote(a, { status: 'sent', sifenProtocol: '4500123', sentAt: new Date('2026-10-01') }))
+      .returning();
+    expect(await causeOf(update(db, a, row.id, { sifenProtocol: '999' }))).toContain('write-once');
+    expect(await causeOf(update(db, a, row.id, { sentAt: new Date('2026-10-02') }))).toContain(
+      'write-once',
+    );
+    expect(await causeOf(update(db, a, row.id, { sifenProtocol: null }))).toContain('write-once');
+  });
+
+  it('indexes lote_documents by document_id', async () => {
+    const { db } = await seed();
+    const result = await db.execute(
+      sql`select 1 from pg_indexes where tablename = 'lote_documents' and indexdef like '%(document_id)%'`,
+    );
+    expect(result.rows).toHaveLength(1);
   });
 
   it('links a document to a lote once, and only within the same tenant', async () => {

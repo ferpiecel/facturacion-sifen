@@ -27,7 +27,6 @@ describe('DrizzleLotePollStore', () => {
   let tenantId: string;
   let otherTenantId: string;
   let loteId: string;
-  let docIds: Record<string, string>;
 
   beforeEach(async () => {
     handle = createPgliteDatabase();
@@ -81,7 +80,6 @@ describe('DrizzleLotePollStore', () => {
         })),
       )
       .returning();
-    docIds = { [CDC_A]: docs[0].id, [CDC_B]: docs[1].id };
     const [lote] = await db
       .insert(lotes)
       .values({

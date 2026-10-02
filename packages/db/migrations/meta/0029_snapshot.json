@@ -1,6 +1,6 @@
 {
-  "id": "2f3ade67-549e-414c-a020-a8a6bd18154f",
-  "prevId": "dbd8b9f7-39d5-4068-a065-a8aceec9839e",
+  "id": "15d92276-5fb7-4287-b09e-ab36cf149292",
+  "prevId": "5f046f8d-c382-4c98-9dc6-085be7297244",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1312,6 +1312,24 @@
           "primaryKey": false,
           "notNull": true
         },
+        "phone": {
+          "name": "phone",
+          "type": "varchar(15)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "email": {
+          "name": "email",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "commercial_name": {
+          "name": "commercial_name",
+          "type": "varchar(30)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -1424,6 +1442,18 @@
         "tenant_establishments_city_code_format": {
           "name": "tenant_establishments_city_code_format",
           "value": "\"tenant_establishments\".\"city_code\" ~ '^[0-9]{1,5}$'"
+        },
+        "tenant_establishments_phone_length": {
+          "name": "tenant_establishments_phone_length",
+          "value": "char_length(\"tenant_establishments\".\"phone\") BETWEEN 6 AND 15 AND \"tenant_establishments\".\"phone\" !~ '^[[:space:]]*$' AND \"tenant_establishments\".\"phone\" !~ '[[:cntrl:]]'"
+        },
+        "tenant_establishments_email_format": {
+          "name": "tenant_establishments_email_format",
+          "value": "\"tenant_establishments\".\"email\" ~ '^[0-9a-zA-Z]([0-9a-zA-Z._-])*@([0-9a-zA-Z][0-9a-zA-Z_-]*[.])+[a-zA-Z]{2,9}$'"
+        },
+        "tenant_establishments_commercial_name_length": {
+          "name": "tenant_establishments_commercial_name_length",
+          "value": "char_length(\"tenant_establishments\".\"commercial_name\") >= 1 AND \"tenant_establishments\".\"commercial_name\" !~ '^[[:space:]]*$'"
         }
       },
       "isRLSEnabled": false

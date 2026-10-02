@@ -6,8 +6,9 @@ const at = (ms: number) => new Date(first.getTime() + ms);
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 
-/** random = 1 -> no jitter reduction (the nominal delay). */
-const delay = (failed: number, now = first, random = () => 1) => {
+/** The largest random() below 1: no jitter reduction, the nominal delay. */
+const ALMOST_ONE = 1 - Number.EPSILON;
+const delay = (failed: number, now = first, random = () => ALMOST_ONE) => {
   const next = nextRetryAt({ firstAttemptAt: first, now, failedAttempts: failed, random });
   return next === null ? null : next.getTime() - now.getTime();
 };
@@ -38,7 +39,7 @@ describe('webhook retry backoff (HU-E11-01)', () => {
   it('never schedules past the 24 h deadline: the last attempt lands on it', () => {
     const now = at(RETRY_WINDOW_MS - MIN);
     expect(
-      nextRetryAt({ firstAttemptAt: first, now, failedAttempts: 20, random: () => 1 }),
+      nextRetryAt({ firstAttemptAt: first, now, failedAttempts: 20, random: () => ALMOST_ONE }),
     ).toEqual(at(RETRY_WINDOW_MS));
   });
 
@@ -49,5 +50,19 @@ describe('webhook retry backoff (HU-E11-01)', () => {
 
   it('rejects a non-positive attempt count', () => {
     expect(() => delay(0)).toThrow(RangeError);
+  });
+
+  it.each([-0.1, 1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    'rejects a random() outside [0, 1): %s',
+    (value) => {
+      expect(() => delay(1, first, () => value)).toThrow(RangeError);
+    },
+  );
+
+  it('rejects invalid dates', () => {
+    const bad = new Date(Number.NaN);
+    const input = { failedAttempts: 1, random: () => 0.5 };
+    expect(() => nextRetryAt({ ...input, firstAttemptAt: bad, now: first })).toThrow(RangeError);
+    expect(() => nextRetryAt({ ...input, firstAttemptAt: first, now: bad })).toThrow(RangeError);
   });
 });

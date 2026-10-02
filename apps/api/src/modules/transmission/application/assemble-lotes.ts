@@ -26,6 +26,7 @@ export interface LoteAssemblyStore {
 export interface LoteAssemblerDeps {
   readonly store: LoteAssemblyStore;
   readonly measureMessage: LoteBuilderDeps['measureMessage'];
+  readonly logger?: { warn(message: string): void };
 }
 
 export interface AssembledLote {
@@ -39,11 +40,17 @@ export interface SkippedDocument {
   readonly reason: string;
 }
 
+export interface ConflictedDocument {
+  readonly cdc: string;
+  /** Sanitized, capped description when the create threw; absent when a document was just no longer ready. */
+  readonly error?: string;
+}
+
 export interface AssembleLotesResult {
   readonly lotes: readonly AssembledLote[];
   readonly skipped: readonly SkippedDocument[];
-  /** Documents of lotes that were not created because one stopped being ready. */
-  readonly conflicted: readonly string[];
+  /** Documents of lotes that were not created: one stopped being ready, or the create failed. */
+  readonly conflicted: readonly ConflictedDocument[];
 }
 
 /**
@@ -74,7 +81,7 @@ export class LoteAssembler {
     }
 
     const lotes: AssembledLote[] = [];
-    const conflicted: string[] = [];
+    const conflicted: ConflictedDocument[] = [];
     for (const { lote, ids } of planned) {
       const cdcs = lote.documents.map((d) => d.cdc);
       let loteId: string | null;
@@ -87,7 +94,7 @@ export class LoteAssembler {
         // Nothing was committed for this lote; its documents stay ready for the next run.
         loteId = null;
       }
-      if (loteId === null) conflicted.push(...cdcs);
+      if (loteId === null) conflicted.push(...cdcs.map((cdc) => ({ cdc })));
       else lotes.push({ loteId, documentType: lote.documentType, cdcs });
     }
     return { lotes, skipped, conflicted };

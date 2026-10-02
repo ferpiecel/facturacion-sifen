@@ -7,6 +7,7 @@ export interface DrizzleLoteAssemblyStoreOptions {
   readonly tenantId: string;
   /** Most documents read per assembly run; the rest wait for the next one. */
   readonly batchSize?: number;
+  readonly now?: () => Date;
 }
 
 const DEFAULT_BATCH_SIZE = 500;

@@ -65,20 +65,21 @@ describe('DrizzleLoteAssemblyStore', () => {
     await handle.close();
   });
 
-  const storeFor = (tenant: string, batchSize?: number) =>
-    createDrizzleLoteAssemblyStore({ db: handle.db, tenantId: tenant, batchSize });
+  const storeFor = (tenant: string, batchSize?: number, now?: () => Date) =>
+    createDrizzleLoteAssemblyStore({ db: handle.db, tenantId: tenant, batchSize, now });
 
   async function addDocument(
     status: string,
     signedXml: string | null = '<rDE/>',
     createdAt?: Date,
+    environment: 'test' | 'production' = 'test',
   ) {
     counter += 1;
     const [row] = await handle.db
       .insert(documents)
       .values({
         tenantId,
-        environment: 'test',
+        environment,
         ...fiscal,
         documentType: 1,
         number: counter,
@@ -132,6 +133,26 @@ describe('DrizzleLoteAssemblyStore', () => {
       const second = await addDocument('signed', '<rDE/>', sameInstant);
       const ids = (await storeFor(tenantId).readyDocuments()).map((d) => d.documentId);
       expect(ids).toEqual([first.id, second.id].sort());
+    });
+
+    it("ignores documents of the tenant's previous environment without starving the rest", async () => {
+      await addDocument('signed');
+      await handle.db
+        .update(tenants)
+        .set({ environment: 'production' })
+        .where(eq(tenants.id, tenantId));
+      const current = await addDocument('signed', '<rDE/>', undefined, 'production');
+      const ready = await storeFor(tenantId, 1).readyDocuments();
+      expect(ready.map((d) => d.documentId)).toEqual([current.id]);
+    });
+
+    it('leaves out documents that a lote in process already carries', async () => {
+      const taken = await addDocument('queued');
+      const freed = await addDocument('queued');
+      await addLote('pending', [taken.id]);
+      await addLote('rejected', [freed.id]);
+      const ready = await storeFor(tenantId).readyDocuments();
+      expect(ready.map((d) => d.documentId)).toEqual([freed.id]);
     });
 
     it('returns nothing for another tenant', async () => {
@@ -247,6 +268,40 @@ describe('DrizzleLoteAssemblyStore', () => {
       });
       expect(loteId).toBeNull();
       expect(await statusOf(document.id)).toBe('signed');
+    });
+
+    it('returns null for a document of another environment or another type', async () => {
+      const stale = await addDocument('signed');
+      await handle.db
+        .update(tenants)
+        .set({ environment: 'production' })
+        .where(eq(tenants.id, tenantId));
+      const store = storeFor(tenantId);
+      expect(await store.createLote({ documentType: 1, documentIds: [stale.id] })).toBeNull();
+      const current = await addDocument('signed', '<rDE/>', undefined, 'production');
+      expect(await store.createLote({ documentType: 4, documentIds: [current.id] })).toBeNull();
+      expect(await statusOf(current.id)).toBe('signed');
+    });
+
+    it('accepts repeated document ids once', async () => {
+      const document = await addDocument('signed');
+      const loteId = await storeFor(tenantId).createLote({
+        documentType: 1,
+        documentIds: [document.id, document.id],
+      });
+      expect(loteId).not.toBeNull();
+      expect(await handle.db.select().from(loteDocuments)).toHaveLength(1);
+    });
+
+    it('stamps updated_at when it queues a document', async () => {
+      const document = await addDocument('signed');
+      const now = new Date('2026-10-05T09:00:00.000Z');
+      await storeFor(tenantId, undefined, () => now).createLote({
+        documentType: 1,
+        documentIds: [document.id],
+      });
+      const [row] = await handle.db.select().from(documents).where(eq(documents.id, document.id));
+      expect(row.updatedAt).toEqual(now);
     });
 
     it('rejects an empty document list', async () => {

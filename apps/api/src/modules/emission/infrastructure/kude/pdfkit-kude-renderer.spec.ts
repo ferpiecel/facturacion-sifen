@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { KudeInvoice, KudeItem } from '../../domain/kude-model.js';
-import { imageSizes, overlaps, pdfText, textItems } from './pdf-inspect.js';
+import { imageSizes, overlaps, pdfText, textItems } from './pdf-inspect.test-helper.js';
 import { PdfkitKudeRenderer } from './pdfkit-kude-renderer.js';
 
 const CDC = '01800695631001001000000612021112917595714694';

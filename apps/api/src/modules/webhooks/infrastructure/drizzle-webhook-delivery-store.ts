@@ -79,11 +79,16 @@ export function createDrizzleWebhookDeliveryStore({
             and(
               eq(webhookDeliveries.id, deliveryId),
               inArray(webhookDeliveries.status, ['pending', 'failed']),
+              // Optimistic guard: the outcome must be the attempt right after the one that was claimed,
+              // so a worker whose lease expired cannot overwrite a newer outcome.
+              eq(webhookDeliveries.attemptCount, outcome.attemptCount - 1),
             ),
           )
           .returning({ id: webhookDeliveries.id });
         if (updated.length !== 1) {
-          throw new Error(`Webhook delivery ${deliveryId} is not pending or failed`);
+          throw new Error(
+            `Webhook delivery ${deliveryId} is not pending or failed at attempt ${String(outcome.attemptCount - 1)}`,
+          );
         }
       });
     },

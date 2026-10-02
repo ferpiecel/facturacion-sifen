@@ -49,6 +49,20 @@ describe('getDocument', () => {
     expect(result?.receiver).toBeNull();
   });
 
+  it.each([
+    ['10.00000000', '10'],
+    ['10', '10'],
+    ['0.50000000', '0.5'],
+    ['0.00000000', '0'],
+    ['100.00000000', '100'],
+  ])('renders the amount %s as %s', async (stored, expected) => {
+    const result = await createGetDocument({
+      reader: readerWith({ ...VIEW, totalAmount: stored }).reader,
+    })('t1', { id: 'd1' });
+
+    expect(result?.totals.amount).toBe(expected);
+  });
+
   it('looks up by id or by cdc inside the given tenant, and returns null when absent', async () => {
     const { reader, findById, findByCdc } = readerWith(null);
     const get = createGetDocument({ reader });

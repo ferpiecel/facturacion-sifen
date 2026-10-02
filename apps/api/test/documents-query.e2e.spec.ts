@@ -2,12 +2,14 @@ import { type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
 import {
   createPgliteDatabase,
+  documents,
   tenantEstablishments,
   tenantExpeditionPoints,
   tenantFiscalProfiles,
   tenantTimbrados,
   type DatabaseHandle,
 } from '@sifen/db';
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTenant, issueApiKey } from '../src/cli/commands.js';
 import { createHttpAdapter } from '../src/bootstrap/http.js';
@@ -150,6 +152,40 @@ describe('GET /v1/documents (e2e)', () => {
     expect((await get('/v1/documents/not-a-uuid', reader)).statusCode).toBe(400);
     expect((await get('/v1/documents?cdc=123', reader)).statusCode).toBe(400);
     expect((await get('/v1/documents', reader)).statusCode).toBe(400);
+    const cdc = '1'.repeat(44);
+    expect((await get(`/v1/documents?cdc=${cdc}&cdc=${cdc}`, reader)).statusCode).toBe(400);
+  });
+
+  it("answers 404 with the same body for an unknown id and another tenant's id", async () => {
+    const { document_id: id } = await create(writer);
+
+    const foreign = await get(`/v1/documents/${id}`, other);
+    const unknown = await get(`/v1/documents/${crypto.randomUUID()}`, other);
+
+    expect([foreign.statusCode, unknown.statusCode]).toEqual([404, 404]);
+    expect(foreign.json()).toEqual(unknown.json());
+  });
+
+  it('answers 403 on POST /v1/documents for a read-only key', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/documents',
+      payload: BODY,
+      headers: { ...auth(other), 'idempotency-key': 'read-only' },
+    });
+
+    expect(response.statusCode).toBe(403);
+  });
+
+  it("answers 404 for a document of the tenant's other environment, by id and by cdc", async () => {
+    const { document_id: id, cdc } = await create(writer);
+    await handle.db
+      .update(documents)
+      .set({ environment: 'production' })
+      .where(eq(documents.id, id));
+
+    expect((await get(`/v1/documents/${id}`, reader)).statusCode).toBe(404);
+    expect((await get(`/v1/documents?cdc=${cdc}`, reader)).statusCode).toBe(404);
   });
 
   it('answers 401 without a key and 403 without the documents:read scope', async () => {

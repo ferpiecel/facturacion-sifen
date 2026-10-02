@@ -44,7 +44,7 @@ lotes in process), plan v1.1 §8.1, backlog HU-E6-01/02/03.
         (`signInvoiceXml`, dFecFirma Asuncion), adds the QR (`addQrToSignedInvoice`: strict XSD + hash
         check) and stores `signed_xml`/`signed_at` with `accepted -> signed` in one store call. Fails
         closed (typed errors, document stays `accepted`); p12 and CSC buffers are zeroized.
-  - [ ] **S4b — Drizzle `SigningStore` + sources.** `load` rebuilds `InvoiceDraft` and
+  - [x] **S4b — Drizzle `SigningStore` + sources.** `load` rebuilds `InvoiceDraft` and
         `InvoiceXmlContext` (issuer profile, establishment, point, timbrado, numbering from the document row,
         receiver data and line codes from `payload`; the establishment contact is a known gap, ADR-0012
         note in `invoice-xml.ts`); `markSigned` is one tenant transaction (`UPDATE ... WHERE status =
@@ -72,3 +72,12 @@ lotes in process), plan v1.1 §8.1, backlog HU-E6-01/02/03.
 - Operator CLI: `establishment:add --phone --email --name` and `establishment:contact`.
 - Signing (S4b) refuses an establishment without phone/email (typed error) and maps `dDenSuc` from
   `commercial_name`, falling back to the issuer's trade/legal name (<= 30 chars) when absent.
+
+## S4b findings
+
+- The accepted payload (`POST /v1/documents`) carries only the receiver RUC and bare items, but the DE needs
+  the receiver's name/address/district/city (D2) and each item's code, description and unit (E7). The
+  Drizzle `SigningStore.load` reads them from extra payload fields and fails with the exact missing paths
+  (`SigningDataIncompleteError`) rather than inventing them: **the request schema must be extended (product
+  decision, HU-E5) before real documents can be signed.**
+- `CscSource` uses the lowest slot of the tenant's CSCs for the environment (approved).

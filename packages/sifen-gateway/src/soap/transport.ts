@@ -1,3 +1,4 @@
+import type { ClientRequest } from 'node:http';
 import { request } from 'node:https';
 import { SifenProtocolError, SifenTimeoutError, SifenTransportError } from '../errors.ts';
 import type { SifenOperation } from '../port.ts';
@@ -51,60 +52,15 @@ export function createHttpsSoapTransport(options: HttpsTransportOptions): SoapTr
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
 
-  async function post({ operation, url, body }: SoapRequest): Promise<SoapResponse> {
-    let credential: MtlsCredential;
-    try {
-      credential = await options.credentials.load();
-    } catch (cause) {
-      throw new SifenTransportError(operation, { cause });
-    }
-
+  function post({ operation, url, body }: SoapRequest): Promise<SoapResponse> {
     return new Promise<SoapResponse>((resolve, reject) => {
-      const payload = Buffer.from(body, 'utf8');
-      const req = request(
-        url,
-        {
-          method: 'POST',
-          agent: false,
-          key: credential.key,
-          cert: credential.cert,
-          ...(credential.ca === undefined ? {} : { ca: credential.ca as string | Buffer }),
-          minVersion: 'TLSv1.2',
-          rejectUnauthorized: true,
-          headers: {
-            'content-type': 'application/soap+xml; charset=utf-8',
-            'content-length': payload.length,
-          },
-        },
-        (res) => {
-          const chunks: Buffer[] = [];
-          let size = 0;
-          res.on('data', (chunk: Buffer) => {
-            size += chunk.length;
-            if (size > maxBytes) {
-              fail(new SifenProtocolError(operation, `response exceeds ${String(maxBytes)} bytes`));
-              return;
-            }
-            chunks.push(chunk);
-          });
-          res.on('end', () => {
-            settle(() => {
-              resolve({
-                status: res.statusCode ?? 0,
-                body: Buffer.concat(chunks).toString('utf8'),
-              });
-            });
-          });
-          res.on('error', (cause) => {
-            fail(new SifenTransportError(operation, { cause }));
-          });
-        },
-      );
-
       let done = false;
+      let active: ClientRequest | undefined;
+      // One deadline covers credential loading, connect, request and response.
       const timer = setTimeout(() => {
         fail(new SifenTimeoutError(operation));
       }, timeoutMs);
+
       function settle(action: () => void): void {
         if (done) return;
         done = true;
@@ -113,14 +69,74 @@ export function createHttpsSoapTransport(options: HttpsTransportOptions): SoapTr
       }
       function fail(error: Error): void {
         settle(() => {
-          req.destroy();
+          active?.destroy();
           reject(error);
         });
       }
-      req.on('error', (cause) => {
+      const failTransport = (cause: unknown): void => {
         fail(new SifenTransportError(operation, { cause }));
-      });
-      req.end(payload);
+      };
+
+      function send(credential: MtlsCredential): void {
+        const payload = Buffer.from(body, 'utf8');
+        const req = request(
+          url,
+          {
+            method: 'POST',
+            agent: false,
+            key: credential.key,
+            cert: credential.cert,
+            ...(credential.ca === undefined ? {} : { ca: credential.ca as string | Buffer }),
+            minVersion: 'TLSv1.2',
+            rejectUnauthorized: true,
+            headers: {
+              'content-type': 'application/soap+xml; charset=utf-8',
+              'content-length': payload.length,
+            },
+          },
+          (res) => {
+            const chunks: Buffer[] = [];
+            let size = 0;
+            res.on('data', (chunk: Buffer) => {
+              size += chunk.length;
+              if (size > maxBytes) {
+                fail(
+                  new SifenProtocolError(operation, `response exceeds ${String(maxBytes)} bytes`),
+                );
+                return;
+              }
+              chunks.push(chunk);
+            });
+            res.on('end', () => {
+              settle(() => {
+                try {
+                  const text = new TextDecoder('utf-8', { fatal: true }).decode(
+                    Buffer.concat(chunks),
+                  );
+                  resolve({ status: res.statusCode ?? 0, body: text });
+                } catch (cause) {
+                  reject(
+                    new SifenProtocolError(operation, 'response is not valid UTF-8', { cause }),
+                  );
+                }
+              });
+            });
+            res.on('error', failTransport);
+          },
+        );
+        active = req;
+        req.on('error', failTransport);
+        req.end(payload);
+      }
+
+      options.credentials.load().then((credential) => {
+        if (done) return;
+        try {
+          send(credential);
+        } catch (cause) {
+          failTransport(cause);
+        }
+      }, failTransport);
     });
   }
 

@@ -58,6 +58,8 @@ function setup(state: LotePollState | null, nowOffsetMs: number) {
   return { gateway, store, poll, now };
 }
 
+const reasonOf = (outcome: { status: string; reason?: string }): string => outcome.reason ?? '';
+
 const run = (poll: PollLoteResult) => poll.execute({ loteId: 'lote-1', dId: 7n });
 
 describe('PollLoteResult', () => {
@@ -185,14 +187,16 @@ describe('PollLoteResult', () => {
     const { poll, gateway, store } = setup(sentLote(), 11 * MINUTE);
     gateway.enqueue('consultarLote', response);
     const outcome = await run(poll);
-    expect(outcome).toMatchObject({ status: 'recovery', reason: expect.stringContaining(code) });
+    expect(outcome).toMatchObject({ status: 'recovery' });
+    expect(reasonOf(outcome)).toContain(code);
     expect(store.outcomes).toEqual([outcome]);
   });
 
   it('hands off to recovery past the 48 h window without calling SIFEN', async () => {
     const { poll, gateway, store } = setup(sentLote(), 48 * HOUR + 1);
     const outcome = await run(poll);
-    expect(outcome).toMatchObject({ status: 'recovery', reason: expect.stringContaining('48') });
+    expect(outcome).toMatchObject({ status: 'recovery' });
+    expect(reasonOf(outcome)).toContain('48 h');
     expect(gateway.callsTo('consultarLote')).toHaveLength(0);
     expect(store.outcomes).toEqual([outcome]);
   });
@@ -205,21 +209,21 @@ describe('PollLoteResult', () => {
 
   it('treats a gateway error as a retryable pending outcome', async () => {
     const { poll, gateway, now } = setup(sentLote(), 11 * MINUTE);
-    gateway.enqueue('consultarLote', new SifenTimeoutError('slow'));
-    expect(await run(poll)).toMatchObject({
+    gateway.enqueue('consultarLote', new SifenTimeoutError('consultarLote'));
+    const outcome = await run(poll);
+    expect(outcome).toMatchObject({
       status: 'pending',
       nextPollAt: new Date(now.getTime() + 10 * MINUTE),
-      reason: expect.stringContaining('slow'),
     });
+    expect(reasonOf(outcome)).toContain('timed out');
   });
 
   it('treats an unexpected code as pending, quoting it', async () => {
     const { poll, gateway } = setup(sentLote(), 11 * MINUTE);
     gateway.enqueue('consultarLote', { dCodRes: '0999', dMsgRes: 'raro', resultados: [] });
-    expect(await run(poll)).toMatchObject({
-      status: 'pending',
-      reason: expect.stringContaining('0999'),
-    });
+    const outcome = await run(poll);
+    expect(outcome).toMatchObject({ status: 'pending' });
+    expect(reasonOf(outcome)).toContain('0999');
   });
 
   it('calls SIFEN once per execution', async () => {

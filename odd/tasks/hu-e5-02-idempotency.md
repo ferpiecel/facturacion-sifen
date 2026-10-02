@@ -15,7 +15,7 @@ Acceptance: the same `Idempotency-Key` returns the same response; a different pa
 
 ## Slices (each <= 400 lines)
 
-- [ ] S1 (`feat/hu-e5-02-idempotency`, ~180 lines): migration 0023 + schema + guard + rollback + db tests.
+- [x] S1 (`feat/hu-e5-02-idempotency`, ~180 lines): migration 0023 + schema + guard + rollback + db tests.
 - [ ] S2 (`feat/hu-e5-02-idempotency-core`, ~385 lines): canonical request hash, `AcceptInvoice` lookup/replay/409/race retry, Drizzle adapter; the controller sends a throwaway key until S3.
 - [ ] S3 (`feat/hu-e5-02-idempotency-api`, ~175 lines): required `Idempotency-Key` header (400), 409 mapping, e2e.
 

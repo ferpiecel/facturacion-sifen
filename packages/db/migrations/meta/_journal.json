@@ -162,6 +162,13 @@
       "when": 1790941047840,
       "tag": "0022_lotes",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1790942327845,
+      "tag": "0023_documents_idempotency",
+      "breakpoints": true
     }
   ]
 }

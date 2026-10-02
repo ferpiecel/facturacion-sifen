@@ -28,9 +28,9 @@ lotes in process), plan v1.1 §8.1, backlog HU-E6-01/02/03.
       documents by (RUC, document type), fills `LoteBuilder`, starts a new lote on `lote-full` /
       `size-exceeded`, skips `cdc-in-process` / `duplicate-cdc` / a document too big alone, and reports
       conflicts when a document stopped being ready between read and create (`createLote` returns null).
-- [ ] **S2 — Dispatch store marks documents `submitted`.** `record('sent')` also moves the lote's
+- [x] **S2 — Dispatch store marks documents `submitted`.** `record('sent')` also moves the lote's
       `queued` documents to `submitted` in the same tenant transaction (no migration; pglite test).
-- [ ] **S3 — Migration 0025 + Drizzle `LoteAssemblyStore`.** `documents.signed_xml text` and
+- [x] **S3 — Migration 0025 + Drizzle `LoteAssemblyStore`.** `documents.signed_xml text` and
       `signed_at timestamptz` (write-once once set, added to `documents_guard` keeping every existing
       rule); adapter: ready = status `signed`|`queued` with `signed_xml`, `cdcsInProcess` over
       `lote_documents` x `lotes` with status in (`pending`,`sending`,`sent`,`unknown`,`recovery`);

@@ -26,6 +26,7 @@ export interface LoteAssemblyStore {
 export interface LoteAssemblerDeps {
   readonly store: LoteAssemblyStore;
   readonly measureMessage: LoteBuilderDeps['measureMessage'];
+  readonly logger?: { warn(message: string): void };
 }
 
 export interface AssembledLote {
@@ -39,11 +40,17 @@ export interface SkippedDocument {
   readonly reason: string;
 }
 
+export interface ConflictedDocument {
+  readonly cdc: string;
+  /** Sanitized, capped description when the create threw; absent when a document was just no longer ready. */
+  readonly error?: string;
+}
+
 export interface AssembleLotesResult {
   readonly lotes: readonly AssembledLote[];
   readonly skipped: readonly SkippedDocument[];
-  /** Documents of lotes that were not created because one stopped being ready. */
-  readonly conflicted: readonly string[];
+  /** Documents of lotes that were not created: one stopped being ready, or the create failed. */
+  readonly conflicted: readonly ConflictedDocument[];
 }
 
 /**
@@ -56,25 +63,44 @@ export class LoteAssembler {
   constructor(private readonly deps: LoteAssemblerDeps) {}
 
   async assemble(): Promise<AssembleLotesResult> {
-    const ready = await this.deps.store.readyDocuments();
-    if (ready.length === 0) return { lotes: [], skipped: [], conflicted: [] };
-    const inProcess = await this.deps.store.cdcsInProcess(ready.map((d) => d.cdc));
+    const all = await this.deps.store.readyDocuments();
+    if (all.length === 0) return { lotes: [], skipped: [], conflicted: [] };
 
     const skipped: SkippedDocument[] = [];
+    const ready = all.filter((document) => {
+      if (isValidCdc(document.cdc)) return true;
+      skipped.push({ cdc: document.cdc, reason: 'invalid-cdc' });
+      return false;
+    });
+    if (ready.length === 0) return { lotes: [], skipped, conflicted: [] };
+    const inProcess = await this.deps.store.cdcsInProcess(ready.map((d) => d.cdc));
+
     const planned: Planned[] = [];
     for (const group of groupByRucAndType(ready).values()) {
       planned.push(...this.fill(group, inProcess, skipped));
     }
 
     const lotes: AssembledLote[] = [];
-    const conflicted: string[] = [];
+    const conflicted: ConflictedDocument[] = [];
     for (const { lote, ids } of planned) {
       const cdcs = lote.documents.map((d) => d.cdc);
-      const loteId = await this.deps.store.createLote({
-        documentType: Number(lote.documentType),
-        documentIds: ids,
-      });
-      if (loteId === null) conflicted.push(...cdcs);
+      let loteId: string | null;
+      let error: string | undefined;
+      try {
+        loteId = await this.deps.store.createLote({
+          documentType: Number(lote.documentType),
+          documentIds: ids,
+        });
+      } catch (cause) {
+        // Nothing was committed for this lote; its documents stay ready for the next run.
+        loteId = null;
+        error = describeError(cause);
+        this.deps.logger?.warn(
+          `LoteAssembler: createLote failed for ${String(cdcs.length)} document(s): ${error}`,
+        );
+      }
+      if (loteId === null)
+        conflicted.push(...cdcs.map((cdc) => (error ? { cdc, error } : { cdc })));
       else lotes.push({ loteId, documentType: lote.documentType, cdcs });
     }
     return { lotes, skipped, conflicted };
@@ -120,6 +146,24 @@ export class LoteAssembler {
 interface Planned {
   readonly lote: Lote;
   readonly ids: readonly string[];
+}
+
+const MAX_ERROR_LENGTH = 200;
+
+/** Error class and message on one line, capped: enough to diagnose, bounded to store or log. */
+function describeError(cause: unknown): string {
+  const name = cause instanceof Error ? cause.name : 'Error';
+  const message = cause instanceof Error ? cause.message : String(cause);
+  return `${name}: ${message}`.replace(/\s+/g, ' ').slice(0, MAX_ERROR_LENGTH);
+}
+
+function isValidCdc(cdc: string): boolean {
+  try {
+    parseCdc(cdc);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function groupByRucAndType(documents: readonly ReadyDocument[]): Map<string, ReadyDocument[]> {

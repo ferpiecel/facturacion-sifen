@@ -20,7 +20,8 @@ delivery history (backlog HU-E11-01; ADR-0011 anti-replay 5 min; plan v1.1 §19 
       (0027+ may be taken by the e6 writer; renumber at rebase, 0028 if so.)
 - [ ] S3 dispatcher service + `WebhookHttpPort` (fake in tests): SSRF guard (https only; resolve DNS, block
       private/loopback/link-local/CGNAT/metadata; connect to the vetted IP; no redirects; timeout; response cap),
-      2xx = delivered, else `nextRetryAt`, null = dead; secret opened with `EnvelopeCipher` (new kind `webhook`).
+      re-checked on EVERY attempt (DNS can change; pin the vetted IP); 2xx = delivered, else `nextRetryAt`, null = dead;
+      the db only checks the url shape, all SSRF defence lives here; secret opened with `EnvelopeCipher` (new kind `webhook`).
 - [ ] S4 outbox: enqueue `webhook_deliveries` rows in the same tenant transaction as the document status change
       (approved / approved_with_observations / rejected / cancelled / number_voided), idempotent per (event, endpoint).
 - [ ] S5 API: register endpoint (secret returned once), rotate secret (overlap window), list/replay deliveries.
@@ -39,6 +40,14 @@ Route: delegated writer per slice; strict TDD, RED commit then GREEN commit.
   `dead` status of `webhook_deliveries`, queryable and replayable, not a separate queue; BullMQ stays the scheduler).
 - `created_at` is UTC ISO (the plan sample shows -03:00; UTC removes ambiguity). Event id `evt_<alnum>` (ULID-compatible).
 - Empty events filter = all events.
+
+- Endpoint url: lowercase `https://` only (scheme case-insensitivity is not worth a second spelling), non-empty host,
+  no userinfo, optional port, <= 2048 chars. DNS/IP checks are S3's job, not the database's.
+- Secret rotation is enforced by the `webhook_endpoints` guard trigger, so even a tenant credential cannot swap
+  the secret: `sealed` changes only with `secret_version + 1`, `previous_sealed = old sealed` and an overlap
+  `previous_expires_at` in (now, now + 7 days]; previous_* is cleared only after it expired. The dispatcher signs
+  with the current secret plus the previous one while it is unexpired (header carries both `v1`).
+- Events filter: empty = all events; duplicates rejected (`webhook_events_unique`).
 
 ## Verification (S1)
 

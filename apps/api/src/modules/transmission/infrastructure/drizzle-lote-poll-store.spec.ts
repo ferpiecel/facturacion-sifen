@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import {
   createPgliteDatabase,
   documents,
@@ -197,6 +197,21 @@ describe('DrizzleLotePollStore', () => {
     expect(applied).toBe(false);
     expect((await readLote()).status).toBe('sent');
     expect((await readDoc(CDC_A)).status).toBe('submitted');
+  });
+
+  it('matches next_poll_at even when it was stored with microseconds', async () => {
+    await handle.db.execute(
+      sql`update lotes set next_poll_at = '2026-10-01 12:10:00.123456+00' where id = ${loteId}`,
+    );
+    const store = storeFor(tenantId);
+    const state = await store.load(loteId);
+    expect(state?.nextPollAt).toEqual(new Date('2026-10-01T12:10:00.123Z'));
+    const applied = await store.record(loteId, processed, {
+      ...guard,
+      expectedNextPollAt: state?.nextPollAt as Date,
+    });
+    expect(applied).toBe(true);
+    expect((await readLote()).status).toBe('processed');
   });
 
   it('writes nothing when the lote is no longer sent', async () => {

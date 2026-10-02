@@ -3,10 +3,10 @@ import type { QrEnvironment } from './qr.js';
 /** MT v150 13.3: the KuDE denomination for an electronic invoice (FE). */
 export const KUDE_TITLE = 'KuDE de Factura Electrónica';
 
-/** MT v150 13.4.4: consultation portal per environment (no trailing slash, no query). */
+/** MT v150 13.4.4: consultation portal per environment (with the trailing slash of the MT). */
 export const KUDE_CONSULT_URL: Readonly<Record<QrEnvironment, string>> = {
-  production: 'https://ekuatia.set.gov.py/consultas',
-  test: 'https://ekuatia.set.gov.py/consultas-test',
+  production: 'https://ekuatia.set.gov.py/consultas/',
+  test: 'https://ekuatia.set.gov.py/consultas-test/',
 };
 
 export interface KudeItem {
@@ -64,8 +64,12 @@ export interface KudeInvoice {
   issuedAt: string;
   /** E602 */
   operationCondition: string;
-  /** D016 */
+  /** D016. Amounts are PYG integers; foreign-currency KuDEs are out of scope. */
   currency: string;
+  /** E644, only for credit operations. */
+  installments?: number;
+  /** D018 as written in the DE (decimal string), only when it applies. */
+  exchangeRate?: string;
   receiver: KudeReceiver;
   /** D012 */
   transactionType: string;
@@ -90,14 +94,18 @@ export function groupCdc(cdc: string): string {
 
 const thousands = (digits: string): string => digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 
-/** PYG amount with dot thousands separators. */
+/** PYG amount with dot thousands separators; PYG has no decimals, so anything else is a bug upstream. */
 export function formatPyg(amount: number): string {
-  return `${amount < 0 ? '-' : ''}${thousands(String(Math.abs(Math.trunc(amount))))}`;
+  if (!Number.isSafeInteger(amount))
+    throw new Error(`PYG amount must be a safe integer: ${String(amount)}`);
+  return `${amount < 0 ? '-' : ''}${thousands(String(Math.abs(amount)))}`;
 }
 
-/** Quantity: dot thousands, decimal comma only when fractional. */
+/** Quantity: dot thousands, decimal comma only when fractional; never exponent notation. */
 export function formatQuantity(quantity: number): string {
-  const [whole = '0', fraction] = String(quantity).split('.');
+  if (!Number.isFinite(quantity)) throw new Error('Quantity must be finite');
+  const plain = quantity.toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 8 });
+  const [whole = '0', fraction] = plain.split('.');
   return fraction ? `${thousands(whole)},${fraction}` : thousands(whole);
 }
 

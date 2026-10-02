@@ -41,7 +41,10 @@ class InMemoryAssemblyStore implements LoteAssemblyStore {
     return Promise.resolve(new Set(cdcs.filter((cdc) => this.inProcess.has(cdc))));
   }
 
-  createLote(input: { documentType: number; documentIds: readonly string[] }) {
+  createLote(input: {
+    documentType: number;
+    documentIds: readonly string[];
+  }): Promise<string | null> {
     if (input.documentIds.some((id) => this.stale.has(id))) return Promise.resolve(null);
     this.created.push(input);
     return Promise.resolve(`lote-${String(this.created.length)}`);
@@ -136,8 +139,50 @@ describe('LoteAssembler', () => {
     const { assembler, store } = setup(docs);
     store.stale.add(docs[0].documentId);
     const result = await assembler.assemble();
-    expect(result.conflicted).toEqual([docs[0].cdc]);
+    expect(result.conflicted).toEqual([{ cdc: docs[0].cdc }]);
     expect(result.lotes.map((l) => l.cdcs)).toEqual([[docs[1].cdc]]);
+  });
+
+  it('skips a document with an invalid CDC and keeps assembling the rest', async () => {
+    const bad: ReadyDocument = { documentId: 'bad', cdc: '123', xml: '<rDE/>' };
+    const docs = [doc(1), bad, doc(2)];
+    const { assembler } = setup(docs);
+    const result = await assembler.assemble();
+    expect(result.lotes.map((l) => l.cdcs)).toEqual([[docs[0].cdc, docs[2].cdc]]);
+    expect(result.skipped).toEqual([{ cdc: '123', reason: 'invalid-cdc' }]);
+  });
+
+  it('reports the documents of a lote whose creation failed and keeps going', async () => {
+    const docs = [doc(1), doc(2, '04')];
+    const { assembler, store } = setup(docs);
+    const create = store.createLote.bind(store);
+    let calls = 0;
+    store.createLote = (input) => {
+      calls += 1;
+      return calls === 1 ? Promise.reject(new Error('db down')) : create(input);
+    };
+    const result = await assembler.assemble();
+    expect(result.conflicted).toEqual([{ cdc: docs[0].cdc, error: 'Error: db down' }]);
+    expect(result.lotes.map((l) => l.cdcs)).toEqual([[docs[1].cdc]]);
+  });
+
+  it('logs a failed create and caps what it keeps of the error', async () => {
+    const docs = [doc(1)];
+    const store = new InMemoryAssemblyStore(docs);
+    store.createLote = () => Promise.reject(new Error(`boom\n${'x'.repeat(1000)}`));
+    const warnings: string[] = [];
+    const assembler = new LoteAssembler({
+      store,
+      measureMessage: small,
+      logger: { warn: (message) => warnings.push(message) },
+    });
+    const result = await assembler.assemble();
+    const error = result.conflicted[0].error ?? '';
+    expect(error.startsWith('Error: boom')).toBe(true);
+    expect(error).not.toContain('\n');
+    expect(error.length).toBeLessThanOrEqual(200);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('createLote');
   });
 
   it('asks the store about every ready CDC once, in one call', async () => {

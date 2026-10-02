@@ -53,6 +53,9 @@ Route: delegated writer per slice; strict TDD, RED commit then GREEN commit.
   the secret: `sealed` changes only with `secret_version + 1`, `previous_sealed = old sealed` and an overlap
   `previous_expires_at` in (now, now + 7 days]; previous_* is cleared only after it expired. The dispatcher signs
   with the current secret plus the previous one while it is unexpired (header carries both `v1`).
+- Delivery is at-least-once (a lost 2xx or a crash between send and record resends after the lease). Each attempt is
+  re-signed with a fresh `t`, so signatures differ per attempt; receivers dedupe by event `id` (documented in
+  `docs/integracion/webhooks.md`).
 - Events filter: empty = all events; duplicates rejected (`webhook_events_unique`).
 
 ## Verification (S1)

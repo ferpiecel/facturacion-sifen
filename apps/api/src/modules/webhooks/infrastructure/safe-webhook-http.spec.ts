@@ -1,6 +1,6 @@
 import type { IncomingHttpHeaders } from 'node:http';
 import { createServer, type Server } from 'node:https';
-import type { AddressInfo } from 'node:net';
+import { createServer as createNetServer, type AddressInfo } from 'node:net';
 import type { TLSSocket } from 'node:tls';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -176,5 +176,33 @@ describe('SafeWebhookHttp (HU-E11-01)', () => {
     const free = (closed.address() as AddressInfo).port;
     await new Promise((r) => closed.close(r));
     expect(await post(local(), free)).toEqual(err('connect_failed'));
+  });
+
+  it('bounds the DNS lookup by the total deadline', async () => {
+    const client = new SafeWebhookHttp({
+      resolve: () => new Promise(() => undefined),
+      totalTimeoutMs: 100,
+    });
+    const started = Date.now();
+    expect(await go(client)).toEqual(err('timeout'));
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  it('ignores HTTPS_PROXY and NODE_USE_ENV_PROXY: the vetted address is connected to directly', async () => {
+    let proxied = 0;
+    const proxy = createNetServer(() => {
+      proxied++;
+    });
+    await new Promise<void>((r) => proxy.listen(0, '127.0.0.1', r));
+    vi.stubEnv('HTTPS_PROXY', `http://127.0.0.1:${String((proxy.address() as AddressInfo).port)}`);
+    vi.stubEnv('NODE_USE_ENV_PROXY', '1');
+    try {
+      const { port } = await listen((_req, res) => res.end());
+      expect(await post(local(), port)).toEqual({ kind: 'response', status: 200 });
+      expect(proxied).toBe(0);
+    } finally {
+      vi.unstubAllEnvs();
+      await new Promise((r) => proxy.close(r));
+    }
   });
 });

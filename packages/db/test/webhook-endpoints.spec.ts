@@ -35,7 +35,10 @@ describe('webhook_endpoints', () => {
 
   async function seed() {
     handle = await createTestDatabase();
-    const rows = await handle.db.insert(tenants).values([{ name: 'A' }, { name: 'B' }]).returning();
+    const rows = await handle.db
+      .insert(tenants)
+      .values([{ name: 'A' }, { name: 'B' }])
+      .returning();
     const [a, b] = rows.map((row) => row.id);
     return { db: handle.db, a, b };
   }

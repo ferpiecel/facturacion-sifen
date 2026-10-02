@@ -13,7 +13,8 @@ import {
 import { eq } from 'drizzle-orm';
 import { signedInvoiceWithQr } from './support/signed-invoice.js';
 import { pdfText } from '../src/modules/emission/infrastructure/kude/pdf-inspect.test-helper.js';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { Logger } from '@nestjs/common';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTenant, issueApiKey } from '../src/cli/commands.js';
 import { createHttpAdapter } from '../src/bootstrap/http.js';
 import { AppModule } from '../src/app.module.js';
@@ -129,6 +130,7 @@ describe('GET /v1/documents/{id}/kude (e2e)', () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.headers['content-type']).toBe('application/pdf');
+    expect(response.headers['cache-control']).toBe('private, no-store');
     expect(response.headers['content-disposition']).toBe(
       'inline; filename="kude-001-002-0000001.pdf"',
     );
@@ -167,5 +169,40 @@ describe('GET /v1/documents/{id}/kude (e2e)', () => {
     expect((await get('/v1/documents/nope/kude', reader)).statusCode).toBe(400);
     expect((await get(`/v1/documents/${id}/kude`, null)).statusCode).toBe(401);
     expect((await get(`/v1/documents/${id}/kude`, writeOnly)).statusCode).toBe(403);
+  });
+
+  it('answers a sanitized 500 and logs no XML when the stored XML cannot be printed', async () => {
+    const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const { document_id: id } = await create(writer);
+    await handle.db
+      .update(documents)
+      .set({
+        status: 'signed',
+        signedXml: '<rDE><secret>TOKEN-123</secret></rDE>',
+        signedAt: new Date(),
+      })
+      .where(eq(documents.id, id));
+
+    const response = await get(`/v1/documents/${id}/kude`, reader);
+
+    expect(response.statusCode).toBe(500);
+    expect(response.body).not.toContain('TOKEN-123');
+    const lines = logged.mock.calls.map((call) => String(call[0]));
+    expect(lines.some((line) => line.includes(id))).toBe(true);
+    expect(lines.join('\n')).not.toMatch(/TOKEN-123|<rDE>/);
+    logged.mockRestore();
+  });
+
+  it('answers 500 when the QR environment is not the document environment', async () => {
+    const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const { document_id: id } = await create(writer);
+    const xml = (await signedInvoiceWithQr()).replace('/consultas-test/qr?', '/consultas/qr?');
+    await handle.db
+      .update(documents)
+      .set({ status: 'signed', signedXml: xml, signedAt: new Date() })
+      .where(eq(documents.id, id));
+
+    expect((await get(`/v1/documents/${id}/kude`, reader)).statusCode).toBe(500);
+    logged.mockRestore();
   });
 });

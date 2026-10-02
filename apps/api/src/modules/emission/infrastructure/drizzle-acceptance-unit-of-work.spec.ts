@@ -12,8 +12,13 @@ import {
   withTenantTransaction,
   type DatabaseHandle,
 } from '@sifen/db';
-import { createAcceptInvoice, IssuerNotConfiguredError } from '../application/accept-invoice.js';
+import {
+  createAcceptInvoice,
+  IdempotencyKeyReusedError,
+  IssuerNotConfiguredError,
+} from '../application/accept-invoice.js';
 import type { AcceptInvoiceInput } from '../application/accept-invoice.js';
+import { IdempotencyKeyCollisionError } from '../application/ports/acceptance-unit-of-work.port.js';
 import { parseCdc } from '../domain/cdc.js';
 import { createDrizzleAcceptanceUnitOfWork } from './drizzle-acceptance-unit-of-work.js';
 
@@ -30,6 +35,7 @@ describe('AcceptInvoice with the Drizzle unit of work', () => {
   let handle: DatabaseHandle;
   let tenantId: string;
   let otherTenantId: string;
+  let keySeq = 0;
 
   beforeEach(async () => {
     handle = createPgliteDatabase();
@@ -86,6 +92,7 @@ describe('AcceptInvoice with the Drizzle unit of work', () => {
     draft: DRAFT,
     receiverRuc: null,
     payload: { items: 1 },
+    idempotencyKey: `key-${String(++keySeq)}`,
     ...overrides,
   });
 
@@ -150,5 +157,110 @@ describe('AcceptInvoice with the Drizzle unit of work', () => {
       .from(tenantTimbrados)
       .where(eq(tenantTimbrados.number, '11111111'));
     expect(row.timbradoId).toBe(old.id);
+  });
+
+  describe('idempotency (HU-E5-02)', () => {
+    it('replays the same response for the same key and payload, creating nothing new', async () => {
+      const first = await accept()(input({ idempotencyKey: 'retry-me' }));
+      const second = await accept()(input({ idempotencyKey: 'retry-me' }));
+
+      expect(second).toEqual(first);
+      expect(await rows()).toHaveLength(1);
+      const audit = await withTenantTransaction(handle.db, tenantId, (tx) =>
+        tx.select().from(auditLog),
+      );
+      expect(audit).toHaveLength(1);
+      // The replay burned no number: the next new document is number 2.
+      const next = await accept()(input());
+      expect(parseCdc(next.cdc).documentNumber).toBe('0000002');
+    });
+
+    it('rejects the same key with a different payload and keeps the original', async () => {
+      const first = await accept()(input({ idempotencyKey: 'k', payload: { a: 1 } }));
+      await expect(
+        accept()(input({ idempotencyKey: 'k', payload: { a: 2 } })),
+      ).rejects.toBeInstanceOf(IdempotencyKeyReusedError);
+      const stored = await rows();
+      expect(stored).toHaveLength(1);
+      expect(stored[0]).toMatchObject({ id: first.documentId, idempotencyKey: 'k' });
+    });
+
+    it('treats the same payload with reordered keys as the same request', async () => {
+      const first = await accept()(input({ idempotencyKey: 'k', payload: { a: 1, b: { c: 2 } } }));
+      const second = await accept()(input({ idempotencyKey: 'k', payload: { b: { c: 2 }, a: 1 } }));
+      expect(second).toEqual(first);
+    });
+
+    it('scopes keys per tenant: another tenant may reuse the same key', async () => {
+      await accept()(input({ idempotencyKey: 'shared' }));
+      await handle.db.insert(tenantFiscalProfiles).values({
+        tenantId: otherTenantId,
+        rucBase: '80069563',
+        rucDv: 1,
+        legalName: 'Otra SA',
+        taxpayerType: 'persona_juridica',
+      });
+      const [est] = await handle.db
+        .insert(tenantEstablishments)
+        .values({
+          tenantId: otherTenantId,
+          code: '001',
+          address: 'Av. Mariscal Lopez 123',
+          houseNumber: '123',
+          departmentCode: '11',
+          cityCode: '3432',
+          cityDescription: 'Asuncion',
+        })
+        .returning();
+      await handle.db
+        .insert(tenantExpeditionPoints)
+        .values({ tenantId: otherTenantId, establishmentId: est.id, code: '002' });
+      await handle.db
+        .insert(tenantTimbrados)
+        .values({ tenantId: otherTenantId, number: '33333333', validFrom: '2026-01-01' });
+
+      const theirs = await accept()(input({ tenantId: otherTenantId, idempotencyKey: 'shared' }));
+
+      expect(theirs.documentId).toBeDefined();
+      expect(await rows()).toHaveLength(1);
+    });
+
+    it('raises a collision error when a concurrent insert reuses the key, rolling the number back', async () => {
+      const unitOfWork = createDrizzleAcceptanceUnitOfWork(handle.db);
+      await accept()(input({ idempotencyKey: 'race' }));
+
+      const racing = unitOfWork.run(tenantId, async (unit) => {
+        const issuer = await unit.resolveIssuer({
+          establishmentCode: '001',
+          expeditionPointCode: '002',
+          issueDate: '2026-03-05',
+        });
+        if (!issuer) throw new Error('issuer expected');
+        const { number } = await unit.nextNumber(issuer, 1);
+        return unit.insertDocument({
+          environment: issuer.environment,
+          cdc: '9'.repeat(44),
+          documentType: 1,
+          timbradoId: issuer.timbradoId,
+          establishmentId: issuer.establishmentId,
+          expeditionPointId: issuer.expeditionPointId,
+          series: '',
+          number,
+          securityCode: '123456789',
+          receiverRuc: null,
+          issuedAt: new Date('2026-03-06T01:30:00Z'),
+          totalAmount: '1',
+          currency: 'PYG',
+          payload: {},
+          idempotencyKey: 'race',
+          requestHash: 'a'.repeat(64),
+        });
+      });
+
+      await expect(racing).rejects.toBeInstanceOf(IdempotencyKeyCollisionError);
+      expect((await accept()(input())).cdc).toSatisfy(
+        (cdc: string) => parseCdc(cdc).documentNumber === '0000002',
+      );
+    });
   });
 });

@@ -6,7 +6,7 @@ import {
 } from '@sifen/sifen-gateway';
 import { describe, expect, it } from 'vitest';
 import { buildCdc } from '../../emission/domain/cdc.js';
-import type { Lote } from '../domain/lote-builder.js';
+import { EmptyLoteError, type Lote } from '../domain/lote-builder.js';
 import { SendLote, type LoteDispatchOutcome, type LoteDispatchStore } from './send-lote.js';
 
 class InMemoryLoteStore implements LoteDispatchStore {
@@ -127,5 +127,31 @@ describe('SendLote', () => {
     };
     await send.execute({ loteId: 'lote-1', dId: 1n, lote });
     expect(seen).toBe('sending');
+  });
+
+  it('marks the lote unknown on any gateway error and keeps the cause', async () => {
+    const { gateway, store, send } = setup();
+    const failure = new TypeError('boom');
+    gateway.enqueue('enviarLote', failure);
+    const outcome = await send.execute({ loteId: 'lote-1', dId: 1n, lote });
+    expect(outcome).toMatchObject({ status: 'unknown', reason: 'boom', cause: failure });
+    expect(store.states.get('lote-1')).toBe('unknown');
+  });
+
+  it('rejects an empty lote before claiming it', async () => {
+    const { gateway, store, send } = setup();
+    await expect(
+      send.execute({ loteId: 'lote-1', dId: 1n, lote: { ...lote, documents: [] } }),
+    ).rejects.toBeInstanceOf(EmptyLoteError);
+    expect(store.states.get('lote-1')).toBe('pending');
+    expect(gateway.callsTo('enviarLote')).toHaveLength(0);
+  });
+
+  it('rethrows when the outcome cannot be recorded, leaving the lote sending', async () => {
+    const { gateway, store, send } = setup();
+    store.record = () => Promise.reject(new Error('db down'));
+    await expect(send.execute({ loteId: 'lote-1', dId: 1n, lote })).rejects.toThrow('db down');
+    expect(store.states.get('lote-1')).toBe('sending');
+    expect(gateway.callsTo('enviarLote')).toHaveLength(1);
   });
 });

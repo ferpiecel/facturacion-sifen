@@ -12,10 +12,20 @@ import {
   type TenantTx,
 } from '@sifen/db';
 import { recordAudit } from '../../audit/infrastructure/record-audit.js';
-import type {
-  AcceptanceUnit,
-  AcceptanceUnitOfWork,
+import {
+  IdempotencyKeyCollisionError,
+  type AcceptanceUnit,
+  type AcceptanceUnitOfWork,
 } from '../application/ports/acceptance-unit-of-work.port.js';
+
+const IDEMPOTENCY_CONSTRAINT = 'documents_tenant_idempotency_key_key';
+
+/** Whether `error` (or its cause chain) is the unique violation of the idempotency key. */
+function isIdempotencyCollision(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const { constraint, cause } = error as { constraint?: unknown; cause?: unknown };
+  return constraint === IDEMPOTENCY_CONSTRAINT || isIdempotencyCollision(cause);
+}
 
 /** First row of a result, typed as possibly missing. */
 function first<T>(rows: T[]): T | undefined {
@@ -24,6 +34,15 @@ function first<T>(rows: T[]): T | undefined {
 
 function createUnit(tx: TenantTx, tenantId: string): AcceptanceUnit {
   return {
+    async findByIdempotencyKey(key) {
+      const row = await tx
+        .select({ id: documents.id, cdc: documents.cdc, requestHash: documents.requestHash })
+        .from(documents)
+        .where(and(eq(documents.tenantId, tenantId), eq(documents.idempotencyKey, key)))
+        .then(first);
+      if (!row?.requestHash) return null;
+      return { documentId: row.id, cdc: row.cdc, requestHash: row.requestHash };
+    },
     async resolveIssuer(query) {
       const tenant = await tx
         .select({ environment: tenants.environment })
@@ -88,11 +107,16 @@ function createUnit(tx: TenantTx, tenantId: string): AcceptanceUnit {
         documentType,
       }),
     async insertDocument(document) {
-      const [row] = await tx
-        .insert(documents)
-        .values({ ...document, tenantId })
-        .returning({ id: documents.id });
-      return { id: row.id };
+      try {
+        const [row] = await tx
+          .insert(documents)
+          .values({ ...document, tenantId })
+          .returning({ id: documents.id });
+        return { id: row.id };
+      } catch (error) {
+        if (isIdempotencyCollision(error)) throw new IdempotencyKeyCollisionError();
+        throw error;
+      }
     },
     recordAudit: (entry) => recordAudit(tx, entry),
   };

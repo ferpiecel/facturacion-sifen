@@ -187,4 +187,52 @@ describe('DrizzleWebhookDeliveryStore', () => {
       }),
     ).rejects.toThrow(/not pending or failed/);
   });
+
+  it('lets a stale worker not overwrite the outcome of the one that claimed after its lease expired', async () => {
+    const id = await delivery({
+      attemptCount: 3,
+      firstAttemptAt: new Date(NOW.getTime() - 9 * MIN),
+      status: 'failed',
+    });
+    const store = storeFor(tenantId);
+    const [slow] = await store.claimDue(NOW, 1, 2 * MIN);
+    const later = new Date(NOW.getTime() + 3 * MIN);
+    const [fast] = await store.claimDue(later, 1, 2 * MIN);
+    expect([slow.id, fast.id]).toEqual([id, id]);
+    const outcome = (status: 'delivered' | 'failed', at: Date) => ({
+      status,
+      attemptCount: 4,
+      firstAttemptAt: slow.firstAttemptAt as Date,
+      lastAttemptAt: at,
+      nextAttemptAt: status === 'failed' ? new Date(at.getTime() + MIN) : null,
+      deliveredAt: status === 'delivered' ? at : null,
+      lastStatusCode: status === 'delivered' ? 200 : 500,
+      lastError: status === 'delivered' ? null : 'HTTP 500',
+    });
+    await store.record(id, outcome('delivered', later));
+    await expect(store.record(id, outcome('failed', NOW))).rejects.toThrow(/not pending or failed/);
+    expect(await read(id)).toMatchObject({
+      status: 'delivered',
+      attemptCount: 4,
+      lastStatusCode: 200,
+    });
+  });
+
+  it('refuses an outcome whose attempt does not follow the claimed one', async () => {
+    const id = await delivery({ attemptCount: 2, status: 'failed', firstAttemptAt: NOW });
+    const base = {
+      status: 'failed' as const,
+      firstAttemptAt: NOW,
+      lastAttemptAt: NOW,
+      nextAttemptAt: NOW,
+      deliveredAt: null,
+      lastStatusCode: 500,
+      lastError: 'HTTP 500',
+    };
+    await expect(storeFor(tenantId).record(id, { ...base, attemptCount: 5 })).rejects.toThrow(
+      /attempt/,
+    );
+    await storeFor(tenantId).record(id, { ...base, attemptCount: 3 });
+    expect((await read(id)).attemptCount).toBe(3);
+  });
 });

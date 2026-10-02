@@ -56,11 +56,18 @@ export class LoteAssembler {
   constructor(private readonly deps: LoteAssemblerDeps) {}
 
   async assemble(): Promise<AssembleLotesResult> {
-    const ready = await this.deps.store.readyDocuments();
-    if (ready.length === 0) return { lotes: [], skipped: [], conflicted: [] };
-    const inProcess = await this.deps.store.cdcsInProcess(ready.map((d) => d.cdc));
+    const all = await this.deps.store.readyDocuments();
+    if (all.length === 0) return { lotes: [], skipped: [], conflicted: [] };
 
     const skipped: SkippedDocument[] = [];
+    const ready = all.filter((document) => {
+      if (isValidCdc(document.cdc)) return true;
+      skipped.push({ cdc: document.cdc, reason: 'invalid-cdc' });
+      return false;
+    });
+    if (ready.length === 0) return { lotes: [], skipped, conflicted: [] };
+    const inProcess = await this.deps.store.cdcsInProcess(ready.map((d) => d.cdc));
+
     const planned: Planned[] = [];
     for (const group of groupByRucAndType(ready).values()) {
       planned.push(...this.fill(group, inProcess, skipped));
@@ -70,10 +77,16 @@ export class LoteAssembler {
     const conflicted: string[] = [];
     for (const { lote, ids } of planned) {
       const cdcs = lote.documents.map((d) => d.cdc);
-      const loteId = await this.deps.store.createLote({
-        documentType: Number(lote.documentType),
-        documentIds: ids,
-      });
+      let loteId: string | null;
+      try {
+        loteId = await this.deps.store.createLote({
+          documentType: Number(lote.documentType),
+          documentIds: ids,
+        });
+      } catch {
+        // Nothing was committed for this lote; its documents stay ready for the next run.
+        loteId = null;
+      }
       if (loteId === null) conflicted.push(...cdcs);
       else lotes.push({ loteId, documentType: lote.documentType, cdcs });
     }
@@ -120,6 +133,15 @@ export class LoteAssembler {
 interface Planned {
   readonly lote: Lote;
   readonly ids: readonly string[];
+}
+
+function isValidCdc(cdc: string): boolean {
+  try {
+    parseCdc(cdc);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function groupByRucAndType(documents: readonly ReadyDocument[]): Map<string, ReadyDocument[]> {

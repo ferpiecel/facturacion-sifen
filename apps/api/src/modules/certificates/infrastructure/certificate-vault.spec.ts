@@ -150,7 +150,7 @@ describe('CertificateVault', () => {
       .add(db, { tenantId: a, environment: 'test', p12, password: 'wrong-password-123' })
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(Pkcs12UnreadableError);
-    expect(String((error as Error).message)).not.toContain('wrong-password-123');
+    expect((error as Error).message).not.toContain('wrong-password-123');
   });
 
   it('fails for an unknown tenant and for a tenant without a fiscal profile', async () => {

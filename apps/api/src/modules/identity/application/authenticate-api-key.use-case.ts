@@ -3,6 +3,7 @@ import type { ApiKeyLookup } from './ports/api-key-lookup.port.js';
 import type { SecretVerifier } from './ports/secret-verifier.port.js';
 
 export interface AuthenticatedApiKey {
+  apiKeyId: string;
   tenantId: string;
   scopes: string[];
   environment: ApiKeyEnvironment;
@@ -53,6 +54,11 @@ export class AuthenticateApiKeyUseCase {
     // can never fail an otherwise-successful authentication.
     await this.lookup.touchLastUsed(record.id).catch(() => undefined);
 
-    return { tenantId: record.tenantId, scopes: record.scopes, environment: record.environment };
+    return {
+      apiKeyId: record.id,
+      tenantId: record.tenantId,
+      scopes: record.scopes,
+      environment: record.environment,
+    };
   }
 }

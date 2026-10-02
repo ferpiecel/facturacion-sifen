@@ -2,6 +2,7 @@ import { HttpException } from '@nestjs/common';
 import { DocumentNumberExhaustedError } from '@sifen/db';
 import { describe, expect, it } from 'vitest';
 import {
+  IdempotencyKeyReusedError,
   InvoiceValidationError,
   IssuerNotConfiguredError,
 } from '../../application/accept-invoice.js';
@@ -25,6 +26,13 @@ describe('toHttpException', () => {
 
   it('maps an unconfigured issuer to 422', () => {
     expect(statusOf(new IssuerNotConfiguredError())).toBe(422);
+  });
+
+  it('maps a reused idempotency key with another payload to 409', () => {
+    expect(statusOf(new IdempotencyKeyReusedError())).toBe(409);
+    expect(toHttpException(new IdempotencyKeyReusedError())?.getResponse()).toMatchObject({
+      message: expect.stringContaining('Idempotency-Key') as string,
+    });
   });
 
   it('maps an exhausted numbering sequence to 409', () => {

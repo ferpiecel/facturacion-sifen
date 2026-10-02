@@ -4,6 +4,7 @@ import {
   formatDocumentNumber,
   formatPyg,
   formatQuantity,
+  assertValidKudeInvoice,
   groupCdc,
   KUDE_CONSULT_URL,
   KUDE_TITLE,
@@ -60,5 +61,54 @@ describe('KuDE formatting', () => {
     expect(KUDE_TITLE).toBe('KuDE de Factura Electrónica');
     expect(KUDE_CONSULT_URL.production).toBe('https://ekuatia.set.gov.py/consultas/');
     expect(KUDE_CONSULT_URL.test).toBe('https://ekuatia.set.gov.py/consultas-test/');
+  });
+});
+
+describe('assertValidKudeInvoice', () => {
+  const valid: KudeInvoice = {
+    environment: 'test',
+    cdc: '01800695631001001000000612021112917595714694',
+    qrUrl: 'https://ekuatia.set.gov.py/consultas-test/qr?a=1',
+    issuer: { name: 'A', address: 'B', city: 'C', ruc: '1-1' },
+    stamp: { number: '1', validFrom: '2018-07-01', validTo: '2019-07-31' },
+    establishment: '001',
+    point: '001',
+    documentNumber: '0000001',
+    issuedAt: '2026-01-02T10:15:30',
+    operationCondition: 'Contado',
+    currency: 'PYG',
+    receiver: { kind: 'unnamed' },
+    transactionType: 'Venta',
+    items: [],
+    totals: {
+      subtotalExempt: 0,
+      subtotal5: 0,
+      subtotal10: 0,
+      totalOperation: 0,
+      totalGs: 0,
+      vat5: 0,
+      vat10: 0,
+      totalVat: 0,
+    },
+  };
+
+  it('accepts a well-formed invoice', () => {
+    expect(() => {
+      assertValidKudeInvoice(valid);
+    }).not.toThrow();
+  });
+
+  it.each([
+    ['cdc', { cdc: '12' }],
+    ['issuedAt', { issuedAt: '2026-02-30T10:00:00' }],
+    ['issuedAt', { issuedAt: '2026-01-02' }],
+    ['stamp', { stamp: { number: '1', validFrom: '01/07/2018', validTo: '2019-07-31' } }],
+    ['currency', { currency: 'USD' }],
+    ['qrUrl', { qrUrl: '' }],
+    ['installments', { installments: -1 }],
+  ])('rejects an invalid %s', (field, patch) => {
+    expect(() => {
+      assertValidKudeInvoice({ ...valid, ...patch });
+    }).toThrow(new RegExp(field));
   });
 });

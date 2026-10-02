@@ -5,9 +5,13 @@ import {
   type ValidationConfig,
   type ValidationError,
 } from '../domain/invoice-draft.js';
+import { requestHash } from '../domain/request-hash.js';
 import { generateSecurityCode, type RandomBytes } from '../domain/security-code.js';
 import type { AuditEntry } from '../../audit/application/ports/record-audit.port.js';
-import type { AcceptanceUnitOfWork } from './ports/acceptance-unit-of-work.port.js';
+import {
+  IdempotencyKeyCollisionError,
+  type AcceptanceUnitOfWork,
+} from './ports/acceptance-unit-of-work.port.js';
 
 /** iTiDE of an electronic invoice (FE). */
 const INVOICE_DOCUMENT_TYPE = 1;
@@ -30,6 +34,14 @@ export class IssuerNotConfiguredError extends Error {
   }
 }
 
+/** The `Idempotency-Key` was already used with a different request body. */
+export class IdempotencyKeyReusedError extends Error {
+  constructor() {
+    super('Idempotency-Key was already used with a different request payload');
+    this.name = 'IdempotencyKeyReusedError';
+  }
+}
+
 export interface AcceptInvoiceInput {
   tenantId: string;
   actor: AuditEntry['actor'];
@@ -40,6 +52,8 @@ export interface AcceptInvoiceInput {
   receiverRuc: string | null;
   /** The request body as received. */
   payload: unknown;
+  /** `Idempotency-Key` header, unique per tenant. */
+  idempotencyKey: string;
 }
 
 export interface AcceptInvoiceDependencies {
@@ -76,7 +90,12 @@ function netTotal(draft: InvoiceDraft): number {
  * a number; everything else shares one tenant transaction. Signing and
  * transmission happen later.
  *
- * @throws InvoiceValidationError, IssuerNotConfiguredError
+ * Idempotent (HU-E5-02): the same `idempotencyKey` and body replays the first
+ * result without creating anything. The key is checked inside the transaction
+ * and enforced by a unique constraint; a concurrent loser rolls back and
+ * re-reads once.
+ *
+ * @throws InvoiceValidationError, IssuerNotConfiguredError, IdempotencyKeyReusedError
  */
 export function createAcceptInvoice(deps: AcceptInvoiceDependencies) {
   const now = deps.now ?? (() => new Date());
@@ -85,10 +104,27 @@ export function createAcceptInvoice(deps: AcceptInvoiceDependencies) {
     const errors = validateInvoiceDraft(input.draft, deps.validation ?? {});
     if (errors.length > 0) throw new InvoiceValidationError(errors);
 
+    const hash = requestHash(input.payload);
+    try {
+      return await acceptOnce(input, hash);
+    } catch (error) {
+      if (!(error instanceof IdempotencyKeyCollisionError)) throw error;
+      // A concurrent request committed the key first; it is visible now.
+      return acceptOnce(input, hash);
+    }
+  };
+
+  async function acceptOnce(input: AcceptInvoiceInput, hash: string): Promise<AcceptedInvoice> {
     const issuedAt = now();
     const issueDate = paraguayDate(issuedAt);
 
     return deps.unitOfWork.run(input.tenantId, async (unit) => {
+      const existing = await unit.findByIdempotencyKey(input.idempotencyKey);
+      if (existing) {
+        if (existing.requestHash !== hash) throw new IdempotencyKeyReusedError();
+        return { documentId: existing.documentId, cdc: existing.cdc };
+      }
+
       const issuer = await unit.resolveIssuer({
         establishmentCode: input.establishmentCode,
         expeditionPointCode: input.expeditionPointCode,
@@ -126,6 +162,8 @@ export function createAcceptInvoice(deps: AcceptInvoiceDependencies) {
         totalAmount: String(netTotal(input.draft)),
         currency: 'PYG',
         payload: input.payload,
+        idempotencyKey: input.idempotencyKey,
+        requestHash: hash,
       });
       await unit.recordAudit({
         actor: input.actor,
@@ -136,5 +174,5 @@ export function createAcceptInvoice(deps: AcceptInvoiceDependencies) {
       });
       return { documentId: id, cdc };
     });
-  };
+  }
 }

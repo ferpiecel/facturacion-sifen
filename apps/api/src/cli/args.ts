@@ -1,6 +1,7 @@
 import { parseArgs, type ParseArgsConfig } from 'node:util';
 import {
   createEstablishment,
+  createEstablishmentContact,
   type Establishment,
   type EstablishmentContact,
 } from '../modules/fiscal-config/domain/establishment.js';
@@ -256,6 +257,9 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
           'district-description': { type: 'string' },
           city: { type: 'string' },
           'city-description': { type: 'string' },
+          phone: { type: 'string' },
+          email: { type: 'string' },
+          name: { type: 'string' },
         },
       });
 
@@ -275,6 +279,9 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
         districtDescription,
         cityCode: requireOption(values.city, 'city'),
         cityDescription: requireOption(values['city-description'], 'city-description'),
+        phone: values.phone,
+        email: values.email,
+        commercialName: values.name,
       });
 
       return {
@@ -283,8 +290,28 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
         establishment,
       };
     }
-    case 'establishment:contact':
-      throw new OpsArgError('not implemented');
+    case 'establishment:contact': {
+      const { values } = parseStrict({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          establishment: { type: 'string' },
+          phone: { type: 'string' },
+          email: { type: 'string' },
+          name: { type: 'string' },
+        },
+      });
+      return {
+        kind: 'establishment:contact',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        establishmentCode: requireOption(values.establishment, 'establishment'),
+        contact: createEstablishmentContact({
+          phone: requireOption(values.phone, 'phone'),
+          email: requireOption(values.email, 'email'),
+          commercialName: values.name,
+        }),
+      };
+    }
     case 'point:add': {
       const { values } = parseStrict({
         args: rest,

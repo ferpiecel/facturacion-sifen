@@ -62,3 +62,13 @@ lotes in process), plan v1.1 §8.1, backlog HU-E6-01/02/03.
   lote. The failure reason lives on the lote row (`response_code`/`response_message`).
 - `unknown` (no answer) and `recovery` lotes count as in process: SIFEN may hold them (plan §8.1), so
   their CDCs are never put in another lote until HU-E6-04 resolves them.
+
+## Establishment contact (before S4b)
+
+- gEmis in `DE_v150.xsd` makes `dTelEmi` (tdTel, 6-15) and `dEmailE` (tEmail pattern) required and
+  `dDenSuc` (1-30) optional, so they live on `tenant_establishments` (migration 0027), nullable only for
+  rows created earlier. The MT PDF could not be text-extracted in this environment; the XSD is the cited
+  authority (no fiscal-profile fallback: the XSD scopes them to the establishment group).
+- Operator CLI: `establishment:add --phone --email --name` and `establishment:contact`.
+- Signing (S4b) refuses an establishment without phone/email (typed error) and maps `dDenSuc` from
+  `commercial_name`, falling back to the issuer's trade/legal name (<= 30 chars) when absent.

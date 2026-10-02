@@ -13,6 +13,8 @@ export class InvalidEstablishmentError extends Error {
 const ESTABLISHMENT_CODE_PATTERN = /^(?!000$)\d{3}$/;
 // cDisEmi (MT §D2, D113 / XSD tcDisEmi): 1-4 digits, occurrence 0-1.
 const DISTRICT_CODE_PATTERN = /^\d{1,4}$/;
+// dEmailE (XSD tEmail, DE_Types_v150.xsd).
+const EMAIL_PATTERN = /^[0-9a-zA-Z]([0-9a-zA-Z._-])*@([0-9a-zA-Z][0-9a-zA-Z_-]*\.)+[a-zA-Z]{2,9}$/;
 // cCiuEmi (MT §D2, D115 / XSD tcCiuEmi): 1-5 digits, occurrence 1-1.
 const CITY_CODE_PATTERN = /^\d{1,5}$/;
 
@@ -61,10 +63,20 @@ export interface EstablishmentContactInput {
 }
 
 /** Validates and normalizes the gEmis contact (DE_v150.xsd: tdTel 6-15, tEmail pattern, dDenSuc 1-30). */
-export function createEstablishmentContact(
-  _input: EstablishmentContactInput,
-): EstablishmentContact {
-  throw new InvalidEstablishmentError('not implemented');
+export function createEstablishmentContact(input: EstablishmentContactInput): EstablishmentContact {
+  const phone = input.phone.trim();
+  if (phone.length < 6 || phone.length > 15) {
+    throw new InvalidEstablishmentError('phone (dTelEmi) must be 6 to 15 characters');
+  }
+  const email = input.email.trim();
+  if (!EMAIL_PATTERN.test(email)) {
+    throw new InvalidEstablishmentError('email (dEmailE) is not a valid address');
+  }
+  const commercialName = normalizeOptional(input.commercialName);
+  if (commercialName !== null && commercialName.length > 30) {
+    throw new InvalidEstablishmentError('commercialName (dDenSuc) must be 1 to 30 characters');
+  }
+  return { phone, email, commercialName };
 }
 
 export interface CreateEstablishmentInput {
@@ -126,6 +138,19 @@ export function createEstablishment(input: CreateEstablishmentInput): Establishm
     30,
   );
 
+  const hasPhone = normalizeOptional(input.phone) !== null;
+  const hasEmail = normalizeOptional(input.email) !== null;
+  if (hasPhone !== hasEmail) {
+    throw new InvalidEstablishmentError('phone and email (dTelEmi/dEmailE) must be given together');
+  }
+  const contact = hasPhone
+    ? createEstablishmentContact({
+        phone: input.phone ?? '',
+        email: input.email ?? '',
+        commercialName: input.commercialName,
+      })
+    : { phone: null, email: null, commercialName: normalizeOptional(input.commercialName) };
+
   return {
     code,
     address,
@@ -138,9 +163,7 @@ export function createEstablishment(input: CreateEstablishmentInput): Establishm
     districtDescription,
     cityCode,
     cityDescription,
-    phone: null,
-    email: null,
-    commercialName: null,
+    ...contact,
   };
 }
 

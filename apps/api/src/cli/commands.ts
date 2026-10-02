@@ -232,6 +232,9 @@ export async function addEstablishment(
         districtDescription: establishment.districtDescription,
         cityCode: establishment.cityCode,
         cityDescription: establishment.cityDescription,
+        phone: establishment.phone,
+        email: establishment.email,
+        commercialName: establishment.commercialName,
       })
       .returning();
 
@@ -246,11 +249,32 @@ export interface SetEstablishmentContactParams {
 }
 
 /** Operator CLI handler: sets dTelEmi/dEmailE/dDenSuc on an existing establishment (HU-E6-02). */
-export function setEstablishmentContact(
-  _db: Database,
-  _params: SetEstablishmentContactParams,
+export async function setEstablishmentContact(
+  db: Database,
+  params: SetEstablishmentContactParams,
 ): Promise<{ id: string; code: string }> {
-  return Promise.reject(new Error('not implemented'));
+  const { tenantId, establishmentCode, contact } = params;
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(tenantEstablishments)
+      .set({
+        phone: contact.phone,
+        email: contact.email,
+        commercialName: contact.commercialName,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(tenantEstablishments.tenantId, tenantId),
+          eq(tenantEstablishments.code, establishmentCode),
+        ),
+      )
+      .returning({ id: tenantEstablishments.id, code: tenantEstablishments.code });
+    if (!row) {
+      throw new Error(`establishment not found: ${establishmentCode}`);
+    }
+    return row;
+  });
 }
 
 export interface AddExpeditionPointParams {

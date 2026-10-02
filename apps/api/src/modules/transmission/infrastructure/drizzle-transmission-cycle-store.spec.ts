@@ -195,9 +195,7 @@ describe('DrizzleTransmissionCycleStore', () => {
   });
 
   it('skips a pending lote whose documents are not all signed instead of sending fewer', async () => {
-    const complete = await addLote(tenantId, 'pending', [
-      await addDocument(tenantId, 'queued', 1),
-    ]);
+    const complete = await addLote(tenantId, 'pending', [await addDocument(tenantId, 'queued', 1)]);
     await addLote(tenantId, 'pending', [
       await addDocument(tenantId, 'queued', 2),
       await addDocument(tenantId, 'accepted', 3),

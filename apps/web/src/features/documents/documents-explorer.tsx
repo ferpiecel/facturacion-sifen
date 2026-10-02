@@ -1,4 +1,5 @@
 import { DocumentsBrowser } from './documents-browser';
+import { DocumentsHelpBanner } from './documents-help-banner';
 import { DocumentsHeader } from './documents-header';
 import { DocumentsKpis } from './documents-kpis';
 
@@ -9,6 +10,7 @@ export function DocumentsExplorer() {
       <DocumentsHeader />
       <DocumentsKpis />
       <DocumentsBrowser />
+      <DocumentsHelpBanner />
     </div>
   );
 }

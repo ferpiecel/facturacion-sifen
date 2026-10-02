@@ -17,7 +17,7 @@ domain so it can be swapped for the API.
 - [x] PR 2 `feat/hu-e12-explorer-list`: fixture rows and document list.
 - [x] PR 3 `feat/hu-e12-explorer-selection`: type tabs with period counts and bulk selection bar.
 - [x] PR 4 `feat/hu-e12-explorer-filters`: filter bar (search, selects, chips).
-- [ ] PR 5 `feat/hu-e12-explorer-pagination`: pagination footer.
+- [x] PR 5 `feat/hu-e12-explorer-pagination`: pagination footer and help banner.
 - [ ] PR 6 `feat/hu-e12-explorer-detail`: detail panel (KuDE / XML / events tabs) and help banner.
 
 Route: delegated writer (one) per PR; strict TDD, RED commit then GREEN commit.
@@ -39,5 +39,6 @@ Route: delegated writer (one) per PR; strict TDD, RED commit then GREEN commit.
 | "Aprobado DNIT" pill | "Aprobado SIFEN" (`StatusBadge`) | Design-system component |
 | "Emitido hoy a las 15:42 hs" | Absolute date `02/10/2026 15:42` (America/Asuncion) | Deterministic, no clock dependency |
 | "Solo con discrepancias fiscales" | "Solo con observaciones o rechazos" | "Discrepancy" has no domain meaning |
+| Help banner "hasta 72hs de emitido" | "hasta 48 hs desde la aprobación para facturas y 168 hs para el resto" | HU-E8-02, plan §cancelación: FE ≤ 48 h, others ≤ 168 h from approval |
 | "Ver Log DNIT" | "Ver respuesta SIFEN" | Wording |
 | "Sucursales: 001-002 POS Ciudad del Este" | Establishment 002 "Sucursal Ciudad del Este" | est-point-number: 002 is the establishment |

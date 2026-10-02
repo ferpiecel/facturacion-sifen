@@ -14,7 +14,7 @@ Sources: backlog HU-E6-02, plan §8.1 "Envío y consulta" and §8.5, ADR-0007.
 
 ## Slices
 
-- [ ] **S1 — `SendLote` application service (api, no migration).** Claims the lote through a
+- [x] **S1 — `SendLote` application service (api, no migration).** Claims the lote through a
       `LoteDispatchStore` port (atomic `pending -> sending`; a lote already claimed is never sent
       again), calls `gateway.enviarLote`, maps: 0300 -> `sent` + `dProtConsLote`; 0301 -> `rejected`
   - code and reason; timeout/transport error or any unexpected/ambiguous response (other code,

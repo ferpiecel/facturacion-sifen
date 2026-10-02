@@ -1,5 +1,5 @@
 {
-  "id": "18674dc4-596c-4228-8009-196cdb9c9315",
+  "id": "edb61a48-2e1a-4c7b-bd7c-2f61462a22a9",
   "prevId": "7abb8670-9fcc-4ac9-9309-91ef37fa65fa",
   "version": "7",
   "dialect": "postgresql",
@@ -1445,7 +1445,7 @@
         },
         "tenant_establishments_phone_length": {
           "name": "tenant_establishments_phone_length",
-          "value": "char_length(\"tenant_establishments\".\"phone\") BETWEEN 6 AND 15 AND \"tenant_establishments\".\"phone\" !~ '^[[:space:]]*$'"
+          "value": "char_length(\"tenant_establishments\".\"phone\") BETWEEN 6 AND 15 AND \"tenant_establishments\".\"phone\" !~ '^[[:space:]]*$' AND \"tenant_establishments\".\"phone\" !~ '[[:cntrl:]]'"
         },
         "tenant_establishments_email_format": {
           "name": "tenant_establishments_email_format",

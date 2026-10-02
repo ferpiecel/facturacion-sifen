@@ -270,7 +270,7 @@ export const tenantEstablishments = pgTable(
     check('tenant_establishments_city_code_format', sql`${table.cityCode} ~ '^[0-9]{1,5}$'`),
     check(
       'tenant_establishments_phone_length',
-      sql`char_length(${table.phone}) BETWEEN 6 AND 15 AND ${table.phone} !~ '^[[:space:]]*$'`,
+      sql`char_length(${table.phone}) BETWEEN 6 AND 15 AND ${table.phone} !~ '^[[:space:]]*$' AND ${table.phone} !~ '[[:cntrl:]]'`,
     ),
     // XSD tEmail pattern (DE_Types_v150.xsd), anchored; written without backslashes (a sql`` template
     // would swallow them): `.` and `-` live inside bracket expressions.

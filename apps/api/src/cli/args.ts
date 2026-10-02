@@ -44,6 +44,15 @@ export type OpsCommand =
       environment: TenantEnvironment;
       idCsc: string;
       csc: string;
+    }
+  | {
+      kind: 'certificate:add';
+      tenantId: string;
+      environment: TenantEnvironment;
+      p12Path: string;
+      /** Read from stdin by the CLI (`--password -`), never from argv. */
+      password: string;
+      replace: boolean;
     };
 
 /**
@@ -359,6 +368,8 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
         throw error;
       }
     }
+    case 'certificate:add':
+      throw new OpsArgError('not implemented');
     default:
       throw new OpsArgError(`unknown subcommand "${subcommand}"`);
   }

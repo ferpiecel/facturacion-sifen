@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { createNodePostgresDatabase, type Database } from '@sifen/db';
 import { EnvelopeCipher } from '../modules/custody/application/envelope-cipher.js';
 import { createLocalKms } from '../modules/custody/infrastructure/adapters/local-kms.adapter.js';
@@ -100,6 +101,8 @@ export async function runOpsCommand(
       });
       return `tenant environment set: ${result.id} (${result.environment})`;
     }
+    case 'certificate:add':
+      throw new Error('not implemented');
     case 'csc:add': {
       if (!vault) {
         throw new Error('csc:add requires a CSC vault');
@@ -148,6 +151,7 @@ export interface CliIo {
   argv: string[];
   env: NodeJS.ProcessEnv;
   readStdin: () => Promise<string>;
+  readFile: (path: string) => Buffer;
   out: (text: string) => void;
   err: (text: string) => void;
   openDb: (url: string) => { db: Database; close: () => Promise<void> };
@@ -190,6 +194,7 @@ if (isMainModule) {
     argv: process.argv.slice(2),
     env: process.env,
     readStdin: readProcessStdin,
+    readFile: (path) => readFileSync(path),
     out: (text) => {
       console.log(text);
     },

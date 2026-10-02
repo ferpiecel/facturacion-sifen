@@ -1,6 +1,6 @@
-import { inflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import type { KudeInvoice, KudeItem } from '../../domain/kude-model.js';
+import { imageSizes, overlaps, pdfText, textItems } from './pdf-inspect.js';
 import { PdfkitKudeRenderer } from './pdfkit-kude-renderer.js';
 
 const CDC = '01800695631001001000000612021112917595714694';
@@ -59,40 +59,6 @@ const invoice = (items: KudeItem[] = [item(12)]): KudeInvoice => ({
   },
 });
 
-/** Inflates every stream of the PDF; plain (uncompressed) streams pass through. */
-function streams(pdf: Uint8Array): string[] {
-  const raw = Buffer.from(pdf).toString('latin1');
-  return [...raw.matchAll(/stream\r?\n([\s\S]*?)\r?\nendstream/g)].map((m) => {
-    const bytes = Buffer.from(m[1], 'latin1');
-    try {
-      return inflateSync(bytes).toString('latin1');
-    } catch {
-      return bytes.toString('latin1');
-    }
-  });
-}
-
-/** Text shown by the content streams: standard-font strings are WinAnsi hex in Tj/TJ operators. */
-function pdfText(pdf: Uint8Array): string {
-  const lines: string[] = [];
-  for (const content of streams(pdf)) {
-    for (const op of content.matchAll(/(\[[^\]]*\]|<[0-9a-fA-F]*>)\s*TJ?/g)) {
-      const hex = [...op[1].matchAll(/<([0-9a-fA-F]*)>/g)].map((h) => h[1]);
-      lines.push(Buffer.from(hex.join(''), 'hex').toString('latin1'));
-    }
-  }
-  return lines.join('\n');
-}
-
-/** Width and height in points of every image painted on the pages. */
-function imageSizes(pdf: Uint8Array): { w: number; h: number }[] {
-  return streams(pdf).flatMap((content) =>
-    [...content.matchAll(/(-?[\d.]+) 0 0 (-?[\d.]+) -?[\d.]+ -?[\d.]+ cm\s+\/I\d+ Do/g)].map(
-      (m) => ({ w: Math.abs(Number(m[1])), h: Math.abs(Number(m[2])) }),
-    ),
-  );
-}
-
 describe('PdfkitKudeRenderer (FE, A4)', () => {
   const renderer = new PdfkitKudeRenderer();
 
@@ -101,7 +67,7 @@ describe('PdfkitKudeRenderer (FE, A4)', () => {
     expect(Buffer.from(pdf).subarray(0, 5).toString()).toBe('%PDF-');
   });
   it('prints the title, emitter, stamp and document number (MT 13.4.1)', async () => {
-    const text = pdfText(await renderer.render(invoice()));
+    const text = await pdfText(await renderer.render(invoice()));
     for (const expected of [
       'KuDE de Factura Electrónica',
       'Marta Anahi Bordon Vidal',
@@ -118,7 +84,7 @@ describe('PdfkitKudeRenderer (FE, A4)', () => {
     }
   });
   it('prints the general data and the receiver block', async () => {
-    const text = pdfText(await renderer.render(invoice()));
+    const text = await pdfText(await renderer.render(invoice()));
     for (const expected of [
       '2026-01-02T10:15:30',
       'Contado',
@@ -135,10 +101,10 @@ describe('PdfkitKudeRenderer (FE, A4)', () => {
   });
   it('prints "Sin nombre" for an unnamed receiver', async () => {
     const unnamed = { ...invoice(), receiver: { kind: 'unnamed' as const } };
-    expect(pdfText(await renderer.render(unnamed))).toContain('Sin Nombre');
+    expect(await pdfText(await renderer.render(unnamed))).toContain('Sin Nombre');
   });
   it('prints the items with the VAT column of each rate', async () => {
-    const text = pdfText(await renderer.render(invoice()));
+    const text = await pdfText(await renderer.render(invoice()));
     for (const expected of ['INF012', 'Disco duro 12', 'UNI', '110.000']) {
       expect(text).toContain(expected);
     }
@@ -156,5 +122,36 @@ describe('PdfkitKudeRenderer (FE, A4)', () => {
     expect(first.equals(second)).toBe(true);
     // 2026-01-02 10:15:30 in Asunción (UTC-3 all year since 2024-10) = 13:15:30Z
     expect(first.toString('latin1')).toContain('(D:20260102131530Z)');
+  });
+
+  it('embeds a Unicode font: accents, guaraní and ₲ survive, unsupported glyphs become "?"', async () => {
+    const named = { kind: 'named' as const, document: '1-1', name: 'Cafe\u0301 ₲ ĩ ẽ g\u0303 😀' };
+    const text = await pdfText(await renderer.render({ ...invoice(), receiver: named }));
+    expect(text).toContain('Café ₲ ĩ ẽ g\u0303 ?');
+  });
+
+  it('advances below wrapped text blocks and rows, never drawing text over text', async () => {
+    const wordy = 'Sociedad Anónima de Responsabilidad Limitada del Paraguay '.repeat(3).trim();
+    const base = invoice();
+    const wrapped = {
+      ...base,
+      issuer: { ...base.issuer, name: wordy },
+      receiver: { kind: 'named' as const, document: '1-1', name: wordy, address: wordy },
+      items: [
+        item(1),
+        { ...item(2), code: 'CODIGO-LARGO-SIN-ESPACIOS-0002', unit: 'UNIDADLARGA' },
+        item(3),
+      ],
+    };
+    expect(overlaps(await textItems(await renderer.render(wrapped)))).toEqual([]);
+  });
+
+  it('never splits an amount or a heading across lines, even with 15-digit PYG', async () => {
+    const big = 999_999_999_999_999;
+    const row = { ...item(1), unitPrice: big, discount: big, total: big };
+    const items = await textItems(await renderer.render(invoice([row])));
+    expect(items.filter((i) => i.str === '999.999.999.999.999')).toHaveLength(3);
+    expect(items.some((i) => i.str === 'Descuento')).toBe(true);
+    expect(overlaps(items)).toEqual([]);
   });
 });

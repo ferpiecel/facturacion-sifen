@@ -43,6 +43,8 @@
     "@vitest/coverage-v8": "5.0.1",
     "dependency-cruiser": "18.4.0",
     "fast-check": "4.10.2",
+    "jsqr": "1.4.0",
+    "pdfjs-dist": "6.3.289",
     "typescript": "6.0.3",
     "unplugin-swc": "2.0.0",
     "vitest": "5.0.1",

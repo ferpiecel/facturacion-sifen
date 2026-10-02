@@ -56,7 +56,8 @@ export interface KudeInvoice {
     /** `RUC-DV`. */
     ruc: string;
   };
-  stamp: { number: string; validFrom: string; validTo: string };
+  /** `validTo` (C009) is not in the DE v150 XML; printed only when the caller knows it. */
+  stamp: { number: string; validFrom: string; validTo?: string };
   establishment: string;
   point: string;
   documentNumber: string;
@@ -155,7 +156,10 @@ export function assertValidKudeInvoice(invoice: KudeInvoice): void {
   ) {
     throw new InvalidKudeInvoiceError('issuedAt', 'expected a real YYYY-MM-DDThh:mm:ss');
   }
-  if (!isDate(invoice.stamp.validFrom) || !isDate(invoice.stamp.validTo)) {
+  if (
+    !isDate(invoice.stamp.validFrom) ||
+    (invoice.stamp.validTo !== undefined && !isDate(invoice.stamp.validTo))
+  ) {
     throw new InvalidKudeInvoiceError('stamp', 'validity dates must be YYYY-MM-DD');
   }
   if (invoice.currency !== 'PYG') {

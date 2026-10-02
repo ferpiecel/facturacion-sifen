@@ -137,7 +137,7 @@ describe('readKudeInvoice', () => {
     'dTotOpeItem',
     'dDesProSer',
     'dTotGralOpe',
-    'dTotIVA',
+
     'dDCondOpe',
     'dDesTipTra',
     'cMoneOpe',

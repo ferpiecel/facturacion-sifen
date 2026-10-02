@@ -164,6 +164,49 @@ describe('documents', () => {
     const [row] = await db.update(documents).set({ status: 'signed' }).returning();
     expect(row.status).toBe('signed');
   });
+  /** Spec: HU-E6-02. The signed XML is stored once, with its signing instant. */
+  describe('signed XML', () => {
+    const update = (
+      db: DatabaseHandle['db'],
+      tenantId: string,
+      set: Partial<typeof documents.$inferInsert>,
+    ) =>
+      withTenantTransaction(db, tenantId, (tx) =>
+        tx.update(documents).set(set).where(eq(documents.cdc, CDC_A)).returning(),
+      );
+
+    it('starts empty and accepts the XML once, together with a status move', async () => {
+      const { db, a, setupA, doc } = await seed();
+      const [created] = await db.insert(documents).values(doc(a, setupA)).returning();
+      expect(created.signedXml).toBeNull();
+      expect(created.signedAt).toBeNull();
+      const signedAt = new Date('2026-01-01T12:00:05Z');
+      const [row] = await update(db, a, { status: 'signed', signedXml: '<rDE/>', signedAt });
+      expect(row).toMatchObject({ status: 'signed', signedXml: '<rDE/>', signedAt });
+    });
+
+    it('makes signed_xml and signed_at write-once', async () => {
+      const { db, a, setupA, doc } = await seed();
+      const signedAt = new Date('2026-01-01T12:00:05Z');
+      await db
+        .insert(documents)
+        .values(doc(a, setupA, { status: 'signed', signedXml: '<rDE/>', signedAt }));
+      expect(await causeOf(update(db, a, { signedXml: '<rDE>2</rDE>' }))).toContain('write-once');
+      expect(await causeOf(update(db, a, { signedXml: null }))).toContain('write-once');
+      expect(await causeOf(update(db, a, { signedAt: new Date('2026-02-01') }))).toContain(
+        'write-once',
+      );
+    });
+
+    it('keeps the status guard: no regression even with the XML present', async () => {
+      const { db, a, setupA, doc } = await seed();
+      await db.insert(documents).values(doc(a, setupA, { status: 'queued', signedXml: '<rDE/>' }));
+      expect(await causeOf(update(db, a, { status: 'accepted' }))).toContain(
+        'invalid status transition',
+      );
+    });
+  });
+
   /** Spec: HU-E6-03. SIFEN outcomes are entered once, from `submitted`, and never regress. */
   describe('status transitions', () => {
     const move = (

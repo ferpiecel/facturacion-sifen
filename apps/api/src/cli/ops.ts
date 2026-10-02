@@ -15,6 +15,7 @@ import {
   createTenant,
   issueApiKey,
   revokeApiKey,
+  setEstablishmentContact,
   setFiscalProfile,
   setTenantEnvironment,
 } from './commands.js';
@@ -126,6 +127,15 @@ export async function runOpsCommand(
         establishment: command.establishment,
       });
       return `establishment created: ${result.id} (code ${result.code})`;
+    }
+    case 'establishment:contact': {
+      const result = await setEstablishmentContact(db, {
+        tenantId: command.tenantId,
+        establishmentCode: command.establishmentCode,
+        contact: command.contact,
+      });
+      // Public business data, but echoing only the code keeps the output uniform with the others.
+      return `establishment contact saved: ${command.tenantId} (code ${result.code})`;
     }
     case 'point:add': {
       const result = await addExpeditionPoint(db, {

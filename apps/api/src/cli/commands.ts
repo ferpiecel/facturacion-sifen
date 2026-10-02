@@ -11,7 +11,10 @@ import {
   type Database,
 } from '@sifen/db';
 import type { TenantEnvironment } from '../modules/fiscal-config/domain/document-environment.js';
-import type { Establishment } from '../modules/fiscal-config/domain/establishment.js';
+import type {
+  Establishment,
+  EstablishmentContact,
+} from '../modules/fiscal-config/domain/establishment.js';
 import type { ExpeditionPoint } from '../modules/fiscal-config/domain/expedition-point.js';
 import type { FiscalProfile } from '../modules/fiscal-config/domain/fiscal-profile.js';
 import { formatRuc } from '../modules/fiscal-config/domain/ruc.js';
@@ -229,10 +232,50 @@ export async function addEstablishment(
         districtDescription: establishment.districtDescription,
         cityCode: establishment.cityCode,
         cityDescription: establishment.cityDescription,
+        phone: establishment.phone,
+        email: establishment.email,
+        commercialName: establishment.commercialName,
       })
       .returning();
 
     return { id: required(row, 'establishment was not inserted').id, code: establishment.code };
+  });
+}
+
+export interface SetEstablishmentContactParams {
+  tenantId: string;
+  establishmentCode: string;
+  contact: EstablishmentContact;
+}
+
+/** Operator CLI handler: sets dTelEmi/dEmailE/dDenSuc on an existing establishment (HU-E6-02). */
+export async function setEstablishmentContact(
+  db: Database,
+  params: SetEstablishmentContactParams,
+): Promise<{ id: string; code: string }> {
+  const { tenantId, establishmentCode, contact } = params;
+  return db.transaction(async (tx) => {
+    const updated = await tx
+      .update(tenantEstablishments)
+      .set({
+        phone: contact.phone,
+        email: contact.email,
+        // Only --name sets the commercial name; leaving it out keeps the stored one (no clearing).
+        ...(contact.commercialName === null ? {} : { commercialName: contact.commercialName }),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(tenantEstablishments.tenantId, tenantId),
+          eq(tenantEstablishments.code, establishmentCode),
+        ),
+      )
+      .returning({ id: tenantEstablishments.id, code: tenantEstablishments.code });
+    const row = updated.at(0);
+    if (!row) {
+      throw new Error(`establishment not found: ${establishmentCode}`);
+    }
+    return row;
   });
 }
 

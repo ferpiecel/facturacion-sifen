@@ -197,12 +197,17 @@ export class PdfkitKudeRenderer implements KudeRenderer {
       `RUC: ${issuer.ruc}`,
       `Timbrado Nº ${stamp.number}`,
       `Fecha de Inicio de Vigencia: ${formatDateDmy(stamp.validFrom)}`,
-      `Fecha de Fin de Vigencia: ${formatDateDmy(stamp.validTo)}`,
+      stamp.validTo === undefined
+        ? ''
+        : `Fecha de Fin de Vigencia: ${formatDateDmy(stamp.validTo)}`,
       `Factura Electrónica Nº ${documentNumber}`,
-    ];
+    ].filter(Boolean);
     let middle = top;
     stampLines.forEach((text, i) => {
-      middle = this.put(doc, text, 285, middle, { width: 180, bold: i === 0 || i === 4 });
+      middle = this.put(doc, text, 285, middle, {
+        width: 180,
+        bold: i === 0 || i === stampLines.length - 1,
+      });
     });
     doc.image(qr.png, doc.page.width - MARGIN - qr.size, top - 4, {
       width: qr.size,

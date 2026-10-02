@@ -83,7 +83,7 @@ export function buildLoteMessage(xmls: readonly string[], dId: bigint): string {
   const xDE = buildLoteZip(xmls).toString('base64');
   return (
     `<env:Envelope xmlns:env="${SOAP_NS}"><env:Header/><env:Body>` +
-    `<rEnvioLote xmlns="${SIFEN_NS}"><dId>${dId}</dId><xDE>${xDE}</xDE></rEnvioLote>` +
+    `<rEnvioLote xmlns="${SIFEN_NS}"><dId>${dId.toString()}</dId><xDE>${xDE}</xDE></rEnvioLote>` +
     '</env:Body></env:Envelope>'
   );
 }

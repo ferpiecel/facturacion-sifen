@@ -48,7 +48,7 @@ describe('DrizzleLoteDispatchStore', () => {
   it('claims a pending lote once', async () => {
     const store = storeFor(tenantId);
     expect(await store.claim(loteId)).toBe(true);
-    expect((await readLote())?.status).toBe('sending');
+    expect((await readLote()).status).toBe('sending');
     expect(await store.claim(loteId)).toBe(false);
   });
 
@@ -60,7 +60,7 @@ describe('DrizzleLoteDispatchStore', () => {
 
   it('does not claim a lote of another tenant', async () => {
     expect(await storeFor(otherTenantId).claim(loteId)).toBe(false);
-    expect((await readLote())?.status).toBe('pending');
+    expect((await readLote()).status).toBe('pending');
   });
 
   it('records sent with the protocol and the poll schedule', async () => {
@@ -103,6 +103,6 @@ describe('DrizzleLoteDispatchStore', () => {
     await expect(
       storeFor(tenantId).record(loteId, { status: 'sent', dProtConsLote: '1' }),
     ).rejects.toThrow(/not in sending/);
-    expect((await readLote())?.status).toBe('pending');
+    expect((await readLote()).status).toBe('pending');
   });
 });

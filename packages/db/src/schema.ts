@@ -597,11 +597,83 @@ export const documents = pgTable(
     check('documents_number_range', sql`${table.number} BETWEEN 1 AND 9999999`),
     // iTiDE (C002) range: 1..8.
     check('documents_document_type_range', sql`${table.documentType} BETWEEN 1 AND 8`),
+    unique('documents_tenant_id_key').on(table.tenantId, table.id),
     check('documents_series_format', sql`${table.series} = '' OR ${table.series} ~ '^[A-Z]{2}$'`),
     check(
       'documents_status_valid',
       sql`${table.status} IN (${sql.raw(DOCUMENT_STATUSES.map((s) => `'${s}'`).join(', '))})`,
     ),
+  ],
+);
+
+export const LOTE_STATUSES = ['pending', 'sending', 'sent', 'rejected', 'unknown'] as const;
+
+/**
+ * A lote of DEs sent to SIFEN through `siRecepLoteDE` (HU-E6-02). `sending` is
+ * set before the call and never retried; a lote stuck there is recovered as
+ * `unknown` by querying SIFEN (HU-E6-04). Rows are never deleted.
+ */
+export const lotes = pgTable(
+  'lotes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    environment: tenantEnvironment('environment').notNull(),
+    /** `iTiDE`: a lote carries a single document type. */
+    documentType: smallint('document_type').notNull(),
+    status: varchar('status', { length: 16 }).notNull().default('pending'),
+    /** `dProtConsLote`, returned with 0300. */
+    sifenProtocol: varchar('sifen_protocol', { length: 64 }),
+    /** `dCodRes` of the `siRecepLoteDE` answer, when there was one. */
+    responseCode: varchar('response_code', { length: 8 }),
+    /** `dMsgRes`, or why the outcome is unknown. */
+    responseMessage: text('response_message'),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    /** First lote query: `sent_at` + 10 min. */
+    nextPollAt: timestamp('next_poll_at', { withTimezone: true }),
+    /** Lote queries stop being valid 48 h after sending (0364). */
+    pollDeadlineAt: timestamp('poll_deadline_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('lotes_tenant_id_key').on(table.tenantId, table.id),
+    check('lotes_document_type_range', sql`${table.documentType} BETWEEN 1 AND 8`),
+    check(
+      'lotes_status_valid',
+      sql`${table.status} IN (${sql.raw(LOTE_STATUSES.map((s) => `'${s}'`).join(', '))})`,
+    ),
+  ],
+);
+
+/**
+ * The documents a lote carries. A document may reappear in a later lote once
+ * the earlier one was rejected, so uniqueness is per (lote, document) only; the
+ * "no CDC in two lotes in process" rule stays in `LoteBuilder`.
+ */
+export const loteDocuments = pgTable(
+  'lote_documents',
+  {
+    loteId: uuid('lote_id').notNull(),
+    documentId: uuid('document_id').notNull(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+  },
+  (table) => [
+    primaryKey({ columns: [table.loteId, table.documentId] }),
+    foreignKey({
+      columns: [table.tenantId, table.loteId],
+      foreignColumns: [lotes.tenantId, lotes.id],
+      name: 'lote_documents_tenant_lote_fk',
+    }),
+    foreignKey({
+      columns: [table.tenantId, table.documentId],
+      foreignColumns: [documents.tenantId, documents.id],
+      name: 'lote_documents_tenant_document_fk',
+    }),
   ],
 );
 
@@ -615,6 +687,8 @@ export const TENANT_TABLES = [
   'api_keys',
   'audit_log',
   'documents',
+  'lote_documents',
+  'lotes',
   'tenant_document_sequences',
   'tenant_establishments',
   'tenant_expedition_points',

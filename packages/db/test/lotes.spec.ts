@@ -148,7 +148,7 @@ describe('lotes', () => {
     await db.insert(lotes).values(lote(a));
     expect(await causeOf(db.update(lotes).set({ documentType: 2 }))).toContain('immutable');
     expect(await causeOf(db.update(lotes).set({ environment: 'production' }))).toContain(
-      'immutable',
+      'environment must match',
     );
     const [row] = await db
       .update(lotes)
@@ -163,9 +163,11 @@ describe('lotes', () => {
     await db.insert(loteDocuments).values({ tenantId: a, loteId: row.id, documentId });
     expect(
       await causeOf(db.insert(loteDocuments).values({ tenantId: a, loteId: row.id, documentId })),
-    ).toContain('lote_documents_pkey');
+    ).toContain('lote_documents_lote_id_document_id_pk');
     expect(
-      await causeOf(db.insert(loteDocuments).values({ tenantId: b, loteId: row.id, documentId })),
+      await causeOf(
+        db.insert(loteDocuments).values({ tenantId: b, loteId: crypto.randomUUID(), documentId }),
+      ),
     ).toContain('lote_documents_tenant_lote_fk');
   });
 });

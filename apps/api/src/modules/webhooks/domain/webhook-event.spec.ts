@@ -16,15 +16,49 @@ const base = {
 };
 
 describe('webhook event envelope (HU-E11-01)', () => {
-  it('lists the lifecycle events of the plan (§19)', () => {
+  it('lists the v1.0 §13 events plus the v1.1 §19 additions (v1.1 adds, it does not replace)', () => {
     expect(WEBHOOK_EVENT_TYPES).toEqual([
+      'document.created',
+      'document.signed',
+      'document.submitted',
       'document.approved',
       'document.approved_with_observations',
       'document.rejected',
       'document.cancelled',
       'document.number_voided',
       'document.transmission_deadline_warning',
+      'document.notification.delivered',
+      'document.notification.failed',
     ]);
+  });
+
+  it.each([
+    ['a bigint', { n: 1n }],
+    ['a function', { f: () => 1 }],
+    ['undefined', { u: undefined }],
+    ['NaN', { n: Number.NaN }],
+    ['Infinity', { n: Number.POSITIVE_INFINITY }],
+    ['a Date', { d: new Date() }],
+    ['a Map', { m: new Map() }],
+    ['a class instance', { c: new (class X {})() }],
+    ['a symbol', { s: Symbol('x') }],
+    ['an array holding a bigint', { a: [1n] }],
+  ])('rejects data holding %s', (_name, data) => {
+    expect(() => createWebhookEvent({ ...base, data })).toThrow(InvalidWebhookEventError);
+  });
+
+  it('rejects circular and absurdly deep data', () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    expect(() => createWebhookEvent({ ...base, data: circular })).toThrow(InvalidWebhookEventError);
+    let deep: Record<string, unknown> = {};
+    for (let i = 0; i < 100; i++) deep = { deep };
+    expect(() => createWebhookEvent({ ...base, data: deep })).toThrow(InvalidWebhookEventError);
+  });
+
+  it('accepts nested plain JSON values', () => {
+    const data = { a: [1, 'x', null, true, { b: 2.5 }], c: { d: null } };
+    expect(createWebhookEvent({ ...base, data }).data).toEqual(data);
   });
 
   it('builds the envelope with a UTC ISO created_at', () => {

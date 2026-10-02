@@ -34,7 +34,11 @@ function rewritePkcs12(p12: Buffer, visit: (node: forge.asn1.Asn1) => void): Buf
       node.value.startsWith('0') &&
       node.value.length > 32
     ) {
-      const inner = forge.asn1.fromDer(node.value);
+      // Ciphertext, salts and MAC digests are random bytes that start with
+      // 0x30 one time in 256; only descend into OCTET STRINGs that really
+      // hold DER, i.e. that parse and re-encode to the same bytes.
+      const inner = parseNestedDer(node.value);
+      if (inner === undefined) return;
       walk(inner);
       node.value = forge.asn1.toDer(inner).getBytes();
     }
@@ -42,6 +46,15 @@ function rewritePkcs12(p12: Buffer, visit: (node: forge.asn1.Asn1) => void): Buf
   const root = forge.asn1.fromDer(p12.toString('binary'));
   walk(root);
   return Buffer.from(forge.asn1.toDer(root).getBytes(), 'binary');
+}
+
+function parseNestedDer(bytes: string): forge.asn1.Asn1 | undefined {
+  try {
+    const inner = forge.asn1.fromDer(bytes);
+    return forge.asn1.toDer(inner).getBytes() === bytes ? inner : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Replaces every default (2048) PBE/PBKDF2/MAC iteration count with `count`. */

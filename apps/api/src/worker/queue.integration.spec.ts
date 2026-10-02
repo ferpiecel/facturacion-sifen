@@ -6,6 +6,7 @@ import {
   createTenantScheduleStore,
   createTransmissionWorker,
 } from './queue.js';
+import { startTransmissionWorker } from './start-transmission-worker.js';
 import { createRedisTenantRunLock } from './tenant-run-lock.js';
 
 const REDIS_URL = process.env.REDIS_URL;
@@ -84,5 +85,31 @@ describe.skipIf(!REDIS_URL)('BullMQ transmission queue (real Redis)', () => {
     expect(await lockB.acquire('t-lock')).toBeNull();
     await release?.();
     expect(await lockB.acquire('t-lock')).not.toBeNull();
+  });
+
+  it('runs the whole worker lifecycle: schedules tenants, processes their jobs and stops', async () => {
+    const { prefix, connection } = open();
+    const queue = new Queue('lote-build', { connection, prefix });
+    cleanup.push(() => queue.close());
+    const seen = new Set<string>();
+    const quiet = { info: () => undefined, warn: () => undefined, error: () => undefined };
+
+    const running = await startTransmissionWorker({
+      cycleIntervalMs: 100,
+      reconcileEveryMs: 60_000,
+      directory: { tenantIds: () => Promise.resolve(['a', 'b']) },
+      schedules: createTenantScheduleStore(queue),
+      process: (data) => {
+        seen.add(data.tenantId);
+        return Promise.resolve();
+      },
+      createWorker: (process) =>
+        createTransmissionWorker({ connection, prefix, concurrency: 2, process }),
+      logger: quiet,
+    });
+    await until(() => seen.size === 2);
+    await running.stop();
+
+    expect(seen).toEqual(new Set(['a', 'b']));
   });
 });

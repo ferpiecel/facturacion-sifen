@@ -192,6 +192,8 @@ export class CertificateVault {
         .from(tenantCertificates)
         .where(
           and(
+            // RLS already scopes the rows; the explicit filter is defence in depth.
+            eq(tenantCertificates.tenantId, tenantId),
             eq(tenantCertificates.environment, environment),
             eq(tenantCertificates.status, 'active'),
           ),

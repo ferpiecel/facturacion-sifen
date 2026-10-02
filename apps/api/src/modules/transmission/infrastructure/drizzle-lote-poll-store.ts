@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { documents, loteDocuments, lotes, withTenantTransaction, type Database } from '@sifen/db';
 import type {
   DocumentResolution,
@@ -56,7 +56,8 @@ export function createDrizzleLotePollStore({
             and(
               eq(lotes.id, loteId),
               eq(lotes.status, 'sent'),
-              eq(lotes.nextPollAt, guard.expectedNextPollAt),
+              // JS dates carry milliseconds; the column may hold microseconds.
+              sql`date_trunc('milliseconds', ${lotes.nextPollAt}) = ${guard.expectedNextPollAt}`,
             ),
           )
           .returning({ id: lotes.id });
@@ -125,8 +126,11 @@ async function settleDocument(
   if (doc.status !== 'submitted') {
     throw new Error(`Document ${cdc} is ${doc.status}, expected submitted`);
   }
-  await tx
+  const updated = await tx
     .update(documents)
     .set({ status, sifenMessages: messages, updatedAt: at })
-    .where(and(eq(documents.id, doc.id), eq(documents.status, 'submitted')));
+    .where(and(eq(documents.id, doc.id), eq(documents.status, 'submitted')))
+    .returning({ id: documents.id });
+  if (updated.length !== 1)
+    throw new Error(`Document ${cdc} changed while settling lote ${loteId}`);
 }

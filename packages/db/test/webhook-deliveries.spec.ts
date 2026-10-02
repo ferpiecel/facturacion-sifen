@@ -34,10 +34,14 @@ describe('webhook_deliveries', () => {
 
   async function seed() {
     handle = await createTestDatabase();
-    const rows = await handle.db.insert(tenants).values([{ name: 'A' }, { name: 'B' }]).returning();
+    const rows = await handle.db
+      .insert(tenants)
+      .values([{ name: 'A' }, { name: 'B' }])
+      .returning();
     const [a, b] = rows.map((row) => row.id);
+    const { db } = handle;
     const endpointFor = async (tenantId: string) => {
-      const [ep] = await handle!.db
+      const [ep] = await db
         .insert(webhookEndpoints)
         .values({ tenantId, url: 'https://example.com/hook', sealed: SEALED })
         .returning();

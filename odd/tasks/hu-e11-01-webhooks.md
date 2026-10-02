@@ -15,9 +15,11 @@ delivery history (backlog HU-E11-01; ADR-0011 anti-replay 5 min; plan v1.1 §19 
       `Sifen-Signature` scheme (+ verify helper, rotation overlap, secret generator); integrator doc
       `docs/integracion/webhooks.md`.
 - [x] S1b `feat/hu-e11-01-webhook-backoff` (stacked on S1, split out to stay <= 400 lines) — `nextRetryAt` backoff.
-- [ ] S2 `feat/hu-e11-01-webhook-tables` — migration 0027: `webhook_endpoints` (sealed secret, https-only url,
-      events filter) and `webhook_deliveries` (state, attempts, next_attempt_at, history), FORCE RLS.
-      (0027+ may be taken by the e6 writer; renumber at rebase, 0028 if so.)
+- [x] S2 `feat/hu-e11-01-webhook-tables` (stacked on S1b) — migration 0028 `webhook_endpoints` (sealed secret,
+      https-only url, events filter, rotation overlap), FORCE RLS. 0027 is reserved for the e6 writer; renumber at rebase.
+- [x] S2b `feat/hu-e11-01-webhook-deliveries` (stacked on S2) — migration 0029 `webhook_deliveries` (retry queue, DLQ
+      as `dead`, history columns), composite tenant FK, FORCE RLS. A per-attempt history table is a follow-up if
+      the last-attempt columns prove too thin for the S5 history endpoint.
 - [ ] S3 dispatcher service + `WebhookHttpPort` (fake in tests): SSRF guard (https only; resolve DNS, block
       private/loopback/link-local/CGNAT/metadata; connect to the vetted IP; no redirects; timeout; response cap),
       2xx = delivered, else `nextRetryAt`, null = dead; secret opened with `EnvelopeCipher` (new kind `webhook`).

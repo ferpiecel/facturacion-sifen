@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { derChildren, DerError, readDerElement, readDerElements } from './der.js';
+import { readX509Profile } from './x509-profile.js';
 
 const bytes = (...values: number[]) => Buffer.from(values);
 
@@ -28,5 +29,10 @@ describe('DER reader bounds (HU-E3-01)', () => {
     expect(() => readDerElement(bytes(0x05, 0x00, 0x05, 0x00))).toThrow(DerError);
     expect(() => readDerElement(bytes())).toThrow(DerError);
     expect(() => derChildren({ tag: 0x04, content: bytes() })).toThrow(DerError);
+  });
+
+  it('rejects a certificate that is not an X.509 structure', () => {
+    expect(() => readX509Profile(bytes(0x30, 0x00))).toThrow(DerError);
+    expect(() => readX509Profile(bytes(0x30, 0x02, 0x30, 0x00))).toThrow(DerError);
   });
 });

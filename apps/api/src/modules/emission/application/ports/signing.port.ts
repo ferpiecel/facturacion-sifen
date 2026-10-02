@@ -15,9 +15,21 @@ export interface SignableDocument {
   readonly context: InvoiceXmlContext;
 }
 
+/** A document that is not `accepted`: nothing to sign, so nothing else is loaded or parsed. */
+export interface NotAcceptedDocument {
+  readonly documentId: string;
+  readonly status: string;
+}
+
 export interface SigningStore {
-  /** Runs inside the tenant's RLS scope; null when the document does not exist for the tenant. */
-  load(tenantId: string, documentId: string): Promise<SignableDocument | null>;
+  /**
+   * Runs inside the tenant's RLS scope; null when the document does not exist for the tenant. A
+   * document that is not `accepted` comes back as {@link NotAcceptedDocument} (no `context`).
+   */
+  load(
+    tenantId: string,
+    documentId: string,
+  ): Promise<SignableDocument | NotAcceptedDocument | null>;
   /**
    * One tenant transaction: stores `signed_xml`/`signed_at` and moves `accepted -> signed`.
    * False (nothing written) when the document is no longer `accepted`.

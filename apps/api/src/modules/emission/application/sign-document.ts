@@ -72,7 +72,7 @@ export class SignDocument {
   }): Promise<SignDocumentResult> {
     const document = await this.deps.store.load(tenantId, documentId);
     if (!document) throw new DocumentNotFoundError();
-    if (document.status !== 'accepted') {
+    if (document.status !== 'accepted' || !('context' in document)) {
       return { status: 'skipped', documentStatus: document.status };
     }
     if (document.environment !== document.tenantEnvironment) {

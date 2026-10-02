@@ -16,6 +16,8 @@ import { buildCdc } from '../domain/cdc.js';
 import {
   EstablishmentContactMissingError,
   SigningDataIncompleteError,
+  type NotAcceptedDocument,
+  type SignableDocument,
 } from '../application/ports/signing.port.js';
 import { createDrizzleSigningStore } from './drizzle-signing-store.js';
 
@@ -62,6 +64,11 @@ const PAYLOAD = {
   location: { departmentCode: 11 },
   currency: 'PYG',
 };
+
+function asSignable(loaded: SignableDocument | NotAcceptedDocument | null): SignableDocument {
+  if (!loaded || !('context' in loaded)) throw new Error('expected a signable document');
+  return loaded;
+}
 
 /** Spec: HU-E6-02 (S4b). SigningStore over documents + fiscal configuration, under RLS. */
 describe('DrizzleSigningStore', () => {
@@ -152,7 +159,7 @@ describe('DrizzleSigningStore', () => {
     beforeEach(() => seed());
 
     it('rebuilds the draft and the XML context from the document and the fiscal configuration', async () => {
-      const loaded = await storeFor(tenantId).load(tenantId, documentId);
+      const loaded = asSignable(await storeFor(tenantId).load(tenantId, documentId));
       expect(loaded).toMatchObject({
         documentId,
         cdc: CDC,
@@ -184,13 +191,13 @@ describe('DrizzleSigningStore', () => {
           lines: [{ code: 'A-001', description: 'Servicio real uno', unitCode: 77 }],
         },
       });
-      expect(loaded?.context.issuer).toMatchObject({
+      expect(loaded.context.issuer).toMatchObject({
         legalName: 'Empresa Real SA',
         economicActivities: [{ code: '1254', description: 'Desarrollo de Software' }],
       });
-      expect(loaded?.context.establishment.code).toBe('001');
-      expect(loaded?.context.point.code).toBe('001');
-      expect(loaded?.context.timbrado.number).toBe('12345678');
+      expect(loaded.context.establishment.code).toBe('001');
+      expect(loaded.context.point.code).toBe('001');
+      expect(loaded.context.timbrado.number).toBe('12345678');
     });
 
     it('is null for an unknown document and for another tenant', async () => {
@@ -205,8 +212,21 @@ describe('DrizzleSigningStore', () => {
         .update(tenants)
         .set({ environment: 'production' })
         .where(eq(tenants.id, tenantId));
-      const loaded = await storeFor(tenantId).load(tenantId, documentId);
+      const loaded = asSignable(await storeFor(tenantId).load(tenantId, documentId));
       expect(loaded).toMatchObject({ environment: 'test', tenantEnvironment: 'production' });
+    });
+  });
+
+  it('returns early, without reading configuration or the payload, when not accepted', async () => {
+    // A payload that would make a full load throw: a signed document must never be parsed again.
+    await seed({ payload: 'not an invoice' });
+    await handle.db
+      .update(documents)
+      .set({ status: 'signed', signedXml: '<rDE/>', signedAt: new Date('2026-09-30T13:00:05Z') })
+      .where(eq(documents.id, documentId));
+    expect(await storeFor(tenantId).load(tenantId, documentId)).toEqual({
+      documentId,
+      status: 'signed',
     });
   });
 

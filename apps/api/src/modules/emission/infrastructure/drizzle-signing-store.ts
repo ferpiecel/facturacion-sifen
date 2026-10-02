@@ -19,6 +19,7 @@ import { createTimbrado } from '../../fiscal-config/domain/timbrado.js';
 import {
   EstablishmentContactMissingError,
   SigningDataIncompleteError,
+  type NotAcceptedDocument,
   type SignableDocument,
   type SigningStore,
 } from '../application/ports/signing.port.js';
@@ -95,125 +96,156 @@ export function createDrizzleSigningStore({
 }: DrizzleSigningStoreOptions): SigningStore {
   return {
     async load(tenantId, documentId) {
-      return withTenantTransaction(db, tenantId, async (tx): Promise<SignableDocument | null> => {
-        const document = first(
-          await tx.select().from(documents).where(eq(documents.id, documentId)),
-        );
-        if (!document) return null;
-        const tenant = first(
-          await tx
-            .select({ environment: tenants.environment })
-            .from(tenants)
-            .where(eq(tenants.id, tenantId)),
-        );
-        const profile = first(
-          await tx
+      return withTenantTransaction(
+        db,
+        tenantId,
+        async (tx): Promise<SignableDocument | NotAcceptedDocument | null> => {
+          // RLS already scopes every query; the explicit tenant predicates are defence in depth.
+          const document = first(
+            await tx
+              .select()
+              .from(documents)
+              .where(and(eq(documents.tenantId, tenantId), eq(documents.id, documentId))),
+          );
+          if (!document) return null;
+          // Nothing to sign: do not touch the configuration or parse the payload again.
+          if (document.status !== 'accepted') {
+            return { documentId: document.id, status: document.status };
+          }
+          const tenant = first(
+            await tx
+              .select({ environment: tenants.environment })
+              .from(tenants)
+              .where(eq(tenants.id, tenantId)),
+          );
+          const profile = first(
+            await tx
+              .select()
+              .from(tenantFiscalProfiles)
+              .where(eq(tenantFiscalProfiles.tenantId, tenantId)),
+          );
+          const activities = await tx
             .select()
-            .from(tenantFiscalProfiles)
-            .where(eq(tenantFiscalProfiles.tenantId, tenantId)),
-        );
-        const activities = await tx
-          .select()
-          .from(tenantFiscalEconomicActivities)
-          .where(eq(tenantFiscalEconomicActivities.tenantId, tenantId))
-          .orderBy(asc(tenantFiscalEconomicActivities.createdAt));
-        const establishment = first(
-          await tx
-            .select()
-            .from(tenantEstablishments)
-            .where(eq(tenantEstablishments.id, document.establishmentId)),
-        );
-        const point = first(
-          await tx
-            .select()
-            .from(tenantExpeditionPoints)
-            .where(eq(tenantExpeditionPoints.id, document.expeditionPointId)),
-        );
-        const timbrado = first(
-          await tx
-            .select()
-            .from(tenantTimbrados)
-            .where(eq(tenantTimbrados.id, document.timbradoId)),
-        );
-        if (!tenant || !profile || !establishment || !point || !timbrado) {
-          throw new SigningDataIncompleteError(['fiscal configuration']);
-        }
-        if (!establishment.phone || !establishment.email) {
-          throw new EstablishmentContactMissingError(establishment.code);
-        }
-
-        const { draft, receiver, items } = readPayload(document.payload);
-        const issuer = createFiscalProfile({
-          ruc: createRuc(profile.rucBase, profile.rucDv),
-          legalName: profile.legalName,
-          tradeName: profile.tradeName,
-          taxpayerType: profile.taxpayerType,
-          regimeCode: profile.regimeCode,
-          economicActivities: activities.map((a) => ({ code: a.code, description: a.description })),
-        });
-        return {
-          documentId: document.id,
-          cdc: document.cdc,
-          status: document.status,
-          environment: document.environment,
-          tenantEnvironment: tenant.environment,
-          draft,
-          context: {
-            environment: document.environment,
-            issuer,
-            establishment: createEstablishment({
-              code: establishment.code,
-              address: establishment.address,
-              houseNumber: establishment.houseNumber,
-              addressComplement1: establishment.addressComplement1,
-              addressComplement2: establishment.addressComplement2,
-              departmentCode: Number(establishment.departmentCode),
-              districtCode: establishment.districtCode,
-              districtDescription: establishment.districtDescription,
-              cityCode: establishment.cityCode,
-              cityDescription: establishment.cityDescription,
-              phone: establishment.phone,
-              email: establishment.email,
-              commercialName: establishment.commercialName,
-            }),
-            // dDenSuc is optional in the XSD, but xmlgen takes a value: the branch name, else the issuer's.
-            establishmentContact: {
-              phone: establishment.phone,
-              email: establishment.email,
-              name: (establishment.commercialName ?? profile.tradeName ?? profile.legalName).slice(
-                0,
-                30,
+            .from(tenantFiscalEconomicActivities)
+            .where(eq(tenantFiscalEconomicActivities.tenantId, tenantId))
+            .orderBy(asc(tenantFiscalEconomicActivities.createdAt));
+          const establishment = first(
+            await tx
+              .select()
+              .from(tenantEstablishments)
+              .where(
+                and(
+                  eq(tenantEstablishments.tenantId, tenantId),
+                  eq(tenantEstablishments.id, document.establishmentId),
+                ),
               ),
-            },
-            point: createExpeditionPoint({ code: point.code }),
-            timbrado: createTimbrado({
-              number: timbrado.number,
-              validityStart: timbrado.validFrom,
-              validityEnd: timbrado.validTo,
-            }),
-            numbering: {
-              documentNumber: String(document.number).padStart(7, '0'),
-              securityCode: document.securityCode,
-            },
-            issuedAt: document.issuedAt,
-            receiver: {
-              ruc: receiver.ruc,
-              name: receiver.name,
-              address: receiver.address,
-              houseNumber: receiver.houseNumber,
-              districtCode: receiver.districtCode,
-              districtDescription: receiver.districtDescription,
-              cityCode: receiver.cityCode,
-              cityDescription: receiver.cityDescription,
-            },
-            lines: items.map((i) => ({
-              code: i.code,
-              description: i.description,
-              unitCode: i.unitCode,
+          );
+          const point = first(
+            await tx
+              .select()
+              .from(tenantExpeditionPoints)
+              .where(
+                and(
+                  eq(tenantExpeditionPoints.tenantId, tenantId),
+                  eq(tenantExpeditionPoints.id, document.expeditionPointId),
+                ),
+              ),
+          );
+          const timbrado = first(
+            await tx
+              .select()
+              .from(tenantTimbrados)
+              .where(
+                and(
+                  eq(tenantTimbrados.tenantId, tenantId),
+                  eq(tenantTimbrados.id, document.timbradoId),
+                ),
+              ),
+          );
+          if (!tenant || !profile || !establishment || !point || !timbrado) {
+            throw new SigningDataIncompleteError(['fiscal configuration']);
+          }
+          if (!establishment.phone || !establishment.email) {
+            throw new EstablishmentContactMissingError(establishment.code);
+          }
+
+          const { draft, receiver, items } = readPayload(document.payload);
+          const issuer = createFiscalProfile({
+            ruc: createRuc(profile.rucBase, profile.rucDv),
+            legalName: profile.legalName,
+            tradeName: profile.tradeName,
+            taxpayerType: profile.taxpayerType,
+            regimeCode: profile.regimeCode,
+            economicActivities: activities.map((a) => ({
+              code: a.code,
+              description: a.description,
             })),
-          },
-        };
-      });
+          });
+          return {
+            documentId: document.id,
+            cdc: document.cdc,
+            status: document.status,
+            environment: document.environment,
+            tenantEnvironment: tenant.environment,
+            draft,
+            context: {
+              environment: document.environment,
+              issuer,
+              establishment: createEstablishment({
+                code: establishment.code,
+                address: establishment.address,
+                houseNumber: establishment.houseNumber,
+                addressComplement1: establishment.addressComplement1,
+                addressComplement2: establishment.addressComplement2,
+                departmentCode: Number(establishment.departmentCode),
+                districtCode: establishment.districtCode,
+                districtDescription: establishment.districtDescription,
+                cityCode: establishment.cityCode,
+                cityDescription: establishment.cityDescription,
+                phone: establishment.phone,
+                email: establishment.email,
+                commercialName: establishment.commercialName,
+              }),
+              // dDenSuc is optional in the XSD, but xmlgen takes a value: the branch name, else the issuer's.
+              establishmentContact: {
+                phone: establishment.phone,
+                email: establishment.email,
+                name: (
+                  establishment.commercialName ??
+                  profile.tradeName ??
+                  profile.legalName
+                ).slice(0, 30),
+              },
+              point: createExpeditionPoint({ code: point.code }),
+              timbrado: createTimbrado({
+                number: timbrado.number,
+                validityStart: timbrado.validFrom,
+                validityEnd: timbrado.validTo,
+              }),
+              numbering: {
+                documentNumber: String(document.number).padStart(7, '0'),
+                securityCode: document.securityCode,
+              },
+              issuedAt: document.issuedAt,
+              receiver: {
+                ruc: receiver.ruc,
+                name: receiver.name,
+                address: receiver.address,
+                houseNumber: receiver.houseNumber,
+                districtCode: receiver.districtCode,
+                districtDescription: receiver.districtDescription,
+                cityCode: receiver.cityCode,
+                cityDescription: receiver.cityDescription,
+              },
+              lines: items.map((i) => ({
+                code: i.code,
+                description: i.description,
+                unitCode: i.unitCode,
+              })),
+            },
+          };
+        },
+      );
     },
 
     async markSigned(tenantId, documentId, { signedXml, signedAt }) {
@@ -221,7 +253,13 @@ export function createDrizzleSigningStore({
         tx
           .update(documents)
           .set({ status: 'signed', signedXml, signedAt, updatedAt: now() })
-          .where(and(eq(documents.id, documentId), eq(documents.status, 'accepted')))
+          .where(
+            and(
+              eq(documents.tenantId, tenantId),
+              eq(documents.id, documentId),
+              eq(documents.status, 'accepted'),
+            ),
+          )
           .returning({ id: documents.id }),
       );
       return updated.length === 1;

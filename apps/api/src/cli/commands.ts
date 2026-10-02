@@ -260,7 +260,8 @@ export async function setEstablishmentContact(
       .set({
         phone: contact.phone,
         email: contact.email,
-        commercialName: contact.commercialName,
+        // Only --name sets the commercial name; leaving it out keeps the stored one (no clearing).
+        ...(contact.commercialName === null ? {} : { commercialName: contact.commercialName }),
         updatedAt: new Date(),
       })
       .where(

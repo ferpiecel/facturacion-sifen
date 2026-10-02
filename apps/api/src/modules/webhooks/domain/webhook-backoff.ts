@@ -20,18 +20,26 @@ export interface NextRetryInput {
  * jitter (between half and the whole nominal delay). The last attempt is clamped to the
  * 24 h deadline; once that has been reached the result is `null` and the delivery is dead.
  *
- * @throws RangeError when `failedAttempts` is not a positive integer.
+ * @throws RangeError when `failedAttempts` is not a positive integer, `random()` leaves [0, 1)
+ * or a date is invalid.
  */
 export function nextRetryAt(input: NextRetryInput): Date | null {
   const { failedAttempts, now } = input;
   if (!Number.isInteger(failedAttempts) || failedAttempts < 1) {
     throw new RangeError('failedAttempts must be a positive integer');
   }
+  const random = input.random();
+  if (!Number.isFinite(random) || random < 0 || random >= 1) {
+    throw new RangeError('random() must return a number in [0, 1)');
+  }
+  if (!Number.isFinite(input.firstAttemptAt.getTime()) || !Number.isFinite(now.getTime())) {
+    throw new RangeError('firstAttemptAt and now must be valid dates');
+  }
   const deadline = input.firstAttemptAt.getTime() + RETRY_WINDOW_MS;
   if (now.getTime() >= deadline) {
     return null;
   }
   const nominal = Math.min(BASE_DELAY_MS * 2 ** Math.min(failedAttempts - 1, 20), MAX_DELAY_MS);
-  const delay = nominal / 2 + (nominal / 2) * input.random();
+  const delay = Math.round(nominal / 2 + (nominal / 2) * random);
   return new Date(Math.min(now.getTime() + delay, deadline));
 }

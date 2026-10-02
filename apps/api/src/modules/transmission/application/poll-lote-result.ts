@@ -35,10 +35,20 @@ export interface LotePollState {
   readonly cdcs: readonly string[];
 }
 
+export interface LotePollGuard {
+  /** The `next_poll_at` the lote had when it was loaded; the write only applies if it still has it. */
+  readonly expectedNextPollAt: Date;
+  readonly polledAt: Date;
+}
+
 export interface LotePollStore {
   load(loteId: string): Promise<LotePollState | null>;
-  /** Atomically stores the lote transition and the document updates it implies. */
-  record(loteId: string, outcome: LotePollOutcome): Promise<void>;
+  /**
+   * Atomically stores the lote transition and the document updates it implies, only while the
+   * lote is still `sent` with `guard.expectedNextPollAt`. Returns false (nothing written) when a
+   * concurrent poll already moved it.
+   */
+  record(loteId: string, outcome: LotePollOutcome, guard: LotePollGuard): Promise<boolean>;
 }
 
 export interface PollLoteResultDeps {
@@ -53,7 +63,7 @@ export interface PollLoteResultCommand {
 }
 
 export type PollLoteResultResult =
-  LotePollOutcome | { readonly status: 'not-found' | 'not-pollable' | 'not-due' };
+  LotePollOutcome | { readonly status: 'not-found' | 'not-pollable' | 'not-due' | 'stale' };
 
 /**
  * Queries a due lote once and decides what happens next (plan 8.1, ADR-0007):
@@ -75,7 +85,7 @@ export class PollLoteResult {
     if (now < lote.nextPollAt) return { status: 'not-due' };
 
     if (lote.pollDeadlineAt && now > lote.pollDeadlineAt) {
-      return this.settle(loteId, {
+      return this.settle(lote, {
         status: 'recovery',
         reason: 'The 48 h lote query window elapsed; query each CDC (0364 would follow)',
       });
@@ -86,9 +96,9 @@ export class PollLoteResult {
       answer = await this.deps.gateway.consultarLote({ dId, dProtConsLote: lote.dProtConsLote });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      return this.settle(loteId, this.pending(now, `Lote query failed: ${reason}`));
+      return this.settle(lote, this.pending(now, `Lote query failed: ${reason}`));
     }
-    return this.settle(loteId, this.interpret(answer, lote.cdcs, now));
+    return this.settle(lote, this.interpret(answer, lote.cdcs, now));
   }
 
   private interpret(answer: SifenLoteResult, cdcs: readonly string[], now: Date): LotePollOutcome {
@@ -109,8 +119,11 @@ export class PollLoteResult {
     return { status: 'pending', nextPollAt: new Date(now.getTime() + POLL_INTERVAL_MS), reason };
   }
 
-  private async settle(loteId: string, outcome: LotePollOutcome): Promise<LotePollOutcome> {
-    await this.deps.store.record(loteId, outcome);
+  private async settle(lote: LotePollState, outcome: LotePollOutcome): Promise<LotePollOutcome> {
+    await this.deps.store.record(lote.loteId, outcome, {
+      expectedNextPollAt: lote.nextPollAt as Date,
+      polledAt: this.now(),
+    });
     return outcome;
   }
 

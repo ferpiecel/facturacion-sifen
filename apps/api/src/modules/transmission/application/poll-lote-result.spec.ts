@@ -8,6 +8,7 @@ import {
 import { describe, expect, it } from 'vitest';
 import {
   PollLoteResult,
+  type LotePollGuard,
   type LotePollOutcome,
   type LotePollState,
   type LotePollStore,
@@ -21,6 +22,7 @@ const cdcB = '01444444017001001000000222026092211234567891'.slice(0, 44);
 
 class InMemoryPollStore implements LotePollStore {
   readonly outcomes: LotePollOutcome[] = [];
+  readonly guards: LotePollGuard[] = [];
 
   constructor(private state: LotePollState | null) {}
 
@@ -28,9 +30,24 @@ class InMemoryPollStore implements LotePollStore {
     return Promise.resolve(this.state);
   }
 
-  record(_loteId: string, outcome: LotePollOutcome): Promise<void> {
+  /** Mimics the adapter's compare-and-set on status and next_poll_at. */
+  record(_loteId: string, outcome: LotePollOutcome, guard: LotePollGuard): Promise<boolean> {
+    const state = this.state;
+    if (
+      !state ||
+      state.status !== 'sent' ||
+      state.nextPollAt?.getTime() !== guard.expectedNextPollAt.getTime()
+    ) {
+      return Promise.resolve(false);
+    }
     this.outcomes.push(outcome);
-    return Promise.resolve();
+    this.guards.push(guard);
+    this.state = {
+      ...state,
+      status: outcome.status === 'pending' ? 'sent' : outcome.status,
+      nextPollAt: outcome.status === 'pending' ? outcome.nextPollAt : state.nextPollAt,
+    };
+    return Promise.resolve(true);
   }
 }
 
@@ -224,6 +241,64 @@ describe('PollLoteResult', () => {
     const outcome = await run(poll);
     expect(outcome).toMatchObject({ status: 'pending' });
     expect(reasonOf(outcome)).toContain('0999');
+  });
+
+  it('hides internal error details in the stored pending reason', async () => {
+    const { poll, gateway } = setup(sentLote(), 11 * MINUTE);
+    gateway.enqueue(
+      'consultarLote',
+      new Error('connect ECONNREFUSED 10.0.0.5:8443 /etc/ssl/tenant.p12'),
+    );
+    const outcome = await run(poll);
+    expect(outcome).toMatchObject({ status: 'pending' });
+    expect(reasonOf(outcome)).toContain('Error');
+    expect(reasonOf(outcome)).not.toContain('10.0.0.5');
+    expect(reasonOf(outcome)).not.toContain('.p12');
+  });
+
+  it('sends a CDC with conflicting duplicate results to recovery', async () => {
+    const { poll, gateway } = setup(sentLote(), 11 * MINUTE);
+    gateway.enqueue(
+      'consultarLote',
+      sifenScenarios.loteConcluido([
+        resultado(cdcA, 'Aprobado'),
+        resultado(cdcA, 'Rechazado', '1000'),
+        resultado(cdcB, 'Aprobado'),
+      ]),
+    );
+    expect(await run(poll)).toMatchObject({
+      resolutions: [{ cdc: cdcB, status: 'approved' }],
+      needsRecovery: [cdcA],
+    });
+  });
+
+  it('collapses identical duplicate results into one resolution', async () => {
+    const { poll, gateway } = setup(sentLote({ cdcs: [cdcA] }), 11 * MINUTE);
+    gateway.enqueue(
+      'consultarLote',
+      sifenScenarios.loteConcluido([resultado(cdcA, 'Aprobado'), resultado(cdcA, 'aprobado')]),
+    );
+    expect(await run(poll)).toMatchObject({
+      resolutions: [{ cdc: cdcA, status: 'approved' }],
+      needsRecovery: [],
+    });
+  });
+
+  it('passes the loaded next_poll_at and the poll time to the store', async () => {
+    const state = sentLote();
+    const { poll, gateway, store, now } = setup(state, 11 * MINUTE);
+    gateway.enqueue('consultarLote', sifenScenarios.loteEnProcesamiento());
+    await run(poll);
+    expect(store.guards).toEqual([{ expectedNextPollAt: state.nextPollAt, polledAt: now }]);
+  });
+
+  it('reports stale and changes nothing when a concurrent poll already moved the lote', async () => {
+    const { poll, gateway, store } = setup(sentLote(), 11 * MINUTE);
+    gateway.enqueue('consultarLote', sifenScenarios.loteEnProcesamiento());
+    gateway.enqueue('consultarLote', sifenScenarios.loteEnProcesamiento());
+    const results = await Promise.all([run(poll), run(poll)]);
+    expect(results.map((r) => r.status).sort()).toEqual(['pending', 'stale']);
+    expect(store.outcomes).toHaveLength(1);
   });
 
   it('calls SIFEN once per execution', async () => {

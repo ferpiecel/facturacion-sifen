@@ -1,5 +1,5 @@
 import { createPgliteDatabase, type DatabaseHandle } from '@sifen/db';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { createEstablishment } from '../modules/fiscal-config/domain/establishment.js';
 import { createExpeditionPoint } from '../modules/fiscal-config/domain/expedition-point.js';
 import { createFiscalProfile } from '../modules/fiscal-config/domain/fiscal-profile.js';
@@ -287,17 +287,20 @@ describe('csc:add (HU-E2-03)', () => {
 
 describe('runCli csc:add (HU-E2-03)', () => {
   const CSC = 'ABCD0000000000000000000000000000';
-  let handle: DatabaseHandle | undefined;
+  // One migrated database for the whole block (migrating costs seconds, esp. under coverage);
+  // every scenario gets its own tenant, so they stay independent.
+  let handle: DatabaseHandle;
 
-  afterEach(async () => {
-    await handle?.close();
-    handle = undefined;
+  beforeAll(async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+  });
+
+  afterAll(async () => {
+    await handle.close();
   });
 
   async function run(argv: (tenantId: string) => string[], stdin = '', key = MASTER_KEY) {
-    await handle?.close();
-    handle = createPgliteDatabase();
-    await handle.migrate();
     const { id: tenantId } = await createTenant(handle.db, 'Cli Tenant');
     const out: string[] = [];
     const err: string[] = [];
@@ -339,25 +342,29 @@ describe('runCli csc:add (HU-E2-03)', () => {
     expect(JSON.stringify(await result.db.select().from(tenantCscs))).not.toContain(CSC);
   });
 
-  it('fails without leaking the CSC: stray positional, unknown tenant, missing master key, bad stdin', async () => {
-    const positional = await run((t) => [
-      'csc:add',
-      '--tenant',
-      t,
-      '--env',
-      'test',
-      '--id',
-      '0001',
-      CSC,
-    ]);
-    const unknown = await run(() => args('00000000-0000-4000-8000-000000000000', CSC));
-    const noKey = await run((t) => args(t, CSC), '', '');
-    const badStdin = await run((t) => args(t, '-'), 'short\n');
-    for (const result of [positional, unknown, noKey, badStdin]) {
-      expect(result.code).toBe(1);
-      expect(result.err).not.toBe('');
-      expect(result.out + result.err).not.toContain(CSC);
-    }
-    expect(noKey.err).toContain('KMS_LOCAL_MASTER_KEY');
+  const expectFailure = (result: { code: number; out: string; err: string }) => {
+    expect(result.code).toBe(1);
+    expect(result.err).not.toBe('');
+    expect(result.out + result.err).not.toContain(CSC);
+  };
+
+  it('fails on a stray positional without leaking the CSC', async () => {
+    expectFailure(
+      await run((t) => ['csc:add', '--tenant', t, '--env', 'test', '--id', '0001', CSC]),
+    );
+  });
+
+  it('fails for an unknown tenant without leaking the CSC', async () => {
+    expectFailure(await run(() => args('00000000-0000-4000-8000-000000000000', CSC)));
+  });
+
+  it('fails without the master key, naming it, without leaking the CSC', async () => {
+    const result = await run((t) => args(t, CSC), '', '');
+    expectFailure(result);
+    expect(result.err).toContain('KMS_LOCAL_MASTER_KEY');
+  });
+
+  it('fails on a malformed stdin CSC without leaking it', async () => {
+    expectFailure(await run((t) => args(t, '-'), 'short\n'));
   });
 });

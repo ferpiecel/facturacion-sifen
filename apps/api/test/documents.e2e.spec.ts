@@ -187,9 +187,7 @@ describe('POST /v1/documents (e2e)', () => {
   });
 
   it('persists the validated body (defaults applied, unknown keys stripped), not the raw one', async () => {
-    const { roundingPyg: _omitted, ...withoutRounding } = BODY;
-
-    const response = await post({ ...withoutRounding, injected: 'x'.repeat(10) });
+    const response = await post({ ...BODY, roundingPyg: undefined, injected: 'x'.repeat(10) });
 
     expect(response.statusCode).toBe(202);
     const [row] = await handle.db.select().from(documents);

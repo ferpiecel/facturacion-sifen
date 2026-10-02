@@ -26,6 +26,7 @@ const BLOCKED_V4: readonly (readonly [string, number])[] = [
   ['172.16.0.0', 12],
   ['192.0.0.0', 24],
   ['192.0.2.0', 24],
+  ['192.88.99.0', 24],
   ['192.168.0.0', 16],
   ['198.18.0.0', 15],
   ['198.51.100.0', 24],
@@ -84,7 +85,10 @@ function blockedV6(g: readonly number[]): boolean {
   }
   if ((g0 & 0xe000) !== 0x2000) return true; // only global unicast 2000::/3 is ever allowed
   if (g0 === 0x2002) return blockedV4(embedded(g1, g2)); // 6to4
-  if (g0 === 0x2001 && (g1 === 0 || g1 === 0x0db8)) return true; // Teredo, documentation
+  if (g0 === 0x2001) {
+    // Teredo (2001::/32), ORCHID 2001:10::/28 and ORCHIDv2 2001:20::/28, documentation (2001:db8::/32).
+    if (g1 === 0 || g1 === 0x0db8 || (g1 & 0xfff0) === 0x10 || (g1 & 0xfff0) === 0x20) return true;
+  }
   return false;
 }
 

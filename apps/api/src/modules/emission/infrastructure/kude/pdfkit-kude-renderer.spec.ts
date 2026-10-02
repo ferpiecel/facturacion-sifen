@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import PDFDocument from 'pdfkit';
+import { describe, expect, it, vi } from 'vitest';
 import type { KudeInvoice, KudeItem } from '../../domain/kude-model.js';
 import {
   decodeQr,
@@ -251,5 +252,18 @@ describe('PdfkitKudeRenderer (FE, A4)', () => {
     await expect(renderer.render({ ...invoice(), issuedAt: '2026-01-02' })).rejects.toThrow(
       /issuedAt/,
     );
+  });
+
+  it('rejects when pdfkit reports an error instead of hanging', async () => {
+    const end = vi.spyOn(PDFDocument.prototype, 'end').mockImplementation(function (
+      this: InstanceType<typeof PDFDocument>,
+    ) {
+      setImmediate(() => this.emit('error', new Error('boom')));
+    });
+    try {
+      await expect(renderer.render(invoice())).rejects.toThrow('boom');
+    } finally {
+      end.mockRestore();
+    }
   });
 });

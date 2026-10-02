@@ -1,4 +1,4 @@
-import type { X509Certificate } from 'node:crypto';
+import { X509Certificate } from 'node:crypto';
 
 /** The PSC trusted-roots configuration is missing or unusable; the operator CLI fails closed. */
 export class TrustedRootsError extends Error {
@@ -8,15 +8,39 @@ export class TrustedRootsError extends Error {
   }
 }
 
-/** Parses a PEM bundle of PSC root certificates. */
-export function parseTrustedRoots(_pem: string): X509Certificate[] {
-  throw new TrustedRootsError('not implemented');
+const PEM_BLOCK = /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g;
+
+/**
+ * Parses a PEM bundle of PSC root certificates (the MIC-enabled roots, never hardcoded: the
+ * validator trusts exactly this list). A corrupt block fails the whole bundle so a typo cannot
+ * silently drop a root.
+ */
+export function parseTrustedRoots(pem: string): X509Certificate[] {
+  const blocks = pem.match(PEM_BLOCK) ?? [];
+  if (blocks.length === 0) throw new TrustedRootsError('trusted roots bundle has no certificate');
+  return blocks.map((block) => {
+    try {
+      return new X509Certificate(block);
+    } catch {
+      throw new TrustedRootsError('trusted roots bundle has an unreadable certificate');
+    }
+  });
 }
 
-/** Loads the bundle named by `PSC_TRUSTED_ROOTS_PATH`. */
+/** Loads the PEM bundle named by `PSC_TRUSTED_ROOTS_PATH`; fails closed without it. */
 export function loadTrustedRoots(
-  _env: NodeJS.ProcessEnv,
-  _readFile: (path: string) => string,
+  env: NodeJS.ProcessEnv,
+  readFile: (path: string) => string,
 ): X509Certificate[] {
-  throw new TrustedRootsError('not implemented');
+  const path = env.PSC_TRUSTED_ROOTS_PATH;
+  if (!path)
+    throw new TrustedRootsError('PSC_TRUSTED_ROOTS_PATH is required (PSC root bundle, PEM)');
+  let pem: string;
+  try {
+    pem = readFile(path);
+  } catch {
+    // No cause: the path is operator-supplied, the OS error adds nothing safe to print.
+    throw new TrustedRootsError('PSC_TRUSTED_ROOTS_PATH could not be read');
+  }
+  return parseTrustedRoots(pem);
 }

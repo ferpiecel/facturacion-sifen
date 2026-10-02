@@ -1,10 +1,27 @@
 import { z } from 'zod';
 import { parseRuc } from '../../../fiscal-config/domain/ruc.js';
+import { isUnitOfMeasureCode } from '../../domain/unit-of-measure.js';
 import type { ValidationError } from '../../domain/invoice-draft.js';
 import type { AcceptInvoiceInput } from '../../application/accept-invoice.js';
 
 /** MT v150 E001 gCamItem occurs 1-999 times per DE (p. 86). */
 const MAX_ITEMS = 999;
+
+/** `noEmptyString` (DE_Types_v150.xsd:1724): at least one non-whitespace character. */
+const text = (max: number, min = 1) =>
+  z
+    .string()
+    .max(max)
+    .refine((value) => value.trim().length >= min && value.trim().length > 0, {
+      error: `Must have at least ${String(min)} non-blank characters`,
+    });
+
+const digits = (max: number) =>
+  z
+    .number()
+    .int()
+    .min(1)
+    .max(10 ** max - 1);
 
 const code = (length: number) => z.string().regex(new RegExp(`^\\d{${String(length)}}$`));
 
@@ -20,10 +37,26 @@ const receiver = z.discriminatedUnion('kind', [
       }
     }, 'Receiver RUC is not a valid RUC (base-DV)'),
     isPublicEntity: z.boolean().default(false),
+    /** dNomRec (D109): tdNombre, 4..255 (DE_Types_v150.xsd:2242). */
+    name: text(255, 4),
+    /** dDirRec (D110): tdDirec, up to 255 (:2206). */
+    address: text(255),
+    /** dNumCasRec (D111): tdNumCas, integer >= 0 of up to 6 digits (:2217), kept as text. */
+    houseNumber: z.string().regex(/^\d{1,6}$/, 'House number must be 1 to 6 digits'),
+    /** cDisRec / dDesDisRec (D113/D114): tDistrito 4 digits (:1789), description 1..30 (:1801). */
+    districtCode: digits(4),
+    districtDescription: text(30),
+    /** cCiuRec / dDesCiuRec (D115/D116): tCiudad 5 digits (:1764), description up to 30 (:1776). */
+    cityCode: digits(5),
+    cityDescription: text(30),
   }),
   z.object({
     kind: z.literal('unnamed'),
     ruc: z.never({ error: 'An unnamed receiver must not carry a RUC' }).optional(),
+    /** NT 024: the DE of an innominado receiver carries the fixed name "Sin Nombre". */
+    name: z
+      .never({ error: 'An unnamed receiver has a fixed name and must not carry one' })
+      .optional(),
   }),
 ]);
 
@@ -34,7 +67,21 @@ export const createDocumentSchema = z.object({
   operationType: z.enum(['B2B', 'B2C', 'B2G', 'B2F']),
   receiver,
   items: z
-    .array(z.object({ quantity: z.number(), unitPrice: z.number(), vatRate: z.number() }))
+    .array(
+      z.object({
+        /** dCodInt (E701): tdCodInt, 1..50 (DE_Types_v150.xsd:1156). */
+        code: text(50),
+        /** dDesProSer (E708): 1..2000 (DE_v150.xsd:878). */
+        description: text(2000),
+        /** cUniMed (E709): closed DNCP list. */
+        unitCode: z
+          .number()
+          .refine(isUnitOfMeasureCode, 'Unit of measure code is not in the cUniMed list'),
+        quantity: z.number(),
+        unitPrice: z.number(),
+        vatRate: z.number(),
+      }),
+    )
     .max(MAX_ITEMS),
   roundingPyg: z.number().default(0),
   location: z.object({ departmentCode: z.number() }),

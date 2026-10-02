@@ -1,17 +1,12 @@
-import {
-  SIFEN_CODES,
-  SifenTimeoutError,
-  SifenTransportError,
-  type SifenGateway,
-} from '@sifen/sifen-gateway';
-import type { Lote } from '../domain/lote-builder.js';
+import { SIFEN_CODES, type SifenGateway } from '@sifen/sifen-gateway';
+import { EmptyLoteError, type Lote } from '../domain/lote-builder.js';
 
 /** What SIFEN (or its silence) told us about a sent lote. */
 export type LoteDispatchOutcome =
   | { readonly status: 'sent'; readonly dProtConsLote: string }
   | { readonly status: 'rejected'; readonly code: string; readonly reason: string }
   /** No usable answer: SIFEN may have the lote. Never resend; recover by querying (HU-E6-04). */
-  | { readonly status: 'unknown'; readonly reason: string };
+  | { readonly status: 'unknown'; readonly reason: string; readonly cause?: unknown };
 
 /** Persistence of a lote's dispatch state; implemented over `lotes_sifen` later. */
 export interface LoteDispatchStore {
@@ -33,11 +28,17 @@ export interface SendLoteCommand {
 
 export type SendLoteResult = LoteDispatchOutcome | { readonly status: 'already-claimed' };
 
-/** Sends a built lote to SIFEN exactly once and records the outcome (plan 8.1, ADR-0007). */
+/**
+ * Sends a built lote to SIFEN exactly once and records the outcome (plan 8.1, ADR-0007).
+ * If `record` fails after the send, the error propagates and the lote stays `sending`;
+ * HU-E6-04 recovers a stale `sending` lote as `unknown` by querying SIFEN. Never resent.
+ * @throws EmptyLoteError before anything is claimed or sent.
+ */
 export class SendLote {
   constructor(private readonly deps: SendLoteDeps) {}
 
   async execute(command: SendLoteCommand): Promise<SendLoteResult> {
+    if (command.lote.documents.length === 0) throw new EmptyLoteError();
     if (!(await this.deps.store.claim(command.loteId))) return { status: 'already-claimed' };
 
     const outcome = await this.dispatch(command);
@@ -53,10 +54,9 @@ export class SendLote {
       });
       return interpret(receipt);
     } catch (error) {
-      if (error instanceof SifenTimeoutError || error instanceof SifenTransportError) {
-        return { status: 'unknown', reason: error.message };
-      }
-      throw error;
+      // Once the call started SIFEN may hold the lote, whatever went wrong: never resend.
+      const reason = error instanceof Error ? error.message : String(error);
+      return { status: 'unknown', reason, cause: error };
     }
   }
 }

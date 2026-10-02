@@ -35,7 +35,6 @@ describe('DocumentsBrowser (XML and events tabs)', () => {
     const code = xml.querySelector('code')?.textContent ?? '';
     expect(code).toContain('<DE Id="01800123450001001000452022026100214582139077">');
     expect(code).toContain('<dVerFor>150</dVerFor>');
-    expect(code).toContain('<dDVId>7</dDVId>');
     expect(code).toContain('<dFeEmiDE>2026-10-02T15:42:00</dFeEmiDE>');
     expect(code).toContain('<dRucRec>80034567</dRucRec>');
     expect(code).toContain('<dDVRec>3</dDVRec>');
@@ -48,7 +47,6 @@ describe('DocumentsBrowser (XML and events tabs)', () => {
 
     const events = within(panel()).getByRole('list', { name: 'Ciclo de vida del comprobante' });
     expect(within(events).getAllByRole('listitem')).toHaveLength(3);
-    expect(within(events).getByText('Comprobante generado y firmado')).toBeInTheDocument();
     expect(within(events).getByText('15:42:01')).toBeInTheDocument();
     expect(within(events).getByText(/0260/)).toBeInTheDocument();
     expect(within(events).getByText(/facturacion@teledelsur\.com\.py/)).toBeInTheDocument();

@@ -19,7 +19,7 @@ domain so it can be swapped for the API.
 - [x] PR 4 `feat/hu-e12-explorer-filters`: filter bar (search, selects, chips).
 - [x] PR 5 `feat/hu-e12-explorer-pagination`: pagination footer and help banner.
 - [x] PR 6 `feat/hu-e12-explorer-detail`: detail panel header and KuDE preview, active row.
-- [ ] PR 7 `feat/hu-e12-explorer-detail-tabs`: XML and events tabs of the detail panel.
+- [x] PR 7 `feat/hu-e12-explorer-detail-tabs`: XML and events tabs of the detail panel.
 
 Route: delegated writer (one) per PR; strict TDD, RED commit then GREEN commit.
 
@@ -45,6 +45,8 @@ Route: delegated writer (one) per PR; strict TDD, RED commit then GREEN commit.
 | "Sucursales: 001-002 POS Ciudad del Este" | Establishment 002 "Sucursal Ciudad del Este" | est-point-number: 002 is the establishment |
 | "Certificado: CODE100 PARAGUAY S.A." / "PKCS#7 SHA-256" | "Certificado: ACME PARAGUAY S.A." / "XMLDSig RSA-SHA256" | The DE is signed with the issuer's certificate using XMLDSig RSA-SHA256 |
 | KuDE issuer "RUC: 80012345-6", validity 2024 | "RUC: 80012345-0" (valid DV), validity 2026 | Valid modulo-11 check digit; 2026 data |
+| Detail "Inutilizar Número" action | Removed; "Emitir Cancelación DNIT" became "Cancelar en SIFEN" with its window (FE 48 h, others 168 h) | Voiding only applies to numbers never approved (HU-E8-03) |
+| XML tab "XAdES-BES", event "sifeRecepcionLote", protocol number | "XMLDSig RSA-SHA256", "Código 0260", no protocol | Verified SIFEN codes only; nothing invented |
 | "WhatsApp al Cliente" (button and event) | "Enviar por email" | WhatsApp is not in the backlog; email is HU-E11-02 |
 | Item names "Cloud SIFEN Enterprise", "HSM FIPS 140-2" | Neutral service descriptions | Infrastructure jargon in user-facing sample data |
 | KuDE QR image (external URL) | QR icon placeholder | The real QR comes with HU-E5-06 / HU-E10-01 |

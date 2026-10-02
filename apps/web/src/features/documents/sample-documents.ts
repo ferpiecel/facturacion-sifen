@@ -70,6 +70,8 @@ export interface DocumentDetail {
   saleCondition: string;
   items: readonly { quantity: number; description: string; unitPrice: number; total: number }[];
   amountInWords: string;
+  /** Email the KuDE and XML were delivered to (HU-E11-02), when sent. */
+  notifiedTo?: string;
 }
 
 export const SAMPLE_ISSUER = {
@@ -118,6 +120,7 @@ export const SAMPLE_DOCUMENTS_PAGE: DocumentsPage = {
       detail: {
         saleCondition: 'Crédito (30 días)',
         amountInWords: 'Dieciséis millones cien mil guaraníes',
+        notifiedTo: 'facturacion@teledelsur.com.py',
         items: [
           {
             quantity: 1,

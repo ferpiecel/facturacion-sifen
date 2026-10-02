@@ -214,6 +214,9 @@ importers:
       '@sifen/sifen-gateway':
         specifier: workspace:*
         version: link:../../packages/sifen-gateway
+      '@sifen/sifen-tips':
+        specifier: workspace:*
+        version: link:../../packages/sifen-tips
       '@sifen/sifen-xsd':
         specifier: workspace:*
         version: link:../../packages/sifen-xsd
@@ -257,9 +260,6 @@ importers:
       '@sifen/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@sifen/sifen-tips':
-        specifier: workspace:*
-        version: link:../../packages/sifen-tips
       '@swc/core':
         specifier: 1.16.2
         version: 1.16.2(@swc/helpers@0.5.23)

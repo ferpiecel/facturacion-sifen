@@ -247,7 +247,7 @@ describe('lotes', () => {
     const result = await db.execute(
       sql`select 1 from pg_indexes where tablename = 'lote_documents' and indexdef like '%(document_id)%'`,
     );
-    expect(result.rows).toHaveLength(1);
+    expect((result as { rows: unknown[] }).rows).toHaveLength(1);
   });
 
   it('links a document to a lote once, and only within the same tenant', async () => {

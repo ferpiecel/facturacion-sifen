@@ -1,7 +1,9 @@
 import { parseArgs, type ParseArgsConfig } from 'node:util';
 import {
   createEstablishment,
+  createEstablishmentContact,
   type Establishment,
+  type EstablishmentContact,
 } from '../modules/fiscal-config/domain/establishment.js';
 import {
   createExpeditionPoint,
@@ -35,6 +37,12 @@ export type OpsCommand =
   | { kind: 'apikey:revoke'; keyId: string }
   | { kind: 'fiscal:set'; tenantId: string; profile: FiscalProfile }
   | { kind: 'establishment:add'; tenantId: string; establishment: Establishment }
+  | {
+      kind: 'establishment:contact';
+      tenantId: string;
+      establishmentCode: string;
+      contact: EstablishmentContact;
+    }
   | { kind: 'point:add'; tenantId: string; establishmentCode: string; point: ExpeditionPoint }
   | { kind: 'timbrado:add'; tenantId: string; timbrado: Timbrado }
   | { kind: 'tenant:environment'; tenantId: string; environment: TenantEnvironment }
@@ -249,6 +257,9 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
           'district-description': { type: 'string' },
           city: { type: 'string' },
           'city-description': { type: 'string' },
+          phone: { type: 'string' },
+          email: { type: 'string' },
+          name: { type: 'string' },
         },
       });
 
@@ -268,12 +279,37 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
         districtDescription,
         cityCode: requireOption(values.city, 'city'),
         cityDescription: requireOption(values['city-description'], 'city-description'),
+        phone: values.phone,
+        email: values.email,
+        commercialName: values.name,
       });
 
       return {
         kind: 'establishment:add',
         tenantId: requireOption(values.tenant, 'tenant'),
         establishment,
+      };
+    }
+    case 'establishment:contact': {
+      const { values } = parseStrict({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          establishment: { type: 'string' },
+          phone: { type: 'string' },
+          email: { type: 'string' },
+          name: { type: 'string' },
+        },
+      });
+      return {
+        kind: 'establishment:contact',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        establishmentCode: requireOption(values.establishment, 'establishment'),
+        contact: createEstablishmentContact({
+          phone: requireOption(values.phone, 'phone'),
+          email: requireOption(values.email, 'email'),
+          commercialName: values.name,
+        }),
       };
     }
     case 'point:add': {

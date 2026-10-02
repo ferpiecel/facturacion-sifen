@@ -13,6 +13,8 @@ export class InvalidEstablishmentError extends Error {
 const ESTABLISHMENT_CODE_PATTERN = /^(?!000$)\d{3}$/;
 // cDisEmi (MT §D2, D113 / XSD tcDisEmi): 1-4 digits, occurrence 0-1.
 const DISTRICT_CODE_PATTERN = /^\d{1,4}$/;
+// dEmailE (XSD tEmail, DE_Types_v150.xsd).
+const EMAIL_PATTERN = /^[0-9a-zA-Z]([0-9a-zA-Z._-])*@([0-9a-zA-Z][0-9a-zA-Z_-]*\.)+[a-zA-Z]{2,9}$/;
 // cCiuEmi (MT §D2, D115 / XSD tcCiuEmi): 1-5 digits, occurrence 1-1.
 const CITY_CODE_PATTERN = /^\d{1,5}$/;
 
@@ -39,6 +41,42 @@ export interface Establishment {
   readonly cityCode: string;
   /** dDesCiuEmi */
   readonly cityDescription: string;
+  /** dTelEmi (6-15 chars); required in the DE, null for establishments created before it was captured. */
+  readonly phone: string | null;
+  /** dEmailE (XSD tEmail); required in the DE, null as `phone`. */
+  readonly email: string | null;
+  /** dDenSuc (1-30 chars), optional. */
+  readonly commercialName: string | null;
+}
+
+/** The contact part of an establishment (gEmis: dTelEmi, dEmailE, dDenSuc). */
+export interface EstablishmentContact {
+  readonly phone: string;
+  readonly email: string;
+  readonly commercialName: string | null;
+}
+
+export interface EstablishmentContactInput {
+  phone: string;
+  email: string;
+  commercialName?: string | null;
+}
+
+/** Validates and normalizes the gEmis contact (DE_v150.xsd: tdTel 6-15, tEmail pattern, dDenSuc 1-30). */
+export function createEstablishmentContact(input: EstablishmentContactInput): EstablishmentContact {
+  const phone = input.phone.trim();
+  if (phone.length < 6 || phone.length > 15) {
+    throw new InvalidEstablishmentError('phone (dTelEmi) must be 6 to 15 characters');
+  }
+  // eslint-disable-next-line no-control-regex -- rejecting control characters is the point
+  if (/[\u0000-\u001F\u007F]/.test(phone)) {
+    throw new InvalidEstablishmentError('phone (dTelEmi) must not contain control characters');
+  }
+  const email = input.email.trim();
+  if (!EMAIL_PATTERN.test(email)) {
+    throw new InvalidEstablishmentError('email (dEmailE) is not a valid address');
+  }
+  return { phone, email, commercialName: normalizeCommercialName(input.commercialName) };
 }
 
 export interface CreateEstablishmentInput {
@@ -52,6 +90,9 @@ export interface CreateEstablishmentInput {
   districtDescription?: string | null;
   cityCode: string;
   cityDescription: string;
+  phone?: string | null;
+  email?: string | null;
+  commercialName?: string | null;
 }
 
 /**
@@ -97,6 +138,19 @@ export function createEstablishment(input: CreateEstablishmentInput): Establishm
     30,
   );
 
+  const hasPhone = normalizeOptional(input.phone) !== null;
+  const hasEmail = normalizeOptional(input.email) !== null;
+  if (hasPhone !== hasEmail) {
+    throw new InvalidEstablishmentError('phone and email (dTelEmi/dEmailE) must be given together');
+  }
+  const contact = hasPhone
+    ? createEstablishmentContact({
+        phone: input.phone ?? '',
+        email: input.email ?? '',
+        commercialName: input.commercialName,
+      })
+    : { phone: null, email: null, commercialName: normalizeCommercialName(input.commercialName) };
+
   return {
     code,
     address,
@@ -109,7 +163,17 @@ export function createEstablishment(input: CreateEstablishmentInput): Establishm
     districtDescription,
     cityCode,
     cityDescription,
+    ...contact,
   };
+}
+
+/** dDenSuc: optional, 1-30 characters once trimmed. */
+function normalizeCommercialName(raw: string | null | undefined): string | null {
+  const name = normalizeOptional(raw);
+  if (name !== null && name.length > 30) {
+    throw new InvalidEstablishmentError('commercialName (dDenSuc) must be 1 to 30 characters');
+  }
+  return name;
 }
 
 function requireNonEmpty(raw: string, field: string, maxLength: number): string {

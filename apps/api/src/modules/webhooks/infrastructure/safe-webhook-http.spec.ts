@@ -1,5 +1,6 @@
-import { createServer, type IncomingHttpHeaders, type Server } from 'node:https';
-import type { AddressInfo, Socket } from 'node:net';
+import type { IncomingHttpHeaders } from 'node:http';
+import { createServer, type Server } from 'node:https';
+import type { AddressInfo } from 'node:net';
 import type { TLSSocket } from 'node:tls';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -185,7 +186,9 @@ describe('SafeWebhookHttp (HU-E11-01)', () => {
       kind: 'response',
       status: 200,
     });
-    await vi.waitFor(() => expect(finished).toBe(false));
+    await vi.waitFor(() => {
+      expect(finished).toBe(false);
+    });
   });
 
   it('classifies an untrusted certificate and a refused connection', async () => {

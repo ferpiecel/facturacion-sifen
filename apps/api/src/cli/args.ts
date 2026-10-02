@@ -2,6 +2,7 @@ import { parseArgs, type ParseArgsConfig } from 'node:util';
 import {
   createEstablishment,
   type Establishment,
+  type EstablishmentContact,
 } from '../modules/fiscal-config/domain/establishment.js';
 import {
   createExpeditionPoint,
@@ -35,6 +36,12 @@ export type OpsCommand =
   | { kind: 'apikey:revoke'; keyId: string }
   | { kind: 'fiscal:set'; tenantId: string; profile: FiscalProfile }
   | { kind: 'establishment:add'; tenantId: string; establishment: Establishment }
+  | {
+      kind: 'establishment:contact';
+      tenantId: string;
+      establishmentCode: string;
+      contact: EstablishmentContact;
+    }
   | { kind: 'point:add'; tenantId: string; establishmentCode: string; point: ExpeditionPoint }
   | { kind: 'timbrado:add'; tenantId: string; timbrado: Timbrado }
   | { kind: 'tenant:environment'; tenantId: string; environment: TenantEnvironment }
@@ -276,6 +283,8 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
         establishment,
       };
     }
+    case 'establishment:contact':
+      throw new OpsArgError('not implemented');
     case 'point:add': {
       const { values } = parseStrict({
         args: rest,

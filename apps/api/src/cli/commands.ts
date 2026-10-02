@@ -11,7 +11,10 @@ import {
   type Database,
 } from '@sifen/db';
 import type { TenantEnvironment } from '../modules/fiscal-config/domain/document-environment.js';
-import type { Establishment } from '../modules/fiscal-config/domain/establishment.js';
+import type {
+  Establishment,
+  EstablishmentContact,
+} from '../modules/fiscal-config/domain/establishment.js';
 import type { ExpeditionPoint } from '../modules/fiscal-config/domain/expedition-point.js';
 import type { FiscalProfile } from '../modules/fiscal-config/domain/fiscal-profile.js';
 import { formatRuc } from '../modules/fiscal-config/domain/ruc.js';
@@ -234,6 +237,20 @@ export async function addEstablishment(
 
     return { id: required(row, 'establishment was not inserted').id, code: establishment.code };
   });
+}
+
+export interface SetEstablishmentContactParams {
+  tenantId: string;
+  establishmentCode: string;
+  contact: EstablishmentContact;
+}
+
+/** Operator CLI handler: sets dTelEmi/dEmailE/dDenSuc on an existing establishment (HU-E6-02). */
+export function setEstablishmentContact(
+  _db: Database,
+  _params: SetEstablishmentContactParams,
+): Promise<{ id: string; code: string }> {
+  return Promise.reject(new Error('not implemented'));
 }
 
 export interface AddExpeditionPointParams {

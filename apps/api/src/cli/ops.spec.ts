@@ -1,6 +1,9 @@
 import { createPgliteDatabase, type DatabaseHandle } from '@sifen/db';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createEstablishment } from '../modules/fiscal-config/domain/establishment.js';
+import {
+  createEstablishment,
+  createEstablishmentContact,
+} from '../modules/fiscal-config/domain/establishment.js';
 import { createExpeditionPoint } from '../modules/fiscal-config/domain/expedition-point.js';
 import { createFiscalProfile } from '../modules/fiscal-config/domain/fiscal-profile.js';
 import { parseRuc } from '../modules/fiscal-config/domain/ruc.js';
@@ -117,6 +120,32 @@ describe('runOpsCommand (HU-E1-05)', () => {
     });
 
     expect(output).toMatch(/^establishment created: [0-9a-f-]{36} \(code 001\)$/);
+  });
+
+  it('establishment:contact prints the establishment code, never the contact data', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Contact Tenant');
+    await addEstablishment(handle.db, {
+      tenantId,
+      establishment: createEstablishment({
+        code: '001',
+        address: 'Avda. Siempre Viva 123',
+        houseNumber: '123',
+        departmentCode: 11,
+        cityCode: '3316',
+        cityDescription: 'Ciudad del Este',
+      }),
+    });
+
+    const output = await runOpsCommand(handle.db, {
+      kind: 'establishment:contact',
+      tenantId,
+      establishmentCode: '001',
+      contact: createEstablishmentContact({ phone: '0973-000000', email: 'emisor@test.com' }),
+    });
+
+    expect(output).toBe(`establishment contact saved: ${tenantId} (code 001)`);
   });
 
   it('point:add prints the new expedition point id and code', async () => {

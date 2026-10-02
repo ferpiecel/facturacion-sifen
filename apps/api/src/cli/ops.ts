@@ -127,6 +127,8 @@ export async function runOpsCommand(
       });
       return `establishment created: ${result.id} (code ${result.code})`;
     }
+    case 'establishment:contact':
+      throw new Error('not implemented');
     case 'point:add': {
       const result = await addExpeditionPoint(db, {
         tenantId: command.tenantId,

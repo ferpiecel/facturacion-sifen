@@ -12,13 +12,17 @@ import {
 } from '@sifen/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createEstablishment } from '../modules/fiscal-config/domain/establishment.js';
+import {
+  createEstablishment,
+  createEstablishmentContact,
+} from '../modules/fiscal-config/domain/establishment.js';
 import { createExpeditionPoint } from '../modules/fiscal-config/domain/expedition-point.js';
 import { createFiscalProfile } from '../modules/fiscal-config/domain/fiscal-profile.js';
 import { parseRuc } from '../modules/fiscal-config/domain/ruc.js';
 import { createTimbrado } from '../modules/fiscal-config/domain/timbrado.js';
 import {
   addEstablishment,
+  setEstablishmentContact,
   addExpeditionPoint,
   addTimbrado,
   createPartner,
@@ -515,5 +519,80 @@ describe('setTenantEnvironment (HU-E2-04)', () => {
         environment: 'production',
       }),
     ).rejects.toThrow('tenant not found');
+  });
+});
+
+describe('establishment contact (HU-E6-02)', () => {
+  let handle: DatabaseHandle | undefined;
+
+  afterEach(async () => {
+    await handle?.close();
+    handle = undefined;
+  });
+
+  const base = {
+    code: '001',
+    address: 'Avda. Siempre Viva 123',
+    houseNumber: '123',
+    departmentCode: 11,
+    cityCode: '3316',
+    cityDescription: 'Ciudad del Este',
+  };
+  const contact = { phone: '0973-000000', email: 'emisor@test.com', commercialName: 'Casa Matriz' };
+
+  async function setup() {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Contact Tenant');
+    return { db: handle.db, tenantId };
+  }
+
+  const rowOf = (db: DatabaseHandle['db'], id: string) =>
+    db
+      .select()
+      .from(tenantEstablishments)
+      .where(eq(tenantEstablishments.id, id))
+      .then((rows) => rows[0]);
+
+  it('addEstablishment persists the contact', async () => {
+    const { db, tenantId } = await setup();
+    const result = await addEstablishment(db, {
+      tenantId,
+      establishment: createEstablishment({ ...base, ...contact }),
+    });
+    expect(await rowOf(db, result.id)).toMatchObject(contact);
+  });
+
+  it('setEstablishmentContact updates only the contact of the named establishment', async () => {
+    const { db, tenantId } = await setup();
+    const first = await addEstablishment(db, {
+      tenantId,
+      establishment: createEstablishment(base),
+    });
+    const second = await addEstablishment(db, {
+      tenantId,
+      establishment: createEstablishment({ ...base, code: '002' }),
+    });
+
+    const result = await setEstablishmentContact(db, {
+      tenantId,
+      establishmentCode: '001',
+      contact: createEstablishmentContact(contact),
+    });
+
+    expect(result).toEqual({ id: first.id, code: '001' });
+    expect(await rowOf(db, first.id)).toMatchObject({ ...contact, address: base.address });
+    expect(await rowOf(db, second.id)).toMatchObject({ phone: null, email: null });
+  });
+
+  it('fails clearly for an unknown establishment or tenant', async () => {
+    const { db, tenantId } = await setup();
+    await expect(
+      setEstablishmentContact(db, {
+        tenantId,
+        establishmentCode: '009',
+        contact: createEstablishmentContact(contact),
+      }),
+    ).rejects.toThrow('establishment not found');
   });
 });

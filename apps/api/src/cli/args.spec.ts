@@ -210,6 +210,9 @@ describe('parseOpsArgs establishment:add (HU-E2-02)', () => {
         districtDescription: 'Ciudad del Este',
         cityCode: '3316',
         cityDescription: 'Ciudad del Este',
+        phone: null,
+        email: null,
+        commercialName: null,
       },
     });
   });
@@ -234,6 +237,9 @@ describe('parseOpsArgs establishment:add (HU-E2-02)', () => {
         districtDescription: null,
         cityCode: '3316',
         cityDescription: 'Ciudad del Este',
+        phone: null,
+        email: null,
+        commercialName: null,
       },
     });
   });
@@ -572,5 +578,83 @@ describe('parseOpsArgs certificate:add (HU-E3-01)', () => {
     } catch (error) {
       expect((error as Error).message).not.toContain('resolved-from-stdin');
     }
+  });
+});
+
+describe('parseOpsArgs establishment contact (HU-E6-02)', () => {
+  const add = [
+    'establishment:add',
+    '--tenant',
+    't-1',
+    '--code',
+    '001',
+    '--address',
+    'Avda. Siempre Viva 123',
+    '--house-number',
+    '123',
+    '--department',
+    '11',
+    '--city',
+    '3316',
+    '--city-description',
+    'Ciudad del Este',
+  ];
+
+  it('parses --phone, --email and --name on establishment:add', () => {
+    const command = parseOpsArgs([
+      ...add,
+      '--phone',
+      '0973-000000',
+      '--email',
+      'emisor@test.com',
+      '--name',
+      'Casa Matriz',
+    ]);
+    expect(command).toMatchObject({
+      kind: 'establishment:add',
+      establishment: {
+        phone: '0973-000000',
+        email: 'emisor@test.com',
+        commercialName: 'Casa Matriz',
+      },
+    });
+  });
+
+  it('rejects an invalid email or a lone --phone on establishment:add', () => {
+    expect(() => parseOpsArgs([...add, '--phone', '0973-000000', '--email', 'nope'])).toThrow(
+      /email/,
+    );
+    expect(() => parseOpsArgs([...add, '--phone', '0973-000000'])).toThrow(/phone and email/);
+  });
+
+  const contact = [
+    'establishment:contact',
+    '--tenant',
+    't-1',
+    '--establishment',
+    '001',
+    '--phone',
+    '0973-000000',
+    '--email',
+    'emisor@test.com',
+  ];
+
+  it('parses establishment:contact with an optional --name', () => {
+    expect(parseOpsArgs(contact)).toEqual({
+      kind: 'establishment:contact',
+      tenantId: 't-1',
+      establishmentCode: '001',
+      contact: { phone: '0973-000000', email: 'emisor@test.com', commercialName: null },
+    });
+    expect(parseOpsArgs([...contact, '--name', 'Casa Matriz'])).toMatchObject({
+      contact: { commercialName: 'Casa Matriz' },
+    });
+  });
+
+  it.each(['tenant', 'establishment', 'phone', 'email'])('rejects missing --%s', (flag) => {
+    const index = contact.indexOf(`--${flag}`);
+    expect(() => parseOpsArgs(contact.filter((_, i) => i !== index && i !== index + 1))).toThrow(
+      `missing required --${flag}`,
+    );
   });
 });

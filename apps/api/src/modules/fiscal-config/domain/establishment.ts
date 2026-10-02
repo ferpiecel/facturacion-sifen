@@ -39,6 +39,32 @@ export interface Establishment {
   readonly cityCode: string;
   /** dDesCiuEmi */
   readonly cityDescription: string;
+  /** dTelEmi (6-15 chars); required in the DE, null for establishments created before it was captured. */
+  readonly phone: string | null;
+  /** dEmailE (XSD tEmail); required in the DE, null as `phone`. */
+  readonly email: string | null;
+  /** dDenSuc (1-30 chars), optional. */
+  readonly commercialName: string | null;
+}
+
+/** The contact part of an establishment (gEmis: dTelEmi, dEmailE, dDenSuc). */
+export interface EstablishmentContact {
+  readonly phone: string;
+  readonly email: string;
+  readonly commercialName: string | null;
+}
+
+export interface EstablishmentContactInput {
+  phone: string;
+  email: string;
+  commercialName?: string | null;
+}
+
+/** Validates and normalizes the gEmis contact (DE_v150.xsd: tdTel 6-15, tEmail pattern, dDenSuc 1-30). */
+export function createEstablishmentContact(
+  _input: EstablishmentContactInput,
+): EstablishmentContact {
+  throw new InvalidEstablishmentError('not implemented');
 }
 
 export interface CreateEstablishmentInput {
@@ -52,6 +78,9 @@ export interface CreateEstablishmentInput {
   districtDescription?: string | null;
   cityCode: string;
   cityDescription: string;
+  phone?: string | null;
+  email?: string | null;
+  commercialName?: string | null;
 }
 
 /**
@@ -109,6 +138,9 @@ export function createEstablishment(input: CreateEstablishmentInput): Establishm
     districtDescription,
     cityCode,
     cityDescription,
+    phone: null,
+    email: null,
+    commercialName: null,
   };
 }
 

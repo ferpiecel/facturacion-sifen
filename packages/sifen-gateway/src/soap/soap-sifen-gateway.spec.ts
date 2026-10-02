@@ -40,14 +40,18 @@ async function gateway(
     timeoutMs,
     credentials: { load: () => Promise.resolve({ ...pki.client, ca: pki.caCert }) },
   });
-  const endpoints = sifenEndpoints('test', {
-    enviarLote: `${server.baseUrl}/de/ws/async/recibe-lote`,
-    consultarLote: `${server.baseUrl}/de/ws/consultas/consulta-lote`,
-    enviarDESincronico: `${server.baseUrl}/de/ws/sync/recibe`,
-    consultarDE: `${server.baseUrl}/de/ws/consultas/consulta`,
-    enviarEventos: `${server.baseUrl}/de/ws/eventos/evento`,
-    consultarRUC: `${server.baseUrl}/de/ws/consultas/consulta-ruc`,
-  });
+  const endpoints = sifenEndpoints(
+    'test',
+    {
+      enviarLote: `${server.baseUrl}/de/ws/async/recibe-lote`,
+      consultarLote: `${server.baseUrl}/de/ws/consultas/consulta-lote`,
+      enviarDESincronico: `${server.baseUrl}/de/ws/sync/recibe`,
+      consultarDE: `${server.baseUrl}/de/ws/consultas/consulta`,
+      enviarEventos: `${server.baseUrl}/de/ws/eventos/evento`,
+      consultarRUC: `${server.baseUrl}/de/ws/consultas/consulta-ruc`,
+    },
+    { allowCustomHost: true },
+  );
   return { gateway: new SoapSifenGateway({ transport, endpoints }), server };
 }
 
@@ -101,6 +105,15 @@ describe('SoapSifenGateway.enviarLote', () => {
   it('maps a non-SOAP HTTP error page to SifenTransportError', async () => {
     const ctx = await gateway();
     ctx.server.respondWith((res) => res.writeHead(502).end('<html>Bad Gateway</html>'));
+
+    await expect(ctx.gateway.enviarLote({ dId: 1n, des: [DE] })).rejects.toBeInstanceOf(
+      SifenTransportError,
+    );
+  });
+
+  it('does not treat a well-formed non-Fault body on a non-2xx status as success', async () => {
+    const ctx = await gateway();
+    ctx.server.respondWith((res) => res.writeHead(503).end(loteRecibidoXml));
 
     await expect(ctx.gateway.enviarLote({ dId: 1n, des: [DE] })).rejects.toBeInstanceOf(
       SifenTransportError,

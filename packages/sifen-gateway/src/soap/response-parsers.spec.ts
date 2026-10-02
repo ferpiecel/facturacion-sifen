@@ -180,6 +180,22 @@ describe('parseConsultaRUC', () => {
     });
   });
 
+  it.each(['s', 'X', ''])('rejects dRUCFactElec "%s" (only S or N)', (value) => {
+    const bad = consRUCEncontradoXml.replace(
+      '<dRUCFactElec>S</dRUCFactElec>',
+      `<dRUCFactElec>${value}</dRUCFactElec>`,
+    );
+    expect(catchError(() => parseConsultaRUC(bad))).toBeInstanceOf(SifenProtocolError);
+  });
+
+  it('maps N to a taxpayer that is not an electronic invoicer', () => {
+    const no = consRUCEncontradoXml.replace(
+      '<dRUCFactElec>S</dRUCFactElec>',
+      '<dRUCFactElec>N</dRUCFactElec>',
+    );
+    expect(parseConsultaRUC(no).contribuyente?.facturadorElectronico).toBe(false);
+  });
+
   it('returns no taxpayer when the RUC does not exist', () => {
     expect(parseConsultaRUC(consRUCInexistenteXml)).toEqual({
       dCodRes: '0500',

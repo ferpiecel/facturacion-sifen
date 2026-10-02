@@ -156,6 +156,14 @@ export function parseConsultaDE(xml: string, options?: ParseOptions): SifenConsD
   };
 }
 
+/** `dRUCFactElec` is exactly S or N (MT v150 schema 17): anything else is not a usable answer. */
+function parseSiNo(value: string): boolean {
+  if (value !== 'S' && value !== 'N') {
+    throw protocolError('consultarRUC', `<dRUCFactElec> must be S or N, received "${value}"`);
+  }
+  return value === 'S';
+}
+
 /** siConsRUC response (MT v150 §9.6.3, schemas 16-17). */
 export function parseConsultaRUC(xml: string, options?: ParseOptions): SifenConsRUC {
   const body = bodyAs(xml, 'consultarRUC', 'rResEnviConsRUC', options);
@@ -172,7 +180,7 @@ export function parseConsultaRUC(xml: string, options?: ParseOptions): SifenCons
             ruc: requireText(rContRUC, 'dRUCCons', 'consultarRUC'),
             razonSocial: requireText(rContRUC, 'dRazCons', 'consultarRUC'),
             estado: requireText(rContRUC, 'dCodEstCons', 'consultarRUC'),
-            facturadorElectronico: requireText(rContRUC, 'dRUCFactElec', 'consultarRUC') === 'S',
+            facturadorElectronico: parseSiNo(requireText(rContRUC, 'dRUCFactElec', 'consultarRUC')),
           },
   };
 }

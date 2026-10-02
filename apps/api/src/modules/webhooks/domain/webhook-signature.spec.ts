@@ -64,6 +64,46 @@ describe('webhook signature (HU-E11-01, ADR-0011)', () => {
     });
   });
 
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, -1])(
+    'fails closed on a non-finite or negative tolerance (%s)',
+    (toleranceSeconds) => {
+      const header = signWebhook({ secret, body, timestamp: t });
+      expect(verifyWebhookSignature({ secret, body, header, now: t, toleranceSeconds }).ok).toBe(
+        false,
+      );
+    },
+  );
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY])(
+    'fails closed on a non-finite clock (%s)',
+    (now) => {
+      const header = signWebhook({ secret, body, timestamp: t });
+      expect(verifyWebhookSignature({ secret, body, header, now }).ok).toBe(false);
+    },
+  );
+
+  it('rejects a duplicated t and an oversized header as malformed', () => {
+    const header = signWebhook({ secret, body, timestamp: t });
+    expect(
+      verifyWebhookSignature({ secret, body, header: `t=${String(t + 1)},${header}`, now: t }),
+    ).toMatchObject({ ok: false, reason: 'malformed' });
+    const huge = `${header}${',v1=00'.repeat(400)}`;
+    expect(huge.length).toBeGreaterThan(2048);
+    expect(verifyWebhookSignature({ secret, body, header: huge, now: t })).toMatchObject({
+      ok: false,
+      reason: 'malformed',
+    });
+  });
+
+  it('splits key and value on the first "=" only', () => {
+    const header = signWebhook({ secret, body, timestamp: t });
+    const poisoned = header.replace(/v1=/, 'v1=0=');
+    expect(verifyWebhookSignature({ secret, body, header: poisoned, now: t })).toMatchObject({
+      ok: false,
+      reason: 'malformed',
+    });
+  });
+
   it('supports secret rotation: signs with several secrets, any one verifies', () => {
     const header = signWebhook({ secret: ['whsec_new', 'whsec_old'], body, timestamp: t });
     expect(header.match(/v1=/g)).toHaveLength(2);

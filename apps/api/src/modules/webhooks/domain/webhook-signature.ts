@@ -12,6 +12,8 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 export const SIGNATURE_HEADER = 'Sifen-Signature';
 export const SIGNATURE_TOLERANCE_SECONDS = 300;
 
+/** Longest header accepted; ours is ~100 bytes even with a few rotation overlaps. */
+const MAX_HEADER_LENGTH = 2048;
 const V1_HEX = /^[0-9a-f]{64}$/;
 
 function mac(secret: string, timestamp: number, body: string): string {
@@ -51,11 +53,22 @@ export interface VerifyWebhookInput {
 
 /** Constant-time verification helper for integrators (and our own tests). */
 export function verifyWebhookSignature(input: VerifyWebhookInput): WebhookVerification {
+  if (input.header.length > MAX_HEADER_LENGTH) {
+    return { ok: false, reason: 'malformed' };
+  }
   let timestamp: number | undefined;
   const signatures: string[] = [];
   for (const part of input.header.split(',')) {
-    const [key, value = ''] = part.trim().split('=');
-    if (key === 't' && /^[0-9]{1,15}$/.test(value)) {
+    const separator = part.indexOf('=');
+    const key = part.slice(0, separator).trim();
+    const value = part.slice(separator + 1);
+    if (separator < 0) {
+      continue;
+    }
+    if (key === 't') {
+      if (timestamp !== undefined || !/^[0-9]{1,15}$/.test(value)) {
+        return { ok: false, reason: 'malformed' };
+      }
       timestamp = Number(value);
     } else if (key === 'v1' && V1_HEX.test(value)) {
       signatures.push(value);
@@ -73,9 +86,13 @@ export function verifyWebhookSignature(input: VerifyWebhookInput): WebhookVerifi
     return { ok: false, reason: 'mismatch' };
   }
   const tolerance = input.toleranceSeconds ?? SIGNATURE_TOLERANCE_SECONDS;
-  return Math.abs(input.now - timestamp) > tolerance
-    ? { ok: false, reason: 'stale' }
-    : { ok: true };
+  // Fail closed: a NaN, infinite or negative tolerance or clock must never accept a delivery.
+  const fresh =
+    Number.isFinite(tolerance) &&
+    tolerance >= 0 &&
+    Number.isFinite(input.now) &&
+    Math.abs(input.now - timestamp) <= tolerance;
+  return fresh ? { ok: true } : { ok: false, reason: 'stale' };
 }
 
 /** `whsec_` + 256 random bits (base64url). Shown to the integrator once; stored only sealed. */

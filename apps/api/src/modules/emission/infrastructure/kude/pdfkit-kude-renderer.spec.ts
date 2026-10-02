@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { KudeInvoice, KudeItem } from '../../domain/kude-model.js';
-import { imageSizes, overlaps, pdfText, textItems } from './pdf-inspect.test-helper.js';
+import {
+  decodeQr,
+  firstImage,
+  imageSizes,
+  overlaps,
+  pdfText,
+  quietZoneRatio,
+  textItems,
+} from './pdf-inspect.test-helper.js';
 import { PdfkitKudeRenderer } from './pdfkit-kude-renderer.js';
 
 const CDC = '01800695631001001000000612021112917595714694';
@@ -66,6 +74,7 @@ describe('PdfkitKudeRenderer (FE, A4)', () => {
     const pdf = await renderer.render(invoice());
     expect(Buffer.from(pdf).subarray(0, 5).toString()).toBe('%PDF-');
   });
+
   it('prints the title, emitter, stamp and document number (MT 13.4.1)', async () => {
     const text = await pdfText(await renderer.render(invoice()));
     for (const expected of [
@@ -83,6 +92,7 @@ describe('PdfkitKudeRenderer (FE, A4)', () => {
       expect(text).toContain(expected);
     }
   });
+
   it('prints the general data and the receiver block', async () => {
     const text = await pdfText(await renderer.render(invoice()));
     for (const expected of [
@@ -99,10 +109,12 @@ describe('PdfkitKudeRenderer (FE, A4)', () => {
       expect(text).toContain(expected);
     }
   });
+
   it('prints "Sin nombre" for an unnamed receiver', async () => {
     const unnamed = { ...invoice(), receiver: { kind: 'unnamed' as const } };
     expect(await pdfText(await renderer.render(unnamed))).toContain('Sin Nombre');
   });
+
   it('prints the items with the VAT column of each rate', async () => {
     const text = await pdfText(await renderer.render(invoice()));
     for (const expected of ['INF012', 'Disco duro 12', 'UNI', '110.000']) {
@@ -110,12 +122,52 @@ describe('PdfkitKudeRenderer (FE, A4)', () => {
     }
     for (const heading of ['Exentas', '5%', '10%']) expect(text).toContain(heading);
   });
+
+  it('prints subtotals, totals and the VAT breakdown (MT 13.4.3)', async () => {
+    const text = await pdfText(await renderer.render(invoice()));
+    for (const expected of [
+      'SUBTOTAL',
+      'TOTAL DE LA OPERACIÓN: 110.000',
+      'TOTAL EN GUARANÍES: 110.000',
+      'LIQUIDACIÓN IVA: (5%) 0 (10%) 10.000',
+      'TOTAL IVA: 10.000',
+    ]) {
+      expect(text).toContain(expected);
+    }
+  });
+
+  it('prints the CDC in eleven groups of four and the consultation legend (MT 13.4.4)', async () => {
+    const text = await pdfText(await renderer.render(invoice()));
+    expect(text).toContain('0180 0695 6310 0100 1000 0006 1202 1112 9175 9571 4694');
+    expect(text).toContain(
+      'Consulte la validez de esta Factura Electrónica con el número de CDC impreso abajo en:',
+    );
+    expect(text).toContain('https://ekuatia.set.gov.py/consultas-test/');
+  });
+
+  it('points the legend to the production URL in production', async () => {
+    const text = await pdfText(await renderer.render({ ...invoice(), environment: 'production' }));
+    expect(text).toContain('https://ekuatia.set.gov.py/consultas/\n');
+    expect(text).not.toContain('consultas-test');
+  });
+
   it('embeds a QR image of at least 25 mm (MT 13.8.1)', async () => {
     const images = imageSizes(await renderer.render(invoice()));
     expect(images).toHaveLength(1);
     expect(images[0]?.w).toBeGreaterThanOrEqual(MM_25_PT);
     expect(images[0]?.h).toBeGreaterThanOrEqual(MM_25_PT);
   });
+
+  it('numbers the pages "n/total" and keeps the totals on the last page (MT 13.3)', async () => {
+    const pdf = await renderer.render(invoice(Array.from({ length: 70 }, (_, i) => item(i + 1))));
+    const text = await pdfText(pdf);
+    expect(text).toContain('Página 1/2');
+    expect(text).toContain('Página 2/2');
+    expect(text).toContain('INF070');
+    expect(text.match(/TOTAL IVA/g)).toHaveLength(1);
+    expect(imageSizes(pdf)).toHaveLength(1);
+  });
+
   it('is deterministic: same model, same bytes, fixed creation date', async () => {
     const first = Buffer.from(await renderer.render(invoice()));
     const second = Buffer.from(await renderer.render(invoice()));
@@ -153,5 +205,51 @@ describe('PdfkitKudeRenderer (FE, A4)', () => {
     expect(items.filter((i) => i.str === '999.999.999.999.999')).toHaveLength(3);
     expect(items.some((i) => i.str === 'Descuento')).toBe(true);
     expect(overlaps(items)).toEqual([]);
+  });
+
+  it('keeps 15-digit totals on one line, without overlapping', async () => {
+    const big = 999_999_999_999_999;
+    const base = invoice();
+    const totals = { ...base.totals, subtotal10: big, totalOperation: big, totalGs: big };
+    const items = await textItems(await renderer.render({ ...base, totals }));
+    expect(
+      items.filter((i) => i.str.includes('999.999.999.999.999')).length,
+    ).toBeGreaterThanOrEqual(3);
+    expect(overlaps(items)).toEqual([]);
+  });
+
+  it('embeds a QR that decodes to the exact dCarQR URL', async () => {
+    expect(await decodeQr(await renderer.render(invoice()))).toBe(QR_URL);
+  });
+
+  it('keeps a quiet zone of at least 10% per side and 22 mm of QR content (MT 13.8.1)', async () => {
+    const pdf = await renderer.render(invoice());
+    const image = await firstImage(pdf);
+    const ratio = quietZoneRatio(image as NonNullable<typeof image>);
+    expect(ratio).toBeGreaterThanOrEqual(0.1);
+    const widthPt = imageSizes(pdf)[0]?.w ?? 0;
+    expect(widthPt * (1 - 2 * ratio)).toBeGreaterThanOrEqual((22 / 25.4) * 72);
+  });
+
+  it('prints cuotas and tipo de cambio only when present (MT 13.4.1)', async () => {
+    const plain = await pdfText(await renderer.render(invoice()));
+    expect(plain).not.toContain('Cuotas');
+    expect(plain).not.toContain('Tipo de Cambio');
+    const credit = {
+      ...invoice(),
+      operationCondition: 'Crédito',
+      installments: 3,
+      exchangeRate: '1',
+    };
+    const text = await pdfText(await renderer.render(credit));
+    expect(text).toContain('Cuotas: 3');
+    expect(text).toContain('Tipo de Cambio: 1');
+  });
+
+  it('rejects an invalid model before drawing anything', async () => {
+    await expect(renderer.render({ ...invoice(), cdc: '123' })).rejects.toThrow(/cdc/);
+    await expect(renderer.render({ ...invoice(), issuedAt: '2026-01-02' })).rejects.toThrow(
+      /issuedAt/,
+    );
   });
 });

@@ -232,7 +232,7 @@ describe('PollLoteResult', () => {
       status: 'pending',
       nextPollAt: new Date(now.getTime() + 10 * MINUTE),
     });
-    expect(reasonOf(outcome)).toContain('timed out');
+    expect(reasonOf(outcome)).toContain('SifenTimeoutError');
   });
 
   it('treats an unexpected code as pending, quoting it', async () => {

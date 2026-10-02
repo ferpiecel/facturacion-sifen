@@ -81,11 +81,12 @@ export class PollLoteResult {
       return { status: 'not-pollable' };
     }
 
+    const { nextPollAt } = lote;
     const now = this.now();
-    if (now < lote.nextPollAt) return { status: 'not-due' };
+    if (now < nextPollAt) return { status: 'not-due' };
 
     if (lote.pollDeadlineAt && now > lote.pollDeadlineAt) {
-      return this.settle(lote, {
+      return this.settle(lote.loteId, nextPollAt, {
         status: 'recovery',
         reason: 'The 48 h lote query window elapsed; query each CDC (0364 would follow)',
       });
@@ -95,10 +96,11 @@ export class PollLoteResult {
     try {
       answer = await this.deps.gateway.consultarLote({ dId, dProtConsLote: lote.dProtConsLote });
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      return this.settle(lote, this.pending(now, `Lote query failed: ${reason}`));
+      // Only the error class is kept: messages may carry hosts, paths or certificate details.
+      const kind = error instanceof Error ? error.name : 'unknown error';
+      return this.settle(lote.loteId, nextPollAt, this.pending(now, `Lote query failed (${kind})`));
     }
-    return this.settle(lote, this.interpret(answer, lote.cdcs, now));
+    return this.settle(lote.loteId, nextPollAt, this.interpret(answer, lote.cdcs, now));
   }
 
   private interpret(answer: SifenLoteResult, cdcs: readonly string[], now: Date): LotePollOutcome {
@@ -119,12 +121,16 @@ export class PollLoteResult {
     return { status: 'pending', nextPollAt: new Date(now.getTime() + POLL_INTERVAL_MS), reason };
   }
 
-  private async settle(lote: LotePollState, outcome: LotePollOutcome): Promise<LotePollOutcome> {
-    await this.deps.store.record(lote.loteId, outcome, {
-      expectedNextPollAt: lote.nextPollAt as Date,
+  private async settle(
+    loteId: string,
+    expectedNextPollAt: Date,
+    outcome: LotePollOutcome,
+  ): Promise<PollLoteResultResult> {
+    const applied = await this.deps.store.record(loteId, outcome, {
+      expectedNextPollAt,
       polledAt: this.now(),
     });
-    return outcome;
+    return applied ? outcome : { status: 'stale' };
   }
 
   private now(): Date {
@@ -134,18 +140,27 @@ export class PollLoteResult {
 
 function resolve(answer: SifenLoteResult, cdcs: readonly string[]): LotePollOutcome {
   const expected = new Set(cdcs);
-  const resolutions: DocumentResolution[] = [];
-  const settled = new Set<string>();
+  // Duplicates that agree collapse to the first; any disagreement or unknown dEstRes leaves the CDC unsettled.
+  const byCdc = new Map<string, DocumentResolution | null>();
   for (const result of answer.resultados) {
+    if (!expected.has(result.cdc)) continue;
     const status = documentStatusOf(result.dEstRes);
-    if (!status || !expected.has(result.cdc) || settled.has(result.cdc)) continue;
-    settled.add(result.cdc);
-    resolutions.push({
-      cdc: result.cdc,
-      status,
-      messages: result.mensajes.map((m) => ({ code: m.dCodRes, message: m.dMsgRes })),
-    });
+    const previous = byCdc.get(result.cdc);
+    if (previous === null || (previous && previous.status !== status)) {
+      byCdc.set(result.cdc, null);
+    } else if (!previous) {
+      byCdc.set(
+        result.cdc,
+        status && {
+          cdc: result.cdc,
+          status,
+          messages: result.mensajes.map((m) => ({ code: m.dCodRes, message: m.dMsgRes })),
+        },
+      );
+    }
   }
+  const resolutions = [...byCdc.values()].filter((r): r is DocumentResolution => r !== null);
+  const settled = new Set(resolutions.map((r) => r.cdc));
   return {
     status: 'processed',
     resolutions,

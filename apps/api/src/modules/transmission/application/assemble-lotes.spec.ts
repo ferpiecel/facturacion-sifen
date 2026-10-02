@@ -41,7 +41,10 @@ class InMemoryAssemblyStore implements LoteAssemblyStore {
     return Promise.resolve(new Set(cdcs.filter((cdc) => this.inProcess.has(cdc))));
   }
 
-  createLote(input: { documentType: number; documentIds: readonly string[] }) {
+  createLote(input: {
+    documentType: number;
+    documentIds: readonly string[];
+  }): Promise<string | null> {
     if (input.documentIds.some((id) => this.stale.has(id))) return Promise.resolve(null);
     this.created.push(input);
     return Promise.resolve(`lote-${String(this.created.length)}`);

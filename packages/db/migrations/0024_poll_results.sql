@@ -17,7 +17,10 @@ AS $$
     WHEN 'approved' THEN 4
     WHEN 'approved_with_observations' THEN 4
     WHEN 'rejected' THEN 4
-    ELSE 5 -- corrected, number_voided, cancelled: terminal
+    WHEN 'corrected' THEN 5
+    WHEN 'number_voided' THEN 5
+    WHEN 'cancelled' THEN 5
+    ELSE NULL -- unknown status: the guard refuses it
   END
 $$;
 --> statement-breakpoint
@@ -56,11 +59,17 @@ BEGIN
       RAISE EXCEPTION 'documents: identity columns are immutable';
     END IF;
     -- Statuses only move forward; a SIFEN outcome is entered once, from submitted (HU-E6-03).
-    IF NEW.status IS DISTINCT FROM OLD.status AND NOT (
-      public.documents_status_rank(NEW.status) > public.documents_status_rank(OLD.status)
-      AND (public.documents_status_rank(NEW.status) <> 4 OR OLD.status = 'submitted')
-    ) THEN
-      RAISE EXCEPTION 'documents: invalid status transition % -> %', OLD.status, NEW.status;
+    IF NEW.status IS DISTINCT FROM OLD.status THEN
+      IF public.documents_status_rank(NEW.status) IS NULL
+        OR public.documents_status_rank(OLD.status) IS NULL THEN
+        RAISE EXCEPTION 'documents: unranked status % -> %', OLD.status, NEW.status;
+      END IF;
+      IF NOT (
+        public.documents_status_rank(NEW.status) > public.documents_status_rank(OLD.status)
+        AND (public.documents_status_rank(NEW.status) <> 4 OR OLD.status = 'submitted')
+      ) THEN
+        RAISE EXCEPTION 'documents: invalid status transition % -> %', OLD.status, NEW.status;
+      END IF;
     END IF;
   END IF;
   RETURN NEW;

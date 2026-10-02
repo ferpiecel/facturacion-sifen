@@ -140,6 +140,29 @@ describe('LoteAssembler', () => {
     expect(result.lotes.map((l) => l.cdcs)).toEqual([[docs[1].cdc]]);
   });
 
+  it('skips a document with an invalid CDC and keeps assembling the rest', async () => {
+    const bad: ReadyDocument = { documentId: 'bad', cdc: '123', xml: '<rDE/>' };
+    const docs = [doc(1), bad, doc(2)];
+    const { assembler } = setup(docs);
+    const result = await assembler.assemble();
+    expect(result.lotes.map((l) => l.cdcs)).toEqual([[docs[0].cdc, docs[2].cdc]]);
+    expect(result.skipped).toEqual([{ cdc: '123', reason: 'invalid-cdc' }]);
+  });
+
+  it('reports the documents of a lote whose creation failed and keeps going', async () => {
+    const docs = [doc(1), doc(2, '04')];
+    const { assembler, store } = setup(docs);
+    const create = store.createLote.bind(store);
+    let calls = 0;
+    store.createLote = (input) => {
+      calls += 1;
+      return calls === 1 ? Promise.reject(new Error('db down')) : create(input);
+    };
+    const result = await assembler.assemble();
+    expect(result.conflicted).toEqual([docs[0].cdc]);
+    expect(result.lotes.map((l) => l.cdcs)).toEqual([[docs[1].cdc]]);
+  });
+
   it('asks the store about every ready CDC once, in one call', async () => {
     const docs = [doc(1), doc(2)];
     const asked: (readonly string[])[] = [];

@@ -68,7 +68,11 @@ describe('DrizzleLoteAssemblyStore', () => {
   const storeFor = (tenant: string, batchSize?: number) =>
     createDrizzleLoteAssemblyStore({ db: handle.db, tenantId: tenant, batchSize });
 
-  async function addDocument(status: string, signedXml: string | null = '<rDE/>') {
+  async function addDocument(
+    status: string,
+    signedXml: string | null = '<rDE/>',
+    createdAt?: Date,
+  ) {
     counter += 1;
     const [row] = await handle.db
       .insert(documents)
@@ -82,6 +86,7 @@ describe('DrizzleLoteAssemblyStore', () => {
         securityCode: '123456789',
         status,
         signedXml,
+        createdAt,
         signedAt: signedXml ? new Date('2026-01-01T12:00:05Z') : null,
         issuedAt: new Date('2026-01-01T12:00:00Z'),
         totalAmount: '110000',
@@ -119,6 +124,14 @@ describe('DrizzleLoteAssemblyStore', () => {
         { documentId: queued.id, cdc: queued.cdc, xml: '<rDE>q</rDE>' },
         { documentId: signed.id, cdc: signed.cdc, xml: '<rDE>s</rDE>' },
       ]);
+    });
+
+    it('breaks ties on created_at by document id so batches are stable', async () => {
+      const sameInstant = new Date('2026-01-01T00:00:00Z');
+      const first = await addDocument('signed', '<rDE/>', sameInstant);
+      const second = await addDocument('signed', '<rDE/>', sameInstant);
+      const ids = (await storeFor(tenantId).readyDocuments()).map((d) => d.documentId);
+      expect(ids).toEqual([first.id, second.id].sort());
     });
 
     it('returns nothing for another tenant', async () => {

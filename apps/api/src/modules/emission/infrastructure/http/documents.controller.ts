@@ -1,5 +1,4 @@
-import { randomUUID } from 'node:crypto';
-import { Body, Controller, HttpCode, HttpStatus, Inject, Post } from '@nestjs/common';
+import { Body, Controller, Headers, HttpCode, HttpStatus, Inject, Post } from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
 import { RequireScopes } from '../../../identity/infrastructure/decorators/require-scopes.decorator.js';
 import {
@@ -13,6 +12,7 @@ import {
 import type { createAcceptInvoice } from '../../application/accept-invoice.js';
 import { ACCEPT_INVOICE } from '../../emission.tokens.js';
 import { parseCreateDocument, toAcceptInvoiceInput } from './create-document.request.js';
+import { parseIdempotencyKey } from './idempotency-key.js';
 import { toHttpException, validationProblem } from './document-http-errors.js';
 
 @Controller('v1/documents')
@@ -24,10 +24,17 @@ export class DocumentsController {
     private readonly cls: ClsService<TenancyClsStore & IdentityClsStore>,
   ) {}
 
-  /** Accepts an FE: `202 { document_id, cdc }`. Signing and transmission happen asynchronously. */
+  /**
+   * Accepts an FE: `202 { document_id, cdc }`. Signing and transmission happen asynchronously.
+   * A retry with the same `Idempotency-Key` and body gets the same response; another body, 409.
+   */
   @Post()
   @HttpCode(HttpStatus.ACCEPTED)
-  async create(@Body() body: unknown) {
+  async create(
+    @Body() body: unknown,
+    @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
+  ) {
+    const idempotencyKey = parseIdempotencyKey(idempotencyKeyHeader);
     const parsed = parseCreateDocument(body);
     if (!parsed.ok) {
       throw validationProblem(parsed.errors);
@@ -38,8 +45,7 @@ export class DocumentsController {
           tenantId: this.cls.get(TENANT_ID_CLS_KEY),
           actor: { type: 'api_key', id: this.cls.get(API_KEY_ID_CLS_KEY) },
           payload: parsed.value,
-          // Throwaway until the Idempotency-Key header is wired (next slice).
-          idempotencyKey: randomUUID(),
+          idempotencyKey,
         }),
       );
       return { document_id: accepted.documentId, cdc: accepted.cdc };

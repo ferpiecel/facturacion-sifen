@@ -77,10 +77,18 @@ describe('isBlockedAddress (HU-E11-01 SSRF policy)', () => {
     expect(isBlockedAddress(address)).toBe(false);
   });
 
-  it.each(['', 'example.com', '999.1.1.1', '1.2.3', '1.2.3.4.5', '01.2.3.4', '::g', ':::', '1:2:3:4:5:6:7:8:9', 'http://1.1.1.1'])(
-    'fails closed on the unparseable value %j',
-    (value) => {
-      expect(isBlockedAddress(value)).toBe(true);
-    },
-  );
+  it.each([
+    '',
+    'example.com',
+    '999.1.1.1',
+    '1.2.3',
+    '1.2.3.4.5',
+    '01.2.3.4',
+    '::g',
+    ':::',
+    '1:2:3:4:5:6:7:8:9',
+    'http://1.1.1.1',
+  ])('fails closed on the unparseable value %j', (value) => {
+    expect(isBlockedAddress(value)).toBe(true);
+  });
 });

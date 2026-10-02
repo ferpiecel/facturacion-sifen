@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Body, Controller, HttpCode, HttpStatus, Inject, Post } from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
 import { RequireScopes } from '../../../identity/infrastructure/decorators/require-scopes.decorator.js';
@@ -37,6 +38,8 @@ export class DocumentsController {
           tenantId: this.cls.get(TENANT_ID_CLS_KEY),
           actor: { type: 'api_key', id: this.cls.get(API_KEY_ID_CLS_KEY) },
           payload: parsed.value,
+          // Throwaway until the Idempotency-Key header is wired (next slice).
+          idempotencyKey: randomUUID(),
         }),
       );
       return { document_id: accepted.documentId, cdc: accepted.cdc };

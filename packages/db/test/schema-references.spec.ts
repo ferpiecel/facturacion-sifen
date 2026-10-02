@@ -3,6 +3,9 @@ import { getTableName } from 'drizzle-orm';
 import { getTableConfig } from 'drizzle-orm/pg-core';
 import {
   apiKeys,
+  documents,
+  loteDocuments,
+  lotes,
   partners,
   tenantEstablishments,
   tenantExpeditionPoints,
@@ -66,5 +69,25 @@ describe('schema foreign key targets', () => {
 
   it('tenant_timbrados.tenant_id references tenants', () => {
     expectForeignKeyTargets(tenantTimbrados, ['tenants']);
+  });
+
+  it('documents references tenants, its timbrado and its expedition point', () => {
+    expect(
+      getTableConfig(documents)
+        .foreignKeys.map((fk) => getTableName(fk.reference().foreignTable))
+        .sort(),
+    ).toEqual(['tenant_expedition_points', 'tenant_timbrados', 'tenants']);
+  });
+
+  it('lotes.tenant_id references tenants', () => {
+    expectForeignKeyTargets(lotes, ['tenants']);
+  });
+
+  it('lote_documents references tenants, lotes and documents', () => {
+    expect(
+      getTableConfig(loteDocuments)
+        .foreignKeys.map((fk) => getTableName(fk.reference().foreignTable))
+        .sort(),
+    ).toEqual(['documents', 'lotes', 'tenants']);
   });
 });

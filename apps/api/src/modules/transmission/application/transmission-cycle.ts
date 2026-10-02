@@ -85,6 +85,8 @@ export interface CycleReport {
   readonly signed: number;
   readonly signSkipped: number;
   readonly assembled: number;
+  /** Lotes another worker had already claimed: not sent by this run. */
+  readonly sendSkipped: number;
   readonly sent: readonly { readonly loteId: string; readonly status: string }[];
   readonly polled: readonly { readonly loteId: string; readonly status: string }[];
   readonly failures: readonly CycleFailure[];
@@ -116,7 +118,7 @@ export class TransmissionCycle {
     this.failures = [];
     const signing = await this.signAccepted();
     const assembled = await this.assemble();
-    const sent = await this.sendPending();
+    const sending = await this.sendPending();
     const polled = await this.pollDue();
     const held =
       (await this.guard('sign', undefined, () =>
@@ -127,7 +129,15 @@ export class TransmissionCycle {
     );
     const stalePending =
       (await this.guard('send', undefined, () => this.deps.store.pendingOlderThan(cutoff))) ?? 0;
-    return { ...signing, assembled, sent, polled, failures: this.failures, held, stalePending };
+    return {
+      ...signing,
+      assembled,
+      ...sending,
+      polled,
+      failures: this.failures,
+      held,
+      stalePending,
+    };
   }
 
   private async signAccepted() {
@@ -154,6 +164,7 @@ export class TransmissionCycle {
 
   private async sendPending() {
     const sent: { loteId: string; status: string }[] = [];
+    let sendSkipped = 0;
     const pending = await this.guard('send', undefined, () =>
       this.deps.store.pendingLotes(this.batch.send),
     );
@@ -162,10 +173,12 @@ export class TransmissionCycle {
         const dId = await this.deps.store.nextRequestId();
         return this.deps.sender.execute({ loteId, dId, lote });
       });
-      if (result) sent.push({ loteId, status: result.status });
-      else await this.guard('send', loteId, () => this.deps.store.deferPendingLote(loteId));
+      if (result === undefined) {
+        await this.guard('send', loteId, () => this.deps.store.deferPendingLote(loteId));
+      } else if (result.status === 'already-claimed') sendSkipped += 1;
+      else sent.push({ loteId, status: result.status });
     }
-    return sent;
+    return { sent, sendSkipped };
   }
 
   private async pollDue() {

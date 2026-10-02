@@ -233,6 +233,13 @@ export const tenantEstablishments = pgTable(
     // dDesCiuEmi (MT §D2, D116): 1-30 chars, always required (domain:
     // cityDescription).
     cityDescription: varchar('city_description', { length: 30 }).notNull(),
+    // dTelEmi (XSD tdTel, gEmis, required in the DE): 6-15 chars. Nullable here only because
+    // establishments created before HU-E6-02 have none; signing refuses a missing one.
+    phone: varchar('phone', { length: 15 }),
+    // dEmailE (XSD tEmail, gEmis, required in the DE): same nullability reason as `phone`.
+    email: varchar('email', { length: 255 }),
+    // dDenSuc (XSD gEmis, minOccurs 0): commercial name of the branch, 1-30 chars.
+    commercialName: varchar('commercial_name', { length: 30 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -261,6 +268,20 @@ export const tenantEstablishments = pgTable(
       sql`(${table.districtCode} IS NULL) = (${table.districtDescription} IS NULL)`,
     ),
     check('tenant_establishments_city_code_format', sql`${table.cityCode} ~ '^[0-9]{1,5}$'`),
+    check(
+      'tenant_establishments_phone_length',
+      sql`char_length(${table.phone}) BETWEEN 6 AND 15 AND ${table.phone} !~ '^[[:space:]]*$' AND ${table.phone} !~ '[[:cntrl:]]'`,
+    ),
+    // XSD tEmail pattern (DE_Types_v150.xsd), anchored; written without backslashes (a sql`` template
+    // would swallow them): `.` and `-` live inside bracket expressions.
+    check(
+      'tenant_establishments_email_format',
+      sql`${table.email} ~ '^[0-9a-zA-Z]([0-9a-zA-Z._-])*@([0-9a-zA-Z][0-9a-zA-Z_-]*[.])+[a-zA-Z]{2,9}$'`,
+    ),
+    check(
+      'tenant_establishments_commercial_name_length',
+      sql`char_length(${table.commercialName}) >= 1 AND ${table.commercialName} !~ '^[[:space:]]*$'`,
+    ),
   ],
 );
 

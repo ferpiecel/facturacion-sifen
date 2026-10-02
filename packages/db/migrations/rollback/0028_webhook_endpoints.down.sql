@@ -4,3 +4,4 @@ DROP POLICY IF EXISTS "tenant_isolation" ON "webhook_endpoints";
 REVOKE ALL ON "webhook_endpoints" FROM app_user, platform_admin;
 DROP TABLE IF EXISTS "webhook_endpoints";
 DROP FUNCTION IF EXISTS "webhook_endpoints_guard"();
+DROP FUNCTION IF EXISTS "webhook_events_unique"(text[]);

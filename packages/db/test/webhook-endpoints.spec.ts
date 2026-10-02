@@ -142,7 +142,7 @@ describe('webhook_endpoints', () => {
   });
 
   describe('secret rotation (enforced by the guard trigger, as app_user)', () => {
-    const asTenant = <T>(
+    const asTenant = (
       db: DatabaseHandle['db'],
       tenantId: string,
       change: Partial<typeof webhookEndpoints.$inferInsert>,

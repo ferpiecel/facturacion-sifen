@@ -1,3 +1,10 @@
+-- CHECK constraints cannot hold subqueries, hence the function: true when no event is repeated
+-- (an empty filter, meaning "every event", is unique by definition).
+CREATE FUNCTION "webhook_events_unique"(events text[]) RETURNS boolean
+LANGUAGE sql IMMUTABLE
+SET search_path = pg_catalog, pg_temp
+AS $$ SELECT cardinality(events) = (SELECT count(DISTINCT e) FROM unnest(events) AS e) $$;
+--> statement-breakpoint
 CREATE TABLE "webhook_endpoints" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
@@ -11,13 +18,18 @@ CREATE TABLE "webhook_endpoints" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "webhook_endpoints_tenant_id_key" UNIQUE("tenant_id","id"),
-	CONSTRAINT "webhook_endpoints_url_https" CHECK ("webhook_endpoints"."url" ~ '^https://[^[:space:]]+$' AND "webhook_endpoints"."url" !~ '^https://[^/]*@' AND length("webhook_endpoints"."url") <= 2048),
+	CONSTRAINT "webhook_endpoints_url_https" CHECK ("webhook_endpoints"."url" ~ '^https://[^/?#:@[:space:]]+(:[0-9]{1,5})?([/?#][^[:space:]]*)?$' AND length("webhook_endpoints"."url") <= 2048),
 	CONSTRAINT "webhook_endpoints_events_valid" CHECK ("webhook_endpoints"."events" <@ ARRAY['document.created', 'document.signed', 'document.submitted', 'document.approved', 'document.approved_with_observations', 'document.rejected', 'document.cancelled', 'document.number_voided', 'document.transmission_deadline_warning', 'document.notification.delivered', 'document.notification.failed']::text[]),
+	CONSTRAINT "webhook_endpoints_events_unique" CHECK (webhook_events_unique("webhook_endpoints"."events")),
 	CONSTRAINT "webhook_endpoints_previous_pair" CHECK (("webhook_endpoints"."previous_sealed" IS NULL) = ("webhook_endpoints"."previous_expires_at" IS NULL))
 );
 --> statement-breakpoint
 ALTER TABLE "webhook_endpoints" ADD CONSTRAINT "webhook_endpoints_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE no action ON UPDATE no action;
 --> statement-breakpoint
+-- Identity is immutable and updated_at is maintained here. The signing secret is the sensitive part:
+-- `sealed` changes only as a rotation (secret_version + 1, the old secret kept in previous_sealed for
+-- a grace period of at most 7 days) and previous_* is cleared only once that period is over, so a
+-- tenant credential holding UPDATE can neither swap the secret silently nor shorten an overlap.
 CREATE FUNCTION "webhook_endpoints_guard"() RETURNS trigger
 LANGUAGE plpgsql
 SET search_path = pg_catalog, pg_temp
@@ -28,6 +40,28 @@ BEGIN
     OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
     RAISE EXCEPTION 'webhook_endpoints: identity columns are immutable';
   END IF;
+  IF NEW.sealed IS DISTINCT FROM OLD.sealed THEN
+    IF NEW.secret_version IS DISTINCT FROM OLD.secret_version + 1 THEN
+      RAISE EXCEPTION 'webhook_endpoints: secret_version must increase by exactly 1 on rotation';
+    END IF;
+    IF NEW.previous_sealed IS DISTINCT FROM OLD.sealed
+      OR NEW.previous_expires_at IS NULL
+      OR NEW.previous_expires_at <= now()
+      OR NEW.previous_expires_at > now() + interval '7 days' THEN
+      RAISE EXCEPTION 'webhook_endpoints: rotation must keep the old secret as previous_sealed for up to 7 days';
+    END IF;
+  ELSE
+    IF NEW.secret_version IS DISTINCT FROM OLD.secret_version THEN
+      RAISE EXCEPTION 'webhook_endpoints: secret_version only changes through a rotation';
+    END IF;
+    IF (NEW.previous_sealed IS DISTINCT FROM OLD.previous_sealed
+        OR NEW.previous_expires_at IS DISTINCT FROM OLD.previous_expires_at)
+      AND NOT (NEW.previous_sealed IS NULL AND NEW.previous_expires_at IS NULL
+        AND OLD.previous_expires_at <= now()) THEN
+      RAISE EXCEPTION 'webhook_endpoints: previous secret only changes through a rotation or after it expired';
+    END IF;
+  END IF;
+  NEW.updated_at := now();
   RETURN NEW;
 END;
 $$;

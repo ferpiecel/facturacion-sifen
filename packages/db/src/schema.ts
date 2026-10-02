@@ -570,14 +570,18 @@ export const webhookEndpoints = pgTable(
   },
   (table) => [
     unique('webhook_endpoints_tenant_id_key').on(table.tenantId, table.id),
+    // Lowercase `https://` only (the scheme is case-insensitive in RFC 3986, but accepting one
+    // spelling keeps the check, the SSRF guard and the docs in agreement); non-empty host, no
+    // userinfo, optional port, no whitespace. DNS and address checks belong to the dispatcher.
     check(
       'webhook_endpoints_url_https',
-      sql`${table.url} ~ '^https://[^[:space:]]+$' AND ${table.url} !~ '^https://[^/]*@' AND length(${table.url}) <= 2048`,
+      sql`${table.url} ~ '^https://[^/?#:@[:space:]]+(:[0-9]{1,5})?([/?#][^[:space:]]*)?$' AND length(${table.url}) <= 2048`,
     ),
     check(
       'webhook_endpoints_events_valid',
       sql`${table.events} <@ ARRAY[${sqlList(WEBHOOK_EVENT_TYPES)}]::text[]`,
     ),
+    check('webhook_endpoints_events_unique', sql`webhook_events_unique(${table.events})`),
     check(
       'webhook_endpoints_previous_pair',
       sql`(${table.previousSealed} IS NULL) = (${table.previousExpiresAt} IS NULL)`,

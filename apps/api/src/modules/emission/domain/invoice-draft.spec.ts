@@ -198,4 +198,26 @@ describe('validateInvoiceDraft', () => {
       expect.arrayContaining(['public-entity-requires-b2g', 'quantity-positive']),
     );
   });
+
+  describe('amount range (numeric(23,8) column)', () => {
+    it('rejects a line total beyond 15 integer digits', () => {
+      const d = draft({ items: [{ quantity: 1, unitPrice: 1e15, vatRate: 10 }] });
+      expect(validateInvoiceDraft(d, {})).toContainEqual(
+        expect.objectContaining({ field: 'items[0].total', rule: 'amount-range' }),
+      );
+    });
+
+    it('rejects an invoice total beyond the range even when every line fits', () => {
+      const line = { quantity: 1, unitPrice: 600_000_000_000_000, vatRate: 10 } as const;
+      const errors = validateInvoiceDraft(draft({ items: [line, line] }), {});
+      expect(errors).toContainEqual(
+        expect.objectContaining({ field: 'total', rule: 'amount-range' }),
+      );
+    });
+
+    it('accepts the largest allowed total', () => {
+      const d = draft({ items: [{ quantity: 1, unitPrice: 999_999_999_999_950, vatRate: 10 }] });
+      expect(rules(d)).not.toContain('amount-range');
+    });
+  });
 });

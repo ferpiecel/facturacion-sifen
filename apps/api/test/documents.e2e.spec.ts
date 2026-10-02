@@ -1,4 +1,4 @@
-import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
+import { type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
 import {
   createPgliteDatabase,
@@ -13,6 +13,7 @@ import {
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTenant, issueApiKey } from '../src/cli/commands.js';
+import { createHttpAdapter } from '../src/bootstrap/http.js';
 import { AppModule } from '../src/app.module.js';
 import { DATABASE, DATABASE_HANDLE } from '../src/modules/database/database.module.js';
 import { parseCdc } from '../src/modules/emission/domain/cdc.js';
@@ -35,12 +36,12 @@ describe('POST /v1/documents (e2e)', () => {
   let bearer: string;
   const originalEnvironment = process.env.SIFEN_ENVIRONMENT;
 
-  async function seedTenant(name: string, withIssuer: boolean) {
+  async function seedTenant(name: string, withIssuer: boolean, scopes = ['documents:write']) {
     const { id } = await createTenant(handle.db, name);
     const { formattedKey } = await issueApiKey(handle.db, {
       tenantId: id,
       environment: 'live',
-      scopes: ['documents:write'],
+      scopes,
     });
     if (withIssuer) {
       await handle.db.insert(tenantFiscalProfiles).values({
@@ -85,7 +86,7 @@ describe('POST /v1/documents (e2e)', () => {
       .overrideProvider(DATABASE)
       .useValue(handle.db)
       .compile();
-    app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
+    app = moduleRef.createNestApplication<NestFastifyApplication>(createHttpAdapter());
     await app.init();
     await app.getHttpAdapter().getInstance().ready();
   });
@@ -164,6 +165,63 @@ describe('POST /v1/documents (e2e)', () => {
 
     expect(response.statusCode).toBe(422);
     expect(await handle.db.select().from(documents)).toHaveLength(0);
+  });
+
+  it('gives each tenant its own document when both use the same establishment and point codes', async () => {
+    const other = await seedTenant('Other SA', true);
+
+    const mine = await post(BODY);
+    const theirs = await post(BODY, other.formattedKey);
+
+    expect([mine.statusCode, theirs.statusCode]).toEqual([202, 202]);
+    const rows = await handle.db.select().from(documents);
+    expect(rows.map((row) => row.tenantId).sort()).toEqual([tenantId, other.id].sort());
+    expect(new Set(rows.map((row) => row.id)).size).toBe(2);
+  });
+
+  it('answers 403 for a key without the documents:write scope', async () => {
+    const readOnly = await seedTenant('Read SA', true, ['documents:read']);
+
+    expect((await post(BODY, readOnly.formattedKey)).statusCode).toBe(403);
+    expect(await handle.db.select().from(documents)).toHaveLength(0);
+  });
+
+  it('persists the validated body (defaults applied, unknown keys stripped), not the raw one', async () => {
+    const { roundingPyg: _omitted, ...withoutRounding } = BODY;
+
+    const response = await post({ ...withoutRounding, injected: 'x'.repeat(10) });
+
+    expect(response.statusCode).toBe(202);
+    const [row] = await handle.db.select().from(documents);
+    expect(row.payload).toMatchObject({ roundingPyg: 0, currency: 'PYG' });
+    expect(row.payload).not.toHaveProperty('injected');
+  });
+
+  it('answers 422 amount-range for amounts beyond the numeric column, never a 500', async () => {
+    const response = await post({
+      ...BODY,
+      items: [{ quantity: 1, unitPrice: 1e20, vatRate: 10 }],
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(
+      response.json<{ errors: Array<{ rule: string }> }>().errors.map((e) => e.rule),
+    ).toContain('amount-range');
+  });
+
+  it('caps the items at 999 (MT v150 E001 gCamItem 1-999)', async () => {
+    const item = { quantity: 1, unitPrice: 50, vatRate: 10 };
+
+    const response = await post({ ...BODY, items: Array.from({ length: 1000 }, () => item) });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json<{ errors: Array<{ field: string }> }>().errors[0]?.field).toBe('items');
+  });
+
+  it('rejects a body over the 1 MiB limit with 413', async () => {
+    const response = await post({ ...BODY, note: 'x'.repeat(1_048_576) });
+
+    expect(response.statusCode).toBe(413);
   });
 
   it('answers 422 when an unnamed receiver carries a RUC or a named one has an invalid RUC', async () => {

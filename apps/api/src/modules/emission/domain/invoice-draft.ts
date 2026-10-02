@@ -39,6 +39,9 @@ export interface ValidationError {
 
 export const DEFAULT_UNNAMED_THRESHOLD_PYG = 7_000_000;
 const ROUNDING_STEP = 50;
+/** Largest PYG amount the numeric(23,8) columns hold: 15 integer digits. */
+export const MAX_AMOUNT_PYG = 999_999_999_999_999;
+const withinRange = (amount: number) => Math.abs(amount) <= MAX_AMOUNT_PYG;
 
 /**
  * Pure pre-SIFEN validation: collects every violation. PYG amounts are integer-only and
@@ -100,10 +103,24 @@ export function validateInvoiceDraft(
         message: 'PYG item total (quantity x unit price) must be an integer',
       });
     }
+    if (!withinRange(itemTotal)) {
+      errors.push({
+        field: `${path}.total`,
+        rule: 'amount-range',
+        message: `Item total must not exceed ${String(MAX_AMOUNT_PYG)} Gs`,
+      });
+    }
     // Invalid lines never offset valid ones (they would bypass the threshold).
     if (validLine) total += itemTotal;
   });
 
+  if (!withinRange(total)) {
+    errors.push({
+      field: 'total',
+      rule: 'amount-range',
+      message: `Invoice total must not exceed ${String(MAX_AMOUNT_PYG)} Gs`,
+    });
+  }
   const net = total - draft.roundingPyg;
   if (Number.isInteger(total)) {
     const roundingOk =

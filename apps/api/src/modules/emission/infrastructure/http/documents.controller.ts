@@ -36,7 +36,7 @@ export class DocumentsController {
         toAcceptInvoiceInput(parsed.value, {
           tenantId: this.cls.get(TENANT_ID_CLS_KEY),
           actor: { type: 'api_key', id: this.cls.get(API_KEY_ID_CLS_KEY) },
-          payload: body,
+          payload: parsed.value,
         }),
       );
       return { document_id: accepted.documentId, cdc: accepted.cdc };

@@ -3,6 +3,9 @@ import { parseRuc } from '../../../fiscal-config/domain/ruc.js';
 import type { ValidationError } from '../../domain/invoice-draft.js';
 import type { AcceptInvoiceInput } from '../../application/accept-invoice.js';
 
+/** MT v150 E001 gCamItem occurs 1-999 times per DE (p. 86). */
+const MAX_ITEMS = 999;
+
 const code = (length: number) => z.string().regex(new RegExp(`^\\d{${String(length)}}$`));
 
 const receiver = z.discriminatedUnion('kind', [
@@ -32,7 +35,7 @@ export const createDocumentSchema = z.object({
   receiver,
   items: z
     .array(z.object({ quantity: z.number(), unitPrice: z.number(), vatRate: z.number() }))
-    .min(0),
+    .max(MAX_ITEMS),
   roundingPyg: z.number().default(0),
   location: z.object({ departmentCode: z.number() }),
   currency: z.literal('PYG').default('PYG'),

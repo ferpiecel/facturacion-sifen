@@ -3,6 +3,7 @@ import {
   documents,
   tenantEstablishments,
   tenantExpeditionPoints,
+  tenants,
   withTenantTransaction,
   type Database,
   type TenantTx,
@@ -10,35 +11,42 @@ import {
 import type { DocumentReader, DocumentView } from '../application/ports/document-reader.port.js';
 
 function select(tx: TenantTx) {
-  return tx
-    .select({
-      documentId: documents.id,
-      cdc: documents.cdc,
-      establishment: tenantEstablishments.code,
-      point: tenantExpeditionPoints.code,
-      number: documents.number,
-      status: documents.status,
-      environment: documents.environment,
-      issuedAt: documents.issuedAt,
-      totalAmount: documents.totalAmount,
-      currency: documents.currency,
-      receiverRuc: documents.receiverRuc,
-    })
-    .from(documents)
-    .innerJoin(
-      tenantExpeditionPoints,
-      and(
-        eq(tenantExpeditionPoints.tenantId, documents.tenantId),
-        eq(tenantExpeditionPoints.id, documents.expeditionPointId),
-      ),
-    )
-    .innerJoin(
-      tenantEstablishments,
-      and(
-        eq(tenantEstablishments.tenantId, documents.tenantId),
-        eq(tenantEstablishments.id, documents.establishmentId),
-      ),
-    );
+  return (
+    tx
+      .select({
+        documentId: documents.id,
+        cdc: documents.cdc,
+        establishment: tenantEstablishments.code,
+        point: tenantExpeditionPoints.code,
+        number: documents.number,
+        status: documents.status,
+        environment: documents.environment,
+        issuedAt: documents.issuedAt,
+        totalAmount: documents.totalAmount,
+        currency: documents.currency,
+        receiverRuc: documents.receiverRuc,
+      })
+      .from(documents)
+      // The CDC key is (tenant, environment, cdc): only the tenant's current environment is visible.
+      .innerJoin(
+        tenants,
+        and(eq(tenants.id, documents.tenantId), eq(tenants.environment, documents.environment)),
+      )
+      .innerJoin(
+        tenantExpeditionPoints,
+        and(
+          eq(tenantExpeditionPoints.tenantId, documents.tenantId),
+          eq(tenantExpeditionPoints.id, documents.expeditionPointId),
+        ),
+      )
+      .innerJoin(
+        tenantEstablishments,
+        and(
+          eq(tenantEstablishments.tenantId, documents.tenantId),
+          eq(tenantEstablishments.id, documents.establishmentId),
+        ),
+      )
+  );
 }
 
 /** Reads inside `withTenantTransaction`; the explicit tenant filter backs up RLS. */

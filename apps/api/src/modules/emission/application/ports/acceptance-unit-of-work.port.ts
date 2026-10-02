@@ -37,16 +37,42 @@ export interface NewDocument {
   totalAmount: string;
   currency: string;
   payload: unknown;
+  /** `Idempotency-Key` of the request, unique per tenant. */
+  idempotencyKey: string;
+  /** sha-256 of the canonical validated body. */
+  requestHash: string;
+}
+
+/** The outcome stored for an earlier request that used an `Idempotency-Key`. */
+export interface StoredAcceptance {
+  documentId: string;
+  cdc: string;
+  requestHash: string;
+}
+
+/**
+ * Another transaction committed a document with the same tenant and
+ * `Idempotency-Key` first. The losing transaction rolls back (burning no
+ * number); the use case then re-reads the key.
+ */
+export class IdempotencyKeyCollisionError extends Error {
+  constructor() {
+    super('Idempotency key already used by a concurrent request');
+    this.name = 'IdempotencyKeyCollisionError';
+  }
 }
 
 /** Operations that must share one tenant transaction. */
 export interface AcceptanceUnit {
+  /** The document an earlier request with this key created, or null. */
+  findByIdempotencyKey(key: string): Promise<StoredAcceptance | null>;
   /** The tenant's issuer setup, or null when the point or a valid timbrado does not exist. */
   resolveIssuer(query: IssuerQuery): Promise<IssuerContext | null>;
   nextNumber(
     issuer: IssuerContext,
     documentType: number,
   ): Promise<{ series: string | null; number: number }>;
+  /** @throws IdempotencyKeyCollisionError when the key was taken by a concurrent commit. */
   insertDocument(document: NewDocument): Promise<{ id: string }>;
   recordAudit(entry: AuditEntry): Promise<void>;
 }

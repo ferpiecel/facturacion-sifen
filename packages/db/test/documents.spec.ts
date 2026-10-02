@@ -23,6 +23,8 @@ async function causeOf(promise: Promise<unknown>): Promise<string> {
 
 const CDC_A = '01800695631001001000000112026010111234567891';
 const CDC_B = '01800695631001001000000212026010111234567892';
+const CDC_C = '01800695631001001000000312026010111234567893';
+const CDC_D = '01800695631001001000000412026010111234567894';
 
 /** Spec: HU-E5-01 (DB part). Accepted fiscal documents, isolated per tenant by RLS. */
 describe('documents', () => {
@@ -162,6 +164,62 @@ describe('documents', () => {
     const [row] = await db.update(documents).set({ status: 'signed' }).returning();
     expect(row.status).toBe('signed');
   });
+  /** Spec: HU-E6-03. SIFEN outcomes are entered once, from `submitted`, and never regress. */
+  describe('status transitions', () => {
+    const move = (
+      db: DatabaseHandle['db'],
+      tenantId: string,
+      set: Partial<typeof documents.$inferInsert>,
+    ) =>
+      withTenantTransaction(db, tenantId, (tx) =>
+        tx.update(documents).set(set).where(eq(documents.cdc, CDC_A)).returning(),
+      );
+
+    it.each([
+      ['accepted', 'signed'],
+      ['accepted', 'submitted'],
+      ['signed', 'queued'],
+      ['queued', 'submitted'],
+      ['submitted', 'approved'],
+      ['submitted', 'approved_with_observations'],
+      ['submitted', 'rejected'],
+      ['approved', 'cancelled'],
+      ['rejected', 'corrected'],
+    ])('allows %s -> %s', async (from, to) => {
+      const { db, a, setupA, doc } = await seed();
+      await db.insert(documents).values(doc(a, setupA, { status: from }));
+      const [row] = await move(db, a, { status: to });
+      expect(row.status).toBe(to);
+    });
+
+    it.each([
+      ['accepted', 'approved'],
+      ['signed', 'rejected'],
+      ['submitted', 'accepted'],
+      ['approved', 'submitted'],
+      ['approved', 'rejected'],
+      ['rejected', 'approved'],
+      ['approved_with_observations', 'approved'],
+      ['cancelled', 'approved'],
+      ['cancelled', 'accepted'],
+    ])('rejects %s -> %s', async (from, to) => {
+      const { db, a, setupA, doc } = await seed();
+      await db.insert(documents).values(doc(a, setupA, { status: from }));
+      expect(await causeOf(move(db, a, { status: to }))).toContain('invalid status transition');
+    });
+
+    it('stores the SIFEN messages next to the outcome', async () => {
+      const { db, a, setupA, doc } = await seed();
+      await db.insert(documents).values(doc(a, setupA, { status: 'submitted' }));
+      const messages = [{ code: '1005', message: 'Extemporáneo' }];
+      const [row] = await move(db, a, {
+        status: 'approved_with_observations',
+        sifenMessages: messages,
+      });
+      expect(row.sifenMessages).toEqual(messages);
+    });
+  });
+
   it('rejects an environment that differs from the tenant environment on insert', async () => {
     const { db, a, setupA, doc } = await seed();
     const message = await causeOf(
@@ -221,5 +279,56 @@ describe('documents', () => {
         ),
       ),
     ).toContain('documents_tenant_point_fk');
+  });
+
+  it('keeps an idempotency key unique per tenant and requires its request hash (HU-E5-02)', async () => {
+    const { db, a, b, setupA, setupB, doc } = await seed();
+    const hash = 'a'.repeat(64);
+    await db.insert(documents).values(doc(a, setupA, { idempotencyKey: 'k1', requestHash: hash }));
+
+    expect(
+      await causeOf(
+        db
+          .insert(documents)
+          .values(
+            doc(a, setupA, { cdc: CDC_B, number: 2, idempotencyKey: 'k1', requestHash: hash }),
+          ),
+      ),
+    ).toContain('documents_tenant_idempotency_key_key');
+    // Another tenant may reuse the key; documents without a key may coexist.
+    await db
+      .insert(documents)
+      .values(doc(b, setupB, { cdc: CDC_B, idempotencyKey: 'k1', requestHash: hash }));
+    await db.insert(documents).values(doc(a, setupA, { cdc: CDC_B, number: 3 }));
+    await db.insert(documents).values(doc(a, setupA, { cdc: CDC_C, number: 4 }));
+
+    const bad: Partial<typeof documents.$inferInsert>[] = [
+      { idempotencyKey: 'k2' },
+      { requestHash: hash },
+      { idempotencyKey: 'k2', requestHash: 'XYZ' },
+      { idempotencyKey: '', requestHash: hash },
+    ];
+    for (const [index, overrides] of bad.entries()) {
+      expect(
+        await causeOf(
+          db
+            .insert(documents)
+            .values(doc(a, setupA, { cdc: CDC_D, number: 10 + index, ...overrides })),
+        ),
+      ).toMatch(/documents_idempotency_/);
+    }
+  });
+
+  it('makes idempotency_key and request_hash immutable once set', async () => {
+    const { db, a, setupA, doc } = await seed();
+    await db
+      .insert(documents)
+      .values(doc(a, setupA, { idempotencyKey: 'k1', requestHash: 'a'.repeat(64) }));
+    expect(await causeOf(db.update(documents).set({ idempotencyKey: 'k2' }))).toContain(
+      'immutable',
+    );
+    expect(await causeOf(db.update(documents).set({ requestHash: 'b'.repeat(64) }))).toContain(
+      'immutable',
+    );
   });
 });

@@ -191,6 +191,14 @@ describe('lotes', () => {
     ['rejected', 'pending'],
     ['unknown', 'pending'],
     ['unknown', 'sending'],
+    ['pending', 'processed'],
+    ['sending', 'processed'],
+    ['unknown', 'processed'],
+    ['unknown', 'recovery'],
+    ['processed', 'sent'],
+    ['processed', 'recovery'],
+    ['recovery', 'processed'],
+    ['recovery', 'sent'],
   ])('rejects the transition %s -> %s', async (from, to) => {
     const { db, a, lote } = await seed();
     const [row] = await db
@@ -209,6 +217,8 @@ describe('lotes', () => {
     ['sending', 'unknown'],
     ['unknown', 'sent'],
     ['unknown', 'rejected'],
+    ['sent', 'processed'],
+    ['sent', 'recovery'],
   ])('allows the transition %s -> %s', async (from, to) => {
     const { db, a, lote } = await seed();
     const [row] = await db
@@ -227,6 +237,17 @@ describe('lotes', () => {
       .returning();
     const [updated] = await update(db, a, row.id, { responseMessage: 'note' });
     expect(updated.responseMessage).toBe('note');
+  });
+
+  it('records the last poll without a status change', async () => {
+    const { db, a, lote } = await seed();
+    const [row] = await db
+      .insert(lotes)
+      .values(lote(a, { status: 'sent' }))
+      .returning();
+    const lastPolledAt = new Date('2026-10-01T12:10:00Z');
+    const [updated] = await update(db, a, row.id, { lastPolledAt, lastPollMessage: '0361' });
+    expect(updated).toMatchObject({ status: 'sent', lastPolledAt, lastPollMessage: '0361' });
   });
 
   it('makes sent_at and sifen_protocol write-once', async () => {

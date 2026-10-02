@@ -62,7 +62,13 @@ function Actions({ doc }: { doc: DocumentRow }) {
 }
 
 /** One document of the Stitch master list. */
-export function DocumentsRow({ doc }: { doc: DocumentRow }) {
+interface DocumentsRowProps {
+  doc: DocumentRow;
+  selected: boolean;
+  onToggle: () => void;
+}
+
+export function DocumentsRow({ doc, selected, onToggle }: DocumentsRowProps) {
   const rejected = doc.rejection !== undefined;
   const Icon = doc.receiver.kind === 'ruc' ? Building2 : User;
   const signed = doc.kind === 'NCE' ? -doc.total : doc.total;
@@ -73,30 +79,43 @@ export function DocumentsRow({ doc }: { doc: DocumentRow }) {
       className={`flex flex-col gap-2.5 p-4 transition-colors ${
         rejected
           ? 'bg-error-container/20 hover:bg-error-container/30'
-          : 'hover:bg-surface-container-low'
+          : selected
+            ? 'bg-primary/5 hover:bg-primary/10'
+            : 'hover:bg-surface-container-low'
       }`}
     >
       <div className="flex items-start justify-between gap-3">
-        <div className="flex flex-col">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-headline-md text-headline-md font-bold text-on-surface">{`${doc.kind} ${doc.number}`}</span>
-            {KIND_PILL[doc.kind] && (
-              <span className="rounded-full bg-tertiary-fixed px-2 py-0.5 font-code-sm text-code-sm font-bold text-on-tertiary-fixed">
-                {KIND_PILL[doc.kind]}
+        <div className="flex items-center gap-3">
+          <input
+            type="checkbox"
+            aria-label={`Seleccionar ${doc.kind} ${doc.number}`}
+            checked={selected}
+            onChange={onToggle}
+            className="size-4 cursor-pointer rounded accent-primary"
+          />
+          <div className="flex flex-col">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-headline-md text-headline-md font-bold text-on-surface">{`${doc.kind} ${doc.number}`}</span>
+              {KIND_PILL[doc.kind] && (
+                <span className="rounded-full bg-tertiary-fixed px-2 py-0.5 font-code-sm text-code-sm font-bold text-on-tertiary-fixed">
+                  {KIND_PILL[doc.kind]}
+                </span>
+              )}
+              <StatusBadge status={doc.status} />
+              {doc.batch && (
+                <span className="font-code-sm text-code-sm text-tertiary">{`Lote #${doc.batch}`}</span>
+              )}
+            </div>
+            {doc.rejection ? (
+              <span className="mt-0.5 font-label-sm text-label-sm font-medium text-error">
+                {`Error ${doc.rejection.code}: ${doc.rejection.message}`}
+              </span>
+            ) : (
+              <span className="mt-0.5 font-label-sm text-label-sm text-outline">
+                {subtitle(doc)}
               </span>
             )}
-            <StatusBadge status={doc.status} />
-            {doc.batch && (
-              <span className="font-code-sm text-code-sm text-tertiary">{`Lote #${doc.batch}`}</span>
-            )}
           </div>
-          {doc.rejection ? (
-            <span className="mt-0.5 font-label-sm text-label-sm font-medium text-error">
-              {`Error ${doc.rejection.code}: ${doc.rejection.message}`}
-            </span>
-          ) : (
-            <span className="mt-0.5 font-label-sm text-label-sm text-outline">{subtitle(doc)}</span>
-          )}
         </div>
         <div className="flex flex-col items-end text-right">
           <MoneyPYG

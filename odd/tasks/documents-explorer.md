@@ -15,9 +15,10 @@ domain so it can be swapped for the API.
 
 - [x] PR 1 `feat/hu-e12-explorer-comprobantes`: fixture, route, header, KPI cards, nav active state.
 - [x] PR 2 `feat/hu-e12-explorer-list`: fixture rows and document list.
-- [ ] PR 3 `feat/hu-e12-explorer-filters`: type tabs, filter bar (search, selects, chips) and bulk selection bar.
-- [ ] PR 4 `feat/hu-e12-explorer-pagination`: pagination footer.
-- [ ] PR 5 `feat/hu-e12-explorer-detail`: detail panel (KuDE / XML / events tabs) and help banner.
+- [x] PR 3 `feat/hu-e12-explorer-selection`: type tabs with period counts and bulk selection bar.
+- [ ] PR 4 `feat/hu-e12-explorer-filters`: filter bar (search, selects, chips).
+- [ ] PR 5 `feat/hu-e12-explorer-pagination`: pagination footer.
+- [ ] PR 6 `feat/hu-e12-explorer-detail`: detail panel (KuDE / XML / events tabs) and help banner.
 
 Route: delegated writer (one) per PR; strict TDD, RED commit then GREEN commit.
 

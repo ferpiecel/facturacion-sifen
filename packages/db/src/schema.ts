@@ -563,6 +563,15 @@ export const documents = pgTable(
     currency: char('currency', { length: 3 }).notNull().default('PYG'),
     /** The request body as received. */
     payload: jsonb('payload').notNull(),
+    /** SIFEN's `dCodRes`/`dMsgRes` pairs for the final result, as `[{code, message}]` (HU-E6-03). */
+    sifenMessages: jsonb('sifen_messages'),
+    /**
+     * `Idempotency-Key` of the request that created the document (HU-E5-02),
+     * unique per tenant. Null only for rows that predate the story.
+     */
+    idempotencyKey: varchar('idempotency_key', { length: 255 }),
+    /** sha-256 hex of the canonical JSON of the validated body, to detect a reused key. */
+    requestHash: char('request_hash', { length: 64 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -592,6 +601,14 @@ export const documents = pgTable(
       ],
       name: 'documents_tenant_point_fk',
     }),
+    unique('documents_tenant_idempotency_key_key').on(table.tenantId, table.idempotencyKey),
+    check(
+      'documents_idempotency_pair',
+      sql`(${table.idempotencyKey} IS NULL) = (${table.requestHash} IS NULL)`,
+    ),
+    // 1-255 printable ASCII without spaces.
+    check('documents_idempotency_key_format', sql`${table.idempotencyKey} ~ '^[!-~]{1,255}$'`),
+    check('documents_idempotency_hash_format', sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`),
     check('documents_cdc_format', sql`${table.cdc} ~ '^[0-9]{44}$'`),
     check('documents_security_code_format', sql`${table.securityCode} ~ '^[0-9]{9}$'`),
     check('documents_number_range', sql`${table.number} BETWEEN 1 AND 9999999`),
@@ -606,7 +623,17 @@ export const documents = pgTable(
   ],
 );
 
-export const LOTE_STATUSES = ['pending', 'sending', 'sent', 'rejected', 'unknown'] as const;
+export const LOTE_STATUSES = [
+  'pending',
+  'sending',
+  'sent',
+  'rejected',
+  'unknown',
+  /** 0362 received and every DE settled or flagged (HU-E6-03). */
+  'processed',
+  /** 0364, 0360 or the 48 h window lapsed: HU-E6-04 queries each CDC. */
+  'recovery',
+] as const;
 
 /**
  * A lote of DEs sent to SIFEN through `siRecepLoteDE` (HU-E6-02). `sending` is
@@ -635,6 +662,10 @@ export const lotes = pgTable(
     nextPollAt: timestamp('next_poll_at', { withTimezone: true }),
     /** Lote queries stop being valid 48 h after sending (0364). */
     pollDeadlineAt: timestamp('poll_deadline_at', { withTimezone: true }),
+    /** When `siResultLoteDE` was last queried (HU-E6-03). */
+    lastPolledAt: timestamp('last_polled_at', { withTimezone: true }),
+    /** Why the lote is still `sent` after a query, or why it went to `recovery`. */
+    lastPollMessage: text('last_poll_message'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

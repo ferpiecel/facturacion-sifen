@@ -122,3 +122,17 @@ lotes in process), plan v1.1 §8.1, backlog HU-E6-01/02/03.
   (`SigningDataIncompleteError`) rather than inventing them: **the request schema must be extended (product
   decision, HU-E5) before real documents can be signed.**
 - `CscSource` uses the lowest slot of the tenant's CSCs for the environment (approved).
+
+## Supply-chain notes (pnpm audit --prod)
+
+- `facturacionelectronicapy-xmlsign` (via `@sifen/sifen-tips`, now a production dependency of the worker)
+  pulled the abandoned `xmldom` 0.6.0 (1 critical, GHSA-crh6-fp67-6883, plus 10 high and 3 moderate with
+  no patched release under that name) and `xml2js` 0.4.23 (GHSA-776f-qx25-q3cc). Fixed with pnpm
+  overrides in `pnpm-workspace.yaml`: `xmldom` -> `npm:@xmldom/xmldom@0.8.15` (the maintained fork, the
+  one `xml-crypto` already uses) and `xml2js` -> 0.6.2. The sifen-tips, emission and transmission signing
+  specs pass with them (signature, QR and strict XSD checks).
+- Open debt: `node-forge` <= 1.4.0 (high, GHSA-86w9-cpqp-85rv: RSA PKCS#1 v1.5 signature
+  *verification* accepts extra nested data) has no patched release yet. It is a direct dependency of
+  `apps/api` and of xmlsign. The code only parses `.p12` files and *signs*; re-check when a fixed
+  release exists.
+

@@ -9,7 +9,12 @@ export type {
   QrGenerator,
   XmlSigner,
 } from './emission-ports.ts';
-export { SifenTimeoutError, SifenTransportError } from './errors.ts';
+export {
+  SifenFaultError,
+  SifenProtocolError,
+  SifenTimeoutError,
+  SifenTransportError,
+} from './errors.ts';
 export { FakeSifenGateway } from './fake/fake-sifen-gateway.ts';
 export type { Scripted } from './fake/fake-sifen-gateway.ts';
 export * as sifenScenarios from './fake/scenarios.ts';

@@ -1,4 +1,5 @@
 import { HttpException, HttpStatus, NotFoundException } from '@nestjs/common';
+import type { DeliveryView } from '../../application/ports/webhook-delivery-admin-store.port.js';
 import type { EndpointView } from '../../application/ports/webhook-endpoint-store.port.js';
 import {
   WebhookDeliveryNotDeadError,
@@ -50,4 +51,18 @@ export const endpointJson = (e: EndpointView) => ({
   previous_secret_expires_at: e.previousExpiresAt?.toISOString() ?? null,
   created_at: e.createdAt.toISOString(),
   updated_at: e.updatedAt.toISOString(),
+});
+
+export const deliveryJson = (d: DeliveryView) => ({
+  id: d.id,
+  endpoint_id: d.endpointId,
+  event_id: d.eventId,
+  event_type: d.eventType,
+  status: d.status,
+  attempt_count: d.attemptCount,
+  last_status_code: d.lastStatusCode,
+  last_error: d.lastError,
+  next_attempt_at: d.nextAttemptAt?.toISOString() ?? null,
+  delivered_at: d.deliveredAt?.toISOString() ?? null,
+  created_at: d.createdAt.toISOString(),
 });

@@ -30,8 +30,13 @@ delivery history (backlog HU-E11-01; ADR-0011 anti-replay 5 min; plan v1.1 §19 
       Not wired yet: the Nest module and the BullMQ `webhook-delivery` worker/scheduler come with S4/S5.
 - [ ] S4 outbox: enqueue `webhook_deliveries` rows in the same tenant transaction as the document status change
       (approved / approved_with_observations / rejected / cancelled / number_voided), idempotent per (event, endpoint).
-- [ ] S5 API: register endpoint (secret returned once), rotate secret (overlap window), list/replay deliveries.
-      Needs the event `data` shape (plan §19 payload) and `webhooks:write` scope.
+- [x] S5 API, stacked branches (each <= 400 lines): `feat/hu-e11-01-webhook-api` (url/events validation, SSRF literals),
+      `-api-service` (create/update/rotate/list, secret sealed under tenant + endpoint id + version),
+      `-api-store` (Drizzle store + audit), `-api-deliveries` (history service, keyset paging, replay),
+      `-api-deliveries-store`, `-api-http` (controllers, `WebhooksModule`, e2e). Scopes `webhooks:read` / `webhooks:write`
+      (free-form like `documents:*`: the key issuer takes any list). Secret returned once by create (201) and
+      rotate-secret (200, 24 h overlap); lists never carry it. Audit key is `key_version`, not `secret_version`: the redactor
+      masks any key containing "secret".
 
 Route: delegated writer per slice; strict TDD, RED commit then GREEN commit.
 

@@ -58,7 +58,7 @@ export function createRedisTenantRunLock(
       const lost = new AbortController();
       const timer = timers.setInterval(
         () => {
-          redis
+          void redis
             .eval(RENEW_SCRIPT, 1, key, mine, ttlMs)
             .then((extended) => extended === 1)
             .catch(() => false)

@@ -127,6 +127,23 @@ describe('DrizzleLoteAssemblyStore', () => {
       ]);
     });
 
+    it('leaves out documents that are held or still backing off, and takes them once due', async () => {
+      const now = new Date('2026-10-05T09:00:00.000Z');
+      const due = await addDocument('queued');
+      const backing = await addDocument('queued');
+      const held = await addDocument('queued');
+      const set = (id: string, values: Partial<typeof documents.$inferInsert>) =>
+        handle.db.update(documents).set(values).where(eq(documents.id, id));
+      await set(due.id, { nextTransmissionAt: new Date('2026-10-05T08:59:00.000Z') });
+      await set(backing.id, { nextTransmissionAt: new Date('2026-10-05T09:01:00.000Z') });
+      await set(held.id, { transmissionHold: 'transmission:attempts-exhausted' });
+
+      const ids = async (at: Date) =>
+        (await storeFor(tenantId, undefined, () => at).readyDocuments()).map((d) => d.documentId);
+      expect(await ids(now)).toEqual([due.id]);
+      expect(await ids(new Date('2026-10-05T09:02:00.000Z'))).toEqual([due.id, backing.id]);
+    });
+
     it('breaks ties on created_at by document id so batches are stable', async () => {
       const sameInstant = new Date('2026-01-01T00:00:00Z');
       const first = await addDocument('signed', '<rDE/>', sameInstant);
@@ -226,6 +243,17 @@ describe('DrizzleLoteAssemblyStore', () => {
       expect(loteId).toBeNull();
       expect(await handle.db.select().from(lotes)).toEqual([]);
       expect(await statusOf(ready.id)).toBe('signed');
+    });
+
+    it('returns null for a held document', async () => {
+      const held = await addDocument('signed');
+      await handle.db
+        .update(documents)
+        .set({ transmissionHold: 'transmission:attempts-exhausted' })
+        .where(eq(documents.id, held.id));
+      expect(
+        await storeFor(tenantId).createLote({ documentType: 1, documentIds: [held.id] }),
+      ).toBeNull();
     });
 
     it('returns null for a document already in a lote in process', async () => {

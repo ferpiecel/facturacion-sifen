@@ -50,7 +50,36 @@ lotes in process), plan v1.1 §8.1, backlog HU-E6-01/02/03.
         note in `invoice-xml.ts`); `markSigned` is one tenant transaction (`UPDATE ... WHERE status =
         'accepted'`, guard 0025). `CscSource` picks the lowest slot of the tenant's CSCs for the
         environment (decision to confirm).
-- [ ] **S5 — Worker wiring** (`lote-build` queue: assemble, then `SendLote` per lote).
+- [ ] **S5 — Pipeline worker.** Redis/BullMQ are not in the repo yet (no `bullmq`/`ioredis` dependency,
+      no Redis service in compose or CI), so the orchestration is built first as plain application code that
+      a scheduler only has to call (ADR-0003: API and worker are two entrypoints of the same code). Slices
+      of <= 400 lines each:
+  - [x] **S5a — `TransmissionCycle` service** (`transmission/application/transmission-cycle.ts`, ~410
+        lines with its spec): per tenant, in order, sign `accepted` documents (`SignDocument`), assemble
+        (`LoteAssembler`), send `pending` lotes (`SendLote`, one `dId` each), poll due lotes
+        (`PollLoteResult`). Each step is bounded (batch sizes 50/20/20), each document or lote is isolated,
+        failures are recorded in the report and logged with the error class only (no messages: they can
+        carry hosts, paths or key material). Port `TransmissionCycleStore` finds the work.
+  - [x] **S5b — Drizzle `TransmissionCycleStore`** (`drizzle-transmission-cycle-store.ts`): accepted
+        documents of the tenant's current environment, `pending` lotes with their signed XML and the
+        issuer RUC, due `sent` lotes, and `nextRequestId` (per tenant and environment).
+  - [x] **S5c — End-to-end test** (`transmission-cycle.integration.spec.ts`): pglite + real Drizzle
+        adapters + real Tips signing + `FakeSifenGateway`; `accepted -> signed -> queued -> submitted ->
+        approved`, then a further run is a no-op (no resend, no requery).
+  - [ ] **S5d — BullMQ infrastructure.** Add `bullmq` + `ioredis`, a Redis 7 service (compose, CI,
+        `.env.example`: `REDIS_URL`), `QueueModule`, and a `TenantAwareProcessor` base (ADR-0006: the job
+        carries `tenantId`, the processor opens the tenant context, `SET LOCAL` per transaction).
+  - [ ] **S5e — Worker entrypoint** (`apps/api/src/worker.ts`, same code as the API, ADR-0003):
+        composition of `TransmissionCycle` per tenant, a `lote-build` job per tenant (repeatable, a short
+        interval) and `lote-poll`, tenant enumeration port, graceful shutdown, no overlapping runs per
+        tenant (BullMQ job id per tenant). Jobs stay rebuildable: Postgres is the source of truth
+        (ADR-0013).
+  - [ ] **S5f — Retry hardening** (migration 0030 if a column is needed). A `0301`-rejected lote makes its
+        documents eligible again at once, so a scheduler would resend every cycle: add a retry cap and
+        backoff (per document attempt count and `next_attempt_at`). Also: a poisoned `pending` lote or
+        permanently unsignable `accepted` document (typed errors) must not sit at the head of the batch
+        forever (park with a reason after N attempts). A lote left `pending` by a crash before the claim
+        is picked up again by the cycle; a stale `sending` lote becomes `unknown` in HU-E6-04.
 
 ## Decisions
 

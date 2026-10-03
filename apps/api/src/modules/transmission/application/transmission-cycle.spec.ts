@@ -354,4 +354,33 @@ describe('TransmissionCycle', () => {
     await custom.cycle.run();
     expect(custom.cutoffs).toEqual([new Date(NOW.getTime() - 60_000)]);
   });
+
+  it('stops between units of work once its signal aborts (lost run lock) and says so', async () => {
+    const controller = new AbortController();
+    const { cycle, log } = setup({
+      accepted: ['d1', 'd2'],
+      pending: [{ loteId: 'l1', lote: lote() }],
+      due: ['l2'],
+      sign: (id) => {
+        controller.abort();
+        return Promise.resolve({ status: 'signed', cdc: id, signedAt: NOW });
+      },
+    });
+
+    const report = await cycle.run({ signal: controller.signal });
+
+    expect(log).toEqual([`sign:${TENANT}:d1`]);
+    expect(report).toMatchObject({ signed: 1, aborted: true });
+  });
+
+  it('does not run at all with a signal that is already aborted, and omits the flag otherwise', async () => {
+    const aborted = setup({ accepted: ['d1'] });
+    expect(await aborted.cycle.run({ signal: AbortSignal.abort() })).toMatchObject({
+      signed: 0,
+      aborted: true,
+    });
+    expect(aborted.log).toEqual([]);
+
+    expect(await setup().cycle.run()).not.toHaveProperty('aborted');
+  });
 });

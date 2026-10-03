@@ -50,4 +50,8 @@ describe('loadWorkerConfig', () => {
       );
     }
   });
+
+  it('names its error so logs can report the class', () => {
+    expect(new WorkerConfigError('x').name).toBe('WorkerConfigError');
+  });
 });

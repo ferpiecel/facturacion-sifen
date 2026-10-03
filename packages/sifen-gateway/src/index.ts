@@ -51,3 +51,6 @@ export type {
   SoapResponse,
   SoapTransport,
 } from './soap/transport.ts';
+export { buildLoteMessage, buildLoteZip, measureLoteMessage } from './soap/lote-message.ts';
+export { SoapSifenGateway } from './soap/soap-sifen-gateway.ts';
+export type { SoapSifenGatewayOptions } from './soap/soap-sifen-gateway.ts';

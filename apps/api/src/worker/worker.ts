@@ -1,4 +1,4 @@
-import { Queue } from 'bullmq';
+import { FakeSifenGateway } from '@sifen/sifen-gateway';
 import { assertNonPrivilegedSession, createNodePostgresDatabase } from '@sifen/db';
 import { readBoundedFile } from '../cli/bounded-file.js';
 import { createCertificateVault, createCscVault } from '../cli/ops.js';
@@ -9,10 +9,15 @@ import {
 import {
   createRedisConnection,
   createTenantScheduleStore,
+  createTransmissionQueue,
   createTransmissionWorker,
-  TRANSMISSION_QUEUE,
 } from './queue.js';
-import { createDrizzleTenantDirectory } from './tenant-directory.js';
+import type { TransmissionJobData } from './queue.js';
+import { guardSimulatorTenants } from './simulator-guard.js';
+import {
+  createDrizzleTenantDirectory,
+  createDrizzleTenantEnvironments,
+} from './tenant-directory.js';
 import { createRedisTenantRunLock } from './tenant-run-lock.js';
 import { startTransmissionWorker } from './start-transmission-worker.js';
 import { createTenantCycleFactory } from './tenant-cycle-factory.js';
@@ -53,8 +58,8 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
   await assertNonPrivilegedSession(appHandle.db);
   const platformHandle = createNodePostgresDatabase(required(env, 'WORKER_PLATFORM_DATABASE_URL'));
 
-  const connection = createRedisConnection(config.redisUrl);
-  const queue = new Queue(TRANSMISSION_QUEUE, { connection });
+  const connection = createRedisConnection(config.redisUrl, logger);
+  const queue = createTransmissionQueue(connection, logger);
 
   const processor = new TransmissionCycleProcessor({
     lock: createRedisTenantRunLock(connection, { ttlMs: config.lockTtlMs }),
@@ -76,9 +81,14 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
     reconcileEveryMs: RECONCILE_EVERY_MS,
     directory: createDrizzleTenantDirectory(platformHandle.db),
     schedules: createTenantScheduleStore(queue),
-    process: (data) => processor.process(data),
+    process: guardSimulatorTenants({
+      simulator: gateway instanceof FakeSifenGateway,
+      environments: createDrizzleTenantEnvironments(platformHandle.db),
+      logger,
+      process: (data: TransmissionJobData) => processor.process(data),
+    }),
     createWorker: (process) =>
-      createTransmissionWorker({ connection, concurrency: config.concurrency, process }),
+      createTransmissionWorker({ connection, concurrency: config.concurrency, process, logger }),
     logger,
   });
   logger.info(`transmission worker started (cycle every ${String(config.cycleIntervalMs)} ms)`);

@@ -54,6 +54,8 @@ describe('parseXml on adversarial input', () => {
   ])('fails in linear time on %s', (_label, xml) => {
     const started = performance.now();
     expect(() => parseXml(xml)).toThrow(XmlParseError);
-    expect(performance.now() - started).toBeLessThan(100);
+    // ~1-5 ms locally; the old quadratic scanner took hours at this size. The
+    // generous bound keeps the guard while tolerating loaded CI runners.
+    expect(performance.now() - started).toBeLessThan(1_000);
   });
 });

@@ -39,5 +39,11 @@ export interface WebhookDeliveryStore {
    * before `record`) does not send them twice at once.
    */
   claimDue(now: Date, limit: number, leaseMs: number): Promise<DueWebhookDelivery[]>;
+  /**
+   * Stores the outcome only while the delivery is still pending or failed at attempt
+   * `outcome.attemptCount - 1` (the one that was claimed).
+   *
+   * @throws when it no longer is, e.g. a newer worker already recorded after this lease expired.
+   */
   record(deliveryId: string, outcome: WebhookAttemptOutcome): Promise<void>;
 }

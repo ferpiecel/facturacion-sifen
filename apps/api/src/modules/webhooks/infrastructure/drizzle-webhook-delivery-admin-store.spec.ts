@@ -148,4 +148,18 @@ describe('DrizzleWebhookDeliveryAdminStore', () => {
       await store().replay(tenantId, ACTOR, '00000000-0000-4000-8000-000000000000', AT),
     ).toBeNull();
   });
+
+  it('refuses to replay a dead delivery whose endpoint is inactive, and keeps it dead', async () => {
+    const id = await delivery({ status: 'dead', nextAttemptAt: null }, tenantId, ep2);
+    await handle.db
+      .update(webhookEndpoints)
+      .set({ active: false })
+      .where(eq(webhookEndpoints.id, ep2));
+    expect(await store().replay(tenantId, ACTOR, id, AT)).toBe('endpoint-inactive');
+    const [row] = await handle.db
+      .select()
+      .from(webhookDeliveries)
+      .where(eq(webhookDeliveries.id, id));
+    expect(row.status).toBe('dead');
+  });
 });

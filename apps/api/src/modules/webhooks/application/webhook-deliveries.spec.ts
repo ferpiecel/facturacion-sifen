@@ -6,6 +6,7 @@ import type {
 } from './ports/webhook-delivery-admin-store.port.js';
 import {
   WebhookDeliveryNotDeadError,
+  WebhookEndpointInactiveError,
   WebhookEndpointNotFoundError,
   WebhookValidationError,
   createWebhookDeliveryService,
@@ -30,7 +31,10 @@ const view = (n: number): DeliveryView => ({
   createdAt: new Date(NOW.getTime() - n * 1000),
 });
 
-function setup(items: DeliveryView[] = [], replayResult: DeliveryView | 'not-dead' | null = null) {
+function setup(
+  items: DeliveryView[] = [],
+  replayResult: DeliveryView | 'not-dead' | 'endpoint-inactive' | null = null,
+) {
   const queries: DeliveryQuery[] = [];
   const store: WebhookDeliveryAdminStore = {
     list: (_t, q) => {
@@ -89,5 +93,11 @@ describe('webhook delivery service', () => {
     await expect(setup().service.replay(TENANT, ACTOR, 'not-a-uuid')).rejects.toBeInstanceOf(
       WebhookEndpointNotFoundError,
     );
+  });
+
+  it('refuses to replay onto an inactive endpoint', async () => {
+    await expect(
+      setup([], 'endpoint-inactive').service.replay(TENANT, ACTOR, UUID),
+    ).rejects.toBeInstanceOf(WebhookEndpointInactiveError);
   });
 });

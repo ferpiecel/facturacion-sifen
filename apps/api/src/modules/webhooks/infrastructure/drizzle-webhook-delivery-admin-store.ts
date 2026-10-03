@@ -1,5 +1,10 @@
 import { and, desc, eq, sql } from 'drizzle-orm';
-import { webhookDeliveries, withTenantTransaction, type Database } from '@sifen/db';
+import {
+  webhookDeliveries,
+  webhookEndpoints,
+  withTenantTransaction,
+  type Database,
+} from '@sifen/db';
 import { recordAudit } from '../../audit/infrastructure/record-audit.js';
 import type {
   DeliveryView,
@@ -35,6 +40,7 @@ export function createDrizzleWebhookDeliveryAdminStore(db: Database): WebhookDel
           .from(webhookDeliveries)
           .where(
             and(
+              eq(webhookDeliveries.tenantId, tenantId),
               endpointId === undefined ? undefined : eq(webhookDeliveries.endpointId, endpointId),
               status === undefined ? undefined : eq(webhookDeliveries.status, status),
               after === undefined
@@ -50,17 +56,31 @@ export function createDrizzleWebhookDeliveryAdminStore(db: Database): WebhookDel
 
     replay(tenantId, actor, id, at) {
       return withTenantTransaction(db, tenantId, async (tx) => {
-        const before = (
-          await tx.select().from(webhookDeliveries).where(eq(webhookDeliveries.id, id))
-        ).at(0);
+        // RLS already scopes every query to the tenant; the explicit predicates are defence in depth.
+        const mine = and(eq(webhookDeliveries.tenantId, tenantId), eq(webhookDeliveries.id, id));
+        const before = (await tx.select().from(webhookDeliveries).where(mine)).at(0);
         if (!before) return null;
         if (before.status !== 'dead') return 'not-dead';
-        // The guard allows dead to pending and keeps attempt_count; the retry window restarts on its own.
+        const endpoint = (
+          await tx
+            .select({ active: webhookEndpoints.active })
+            .from(webhookEndpoints)
+            .where(
+              and(
+                eq(webhookEndpoints.tenantId, tenantId),
+                eq(webhookEndpoints.id, before.endpointId),
+              ),
+            )
+        ).at(0);
+        if (!endpoint?.active) return 'endpoint-inactive';
+        // The guard allows dead to pending and keeps attempt_count. first_attempt_at is immutable, so the
+        // 24 h retry window of the original delivery is already over: a replay gets exactly one attempt,
+        // and fails back to dead unless it succeeds.
         const row = (
           await tx
             .update(webhookDeliveries)
             .set({ status: 'pending', nextAttemptAt: at })
-            .where(and(eq(webhookDeliveries.id, id), eq(webhookDeliveries.status, 'dead')))
+            .where(and(mine, eq(webhookDeliveries.status, 'dead')))
             .returning()
         ).at(0);
         if (!row) return 'not-dead';

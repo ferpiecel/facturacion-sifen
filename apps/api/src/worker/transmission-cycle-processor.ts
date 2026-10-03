@@ -11,8 +11,13 @@ export interface WorkerLogger {
 export interface TransmissionCycleProcessorDeps {
   readonly lock: TenantRunLock;
   /** Builds the tenant's cycle (every store runs inside the tenant's own transaction, ADR-0006). */
-  readonly createCycle: (tenantId: string) => { run(): Promise<CycleReport> };
+  readonly createCycle: (tenantId: string) => {
+    run(options?: { signal?: AbortSignal }): Promise<CycleReport>;
+  };
   readonly logger: WorkerLogger;
+  readonly now?: () => Date;
+  /** The held-document id list is logged at most this often per tenant (default 10 minutes). */
+  readonly heldListEveryMs?: number;
 }
 
 export type CycleJobResult = { readonly status: 'done' | 'skipped' };
@@ -23,26 +28,28 @@ export type CycleJobResult = { readonly status: 'done' | 'skipped' };
  * cycle and logs its report. Logs carry counts, ids and error classes only, never payloads or secrets.
  */
 export class TransmissionCycleProcessor {
+  private readonly lastHeldList = new Map<string, number>();
+
   constructor(private readonly deps: TransmissionCycleProcessorDeps) {}
 
   async process(data: unknown): Promise<CycleJobResult> {
     const tenantId = (data as { tenantId?: unknown } | null)?.tenantId;
     if (!isValidTenantId(tenantId)) throw new Error('invalid tenant id in job data');
 
-    const release = await this.deps.lock.acquire(tenantId);
-    if (!release) {
+    const lease = await this.deps.lock.acquire(tenantId);
+    if (!lease) {
       this.deps.logger.info(`transmission cycle skipped, tenant ${tenantId} already running`);
       return { status: 'skipped' };
     }
     try {
-      this.log(tenantId, await this.deps.createCycle(tenantId).run());
+      this.log(tenantId, await this.deps.createCycle(tenantId).run({ signal: lease.signal }));
       return { status: 'done' };
     } catch (error) {
       const kind = error instanceof Error ? error.name : 'unknown error';
       this.deps.logger.error(`transmission cycle failed for tenant ${tenantId}: ${kind}`);
       throw error;
     } finally {
-      await release();
+      await lease.release();
     }
   }
 
@@ -53,12 +60,12 @@ export class TransmissionCycleProcessor {
         `skipped=${String(report.signSkipped)} assembled=${String(report.assembled)} ` +
         `sent=${String(report.sent.length)} polled=${String(report.polled.length)}`,
     );
-    if (report.held.length > 0) {
-      const held = report.held.map((h) => `${h.documentId} ${h.reason}`).join(', ');
+    if (report.aborted) {
       logger.warn(
-        `tenant ${tenantId} held=${String(report.held.length)} needs an operator: ${held}`,
+        `tenant ${tenantId} cycle lost the run lock and stopped early; the next run resumes`,
       );
     }
+    if (report.held.length > 0) logger.warn(this.heldMessage(tenantId, report.held));
     if (report.stalePending > 0) {
       logger.warn(`tenant ${tenantId} stalePending=${String(report.stalePending)} lotes not sent`);
     }
@@ -68,5 +75,19 @@ export class TransmissionCycleProcessor {
         .join(', ');
       logger.warn(`tenant ${tenantId} failures=${String(report.failures.length)}: ${failures}`);
     }
+  }
+
+  /** The count goes out every cycle; the ids (first 10) only once per `heldListEveryMs`, to keep the log quiet. */
+  private heldMessage(tenantId: string, held: CycleReport['held']): string {
+    const nowMs = (this.deps.now ?? (() => new Date()))().getTime();
+    const last = this.lastHeldList.get(tenantId);
+    const base = `tenant ${tenantId} held=${String(held.length)} needs an operator`;
+    if (last !== undefined && nowMs - last < (this.deps.heldListEveryMs ?? 600_000)) return base;
+    this.lastHeldList.set(tenantId, nowMs);
+    const ids = held
+      .slice(0, 10)
+      .map((h) => `${h.documentId} ${h.reason}`)
+      .join(', ');
+    return `${base}: ${ids}${held.length > 10 ? ', ...' : ''}`;
   }
 }

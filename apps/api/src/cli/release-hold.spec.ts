@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   createPgliteDatabase,
+  auditLog,
   documents,
   tenantEstablishments,
   tenantExpeditionPoints,
@@ -10,7 +11,7 @@ import {
   type DatabaseHandle,
 } from '@sifen/db';
 import { parseOpsArgs } from './args.js';
-import { releaseDocumentHold } from './commands.js';
+import { releaseDocumentHold, releaseDocumentHolds } from './commands.js';
 import { runOpsCommand } from './ops.js';
 
 /** Spec: HU-E6-02 (S5f follow-up). Operator command that clears a document's transmission hold. */
@@ -82,6 +83,29 @@ describe('document:release-hold', () => {
     };
   }
 
+  async function insertHeld(db: DatabaseHandle['db'], tenant: string, n: number, hold: string) {
+    const [row] = await db.select().from(documents).where(eq(documents.tenantId, tenant)).limit(1);
+    const [copy] = await db
+      .insert(documents)
+      .values({
+        tenantId: tenant,
+        environment: row.environment,
+        timbradoId: row.timbradoId,
+        establishmentId: row.establishmentId,
+        expeditionPointId: row.expeditionPointId,
+        documentType: 1,
+        number: n,
+        cdc: String(n).padStart(44, '0'),
+        securityCode: '123456789',
+        issuedAt: row.issuedAt,
+        totalAmount: '1000',
+        payload: {},
+        transmissionHold: hold,
+      })
+      .returning();
+    return copy.id;
+  }
+
   const read = (db: DatabaseHandle['db'], id: string) =>
     db
       .select()
@@ -141,5 +165,57 @@ describe('document:release-hold', () => {
     expect(() =>
       parseOpsArgs(['document:release-hold', '--tenant', 't', '--document', 'd', 'extra']),
     ).toThrow('unexpected positional argument (value hidden)');
+  });
+
+  it('audits each release with the document id and the previous hold code, nothing personal', async () => {
+    const { db, tenantId, held } = await seed();
+
+    await releaseDocumentHold(db, { tenantId, documentId: held });
+
+    const rows = await db.select().from(auditLog);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      tenantId,
+      actorType: 'operator',
+      action: 'document.hold_released',
+      entityType: 'document',
+      entityId: held,
+      before: { transmissionHold: 'signing:CscNotConfiguredError', transmissionAttempts: 5 },
+      after: { transmissionHold: null },
+    });
+  });
+
+  it('releases every document held for one reason in the tenant, auditing each, and prints the count', async () => {
+    const { db, tenantId, held, free } = await seed();
+    const other = await insertHeld(db, tenantId, 3, 'signing:CertificateNotFoundError');
+    const same = await insertHeld(db, tenantId, 4, 'signing:CscNotConfiguredError');
+
+    const output = await runOpsCommand(db, {
+      kind: 'document:release-holds',
+      tenantId,
+      reason: 'signing:CscNotConfiguredError',
+    });
+
+    expect(output).toBe('document holds released: 2 (signing:CscNotConfiguredError)');
+    expect((await read(db, held)).transmissionHold).toBeNull();
+    expect((await read(db, same)).transmissionHold).toBeNull();
+    expect((await read(db, other)).transmissionHold).toBe('signing:CertificateNotFoundError');
+    expect((await read(db, free)).transmissionHold).toBeNull();
+    expect(await db.select().from(auditLog)).toHaveLength(2);
+    expect(
+      await releaseDocumentHolds(db, { tenantId, reason: 'signing:CscNotConfiguredError' }),
+    ).toBe(0);
+  });
+
+  it('parses document:release-holds strictly, with a plain-code reason', () => {
+    expect(
+      parseOpsArgs(['document:release-holds', '--tenant', 't-1', '--reason', 'signing:X']),
+    ).toEqual({ kind: 'document:release-holds', tenantId: 't-1', reason: 'signing:X' });
+    expect(() => parseOpsArgs(['document:release-holds', '--tenant', 't-1'])).toThrow(
+      'missing required --reason',
+    );
+    expect(() =>
+      parseOpsArgs(['document:release-holds', '--tenant', 't', '--reason', 'has space']),
+    ).toThrow('--reason must be a plain hold code');
   });
 });

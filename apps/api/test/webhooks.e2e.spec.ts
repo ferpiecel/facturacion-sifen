@@ -1,12 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
-import {
-  auditLog,
-  createPgliteDatabase,
-  webhookEndpoints,
-  type DatabaseHandle,
-} from '@sifen/db';
+import { auditLog, createPgliteDatabase, webhookEndpoints, type DatabaseHandle } from '@sifen/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHttpAdapter } from '../src/bootstrap/http.js';
 import { AppModule } from '../src/app.module.js';

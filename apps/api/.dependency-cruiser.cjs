@@ -15,10 +15,11 @@ module.exports = {
       name: 'db-confined-to-infrastructure-and-module-wiring',
       severity: 'error',
       comment:
-        '@sifen/db must only be imported from modules/*/infrastructure/, *.module.ts, or cli/ (architecture-boundaries spec)',
+        '@sifen/db must only be imported from modules/*/infrastructure/, *.module.ts, cli/ or worker/ (architecture-boundaries spec); cli/ and worker/ are process entrypoints that compose the adapters (ADR-0003)',
       from: {
         path: '^src/',
-        pathNot: '((^|/)modules/[^/]+/infrastructure/|(^|/)[^/]+\\.module\\.ts$|(^|/)cli/)',
+        pathNot:
+          '((^|/)modules/[^/]+/infrastructure/|(^|/)[^/]+\\.module\\.ts$|(^|/)cli/|^src/worker/)',
       },
       to: { path: DB_DEPS },
     },

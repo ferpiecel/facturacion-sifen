@@ -14,20 +14,9 @@ import {
   type DatabaseHandle,
 } from '@sifen/db';
 import { FakeSifenGateway, sifenScenarios, toCdc } from '@sifen/sifen-gateway';
-import { TipsDeXmlBuilder, TipsQrGenerator, TipsXmlSigner } from '@sifen/sifen-tips';
 import { generateDevCertificate } from '../../../../test/support/dev-certificate.js';
-import { SignDocument } from '../../emission/application/sign-document.js';
+import { createTenantCycleFactory } from '../../../worker/tenant-cycle-factory.js';
 import { buildCdc } from '../../emission/domain/cdc.js';
-import { createDrizzleSigningStore } from '../../emission/infrastructure/drizzle-signing-store.js';
-import { LoteAssembler } from '../application/assemble-lotes.js';
-import { PollLoteResult } from '../application/poll-lote-result.js';
-import { SendLote } from '../application/send-lote.js';
-import { TransmissionCycle } from '../application/transmission-cycle.js';
-import { createDrizzleLoteAssemblyStore } from './drizzle-lote-assembly-store.js';
-import { createDrizzleLoteDispatchStore } from './drizzle-lote-dispatch-store.js';
-import { createDrizzleLotePollStore } from './drizzle-lote-poll-store.js';
-import { createDrizzleTransmissionCycleStore } from './drizzle-transmission-cycle-store.js';
-import { measureLoteMessage } from './lote-message.js';
 
 const CDC = buildCdc({
   documentType: '01',
@@ -144,44 +133,26 @@ describe('TransmissionCycle end to end', () => {
     await handle.close();
   });
 
-  function buildCycle(gateway: FakeSifenGateway) {
+  function buildCycle(gateway: FakeSifenGateway, options: { csc?: boolean } = {}) {
     const { db } = handle;
     const dev = generateDevCertificate();
     const now = () => clock;
-    return new TransmissionCycle({
-      tenantId,
-      store: createDrizzleTransmissionCycleStore({ db, tenantId }),
-      signer: new SignDocument({
-        store: createDrizzleSigningStore({ db, now }),
-        certificates: {
-          open: () => Promise.resolve({ p12: Buffer.from(dev.p12), password: dev.password }),
-        },
-        cscs: {
-          get: () =>
-            Promise.resolve({
-              idCsc: '0001',
-              value: Buffer.from('ABCD0000000000000000000000000000'),
-            }),
-        },
-        builder: new TipsDeXmlBuilder(),
-        signer: new TipsXmlSigner(),
-        qr: new TipsQrGenerator(),
-      }),
-      assembler: new LoteAssembler({
-        store: createDrizzleLoteAssemblyStore({ db, tenantId, now }),
-        measureMessage: measureLoteMessage,
-      }),
-      sender: new SendLote({
-        gateway,
-        store: createDrizzleLoteDispatchStore({ db, tenantId, now }),
-      }),
-      poller: new PollLoteResult({
-        gateway,
-        store: createDrizzleLotePollStore({ db, tenantId }),
-        now,
-      }),
+    return createTenantCycleFactory({
+      db,
+      gateway,
       now,
-    });
+      certificates: {
+        open: () => Promise.resolve({ p12: Buffer.from(dev.p12), password: dev.password }),
+      },
+      cscs: {
+        get: () =>
+          Promise.resolve(
+            options.csc === false
+              ? null
+              : { idCsc: '0001', value: Buffer.from('ABCD0000000000000000000000000000') },
+          ),
+      },
+    })(tenantId);
   }
 
   const readDocument = () =>
@@ -224,5 +195,55 @@ describe('TransmissionCycle end to end', () => {
     expect(await cycle.run()).toMatchObject({ signed: 0, assembled: 0, sent: [], polled: [] });
     expect(gateway.callsTo('enviarLote')).toHaveLength(1);
     expect(gateway.callsTo('consultarLote')).toHaveLength(1);
+  });
+
+  it('parks a document whose signing can never succeed and stops retrying it', async () => {
+    const gateway = new FakeSifenGateway();
+    const cycle = buildCycle(gateway, { csc: false });
+
+    const first = await cycle.run();
+
+    expect(first.failures).toEqual([
+      { step: 'sign', id: (await readDocument()).id, error: 'CscNotConfiguredError' },
+    ]);
+    expect(first.held).toEqual([
+      { documentId: (await readDocument()).id, reason: 'signing:CscNotConfiguredError' },
+    ]);
+    const second = await cycle.run();
+    expect(second.failures).toEqual([]);
+    expect(second.held).toHaveLength(1);
+    expect((await readDocument()).status).toBe('accepted');
+  });
+
+  it('backs off after a 0301, retries when due and holds the document at the cap', async () => {
+    const gateway = new FakeSifenGateway();
+    gateway.setDefault('enviarLote', sifenScenarios.loteNoEncolado('RUC bloqueado'));
+    const cycle = buildCycle(gateway);
+
+    await cycle.run();
+    expect(await readDocument()).toMatchObject({ status: 'queued', transmissionAttempts: 1 });
+
+    // Backing off: the next run neither assembles nor sends it again.
+    expect(await cycle.run()).toMatchObject({ assembled: 0, sent: [] });
+    expect(gateway.callsTo('enviarLote')).toHaveLength(1);
+
+    // Waits 5, 10, 20 and 40 minutes between the five attempts; the fifth refusal holds it.
+    for (const minutes of [6, 16, 36, 76]) {
+      clock = new Date(clock.getTime() + minutes * 60_000);
+      await cycle.run();
+    }
+    expect(gateway.callsTo('enviarLote')).toHaveLength(5);
+    expect(await readDocument()).toMatchObject({
+      status: 'queued',
+      transmissionAttempts: 5,
+      transmissionHold: 'transmission:attempts-exhausted',
+    });
+
+    clock = new Date(clock.getTime() + 24 * 3_600_000);
+    const last = await cycle.run();
+    expect(last.sent).toEqual([]);
+    expect(last.held).toEqual([
+      { documentId: (await readDocument()).id, reason: 'transmission:attempts-exhausted' },
+    ]);
   });
 });

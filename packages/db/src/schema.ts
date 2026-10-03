@@ -773,6 +773,15 @@ export const documents = pgTable(
     signedXml: text('signed_xml'),
     /** The `dFecFirma` of that signature, as an instant. */
     signedAt: timestamp('signed_at', { withTimezone: true }),
+    /** Times the lote carrying this document was refused with 0301; drives the re-queue cap (HU-E6-02). */
+    transmissionAttempts: integer('transmission_attempts').notNull().default(0),
+    /** Not eligible for a new lote before this instant (backoff after 0301). */
+    nextTransmissionAt: timestamp('next_transmission_at', { withTimezone: true }),
+    /**
+     * Why the pipeline stopped working on this document until an operator clears it: a plain
+     * code (never free text, never a secret), e.g. `signing:SigningDataIncompleteError`.
+     */
+    transmissionHold: varchar('transmission_hold', { length: 64 }),
     /** SIFEN's `dCodRes`/`dMsgRes` pairs for the final result, as `[{code, message}]` (HU-E6-03). */
     sifenMessages: jsonb('sifen_messages'),
     /**
@@ -812,6 +821,11 @@ export const documents = pgTable(
       name: 'documents_tenant_point_fk',
     }),
     unique('documents_tenant_idempotency_key_key').on(table.tenantId, table.idempotencyKey),
+    check('documents_transmission_attempts_range', sql`${table.transmissionAttempts} >= 0`),
+    check(
+      'documents_transmission_hold_format',
+      sql`${table.transmissionHold} ~ '^[A-Za-z0-9:_-]{1,64}$'`,
+    ),
     check('documents_signed_pair', sql`(${table.signedXml} IS NULL) = (${table.signedAt} IS NULL)`),
     check(
       'documents_idempotency_pair',

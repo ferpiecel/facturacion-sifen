@@ -52,7 +52,7 @@ describe('DrizzleWebhookEndpointStore', () => {
     });
   const audit = (tenant = tenantId) =>
     withTenantTransaction(handle.db, tenant, (tx) =>
-      tx.select().from(auditLog).orderBy(auditLog.createdAt),
+      tx.select().from(auditLog).orderBy(auditLog.seq),
     );
 
   it('inserts and lists endpoints without exposing any secret material, auditing the creation', async () => {

@@ -9,9 +9,11 @@ import {
   tenantExpeditionPoints,
   tenants,
   tenantTimbrados,
+  webhookDeliveries,
   withTenantTransaction,
   type DatabaseHandle,
 } from '@sifen/db';
+import { seedWebhookEndpoint } from '../../../../test/support/document-seed.js';
 import { createDrizzleLoteDispatchStore } from './drizzle-lote-dispatch-store.js';
 
 const NOW = new Date('2026-10-01T12:00:00.000Z');
@@ -191,5 +193,15 @@ describe('DrizzleLoteDispatchStore', () => {
     await store.claim(loteId);
     await store.record(loteId, { status: 'unknown', reason: 'timed out' });
     expect(await statusOf(cdcs.queued)).toBe('queued');
+  });
+
+  it('enqueues a document.submitted event for each document that moved to submitted (outbox)', async () => {
+    await seedWebhookEndpoint(handle.db, tenantId);
+    await seedDocuments(['queued', 'accepted']);
+    const store = storeFor(tenantId);
+    await store.claim(loteId);
+    await store.record(loteId, { status: 'sent', dProtConsLote: '4500123' });
+    const rows = await handle.db.select().from(webhookDeliveries);
+    expect(rows.map((r) => r.eventType)).toEqual(['document.submitted']);
   });
 });

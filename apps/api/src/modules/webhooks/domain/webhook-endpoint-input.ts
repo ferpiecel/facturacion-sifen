@@ -15,9 +15,8 @@ const fail = (field: string, message: string): Validated<never> => ({
   errors: [{ field, message }],
 });
 
-/** Same shape rule as the `webhook_endpoints_url_https` CHECK: lowercase https, non-empty host, no userinfo. */
-const URL_SHAPE =
-  /^https:\/\/[^/?#:@\s]+(:[0-9]{1,5})?([/?#]\S*)?$|^https:\/\/\[[0-9a-fA-F:.]+\](:[0-9]{1,5})?([/?#]\S*)?$/;
+/** Same shape rule as the `webhook_endpoints_url_https` CHECK: lowercase https, non-empty host without ":" (so no IPv6 literal), no userinfo. */
+const URL_SHAPE = /^https:\/\/[^/?#:@\s]+(:[0-9]{1,5})?([/?#]\S*)?$/;
 
 /**
  * Registration-time check: the DB's URL shape plus the SSRF policy for what is decidable without DNS

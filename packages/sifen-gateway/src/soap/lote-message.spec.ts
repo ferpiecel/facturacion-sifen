@@ -1,6 +1,6 @@
 import { inflateRawSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { buildLoteMessage, buildLoteZip, measureLoteMessage } from './lote-message.js';
+import { buildLoteMessage, buildLoteZip, measureLoteMessage } from './lote-message.ts';
 
 const DE_1 =
   '<?xml version="1.0" encoding="UTF-8"?>\n<rDE xmlns="http://ekuatia.set.gov.py/sifen/xsd"><DE Id="1">uno</DE></rDE>\n';

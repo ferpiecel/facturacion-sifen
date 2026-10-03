@@ -1,14 +1,11 @@
 import { crc32, deflateRawSync } from 'node:zlib';
+import { WIDEST_DID, assertDId, soapEnvelope } from './requests.ts';
 
 /**
  * siRecepLoteDE request (Manual Técnico v150 §9.2): `rEnvioLote` carries `dId` and `xDE`,
  * the Base64 of a ZIP whose XML is `rLoteDE` holding 1-50 signed `rDE` elements.
  */
-const SIFEN_NS = 'http://ekuatia.set.gov.py/sifen/xsd';
-const SOAP_NS = 'http://www.w3.org/2003/05/soap-envelope';
 const ENTRY_NAME = 'lote.xml';
-/** `dId` is N(1-15), so this is the widest value the envelope can carry. */
-const WIDEST_DID = 999_999_999_999_999n;
 /** 1980-01-01 00:00:00, the ZIP epoch: fixed so the bytes (and the measure) are reproducible. */
 const DOS_TIME = 0;
 const DOS_DATE = 0x21;
@@ -79,13 +76,9 @@ function u32(value: number): Buffer {
 
 /** The SOAP request for `siRecepLoteDE`. @throws RangeError on an empty lote or a `dId` outside 1-15 digits */
 export function buildLoteMessage(xmls: readonly string[], dId: bigint): string {
-  if (dId < 1n || dId > WIDEST_DID) throw new RangeError('dId must have 1 to 15 digits');
+  assertDId(dId);
   const xDE = buildLoteZip(xmls).toString('base64');
-  return (
-    `<env:Envelope xmlns:env="${SOAP_NS}"><env:Header/><env:Body>` +
-    `<rEnvioLote xmlns="${SIFEN_NS}"><dId>${dId.toString()}</dId><xDE>${xDE}</xDE></rEnvioLote>` +
-    '</env:Body></env:Envelope>'
-  );
+  return soapEnvelope('rEnvioLote', `<dId>${dId.toString()}</dId><xDE>${xDE}</xDE>`);
 }
 
 /**

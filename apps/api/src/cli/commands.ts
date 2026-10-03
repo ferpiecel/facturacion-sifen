@@ -9,8 +9,11 @@ import {
   tenantFiscalProfiles,
   tenantTimbrados,
   tenants,
+  withTenantTransaction,
   type Database,
+  type TenantTx,
 } from '@sifen/db';
+import { recordAudit } from '../modules/audit/infrastructure/record-audit.js';
 import type { TenantEnvironment } from '../modules/fiscal-config/domain/document-environment.js';
 import type {
   Establishment,
@@ -415,18 +418,25 @@ export interface ReleaseDocumentHoldParams {
   documentId: string;
 }
 
+const OPERATOR = { type: 'operator', id: 'ops-cli' } as const;
+
 /**
  * Operator CLI handler (HU-E6-02, S5f): clears the pipeline hold of a document and resets its 0301
- * attempts and backoff, so the next transmission cycle works on it again. Refuses a document that
- * is not held; a document of another tenant is reported as not found.
+ * attempts and backoff, so the next transmission cycle works on it again. Runs in the tenant's
+ * transaction (RLS applies) and audits the release (document id and previous hold code only).
+ * Refuses a document that is not held; a document of another tenant is reported as not found.
  */
 export async function releaseDocumentHold(
   db: Database,
   { tenantId, documentId }: ReleaseDocumentHoldParams,
 ): Promise<{ id: string; hold: string }> {
-  return db.transaction(async (tx) => {
+  return withTenantTransaction(db, tenantId, async (tx) => {
     const found = await tx
-      .select({ id: documents.id, hold: documents.transmissionHold })
+      .select({
+        id: documents.id,
+        hold: documents.transmissionHold,
+        attempts: documents.transmissionAttempts,
+      })
       .from(documents)
       .where(and(eq(documents.tenantId, tenantId), eq(documents.id, documentId)))
       .for('update');
@@ -437,6 +447,40 @@ export async function releaseDocumentHold(
     if (document.hold === null) {
       throw new Error(`document is not held: ${documentId}`);
     }
+    await clearHold(tx, tenantId, [document]);
+    return { id: document.id, hold: document.hold };
+  });
+}
+
+/**
+ * Releases every document of the tenant held for `reason` (a configuration cause that was fixed for
+ * the whole tenant, e.g. `signing:CertificateNotFoundError`), auditing each one. Returns the count.
+ */
+export async function releaseDocumentHolds(
+  db: Database,
+  { tenantId, reason }: { tenantId: string; reason: string },
+): Promise<number> {
+  return withTenantTransaction(db, tenantId, async (tx) => {
+    const held = await tx
+      .select({
+        id: documents.id,
+        hold: documents.transmissionHold,
+        attempts: documents.transmissionAttempts,
+      })
+      .from(documents)
+      .where(and(eq(documents.tenantId, tenantId), eq(documents.transmissionHold, reason)))
+      .for('update');
+    await clearHold(tx, tenantId, held);
+    return held.length;
+  });
+}
+
+async function clearHold(
+  tx: TenantTx,
+  tenantId: string,
+  rows: readonly { id: string; hold: string | null; attempts: number }[],
+): Promise<void> {
+  for (const row of rows) {
     await tx
       .update(documents)
       .set({
@@ -445,7 +489,13 @@ export async function releaseDocumentHold(
         nextTransmissionAt: null,
         updatedAt: new Date(),
       })
-      .where(eq(documents.id, documentId));
-    return { id: document.id, hold: document.hold };
-  });
+      .where(and(eq(documents.tenantId, tenantId), eq(documents.id, row.id)));
+    await recordAudit(tx, {
+      actor: OPERATOR,
+      action: 'document.hold_released',
+      entity: { type: 'document', id: row.id },
+      before: { transmissionHold: row.hold, transmissionAttempts: row.attempts },
+      after: { transmissionHold: null },
+    });
+  }
 }

@@ -15,6 +15,7 @@ import {
   createTenant,
   issueApiKey,
   releaseDocumentHold,
+  releaseDocumentHolds,
   revokeApiKey,
   setEstablishmentContact,
   setFiscalProfile,
@@ -144,6 +145,13 @@ export async function runOpsCommand(
         documentId: command.documentId,
       });
       return `document hold released: ${result.id} (was ${result.hold})`;
+    }
+    case 'document:release-holds': {
+      const count = await releaseDocumentHolds(db, {
+        tenantId: command.tenantId,
+        reason: command.reason,
+      });
+      return `document holds released: ${String(count)} (${command.reason})`;
     }
     case 'point:add': {
       const result = await addExpeditionPoint(db, {

@@ -44,6 +44,7 @@ export type OpsCommand =
       contact: EstablishmentContact;
     }
   | { kind: 'document:release-hold'; tenantId: string; documentId: string }
+  | { kind: 'document:release-holds'; tenantId: string; reason: string }
   | { kind: 'point:add'; tenantId: string; establishmentCode: string; point: ExpeditionPoint }
   | { kind: 'timbrado:add'; tenantId: string; timbrado: Timbrado }
   | { kind: 'tenant:environment'; tenantId: string; environment: TenantEnvironment }
@@ -322,6 +323,23 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
         kind: 'document:release-hold',
         tenantId: requireOption(values.tenant, 'tenant'),
         documentId: requireOption(values.document, 'document'),
+      };
+    }
+    case 'document:release-holds': {
+      const { values } = parseStrict({
+        args: rest,
+        options: { tenant: { type: 'string' }, reason: { type: 'string' } },
+      });
+      const reason = requireOption(values.reason, 'reason');
+      if (!/^[A-Za-z0-9:_-]{1,64}$/.test(reason)) {
+        throw new OpsArgError(
+          '--reason must be a plain hold code, e.g. signing:CscNotConfiguredError',
+        );
+      }
+      return {
+        kind: 'document:release-holds',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        reason,
       };
     }
     case 'point:add': {

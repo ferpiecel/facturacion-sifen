@@ -94,6 +94,8 @@ export interface CycleReport {
   readonly held: readonly HeldDocument[];
   /** `pending` lotes older than `stalePendingAfterMs`. */
   readonly stalePending: number;
+  /** Present when the run stopped early because its signal aborted (the tenant run lock was lost). */
+  readonly aborted?: true;
 }
 
 const DEFAULT_BATCH = { sign: 50, send: 20, poll: 20 } as const;
@@ -109,13 +111,19 @@ const HELD_REPORT_LIMIT = 50;
 export class TransmissionCycle {
   private readonly batch: Required<TransmissionCycleBatch>;
   private failures: CycleFailure[] = [];
+  private signal: AbortSignal | undefined;
 
   constructor(private readonly deps: TransmissionCycleDeps) {
     this.batch = { ...DEFAULT_BATCH, ...deps.batch };
   }
 
-  async run(): Promise<CycleReport> {
+  /**
+   * Runs one cycle. If `signal` aborts (the caller lost the tenant run lock) no further unit of work
+   * starts: the one in flight finishes, the report says `aborted` and the next run picks the rest up.
+   */
+  async run({ signal }: { signal?: AbortSignal } = {}): Promise<CycleReport> {
     this.failures = [];
+    this.signal = signal;
     const signing = await this.signAccepted();
     const assembled = await this.assemble();
     const sending = await this.sendPending();
@@ -137,6 +145,7 @@ export class TransmissionCycle {
       failures: this.failures,
       held,
       stalePending,
+      ...(signal?.aborted ? { aborted: true as const } : {}),
     };
   }
 
@@ -214,6 +223,7 @@ export class TransmissionCycle {
     id: string | undefined,
     work: () => Promise<T>,
   ): Promise<T | undefined> {
+    if (this.signal?.aborted) return undefined;
     try {
       return await work();
     } catch (cause) {

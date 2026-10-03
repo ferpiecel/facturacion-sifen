@@ -148,4 +148,41 @@ describe('DrizzleWebhookEndpointStore', () => {
     expect(await store(handle.db).rotate(tenantId, ACTOR, id, change)).toBe('stale');
     expect((await audit()).length).toBe(1);
   });
+
+  it('audits the url without its query string or fragment (they may carry tokens)', async () => {
+    await store(handle.db).insert(tenantId, ACTOR, {
+      id,
+      url: 'https://hooks.example.com/x?token=abc#frag',
+      events: [],
+      sealed: SEALED,
+    });
+    await store(handle.db).update(tenantId, ACTOR, id, {
+      url: 'https://hooks.example.com/y?key=zzz',
+    });
+    const rows = await audit();
+    expect(JSON.stringify(rows)).not.toMatch(/token=abc|frag|key=zzz/);
+    expect(rows[0].after).toMatchObject({ url: 'https://hooks.example.com/x' });
+    expect(rows[1].before).toMatchObject({ url: 'https://hooks.example.com/x' });
+    expect(rows[1].after).toMatchObject({ url: 'https://hooks.example.com/y' });
+  });
+
+  it('lets only one of two concurrent rotations win, the other being stale', async () => {
+    await create();
+    const change = (sealed: typeof SEALED) => ({
+      expectedVersion: 1,
+      sealed,
+      previousSealed: SEALED,
+      previousExpiresAt: new Date(Date.now() + DAY),
+    });
+    const results = await Promise.all([
+      store(handle.db).rotate(tenantId, ACTOR, id, change(SEALED_2)),
+      store(handle.db).rotate(tenantId, ACTOR, id, change({ ...SEALED, ciphertext: 'CC==' })),
+    ]);
+    expect(results.filter((r) => r === 'stale')).toHaveLength(1);
+    expect(results.filter((r) => typeof r === 'object')).toHaveLength(1);
+    expect((await audit()).map((a) => a.action)).toEqual([
+      'webhook_endpoint.create',
+      'webhook_endpoint.rotate_secret',
+    ]);
+  });
 });

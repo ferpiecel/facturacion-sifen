@@ -12,7 +12,6 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { seedDocuments } from '../../test/support/document-seed.js';
 import { WebhookSecretVault } from '../modules/custody/application/webhook-secret-vault.js';
-import { EnvelopeCipher } from '../modules/custody/application/envelope-cipher.js';
 import type { WebhookHttpPort } from '../modules/webhooks/application/ports/webhook-http.port.js';
 import { verifyWebhookSignature } from '../modules/webhooks/domain/webhook-signature.js';
 import { SafeWebhookHttp } from '../modules/webhooks/infrastructure/safe-webhook-http.js';
@@ -136,7 +135,6 @@ describe('webhook delivery worker', () => {
     expect(() => createWebhookDeliveryDeps({ NODE_ENV: 'production' })).toThrow(
       /KMS_LOCAL_MASTER_KEY/,
     );
-    expect(EnvelopeCipher).toBeDefined();
   });
 
   it('describes the repeatable per-tenant BullMQ job', () => {

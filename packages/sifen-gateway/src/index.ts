@@ -42,3 +42,12 @@ export {
 export type { ParseOptions } from './soap/response-parsers.ts';
 export { sifenEndpoints } from './soap/endpoints.ts';
 export type { EndpointOptions, SifenEndpoints } from './soap/endpoints.ts';
+export { createHttpsSoapTransport } from './soap/transport.ts';
+export type {
+  HttpsTransportOptions,
+  MtlsCredential,
+  MtlsCredentialSource,
+  SoapRequest,
+  SoapResponse,
+  SoapTransport,
+} from './soap/transport.ts';

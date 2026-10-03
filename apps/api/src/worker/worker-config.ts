@@ -1,5 +1,7 @@
 /** Invalid or missing environment for the worker. Messages never carry the offending value (REDIS_URL holds a password). */
-export class WorkerConfigError extends Error {}
+export class WorkerConfigError extends Error {
+  override name = 'WorkerConfigError';
+}
 
 export interface WorkerConfig {
   readonly redisUrl: string;

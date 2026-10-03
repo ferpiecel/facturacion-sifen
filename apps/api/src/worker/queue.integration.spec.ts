@@ -80,9 +80,11 @@ describe.skipIf(!REDIS_URL)('BullMQ transmission queue (real Redis)', () => {
     const lockA = createRedisTenantRunLock(a, { ttlMs: 10_000 });
     const lockB = createRedisTenantRunLock(b, { ttlMs: 10_000 });
 
-    const release = await lockA.acquire('t-lock');
+    const lease = await lockA.acquire('t-lock');
     expect(await lockB.acquire('t-lock')).toBeNull();
-    await release?.();
-    expect(await lockB.acquire('t-lock')).not.toBeNull();
+    await lease?.release();
+    const second = await lockB.acquire('t-lock');
+    expect(second).not.toBeNull();
+    await second?.release();
   });
 });

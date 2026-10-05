@@ -630,4 +630,62 @@ describe('DrizzleLoteRecoveryStore', () => {
       expect(warnings).toEqual([]);
     });
   });
+
+  describe('bounded passes', () => {
+    it('leaves skipped CDCs untouched and the lote open, and touches the ones it did query', async () => {
+      await storeFor(tenantId).record(
+        loteId,
+        {
+          resolutions: [],
+          unresolved: [
+            { cdc: CDC_A, reason: '0420: CDC inexistente', absent: false },
+            { cdc: CDC_B, reason: 'Not queried in this pass', skipped: true },
+          ],
+        },
+        guard,
+      );
+      expect((await readDoc(CDC_A)).updatedAt).toEqual(RECOVERED_AT);
+      expect((await readDoc(CDC_B)).updatedAt).not.toEqual(RECOVERED_AT);
+      expect((await readLote()).status).toBe('recovery');
+    });
+
+    it('loads the least recently queried CDCs first, so a capped pass rotates through the lote', async () => {
+      await storeFor(tenantId).record(
+        loteId,
+        {
+          resolutions: [],
+          unresolved: [
+            { cdc: CDC_A, reason: 'x', absent: false },
+            { cdc: CDC_B, reason: 'Not queried in this pass', skipped: true },
+          ],
+        },
+        guard,
+      );
+      expect((await storeFor(tenantId).load(loteId))?.cdcs).toEqual([CDC_B, CDC_A]);
+    });
+  });
+
+  describe('a failing alert', () => {
+    it('cannot fail the record after the commit: the hold stays and record still returns true', async () => {
+      const failing = createDrizzleLoteRecoveryStore({
+        db: handle.db,
+        tenantId,
+        logger: {
+          warn: () => {
+            throw new Error('logger down');
+          },
+        },
+      });
+      const applied = await failing.record(
+        loteId,
+        {
+          resolutions: [approval(CDC_A)],
+          unresolved: [{ cdc: CDC_B, reason: '0420', absent: true }],
+        },
+        guard,
+      );
+      expect(applied).toBe(true);
+      expect((await readDoc(CDC_B)).transmissionHold).toBe(RECOVERY_UNRESOLVED_HOLD);
+    });
+  });
 });

@@ -1,8 +1,10 @@
 import { and, asc, count, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { documents, loteDocuments, lotes, withTenantTransaction, type Database } from '@sifen/db';
 import type { LoteRecoveryOutcome, LoteRecoveryStore } from '../application/recover-lote-by-cdc.js';
+import { recordAudit } from '../../audit/infrastructure/record-audit.js';
 import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
 import { settleDocument, type Tx } from './settle-document.js';
+import { TRANSMISSION_WORKER_ACTOR } from './transmission-audit-actor.js';
 
 /** Hold code of a document whose CDC keeps answering 0420: released with `document:release-hold`. */
 export const RECOVERY_UNRESOLVED_HOLD = 'recovery:0420-unresolved';
@@ -213,7 +215,18 @@ async function holdAbsent(tx: Tx, loteId: string, cdc: string, at: Date): Promis
       ),
     )
     .returning({ id: documents.id });
-  return held.at(0)?.id ?? null;
+  const id = held.at(0)?.id ?? null;
+  if (id) {
+    // Same transaction as the hold: the audit trail and the hold commit or roll back together.
+    await recordAudit(tx, {
+      actor: TRANSMISSION_WORKER_ACTOR,
+      action: 'document.hold_placed',
+      entity: { type: 'document', id },
+      before: { transmissionHold: null },
+      after: { transmissionHold: RECOVERY_UNRESOLVED_HOLD },
+    });
+  }
+  return id;
 }
 
 /** Marks the start of the recovery's own text in `last_poll_message`; what precedes it is the hand-over reason. */

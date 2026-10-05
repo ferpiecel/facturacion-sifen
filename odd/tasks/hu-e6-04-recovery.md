@@ -80,7 +80,9 @@ Out: synchronous emission (HU-E6-05), the 72 h deadline watch, portal UI.
 | 7 | `feat/hu-e6-04-recovery-stale-sending` | T5 | Sweep lotes stuck in `sending` to `unknown`; cycle recovers `unknown` and leftover lotes |
 | 8 | `feat/hu-e6-04-recovery-hold` | T8 | Hold + warning for a CDC that keeps answering 0420; lote settled when nothing is left to query |
 | 9 | `feat/hu-e6-04-recovery-late-record` | T10, T11 | Late send record accepted on `unknown`; bounded sweep; mixed 0422/0420 and rollback tests |
-| 10 | Pending | T6, T7, T9-B | Docs, per-run cap of CDC queries, audited resend |
+| 10 | `feat/hu-e6-04-recovery-cap-audit` | T7 | Per-run cap and abort of CDC queries, safe alert |
+| 11 | `feat/hu-e6-04-recovery-hold-audit` | T8 | `system` audit actor (migration 0033) and the hold audit row |
+| 12 | Pending | T6, T9-B | Docs, audited resend |
 
 ## Decisions of PRs 6 and 7
 
@@ -118,9 +120,17 @@ Out: synchronous emission (HU-E6-05), the 72 h deadline watch, portal UI.
 | `load` orders pending CDCs by `updated_at` and `record` stamps the documents it asked about | Round-robin: a capped pass starts with the CDCs it did not ask last time, so unresolved ones at the front cannot starve the tail |
 | A throwing `logger.warn` after the commit is swallowed | The pass is already recorded; the hold stays in the database and in the worker's held-documents report |
 
+### Decisions of PR 11 (hold audit)
+
+| Decision | Rationale |
+|---|---|
+| Add a proper `system` audit actor type (migration 0033, `ALTER TYPE ... ADD VALUE`, down script recreates the enum) instead of reusing `operator` | An automatic write by the worker is not an operator action, and a trail that says `operator` for it would mislead an audit. The change is one enum value: `audit_log` stores `actor_type::text` in the hash chain, redaction never looks at the actor, and a new spec verifies a chain that mixes a `system` row |
+| The hold writes `document.hold_placed` (before `null`, after `recovery:0420-unresolved`) in the same transaction as the hold; the late-send release is now attributed to `system` / `transmission-worker` (shared `TRANSMISSION_WORKER_ACTOR`) | Every hold and release is audited, and a rolled-back record leaves no audit row |
+| The down script of 0033 fails while `audit_log` rows use `system` | Rows are append-only: archive them first |
+
 ### Debt left by PRs 8 and 9 (not implemented)
 
-- The hold itself writes no audit row (only releases do), and the warning is logged after the commit, so a crash between the two loses the alert (the worker's held-documents report still lists the document).
+- The warning is logged after the commit, so a crash between the two loses the alert (the worker's held-documents report still lists the document). A throwing logger no longer fails the record (PR 10).
 
 ## T9 design note: resending after 0420 past the window (decision pending)
 

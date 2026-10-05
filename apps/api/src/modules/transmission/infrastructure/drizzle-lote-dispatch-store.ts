@@ -4,6 +4,7 @@ import { recordAudit } from '../../audit/infrastructure/record-audit.js';
 import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
 import type { LoteDispatchOutcome, LoteDispatchStore } from '../application/send-lote.js';
 import { RECOVERY_UNRESOLVED_HOLD } from './drizzle-lote-recovery-store.js';
+import { TRANSMISSION_WORKER_ACTOR } from './transmission-audit-actor.js';
 
 /** First wait after a 0301; it doubles on each refusal up to the cap. */
 const BASE_BACKOFF_MS = 5 * 60 * 1000;
@@ -170,7 +171,7 @@ async function releaseRecoveryHolds(tx: Tx, loteId: string): Promise<void> {
     .returning({ id: documents.id });
   for (const { id } of released) {
     await recordAudit(tx, {
-      actor: { type: 'operator', id: 'transmission-worker' },
+      actor: TRANSMISSION_WORKER_ACTOR,
       action: 'document.hold_released',
       entity: { type: 'document', id },
       before: { transmissionHold: RECOVERY_UNRESOLVED_HOLD },

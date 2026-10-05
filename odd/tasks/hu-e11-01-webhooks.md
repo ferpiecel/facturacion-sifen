@@ -38,9 +38,15 @@ delivery history (backlog HU-E11-01; ADR-0011 anti-replay 5 min; plan v1.1 §19 
 - [x] S3-wiring `feat/hu-e11-01-webhook-worker`: `apps/api/src/worker/webhook-delivery.processor.ts`, bullmq-free
       (processor, `createWebhookDeliveryDeps` from KMS_LOCAL_MASTER_KEY, repeatable job spec per tenant). Integration
       point: the HU-E6-02 worker bootstrap registers `new Worker('webhook-delivery', processor)` and adds the
-      repeatable job for each tenant.
-- [ ] S5 API: register endpoint (secret returned once), rotate secret (overlap window), list/replay deliveries.
-      Needs the event `data` shape (plan §19 payload) and `webhooks:write` scope.
+      repeatable job for each tenant. Done in #154 (`createWebhookDeliveryQueue`/`Worker`, reconciled per tenant,
+      failures isolated from transmission scheduling).
+- [x] S5 API, stacked branches (each <= 400 lines): `feat/hu-e11-01-webhook-api` (url/events validation, SSRF literals),
+      `-api-service` (create/update/rotate/list, secret sealed under tenant + endpoint id + version),
+      `-api-store` (Drizzle store + audit), `-api-deliveries` (history service, keyset paging, replay),
+      `-api-deliveries-store`, `-api-http` (controllers, `WebhooksModule`, e2e). Scopes `webhooks:read` / `webhooks:write`
+      (free-form like `documents:*`: the key issuer takes any list). Secret returned once by create (201) and
+      rotate-secret (200, 24 h overlap); lists never carry it. Audit key is `key_version`, not `secret_version`: the redactor
+      masks any key containing "secret".
 
 Route: delegated writer per slice; strict TDD, RED commit then GREEN commit.
 

@@ -59,7 +59,7 @@ export class TransmissionCycleProcessor {
       `transmission cycle tenant=${tenantId} signed=${String(report.signed)} ` +
         `skipped=${String(report.signSkipped)} assembled=${String(report.assembled)} ` +
         `sent=${String(report.sent.length)} polled=${String(report.polled.length)} ` +
-        `recovered=${String(report.recovered.length)}`,
+        `recovered=${String(report.recovered.length)} swept=${String(report.sweptSending)}`,
     );
     if (report.aborted) {
       logger.warn(

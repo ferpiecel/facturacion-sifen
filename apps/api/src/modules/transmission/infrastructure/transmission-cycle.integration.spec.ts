@@ -13,7 +13,7 @@ import {
   withTenantTransaction,
   type DatabaseHandle,
 } from '@sifen/db';
-import { FakeSifenGateway, sifenScenarios, toCdc } from '@sifen/sifen-gateway';
+import { FakeSifenGateway, SifenTimeoutError, sifenScenarios, toCdc } from '@sifen/sifen-gateway';
 import { generateDevCertificate } from '../../../../test/support/dev-certificate.js';
 import { createTenantCycleFactory } from '../../../worker/tenant-cycle-factory.js';
 import { buildCdc } from '../../emission/domain/cdc.js';
@@ -231,6 +231,33 @@ describe('TransmissionCycle end to end', () => {
     expect((await cycle.run()).recovered).toEqual([]);
     expect(gateway.callsTo('enviarLote')).toHaveLength(1);
     expect(gateway.callsTo('consultarDE')).toHaveLength(2);
+  });
+
+  it('recovers a send that got no answer by CDC and never resends it (HU-E6-04)', async () => {
+    const gateway = new FakeSifenGateway();
+    gateway.enqueue('enviarLote', new SifenTimeoutError('enviarLote'));
+    gateway.enqueue('consultarDE', sifenScenarios.cdcInexistente());
+    const cycle = buildCycle(gateway);
+
+    const first = await cycle.run();
+    const loteId = first.sent[0].loteId;
+    expect(first.sent[0].status).toBe('unknown');
+    // SIFEN does not know the CDC yet (0420): the document stays queued and nothing is resent.
+    expect(first.recovered).toEqual([{ loteId, status: 'incomplete' }]);
+    expect((await readDocument()).status).toBe('queued');
+
+    // The next run (still inside the pacing window) neither queries nor resends.
+    expect(await cycle.run()).toMatchObject({ sent: [], recovered: [], assembled: 0 });
+
+    clock = new Date('2026-10-02T12:11:00Z');
+    gateway.enqueue('consultarDE', sifenScenarios.cdcEncontrado(`<rDE><DE Id="${CDC}"/></rDE>`));
+    expect((await cycle.run()).recovered).toEqual([{ loteId, status: 'recovered' }]);
+    expect((await readDocument()).status).toBe('approved');
+    const [lote] = await withTenantTransaction(handle.db, tenantId, (tx) =>
+      tx.select().from(lotes),
+    );
+    expect(lote.status).toBe('processed');
+    expect(gateway.callsTo('enviarLote')).toHaveLength(1);
   });
 
   it('parks a document whose signing can never succeed and stops retrying it', async () => {

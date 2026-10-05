@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull, notExists, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, lte, notExists, or, sql } from 'drizzle-orm';
 import {
   documents,
   loteDocuments,
@@ -45,6 +45,9 @@ export function createDrizzleLoteAssemblyStore({
             and(
               inArray(documents.status, READY_STATUSES),
               isNotNull(documents.signedXml),
+              // Held for an operator, or backing off after a 0301 (S5f).
+              isNull(documents.transmissionHold),
+              or(isNull(documents.nextTransmissionAt), lte(documents.nextTransmissionAt, now())),
               notExists(
                 tx
                   .select({ one: sql`1` })
@@ -117,6 +120,7 @@ export function createDrizzleLoteAssemblyStore({
               eq(documents.documentType, documentType),
               inArray(documents.status, READY_STATUSES),
               isNotNull(documents.signedXml),
+              isNull(documents.transmissionHold),
             ),
           )
           // Same lock order for every assembler, so two of them cannot deadlock.

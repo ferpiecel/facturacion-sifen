@@ -14,6 +14,8 @@ import {
   createPartner,
   createTenant,
   issueApiKey,
+  releaseDocumentHold,
+  releaseDocumentHolds,
   revokeApiKey,
   setEstablishmentContact,
   setFiscalProfile,
@@ -136,6 +138,20 @@ export async function runOpsCommand(
       });
       // Public business data, but echoing only the code keeps the output uniform with the others.
       return `establishment contact saved: ${command.tenantId} (code ${result.code})`;
+    }
+    case 'document:release-hold': {
+      const result = await releaseDocumentHold(db, {
+        tenantId: command.tenantId,
+        documentId: command.documentId,
+      });
+      return `document hold released: ${result.id} (was ${result.hold})`;
+    }
+    case 'document:release-holds': {
+      const count = await releaseDocumentHolds(db, {
+        tenantId: command.tenantId,
+        reason: command.reason,
+      });
+      return `document holds released: ${String(count)} (${command.reason})`;
     }
     case 'point:add': {
       const result = await addExpeditionPoint(db, {

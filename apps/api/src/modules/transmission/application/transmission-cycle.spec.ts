@@ -26,6 +26,8 @@ interface Setup {
   assemble?: () => Promise<AssembleLotesResult>;
   send?: (id: string) => Promise<unknown>;
   poll?: (id: string) => Promise<unknown>;
+  recoverable?: string[];
+  recover?: (id: string) => Promise<unknown>;
   listAccepted?: () => Promise<readonly string[]>;
   nextRequestId?: () => Promise<bigint>;
   held?: { documentId: string; reason: string }[];
@@ -57,6 +59,11 @@ function setup(o: Setup = {}) {
       limits.poll = limit;
       log.push(`due@${at.toISOString()}`);
       return Promise.resolve(o.due ?? []);
+    },
+    recoverableLoteIds: (at, limit) => {
+      limits.recover = limit;
+      log.push(`recoverable@${at.toISOString()}`);
+      return Promise.resolve(o.recoverable ?? []);
     },
     nextRequestId: () => o.nextRequestId?.() ?? Promise.resolve((dId += 1n)),
     holdDocument: (documentId, reason) => {
@@ -102,6 +109,12 @@ function setup(o: Setup = {}) {
         return (await o.poll?.(loteId)) ?? { status: 'not-due' };
       },
     } as TransmissionCycleDeps['poller'],
+    recoverer: {
+      execute: async ({ loteId }) => {
+        log.push(`recover:${loteId}`);
+        return (await o.recover?.(loteId)) ?? { status: 'not-due' };
+      },
+    } as TransmissionCycleDeps['recoverer'],
     now: () => NOW,
     logger: { warn: (message) => warnings.push(message) },
     batch: o.batch,
@@ -127,7 +140,34 @@ describe('TransmissionCycle', () => {
       'send:l1:1',
       `due@${NOW.toISOString()}`,
       'poll:l2:2',
+      `recoverable@${NOW.toISOString()}`,
     ]);
+  });
+
+  it('recovers lotes after polling, so a lote just handed over waits for its own pacing', async () => {
+    const { cycle, log } = setup({ due: ['l1'], recoverable: ['l2'] });
+    await cycle.run();
+    expect(log.filter((e) => e.startsWith('poll:') || e.startsWith('recover:'))).toEqual([
+      'poll:l1:1',
+      'recover:l2',
+    ]);
+  });
+
+  it('reports each recovered lote and isolates a failing one', async () => {
+    const { cycle, warnings } = setup({
+      recoverable: ['l1', 'l2', 'l3'],
+      recover: (id) =>
+        id === 'l2'
+          ? Promise.reject(new Error('db down'))
+          : Promise.resolve({ status: id === 'l1' ? 'recovered' : 'incomplete' }),
+    });
+    const report = await cycle.run();
+    expect(report.recovered).toEqual([
+      { loteId: 'l1', status: 'recovered' },
+      { loteId: 'l3', status: 'incomplete' },
+    ]);
+    expect(report.failures).toEqual([{ step: 'recover', id: 'l2', error: 'Error' }]);
+    expect(warnings).toHaveLength(1);
   });
 
   it('reports what each step did', async () => {
@@ -264,15 +304,16 @@ describe('TransmissionCycle', () => {
       sendSkipped: 0,
       sent: [],
       polled: [],
+      recovered: [],
       failures: [],
       held: [],
       stalePending: 0,
     });
-    expect(defaults.limits).toEqual({ sign: 50, send: 20, poll: 20 });
+    expect(defaults.limits).toEqual({ sign: 50, send: 20, poll: 20, recover: 10 });
 
-    const custom = setup({ batch: { sign: 3, send: 2, poll: 1 } });
+    const custom = setup({ batch: { sign: 3, send: 2, poll: 1, recover: 4 } });
     await custom.cycle.run();
-    expect(custom.limits).toEqual({ sign: 3, send: 2, poll: 1 });
+    expect(custom.limits).toEqual({ sign: 3, send: 2, poll: 1, recover: 4 });
   });
 
   it('parks a document that fails signing with a deterministic error, by error class', async () => {

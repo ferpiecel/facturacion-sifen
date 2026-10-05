@@ -197,6 +197,42 @@ describe('TransmissionCycle end to end', () => {
     expect(gateway.callsTo('consultarLote')).toHaveLength(1);
   });
 
+  it('recovers a lote by CDC after the 48 h window without ever resending it (HU-E6-04)', async () => {
+    const gateway = new FakeSifenGateway();
+    gateway.enqueue('enviarLote', sifenScenarios.loteRecibido('4500123'));
+    const cycle = buildCycle(gateway);
+    const first = await cycle.run();
+    const loteId = first.sent[0].loteId;
+
+    // 48 h later SIFEN no longer answers lote queries (0364): the lote is handed to recovery.
+    clock = new Date('2026-10-04T12:11:00Z');
+    gateway.enqueue('consultarLote', sifenScenarios.loteConcluido([]));
+    expect((await cycle.run()).polled).toEqual([{ loteId, status: 'recovery' }]);
+    expect((await readDocument()).status).toBe('submitted');
+
+    // Pacing: not queried by CDC until 10 minutes after the hand-over.
+    expect((await cycle.run()).recovered).toEqual([]);
+
+    // First attempt: SIFEN does not know the CDC yet (0420) and nothing is settled or resent.
+    clock = new Date('2026-10-04T12:22:00Z');
+    gateway.enqueue('consultarDE', sifenScenarios.cdcInexistente());
+    expect((await cycle.run()).recovered).toEqual([{ loteId, status: 'incomplete' }]);
+    expect((await readDocument()).status).toBe('submitted');
+
+    clock = new Date('2026-10-04T12:33:00Z');
+    gateway.enqueue('consultarDE', sifenScenarios.cdcEncontrado(`<rDE><DE Id="${CDC}"/></rDE>`));
+    expect((await cycle.run()).recovered).toEqual([{ loteId, status: 'recovered' }]);
+    expect((await readDocument()).status).toBe('approved');
+    const [lote] = await withTenantTransaction(handle.db, tenantId, (tx) =>
+      tx.select().from(lotes),
+    );
+    expect(lote.status).toBe('processed');
+
+    expect((await cycle.run()).recovered).toEqual([]);
+    expect(gateway.callsTo('enviarLote')).toHaveLength(1);
+    expect(gateway.callsTo('consultarDE')).toHaveLength(2);
+  });
+
   it('parks a document whose signing can never succeed and stops retrying it', async () => {
     const gateway = new FakeSifenGateway();
     const cycle = buildCycle(gateway, { csc: false });

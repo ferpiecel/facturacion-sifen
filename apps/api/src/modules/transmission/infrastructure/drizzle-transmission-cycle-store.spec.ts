@@ -181,6 +181,30 @@ describe('DrizzleTransmissionCycleStore', () => {
     expect(await store().dueLoteIds(at(30), 1)).toEqual([first]);
   });
 
+  it('lists recovery lotes not queried in the last 10 minutes, never-queried and oldest first', async () => {
+    const recovery = async (minutes: number, lastPolledAt: Date | null) => {
+      const id = await addLote(tenantId, 'recovery', [
+        await addDocument(tenantId, 'submitted', minutes),
+      ]);
+      await handle.db.update(lotes).set({ lastPolledAt }).where(eq(lotes.id, id));
+      return id;
+    };
+    const queriedLong = await recovery(1, at(5));
+    const neverQueried = await recovery(2, null);
+    await recovery(3, at(25));
+    const queriedLonger = await recovery(4, at(0));
+    await addLote(tenantId, 'sent', [await addDocument(tenantId, 'submitted', 5)], at(0));
+    await addLote(otherTenantId, 'recovery', [await addDocument(otherTenantId, 'submitted', 6)]);
+
+    expect(await store().recoverableLoteIds(at(30), 10)).toEqual([
+      neverQueried,
+      queriedLonger,
+      queriedLong,
+    ]);
+    expect(await store().recoverableLoteIds(at(30), 1)).toEqual([neverQueried]);
+    expect(await store().recoverableLoteIds(at(30), 0)).toEqual([]);
+  });
+
   it('ignores lotes of an environment the tenant has left', async () => {
     await addLote(tenantId, 'pending', [await addDocument(tenantId, 'queued', 1)]);
     await addLote(tenantId, 'sent', [await addDocument(tenantId, 'submitted', 2)], at(1));

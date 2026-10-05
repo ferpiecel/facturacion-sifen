@@ -11,6 +11,7 @@ const empty: CycleReport = {
   assembled: 0,
   sent: [],
   polled: [],
+  recovered: [],
   failures: [],
   held: [],
   stalePending: 0,

@@ -119,6 +119,37 @@ describe('audit_log hash chain', () => {
     expect(await verifyAuditChain(db, tenantB)).toMatchObject({ ok: true, rows: 0 });
   });
 
+  it('chains rows written by the system actor and verifies them with the rest', async () => {
+    const { db, tenantA, append } = await seed();
+    await append(tenantA, 2);
+    await withTenantTransaction(db, tenantA, (tx) =>
+      tx.insert(auditLog).values({
+        tenantId: tenantA,
+        actorType: 'system',
+        actorId: 'transmission-worker',
+        action: 'document.hold_placed',
+        entityType: 'document',
+        entityId: 'doc-1',
+        before: { transmissionHold: null },
+        after: { transmissionHold: 'recovery:0420-unresolved' },
+      }),
+    );
+    await append(tenantA, 1);
+
+    const rows = await db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.tenantId, tenantA))
+      .orderBy(asc(auditLog.seq));
+    expect(rows.map((row) => row.actorType)).toEqual([
+      expect.not.stringMatching(/^system$/),
+      expect.not.stringMatching(/^system$/),
+      'system',
+      expect.not.stringMatching(/^system$/),
+    ]);
+    expect(await verifyAuditChain(db, tenantA)).toMatchObject({ ok: true, rows: 4 });
+  });
+
   it('reports the first row whose content was tampered with', async () => {
     const { db, tenantA, tenantB, append, chainOf } = await seed();
     await append(tenantA, 4);

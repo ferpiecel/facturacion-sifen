@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
 import {
   createPgliteDatabase,
+  auditLog,
   documents,
   loteDocuments,
   lotes,
@@ -482,6 +483,47 @@ describe('DrizzleLoteRecoveryStore', () => {
       withTenantTransaction(handle.db, tenantId, (tx) =>
         tx.update(documents).set({ transmissionAttempts: attempts }).where(eq(documents.cdc, cdc)),
       );
+
+    it('audits each hold in the same transaction, as the system actor', async () => {
+      await storeFor(tenantId).record(
+        loteId,
+        { resolutions: [approval(CDC_A)], unresolved: [absent(CDC_B)] },
+        guard,
+      );
+      const audits = await handle.db.select().from(auditLog);
+      expect(audits).toHaveLength(1);
+      expect(audits[0]).toMatchObject({
+        actorType: 'system',
+        actorId: 'transmission-worker',
+        action: 'document.hold_placed',
+        entityType: 'document',
+        before: { transmissionHold: null },
+        after: { transmissionHold: RECOVERY_UNRESOLVED_HOLD },
+      });
+      expect(audits[0].entityId).toBe((await readDoc(CDC_B)).id);
+    });
+
+    it('writes no audit row when nothing is held or the record is rolled back', async () => {
+      const store = storeFor(tenantId);
+      await store.record(
+        loteId,
+        { resolutions: [], unresolved: [absent(CDC_B)] },
+        { ...guard, recoveredAt: new Date(SENT_AT.getTime() + 3_600_000) },
+      );
+      expect(await handle.db.select().from(auditLog)).toEqual([]);
+
+      await withTenantTransaction(handle.db, tenantId, (tx) =>
+        tx.update(documents).set({ status: 'cancelled' }).where(eq(documents.cdc, CDC_A)),
+      );
+      await expect(
+        store.record(
+          loteId,
+          { resolutions: [approval(CDC_A)], unresolved: [absent(CDC_B)] },
+          { ...guard, expectedLastPolledAt: new Date(SENT_AT.getTime() + 3_600_000) },
+        ),
+      ).rejects.toThrow(CDC_A);
+      expect(await handle.db.select().from(auditLog)).toEqual([]);
+    });
 
     it('holds the document at the first 0420 once 48 h passed since the send, and warns', async () => {
       await storeFor(tenantId).record(

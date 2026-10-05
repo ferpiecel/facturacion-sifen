@@ -244,7 +244,7 @@ describe('DrizzleLoteDispatchStore', () => {
       expect(audits[0]).toMatchObject({
         action: 'document.hold_released',
         entityType: 'document',
-        actorType: 'operator',
+        actorType: 'system',
         actorId: 'transmission-worker',
         before: { transmissionHold: 'recovery:0420-unresolved' },
         after: { transmissionHold: null },

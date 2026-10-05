@@ -225,6 +225,13 @@
       "when": 1791226288217,
       "tag": "0031_lote_recovery_transition",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1791231877464,
+      "tag": "0032_lote_unknown_recovery",
+      "breakpoints": true
     }
   ]
 }

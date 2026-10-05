@@ -3,6 +3,11 @@ import type { DocumentResolution } from './poll-lote-result.js';
 
 /** Queries stay at least 10 minutes apart (ADR-0007, Guía 2024), here and in the lote poll. */
 const QUERY_INTERVAL_MS = 10 * 60 * 1000;
+/**
+ * `recovery`: the result query lapsed (0364, 48 h). `unknown`: the send got no answer, so there is no
+ * protocol to query. `processed`: the poll closed it with documents it could not settle.
+ */
+const RECOVERABLE_STATUSES: ReadonlySet<string> = new Set(['recovery', 'unknown', 'processed']);
 const MAX_REASON_LENGTH = 500;
 const capped = (text: string): string => text.slice(0, MAX_REASON_LENGTH);
 
@@ -11,7 +16,7 @@ export interface LoteRecoveryState {
   readonly status: string;
   /** The last lote or CDC query; recovery queries are paced from it. Null when never queried. */
   readonly lastPolledAt: Date | null;
-  /** CDCs of the lote whose document is still `submitted`. */
+  /** CDCs of the lote whose document SIFEN may still owe an answer for (`queued` in an `unknown` lote, else `submitted`). */
   readonly cdcs: readonly string[];
 }
 
@@ -27,6 +32,8 @@ export interface LoteRecoveryOutcome {
 }
 
 export interface LoteRecoveryGuard {
+  /** The status the lote had when it was loaded; the write only applies while it still has it. */
+  readonly expectedStatus: string;
   /** The `last_polled_at` the lote had when it was loaded; the write only applies if it still has it. */
   readonly expectedLastPolledAt: Date | null;
   readonly recoveredAt: Date;
@@ -36,8 +43,8 @@ export interface LoteRecoveryStore {
   load(loteId: string): Promise<LoteRecoveryState | null>;
   /**
    * Atomically settles the resolved documents and stamps the query; the lote becomes `processed`
-   * when nothing is unresolved. Applies only while the lote is still `recovery` with
-   * `guard.expectedLastPolledAt`; returns false (nothing written) when a concurrent run got there.
+   * when nothing is unresolved, otherwise it keeps its status. Applies only while the lote still has
+   * `guard.expectedStatus` and `guard.expectedLastPolledAt`; returns false (nothing written) when a concurrent run got there.
    */
   record(loteId: string, outcome: LoteRecoveryOutcome, guard: LoteRecoveryGuard): Promise<boolean>;
 }
@@ -60,7 +67,7 @@ function deIdOf(xml: string): string | undefined {
 }
 
 /**
- * Recovers a lote whose result query is no longer valid (0364, 0360 or 48 h elapsed) by asking
+ * Recovers a lote whose outcome SIFEN never confirmed (0364, 0360, 48 h elapsed, a send without answer, or documents the poll left unsettled) by asking
  * SIFEN for each of its documents by CDC (plan 8.1, Guía 2024): 0422 means the DE exists and is
  * approved. Nothing is ever resent: 0420 only says SIFEN does not hold an approved DE, which is
  * not proof that it never received it, so such a CDC stays unresolved and is asked again.
@@ -71,7 +78,9 @@ export class RecoverLoteByCdc {
   async execute({ loteId }: { loteId: string }): Promise<RecoverLoteByCdcResult> {
     const lote = await this.deps.store.load(loteId);
     if (!lote) return { status: 'not-found' };
-    if (lote.status !== 'recovery') return { status: 'not-recoverable' };
+    if (!RECOVERABLE_STATUSES.has(lote.status)) return { status: 'not-recoverable' };
+    // A finished lote is only recoverable while it still holds documents SIFEN owes an answer for.
+    if (lote.status === 'processed' && lote.cdcs.length === 0) return { status: 'not-recoverable' };
     const now = this.now();
     if (lote.lastPolledAt && now.getTime() < lote.lastPolledAt.getTime() + QUERY_INTERVAL_MS) {
       return { status: 'not-due' };
@@ -87,6 +96,7 @@ export class RecoverLoteByCdc {
 
     const outcome = { resolutions, unresolved };
     const applied = await this.deps.store.record(loteId, outcome, {
+      expectedStatus: lote.status,
       expectedLastPolledAt: lote.lastPolledAt,
       recoveredAt: this.now(),
     });

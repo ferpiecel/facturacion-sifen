@@ -125,12 +125,27 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
     if (stopping) return;
     stopping = true;
     logger.info(`${signal} received, finishing the running cycles`);
-    void running
-      .stop()
-      .then(() => queue.close())
-      .then(() => webhookQueue.close())
-      .then(() => connection.quit())
-      .then(() => Promise.all([appHandle.close(), platformHandle.close()]))
+    // Order worker, queues, connection, databases; a failing step never skips the later ones.
+    const closeAll = async () => {
+      const steps = [
+        () => running.stop(),
+        () => Promise.all([queue.close(), webhookQueue.close()]),
+        () => connection.quit(),
+        () => Promise.all([appHandle.close(), platformHandle.close()]),
+      ];
+      let first: unknown;
+      let failed = false;
+      for (const step of steps) {
+        try {
+          await step();
+        } catch (error) {
+          if (!failed) first = error;
+          failed = true;
+        }
+      }
+      if (failed) throw first;
+    };
+    void closeAll()
       .then(() => {
         process.exitCode = 0;
       })

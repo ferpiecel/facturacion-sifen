@@ -43,26 +43,48 @@ export async function startTransmissionWorker(
   deps: StartTransmissionWorkerDeps,
 ): Promise<RunningTransmissionWorker> {
   const timers = deps.timers ?? { setInterval, clearInterval };
-  const reconcile = async (refresh: boolean) => {
-    await reconcileTenantSchedules({
+  const reconcileTransmission = (refresh: boolean) =>
+    reconcileTenantSchedules({
       directory: deps.directory,
       schedules: deps.schedules,
       everyMs: deps.cycleIntervalMs,
       refresh,
     });
-    if (deps.webhooks) {
+  // Webhook scheduling never blocks transmission (nor the other way round): its failure is logged
+  // by error class and retried on the next tick, also at startup.
+  const reconcileWebhooks = async (refresh: boolean) => {
+    if (!deps.webhooks) return;
+    try {
       await reconcileTenantSchedules({
         directory: deps.directory,
         schedules: deps.webhooks.schedules,
         everyMs: deps.webhooks.everyMs,
         refresh,
       });
+    } catch (error: unknown) {
+      const kind = error instanceof Error ? error.name : 'unknown error';
+      deps.logger.error(`webhook schedule reconcile failed: ${kind}`);
     }
+  };
+  const reconcile = async (refresh: boolean) => {
+    // Sequential so the schedules appear in a predictable order; the webhook step never throws.
+    const transmission = await reconcileTransmission(refresh).then(
+      () => undefined,
+      (error: unknown) => ({ error }),
+    );
+    await reconcileWebhooks(refresh);
+    if (transmission) throw transmission.error;
   };
 
   await reconcile(true);
   const worker = deps.createWorker(deps.process);
-  const webhookWorker = deps.webhooks?.createWorker();
+  let webhookWorker: { close(): Promise<void> } | undefined;
+  try {
+    webhookWorker = deps.webhooks?.createWorker();
+  } catch (error) {
+    await worker.close();
+    throw error;
+  }
   const timer = timers.setInterval(() => {
     reconcile(false).catch((error: unknown) => {
       const kind = error instanceof Error ? error.name : 'unknown error';
@@ -73,8 +95,10 @@ export async function startTransmissionWorker(
   return {
     async stop() {
       timers.clearInterval(timer);
-      await worker.close();
-      await webhookWorker?.close();
+      // Every close runs even if one fails; the first failure is rethrown afterwards.
+      const closes = await Promise.allSettled([worker.close(), webhookWorker?.close()]);
+      const failed = closes.find((result) => result.status === 'rejected');
+      if (failed) throw failed.reason;
     },
   };
 }

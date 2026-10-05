@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/pglite';
 import {
   createPgliteDatabase,
   auditLog,
@@ -501,6 +502,56 @@ describe('DrizzleLoteRecoveryStore', () => {
         after: { transmissionHold: RECOVERY_UNRESOLVED_HOLD },
       });
       expect(audits[0].entityId).toBe((await readDoc(CDC_B)).id);
+    });
+
+    it('does every document UPDATE before the first audit insert, like the release path', async () => {
+      const statements: string[] = [];
+      const logged = drizzle((handle.db as unknown as { $client: never }).$client, {
+        logger: { logQuery: (query) => statements.push(query) },
+      });
+      const spied = createDrizzleLoteRecoveryStore({
+        db: logged as unknown as typeof handle.db,
+        tenantId,
+      });
+      await spied.record(
+        loteId,
+        { resolutions: [], unresolved: [absent(CDC_A), absent(CDC_B)] },
+        guard,
+      );
+
+      const lastDocumentUpdate = statements.reduce(
+        (last, query, index) => (/^update "documents"/i.test(query) ? index : last),
+        -1,
+      );
+      const firstAudit = statements.findIndex((q) => /^insert into "audit_log"/i.test(q));
+      expect(firstAudit).toBeGreaterThan(-1);
+      expect(statements.filter((q) => /^insert into "audit_log"/i.test(q))).toHaveLength(2);
+      expect(lastDocumentUpdate).toBeLessThan(firstAudit);
+    });
+
+    it('rolls the hold back when its audit row cannot be written (characterization)', async () => {
+      await handle.db.execute(sql`
+        create function fail_hold_audit() returns trigger language plpgsql as $$
+        begin
+          if new.action = 'document.hold_placed' then
+            raise exception 'audit down';
+          end if;
+          return new;
+        end $$`);
+      await handle.db.execute(
+        sql`create trigger fail_hold_audit before insert on audit_log for each row execute function fail_hold_audit()`,
+      );
+      await expect(
+        storeFor(tenantId).record(
+          loteId,
+          { resolutions: [approval(CDC_A)], unresolved: [absent(CDC_B)] },
+          guard,
+        ),
+      ).rejects.toThrow();
+      expect((await readDoc(CDC_B)).transmissionHold).toBeNull();
+      expect((await readDoc(CDC_A)).status).toBe('submitted');
+      expect((await readLote()).status).toBe('recovery');
+      expect(warnings).toEqual([]);
     });
 
     it('writes no audit row when nothing is held or the record is rolled back', async () => {

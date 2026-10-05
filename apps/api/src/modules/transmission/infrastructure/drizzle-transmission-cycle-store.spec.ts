@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/pglite';
 import {
   createPgliteDatabase,
   documents,
@@ -363,5 +364,27 @@ describe('DrizzleTransmissionCycleStore', () => {
     expect(await store().sweepStaleSending(at(5), 2)).toBe(1);
     expect(await store().sweepStaleSending(at(5), 2)).toBe(0);
     expect(await store().sweepStaleSending(at(5), 0)).toBe(0);
+  });
+
+  it('locks the lotes it sweeps and re-checks status and cutoff in the UPDATE itself', async () => {
+    // A lote that records `sent` between the id selection and the UPDATE must not be forced to
+    // `unknown` (and the sweep must not wait on it): concurrency cannot be interleaved on PGlite, so
+    // this pins the shape of the statement that guarantees it.
+    await addLote(tenantId, 'sending', [await addDocument(tenantId, 'queued', 1)]);
+    const statements: string[] = [];
+    const logged = drizzle((handle.db as unknown as { $client: never }).$client, {
+      logger: { logQuery: (query) => statements.push(query) },
+    });
+    const spied = createDrizzleTransmissionCycleStore({
+      db: logged as unknown as typeof handle.db,
+      tenantId,
+    });
+
+    expect(await spied.sweepStaleSending(at(5), 10)).toBe(1);
+
+    const update = statements.find((query) => /^update "lotes"/i.test(query)) ?? '';
+    expect(update).toMatch(/for update skip locked/i);
+    expect(update.match(/"status" = \$/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+    expect(update.match(/"updated_at" < \$/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
   });
 });

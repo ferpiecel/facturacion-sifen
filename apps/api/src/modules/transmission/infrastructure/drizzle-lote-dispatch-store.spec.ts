@@ -4,6 +4,7 @@ import {
   createPgliteDatabase,
   documents,
   loteDocuments,
+  auditLog,
   lotes,
   tenantEstablishments,
   tenantExpeditionPoints,
@@ -207,6 +208,47 @@ describe('DrizzleLoteDispatchStore', () => {
       });
       expect((await readLote()).status).toBe('rejected');
       expect((await readDocument(cdcs.queued)).transmissionAttempts).toBe(1);
+    });
+
+    it('clears the recovery hold of the documents SIFEN did receive, with an audit row each', async () => {
+      await seedDocuments(['queued', 'queued', 'queued', 'approved']);
+      const byNumber = await handle.db
+        .select({ cdc: documents.cdc })
+        .from(documents)
+        .orderBy(documents.number);
+      const [recoveryHeld, otherHeld, plain, approved] = byNumber.map((d) => d.cdc);
+      const hold = (cdc: string, reason: string) =>
+        handle.db.update(documents).set({ transmissionHold: reason }).where(eq(documents.cdc, cdc));
+      await hold(recoveryHeld, 'recovery:0420-unresolved');
+      await hold(otherHeld, 'signing:CertificateNotFoundError');
+      await hold(approved, 'recovery:0420-unresolved');
+      await sweptLote();
+
+      await storeFor(tenantId).record(loteId, { status: 'sent', dProtConsLote: '4500123' });
+
+      expect(await readDocument(recoveryHeld)).toMatchObject({
+        status: 'submitted',
+        transmissionHold: null,
+      });
+      expect(await readDocument(otherHeld)).toMatchObject({
+        status: 'submitted',
+        transmissionHold: 'signing:CertificateNotFoundError',
+      });
+      expect(await readDocument(plain)).toMatchObject({ status: 'submitted' });
+      expect(await readDocument(approved)).toMatchObject({
+        status: 'approved',
+        transmissionHold: 'recovery:0420-unresolved',
+      });
+      const audits = await handle.db.select().from(auditLog);
+      expect(audits).toHaveLength(1);
+      expect(audits[0]).toMatchObject({
+        action: 'document.hold_released',
+        entityType: 'document',
+        actorType: 'operator',
+        actorId: 'transmission-worker',
+        before: { transmissionHold: 'recovery:0420-unresolved' },
+        after: { transmissionHold: null },
+      });
     });
 
     it('still refuses a lote that recovery already closed', async () => {

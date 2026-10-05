@@ -24,6 +24,7 @@ import {
   type SigningStore,
 } from '../application/ports/signing.port.js';
 import type { InvoiceDraft } from '../domain/invoice-draft.js';
+import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
 import { parseCreateDocument } from './http/create-document.request.js';
 
 export interface DrizzleSigningStoreOptions {
@@ -249,10 +250,11 @@ export function createDrizzleSigningStore({
     },
 
     async markSigned(tenantId, documentId, { signedXml, signedAt }) {
-      const updated = await withTenantTransaction(db, tenantId, (tx) =>
-        tx
+      return withTenantTransaction(db, tenantId, async (tx) => {
+        const at = now();
+        const updated = await tx
           .update(documents)
-          .set({ status: 'signed', signedXml, signedAt, updatedAt: now() })
+          .set({ status: 'signed', signedXml, signedAt, updatedAt: at })
           .where(
             and(
               eq(documents.tenantId, tenantId),
@@ -260,9 +262,11 @@ export function createDrizzleSigningStore({
               eq(documents.status, 'accepted'),
             ),
           )
-          .returning({ id: documents.id }),
-      );
-      return updated.length === 1;
+          .returning({ id: documents.id });
+        // Transactional outbox: the document.signed delivery commits with the status change.
+        await enqueueDocumentEvents(tx, { tenantId, documentIds: updated.map((r) => r.id), at });
+        return updated.length === 1;
+      });
     },
   };
 }

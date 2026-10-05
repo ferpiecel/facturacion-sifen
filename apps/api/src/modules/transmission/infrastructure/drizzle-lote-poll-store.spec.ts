@@ -9,9 +9,11 @@ import {
   tenantExpeditionPoints,
   tenants,
   tenantTimbrados,
+  webhookDeliveries,
   withTenantTransaction,
   type DatabaseHandle,
 } from '@sifen/db';
+import { seedWebhookEndpoint } from '../../../../test/support/document-seed.js';
 import type { LotePollOutcome } from '../application/poll-lote-result.js';
 import { createDrizzleLotePollStore } from './drizzle-lote-poll-store.js';
 
@@ -250,5 +252,27 @@ describe('DrizzleLotePollStore', () => {
     );
     expect(await storeFor(tenantId).record(loteId, processed, guard)).toBe(true);
     expect((await readDoc(CDC_B)).status).toBe('rejected');
+  });
+
+  describe('webhook outbox (HU-E11-01)', () => {
+    const deliveries = () => handle.db.select().from(webhookDeliveries);
+
+    it('enqueues one event per settled document in the same transaction', async () => {
+      await seedWebhookEndpoint(handle.db, tenantId);
+      await storeFor(tenantId).record(loteId, processed, guard);
+      expect((await deliveries()).map((d) => d.eventType).sort()).toEqual([
+        'document.approved',
+        'document.rejected',
+      ]);
+    });
+
+    it('enqueues nothing when the record is rolled back', async () => {
+      await seedWebhookEndpoint(handle.db, tenantId);
+      await withTenantTransaction(handle.db, tenantId, (tx) =>
+        tx.update(documents).set({ status: 'cancelled' }).where(eq(documents.cdc, CDC_B)),
+      );
+      await expect(storeFor(tenantId).record(loteId, processed, guard)).rejects.toThrow(CDC_B);
+      expect(await deliveries()).toEqual([]);
+    });
   });
 });

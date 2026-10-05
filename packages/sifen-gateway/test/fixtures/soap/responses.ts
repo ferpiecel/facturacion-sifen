@@ -56,3 +56,49 @@ export const fault12Xml = envelope(
 export const fault11Xml =
   '<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><s:Fault>' +
   '<faultcode>s:Client</faultcode><faultstring>Bad request</faultstring></s:Fault></s:Body></s:Envelope>';
+
+/** siRecepDE (§9.1, schemas 3-4), modelled on the MT §7.4 response example. */
+export const deAutorizadoXml = envelope(
+  `<ns2:rRetEnviDe xmlns:ns2="${NS}"><ns2:rProtDe><ns2:id>${CDC_A}</ns2:id>` +
+    '<ns2:dFecProc>2026-10-02T12:00:00</ns2:dFecProc><ns2:dDigVal>abc=</ns2:dDigVal><ns2:gResProc>' +
+    '<ns2:dEstRes>Aprobado</ns2:dEstRes><ns2:dProtAut>1234567890</ns2:dProtAut>' +
+    '<ns2:dCodRes>0260</ns2:dCodRes><ns2:dMsgRes>Autorización del DE satisfactoria</ns2:dMsgRes>' +
+    '</ns2:gResProc></ns2:rProtDe></ns2:rRetEnviDe>',
+);
+
+export const deRechazadoXml = envelope(
+  `<rRetEnviDe xmlns="${NS}"><rProtDe><dEstRes>Rechazado</dEstRes><gResProc>` +
+    '<dCodRes>0160</dCodRes><dMsgRes>XML malformado</dMsgRes></gResProc></rProtDe></rRetEnviDe>',
+);
+
+/** siConsDE (§9.4, schemas 10-11). */
+export const DE_XML = `<rDE xmlns="${NS}"><DE Id="${CDC_A}">uno</DE></rDE>`;
+export const consDEEncontradoXml = envelope(
+  `<rResEnviConsDe xmlns="${NS}"><dFecProc>2026-10-02T12:00:00</dFecProc><dCodRes>0422</dCodRes>` +
+    `<dMsgRes>CDC encontrado</dMsgRes><xContenDE><rContDe>${DE_XML}<dProtAut>1234567890</dProtAut></rContDe></xContenDE></rResEnviConsDe>`,
+);
+export const consDEInexistenteXml = envelope(
+  `<rResEnviConsDe xmlns="${NS}"><dFecProc>2026-10-02T12:00:00</dFecProc><dCodRes>0420</dCodRes>` +
+    '<dMsgRes>CDC inexistente</dMsgRes></rResEnviConsDe>',
+);
+
+/** siConsRUC (§9.6, schemas 16-17). */
+export const consRUCEncontradoXml = envelope(
+  `<rResEnviConsRUC xmlns="${NS}"><dCodRes>0502</dCodRes><dMsgRes>RUC encontrado</dMsgRes>` +
+    '<xContRUC><rContRUC><dRUCCons>80069563</dRUCCons><dRazCons>Empresa SA</dRazCons>' +
+    '<dCodEstCons>ACT</dCodEstCons><dDesEstCons>Activo</dDesEstCons><dRUCFactElec>S</dRUCFactElec>' +
+    '</rContRUC></xContRUC></rResEnviConsRUC>',
+);
+export const consRUCInexistenteXml = envelope(
+  `<rResEnviConsRUC xmlns="${NS}"><dCodRes>0500</dCodRes><dMsgRes>RUC inexistente</dMsgRes></rResEnviConsRUC>`,
+);
+
+/** siRecepEvento (§9.5, schema 14). */
+export const eventosXml = envelope(
+  `<ns2:rRetEnviEventoDe xmlns:ns2="${NS}"><ns2:dFecProc>2026-10-02T12:00:00</ns2:dFecProc>` +
+    '<ns2:gResProcEVe><ns2:dEstRes>Aprobado</ns2:dEstRes><ns2:dProtAut>1111111111</ns2:dProtAut>' +
+    '<ns2:id>77</ns2:id><ns2:gResProc><ns2:dCodRes>0600</ns2:dCodRes><ns2:dMsgRes>Evento registrado correctamente</ns2:dMsgRes></ns2:gResProc></ns2:gResProcEVe>' +
+    '<ns2:gResProcEVe><ns2:dEstRes>Rechazado</ns2:dEstRes><ns2:id>78</ns2:id><ns2:gResProc>' +
+    '<ns2:dCodRes>4003</ns2:dCodRes><ns2:dMsgRes>El DE ya fue cancelado</ns2:dMsgRes></ns2:gResProc></ns2:gResProcEVe>' +
+    '</ns2:rRetEnviEventoDe>',
+);

@@ -9,9 +9,11 @@ import {
   tenantFiscalProfiles,
   tenants,
   tenantTimbrados,
+  webhookDeliveries,
   withTenantTransaction,
   type DatabaseHandle,
 } from '@sifen/db';
+import { seedWebhookEndpoint } from '../../../../test/support/document-seed.js';
 import {
   createAcceptInvoice,
   IdempotencyKeyReusedError,
@@ -261,6 +263,16 @@ describe('AcceptInvoice with the Drizzle unit of work', () => {
       expect((await accept()(input())).cdc).toSatisfy(
         (cdc: string) => parseCdc(cdc).documentNumber === '0000002',
       );
+    });
+  });
+
+  it('enqueues a document.created event with the document (outbox)', async () => {
+    await seedWebhookEndpoint(handle.db, tenantId);
+    const { documentId, cdc } = await accept()(input());
+    const [row] = await handle.db.select().from(webhookDeliveries);
+    expect(row).toMatchObject({ tenantId, eventType: 'document.created', status: 'pending' });
+    expect(row.payload).toMatchObject({
+      data: { document_id: documentId, cdc, status: 'accepted' },
     });
   });
 });

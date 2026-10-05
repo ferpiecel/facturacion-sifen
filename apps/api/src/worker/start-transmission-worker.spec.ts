@@ -158,4 +158,58 @@ describe('startTransmissionWorker', () => {
       'webhook-worker-closed',
     ]);
   });
+
+  /** Review findings (HU-E11-01): one queue failing must not take the other down. */
+  it('starts and keeps scheduling transmission when the webhook reconcile fails, logging it apart', async () => {
+    const { deps, events, logs, tick } = setup();
+    const failing = withWebhooks(deps, events);
+    failing.webhooks.schedules.list = () => Promise.reject(new Error('redis://u:pw@h'));
+
+    const running = await startTransmissionWorker(failing);
+    events.length = 0;
+    tick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await running.stop();
+
+    expect(events.slice(0, 2)).toEqual(['upsert:a:60000', 'upsert:b:60000']);
+    expect(logs.filter((m) => m.includes('webhook schedule reconcile failed'))).toHaveLength(2);
+    expect(logs.join('\n')).not.toContain('redis://');
+    expect(events).toContain('webhook-worker-closed');
+  });
+
+  it('keeps reconciling webhooks when a periodic transmission reconcile fails', async () => {
+    const { deps, events, logs, tick } = setup();
+    const running = await startTransmissionWorker(withWebhooks(deps, events));
+    events.length = 0;
+    deps.schedules.upsert = () => Promise.reject(new Error('boom'));
+
+    tick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await running.stop();
+
+    expect(events).toContain('wh-upsert:b:30000');
+    expect(logs.join('\n')).toContain('tenant schedule reconcile failed');
+  });
+
+  it('closes the transmission worker when the webhook worker cannot be created', async () => {
+    const { deps, events } = setup();
+    const broken = withWebhooks(deps, events);
+    broken.webhooks.createWorker = () => {
+      throw new Error('no webhook worker');
+    };
+
+    await expect(startTransmissionWorker(broken)).rejects.toThrow('no webhook worker');
+
+    expect(events).toContain('worker-closed');
+  });
+
+  it('still closes the webhook worker when the transmission worker fails to close', async () => {
+    const { deps, events } = setup();
+    deps.createWorker = () => ({ close: () => Promise.reject(new Error('close failed')) });
+    const running = await startTransmissionWorker(withWebhooks(deps, events));
+
+    await expect(running.stop()).rejects.toThrow('close failed');
+
+    expect(events).toContain('webhook-worker-closed');
+  });
 });

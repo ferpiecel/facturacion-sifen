@@ -9,7 +9,10 @@ import { SignDocument } from '../modules/emission/application/sign-document.js';
 import { createDrizzleSigningStore } from '../modules/emission/infrastructure/drizzle-signing-store.js';
 import { LoteAssembler } from '../modules/transmission/application/assemble-lotes.js';
 import { PollLoteResult } from '../modules/transmission/application/poll-lote-result.js';
-import { RecoverLoteByCdc } from '../modules/transmission/application/recover-lote-by-cdc.js';
+import {
+  assertMaxQueries,
+  RecoverLoteByCdc,
+} from '../modules/transmission/application/recover-lote-by-cdc.js';
 import { SendLote } from '../modules/transmission/application/send-lote.js';
 import { TransmissionCycle } from '../modules/transmission/application/transmission-cycle.js';
 import { createDrizzleLoteAssemblyStore } from '../modules/transmission/infrastructure/drizzle-lote-assembly-store.js';
@@ -43,6 +46,8 @@ export function createTenantCycleFactory({
   now,
   recoveryMaxQueries,
 }: TenantCycleFactoryDeps): (tenantId: string) => TransmissionCycle {
+  // Fail when the worker is wired, not on the first tenant run.
+  assertMaxQueries(recoveryMaxQueries);
   return (tenantId) => {
     const store = createDrizzleTransmissionCycleStore({ db, tenantId, now });
     return new TransmissionCycle({

@@ -26,14 +26,17 @@ describe('DocumentsBrowser (filters)', () => {
     const user = userEvent.setup();
     render(<DocumentsBrowser />);
 
+    // Paste instead of type: one input event per query rather than one full
+    // re-render per keystroke, which pushed this test past 5 s under coverage.
     const search = screen.getByRole('searchbox', { name: 'Filtrar el listado de comprobantes' });
-    await user.type(search, '80034567');
+    await user.click(search);
+    await user.paste('80034567');
     expect(rows()).toHaveLength(1);
     await user.clear(search);
-    await user.type(search, 'agroganadera');
+    await user.paste('agroganadera');
     expect(rows()).toHaveLength(1);
     await user.clear(search);
-    await user.type(search, '0004518');
+    await user.paste('0004518');
     expect(screen.getByRole('listitem', { name: 'FE 001-001-0004518' })).toBeInTheDocument();
   });
 

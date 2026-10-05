@@ -4,7 +4,7 @@
 // rules (layering, no-circular) and adds the persistence-isolation rule:
 // @sifen/db (and the persistence deps it re-exports) may only be reached
 // from a module's infrastructure/ layer, from *.module.ts wiring, or from
-// the operator CLI composition root (`cli/`, HU-E1-05), never from
+// the operator CLI and worker composition roots (`cli/`, HU-E1-05; `worker/`, HU-E11-01), never from
 // domain/, application/, or a controller.
 const DB_DEPS = '(^|node_modules/)(@sifen/db(/|$)|@electric-sql/pglite(/|$)|(drizzle-orm|pg)(/|$))';
 
@@ -15,11 +15,11 @@ module.exports = {
       name: 'db-confined-to-infrastructure-and-module-wiring',
       severity: 'error',
       comment:
-        '@sifen/db must only be imported from modules/*/infrastructure/, *.module.ts, cli/ or worker/ (architecture-boundaries spec); cli/ and worker/ are process entrypoints that compose the adapters (ADR-0003)',
+        '@sifen/db must only be imported from modules/*/infrastructure/, *.module.ts, cli/ or worker/ (architecture-boundaries spec)',
       from: {
         path: '^src/',
         pathNot:
-          '((^|/)modules/[^/]+/infrastructure/|(^|/)[^/]+\\.module\\.ts$|(^|/)cli/|^src/worker/)',
+          '((^|/)modules/[^/]+/infrastructure/|(^|/)[^/]+\\.module\\.ts$|(^|/)(cli|worker)/)',
       },
       to: { path: DB_DEPS },
     },

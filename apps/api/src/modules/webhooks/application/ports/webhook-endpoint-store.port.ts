@@ -13,7 +13,7 @@ export interface EndpointView {
 }
 
 export interface Actor {
-  readonly type: 'api_key' | 'user' | 'operator';
+  readonly type: 'api_key' | 'user' | 'operator' | 'system';
   readonly id: string;
 }
 

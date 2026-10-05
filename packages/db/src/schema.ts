@@ -374,7 +374,7 @@ export const tenantTimbrados = pgTable(
 );
 
 /** `audit_log.actor_type`: who performed the audited write. */
-export const auditActorType = pgEnum('audit_actor_type', ['api_key', 'user', 'operator']);
+export const auditActorType = pgEnum('audit_actor_type', ['api_key', 'user', 'operator', 'system']);
 
 /**
  * Append-only audit trail (HU-E13-01, RF-16, RNF-08). `before`/`after` are

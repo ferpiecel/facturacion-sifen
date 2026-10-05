@@ -1,8 +1,10 @@
 import { and, asc, count, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { documents, loteDocuments, lotes, withTenantTransaction, type Database } from '@sifen/db';
 import type { LoteRecoveryOutcome, LoteRecoveryStore } from '../application/recover-lote-by-cdc.js';
+import { recordAudit } from '../../audit/infrastructure/record-audit.js';
 import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
 import { settleDocument, type Tx } from './settle-document.js';
+import { TRANSMISSION_WORKER_ACTOR } from './transmission-audit-actor.js';
 
 /** Hold code of a document whose CDC keeps answering 0420: released with `document:release-hold`. */
 export const RECOVERY_UNRESOLVED_HOLD = 'recovery:0420-unresolved';
@@ -147,6 +149,17 @@ export function createDrizzleLoteRecoveryStore({
               .where(eq(lotes.id, loteId));
           }
         }
+        // After every UPDATE, like `releaseRecoveryHolds`: each audit insert takes the tenant's chain
+        // lock, so none is interleaved with the writes above. Same transaction as the holds.
+        for (const id of held) {
+          await recordAudit(tx, {
+            actor: TRANSMISSION_WORKER_ACTOR,
+            action: 'document.hold_placed',
+            entity: { type: 'document', id },
+            before: { transmissionHold: null },
+            after: { transmissionHold: RECOVERY_UNRESOLVED_HOLD },
+          });
+        }
         return held;
       });
       for (const id of result ?? []) {
@@ -191,7 +204,7 @@ async function touchQueried(
 }
 
 /**
- * Holds one document whose CDC answered 0420 past the window; returns its id when it was held. Only a
+ * Holds one document whose CDC answered 0420 past the window; returns its id when it was held (the caller audits it). Only a
  * document still waiting for SIFEN (`queued` or `submitted`) and not already held is touched.
  */
 async function holdAbsent(tx: Tx, loteId: string, cdc: string, at: Date): Promise<string | null> {

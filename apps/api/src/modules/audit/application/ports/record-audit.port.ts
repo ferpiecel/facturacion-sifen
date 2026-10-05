@@ -1,5 +1,5 @@
 export interface AuditEntry {
-  actor: { type: 'api_key' | 'user' | 'operator'; id: string };
+  actor: { type: 'api_key' | 'user' | 'operator' | 'system'; id: string };
   action: string;
   entity: { type: string; id: string };
   before: unknown;

@@ -85,6 +85,26 @@ read -rs P12_PASSWORD && printf '%s' "$P12_PASSWORD" | KMS_LOCAL_MASTER_KEY="<cl
 
 `document:release-hold` libera un documento que el pipeline de transmisión dejó retenido (`transmission_hold`): sea porque la firma falló con un error determinístico (`signing:<Error>`: falta un dato, el contacto del establecimiento, el CSC o el certificado) o porque se agotaron los reintentos tras 5 rechazos 0301 de lote (`transmission:attempts-exhausted`). Corregí primero la causa (por ejemplo `establishment:contact`, `csc:add`, `certificate:add`), después liberá el documento: borra la retención y reinicia el contador de intentos y la espera, y el próximo ciclo lo retoma. Rechaza un documento que no está retenido o que no es del tenant, e imprime solo los ids y el código liberado. Cada liberación queda en el audit log (`document.hold_released`, con el id y el código anterior). `document:release-holds --tenant <id> --reason <código>` libera de una vez todos los documentos del tenant retenidos por esa causa (por ejemplo tras cargar el certificado que faltaba) e imprime solo la cantidad.
 
+### Worker de transmisión
+
+El worker (`apps/api/src/worker/worker.ts`, mismo código que la API, otro punto de entrada: ADR-0003) corre el ciclo de transmisión de cada tenant (firmar los documentos aceptados, armar lotes, enviar los lotes pendientes y consultar los vencidos) como un job repetible por tenant en la cola BullMQ `lote-build` (ADR-0013). Postgres es la fuente de verdad: Redis solo coordina, y los jobs se reconstruyen al arrancar. Un candado en Redis por tenant evita que dos ciclos del mismo tenant corran a la vez, aunque haya varios procesos worker.
+
+```bash
+docker compose up -d postgres redis
+pnpm --filter @sifen/api build
+export REDIS_URL="redis://localhost:6379"
+export DATABASE_URL="<rol app_login>"                      # trabajo por tenant, sujeto a RLS
+export WORKER_PLATFORM_DATABASE_URL="<login que puede SET ROLE platform_admin>"  # solo lista tenants
+export KMS_LOCAL_MASTER_KEY="<clave-maestra-base64>" PSC_TRUSTED_ROOTS_PATH=/etc/sifen/psc-roots.pem
+export SIFEN_GATEWAY=simulator NODE_ENV=development          # ver nota
+pnpm --filter @sifen/api worker
+```
+
+- **Gateway:** todavía no existe el adaptador real de SIFEN (SOAP). Hasta entonces el worker solo arranca con `SIFEN_GATEWAY=simulator` y `NODE_ENV=development|test`; en producción se niega a arrancar en vez de simular envíos.
+- **Logs:** una línea por ciclo con conteos; advertencias (`WARN`) cuando hay documentos retenidos (`held`, usar `document:release-hold` tras corregir la causa), lotes pendientes viejos (`stalePending`) o fallos. Solo ids, conteos y nombres de error: nunca XML, certificados ni URLs.
+- **Apagado:** `SIGTERM`/`SIGINT` deja terminar los ciclos en curso antes de salir.
+- **Pruebas con Redis real:** `REDIS_URL=redis://localhost:6379 pnpm --filter @sifen/api exec vitest run src/worker`. Sin `REDIS_URL` esas pruebas se omiten; en CI las corre el job `worker-redis`.
+
 `apikey:create` imprime la API key completa (`sk_test_...` / `sk_live_...`) **una sola vez**: no queda guardada en ningún lado más que como hash, así que hay que copiarla en ese momento. El CLI nunca vuelve a loguearla, ni siquiera en `apikey:revoke`.
 
 `csc:add` sella el CSC con el mismo KMS que la API (ADR-0009) y lo guarda en el siguiente slot libre del `(tenant, --env)` (máximo 2; con ambos ocupados falla con un error claro). Exige siempre `KMS_LOCAL_MASTER_KEY` (incluso en development/test: una clave descartable dejaría el CSC irrecuperable) y nunca imprime el CSC. La forma recomendada es `--csc -`, que lo lee de stdin y evita que quede en el historial del shell o en `ps`; `--csc <valor>` también funciona. En tus pruebas usá solo el CSC público de ejemplo (`ABCD0000000000000000000000000000`), nunca uno real en comandos de ejemplo.

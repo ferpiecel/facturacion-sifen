@@ -11,6 +11,7 @@
     "depcruise": "depcruise --config .dependency-cruiser.cjs src",
     "test": "vitest run",
     "start": "node dist/main.js",
+    "worker": "node dist/worker/worker.js",
     "ops": "node dist/cli/ops.js",
     "coverage": "vitest run --coverage"
   },
@@ -21,6 +22,7 @@
     "@node-rs/argon2": "2.2.1",
     "@sifen/db": "workspace:*",
     "@sifen/sifen-gateway": "workspace:*",
+    "@sifen/sifen-tips": "workspace:*",
     "@sifen/sifen-xsd": "workspace:*",
     "bullmq": "6.3.11",
     "drizzle-orm": "0.45.3",
@@ -37,7 +39,6 @@
   "devDependencies": {
     "@nestjs/testing": "12.1.0",
     "@sifen/config": "workspace:*",
-    "@sifen/sifen-tips": "workspace:*",
     "@swc/core": "1.16.2",
     "@types/fontkit": "2.0.9",
     "@types/node": "22.20.4",

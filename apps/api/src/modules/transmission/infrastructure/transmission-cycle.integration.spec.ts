@@ -14,20 +14,9 @@ import {
   type DatabaseHandle,
 } from '@sifen/db';
 import { FakeSifenGateway, sifenScenarios, toCdc } from '@sifen/sifen-gateway';
-import { TipsDeXmlBuilder, TipsQrGenerator, TipsXmlSigner } from '@sifen/sifen-tips';
 import { generateDevCertificate } from '../../../../test/support/dev-certificate.js';
-import { SignDocument } from '../../emission/application/sign-document.js';
+import { createTenantCycleFactory } from '../../../worker/tenant-cycle-factory.js';
 import { buildCdc } from '../../emission/domain/cdc.js';
-import { createDrizzleSigningStore } from '../../emission/infrastructure/drizzle-signing-store.js';
-import { LoteAssembler } from '../application/assemble-lotes.js';
-import { PollLoteResult } from '../application/poll-lote-result.js';
-import { SendLote } from '../application/send-lote.js';
-import { TransmissionCycle } from '../application/transmission-cycle.js';
-import { createDrizzleLoteAssemblyStore } from './drizzle-lote-assembly-store.js';
-import { createDrizzleLoteDispatchStore } from './drizzle-lote-dispatch-store.js';
-import { createDrizzleLotePollStore } from './drizzle-lote-poll-store.js';
-import { createDrizzleTransmissionCycleStore } from './drizzle-transmission-cycle-store.js';
-import { measureLoteMessage } from '@sifen/sifen-gateway';
 
 const CDC = buildCdc({
   documentType: '01',
@@ -148,41 +137,22 @@ describe('TransmissionCycle end to end', () => {
     const { db } = handle;
     const dev = generateDevCertificate();
     const now = () => clock;
-    return new TransmissionCycle({
-      tenantId,
-      store: createDrizzleTransmissionCycleStore({ db, tenantId, now }),
-      signer: new SignDocument({
-        store: createDrizzleSigningStore({ db, now }),
-        certificates: {
-          open: () => Promise.resolve({ p12: Buffer.from(dev.p12), password: dev.password }),
-        },
-        cscs: {
-          get: () =>
-            Promise.resolve(
-              options.csc === false
-                ? null
-                : { idCsc: '0001', value: Buffer.from('ABCD0000000000000000000000000000') },
-            ),
-        },
-        builder: new TipsDeXmlBuilder(),
-        signer: new TipsXmlSigner(),
-        qr: new TipsQrGenerator(),
-      }),
-      assembler: new LoteAssembler({
-        store: createDrizzleLoteAssemblyStore({ db, tenantId, now }),
-        measureMessage: measureLoteMessage,
-      }),
-      sender: new SendLote({
-        gateway,
-        store: createDrizzleLoteDispatchStore({ db, tenantId, now }),
-      }),
-      poller: new PollLoteResult({
-        gateway,
-        store: createDrizzleLotePollStore({ db, tenantId }),
-        now,
-      }),
+    return createTenantCycleFactory({
+      db,
+      gateway,
       now,
-    });
+      certificates: {
+        open: () => Promise.resolve({ p12: Buffer.from(dev.p12), password: dev.password }),
+      },
+      cscs: {
+        get: () =>
+          Promise.resolve(
+            options.csc === false
+              ? null
+              : { idCsc: '0001', value: Buffer.from('ABCD0000000000000000000000000000') },
+          ),
+      },
+    })(tenantId);
   }
 
   const readDocument = () =>

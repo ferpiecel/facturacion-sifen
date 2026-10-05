@@ -162,6 +162,10 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  xmldom: npm:@xmldom/xmldom@0.8.15
+  xml2js: 0.6.2
+
 importers:
 
   .:
@@ -214,6 +218,9 @@ importers:
       '@sifen/sifen-gateway':
         specifier: workspace:*
         version: link:../../packages/sifen-gateway
+      '@sifen/sifen-tips':
+        specifier: workspace:*
+        version: link:../../packages/sifen-tips
       '@sifen/sifen-xsd':
         specifier: workspace:*
         version: link:../../packages/sifen-xsd
@@ -257,9 +264,6 @@ importers:
       '@sifen/config':
         specifier: workspace:*
         version: link:../../packages/config
-      '@sifen/sifen-tips':
-        specifier: workspace:*
-        version: link:../../packages/sifen-tips
       '@swc/core':
         specifier: 1.16.2
         version: 1.16.2(@swc/helpers@0.5.23)
@@ -4565,8 +4569,8 @@ packages:
     resolution: {integrity: sha512-EvGK8EJ3DhaHfbRlETOWAS5pO9MZITeauHKJyb8wyajUfQUenkIg2MvLDTZ4T/TgIcm3HU0TFBgWWboAZ30UHg==}
     engines: {node: '>=18'}
 
-  xml2js@0.4.23:
-    resolution: {integrity: sha512-ySPiMjM0+pLDftHgXY4By0uswI3SPKLDw/i3UXbnO8M/p28zqexCUoPmQFrYD+/1BzhGJSs2i1ERWKJAtiLrug==}
+  xml2js@0.6.2:
+    resolution: {integrity: sha512-T4rieHaC1EXcES0Kxxj4JWgaUQHDk+qwHcYOCFHfiwKz7tOVPLq7Hjq9dM1WCMhylqMEfP7hMcOIChvotiZegA==}
     engines: {node: '>=4.0.0'}
 
   xmlbuilder@11.0.1:
@@ -4579,10 +4583,6 @@ packages:
 
   xmlchars@2.2.0:
     resolution: {integrity: sha512-JZnDKK8B0RCDw84FNdDAIpZK+JuJw+s7Lz8nksI7SIuU3UXJJslUthsi+uWBUYOwPFwW7W7PRLRfUKpxjtjFCw==}
-
-  xmldom@0.6.0:
-    resolution: {integrity: sha512-iAcin401y58LckRZ0TkI4k0VSM1Qg0KGSc3i8rU+xrxe19A/BN1zHyVSJY7uoutVlaTSzYyk/v5AmkewAP7jtg==}
-    engines: {node: '>=10.0.0'}
 
   xpath@0.0.33:
     resolution: {integrity: sha512-NNXnzrkDrAzalLhIUc01jO2mOzXGXh1JwPgkihcLLzw98c0WgYDmmjSh1Kl3wzaxSVWMuA+fe0WTWOBDWCBmNA==}
@@ -5100,7 +5100,6 @@ snapshots:
   '@exodus/bytes@1.16.0(@noble/hashes@1.8.0)':
     optionalDependencies:
       '@noble/hashes': 1.8.0
-    optional: true
 
   '@fastify/ajv-compiler@4.0.6':
     dependencies:
@@ -6377,7 +6376,6 @@ snapshots:
       whatwg-url: 16.0.1(@noble/hashes@1.8.0)
     transitivePeerDependencies:
       - '@noble/hashes'
-    optional: true
 
   debug@4.4.3(supports-color@7.2.0):
     dependencies:
@@ -6675,13 +6673,13 @@ snapshots:
   facturacionelectronicapy-qrgen@1.0.9:
     dependencies:
       crypto-js: 4.2.0
-      xml2js: 0.4.23
+      xml2js: 0.6.2
 
   facturacionelectronicapy-xmlgen@1.0.283:
     dependencies:
       copyfiles: 2.4.1
       fs: 0.0.1-security
-      xml2js: 0.4.23
+      xml2js: 0.6.2
 
   facturacionelectronicapy-xmlsign@1.0.28:
     dependencies:
@@ -6689,9 +6687,9 @@ snapshots:
       find-java-home: 1.2.2
       node-forge: 1.4.0
       xml-crypto: 6.3.1
-      xml2js: 0.4.23
+      xml2js: 0.6.2
       xmlbuilder: 15.1.1
-      xmldom: 0.6.0
+      xmldom: '@xmldom/xmldom@0.8.15'
 
   fast-check@4.10.2:
     dependencies:
@@ -6905,7 +6903,6 @@ snapshots:
       '@exodus/bytes': 1.16.0(@noble/hashes@1.8.0)
     transitivePeerDependencies:
       - '@noble/hashes'
-    optional: true
 
   ieee754@1.2.1: {}
 
@@ -7010,7 +7007,6 @@ snapshots:
       xml-name-validator: 5.0.0
     transitivePeerDependencies:
       - '@noble/hashes'
-    optional: true
 
   jsesc@3.1.0: {}
 
@@ -8148,7 +8144,6 @@ snapshots:
       webidl-conversions: 8.0.1
     transitivePeerDependencies:
       - '@noble/hashes'
-    optional: true
 
   whatwg-url@17.1.2(@noble/hashes@1.8.0):
     dependencies:
@@ -8157,7 +8152,6 @@ snapshots:
       webidl-conversions: 8.0.1
     transitivePeerDependencies:
       - '@noble/hashes'
-    optional: true
 
   which-module@2.0.1: {}
 
@@ -8204,7 +8198,7 @@ snapshots:
 
   xml-name-validator@5.0.0: {}
 
-  xml2js@0.4.23:
+  xml2js@0.6.2:
     dependencies:
       sax: 1.6.1
       xmlbuilder: 11.0.1
@@ -8214,8 +8208,6 @@ snapshots:
   xmlbuilder@15.1.1: {}
 
   xmlchars@2.2.0: {}
-
-  xmldom@0.6.0: {}
 
   xpath@0.0.33: {}
 

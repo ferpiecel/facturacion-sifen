@@ -163,6 +163,24 @@ describe('RecoverLoteByCdc', () => {
     });
   });
 
+  it('flags only a 0420 as absent, so the store can tell it from a failed or odd answer', async () => {
+    const { recover, gateway } = setup(recoveryLote({ cdcs: [cdcA, cdcB, 'c'.repeat(44)] }));
+    gateway.enqueue(
+      'consultarDE',
+      sifenScenarios.cdcInexistente(),
+      new SifenTimeoutError('consultarDE'),
+      sifenScenarios.rucCertificadoSinPermiso(),
+    );
+    const result = await recover.execute({ loteId: 'lote-1' });
+    expect(result).toMatchObject({
+      unresolved: [
+        { cdc: cdcA, absent: true },
+        { cdc: cdcB, absent: false },
+        { cdc: 'c'.repeat(44), absent: false },
+      ],
+    });
+  });
+
   it('a failed query leaves its CDC unresolved, keeps only the error class, and goes on', async () => {
     const { recover, gateway } = setup(recoveryLote());
     gateway.enqueue(

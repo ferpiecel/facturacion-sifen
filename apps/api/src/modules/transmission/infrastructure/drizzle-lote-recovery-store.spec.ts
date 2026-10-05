@@ -15,7 +15,10 @@ import {
 } from '@sifen/db';
 import { seedWebhookEndpoint } from '../../../../test/support/document-seed.js';
 import type { LoteRecoveryOutcome } from '../application/recover-lote-by-cdc.js';
-import { createDrizzleLoteRecoveryStore } from './drizzle-lote-recovery-store.js';
+import {
+  createDrizzleLoteRecoveryStore,
+  RECOVERY_UNRESOLVED_HOLD,
+} from './drizzle-lote-recovery-store.js';
 
 const SENT_AT = new Date('2026-10-01T12:00:00.000Z');
 const HANDED_OVER_AT = new Date('2026-10-03T12:05:00.000Z');
@@ -31,6 +34,7 @@ describe('DrizzleLoteRecoveryStore', () => {
   let loteId: string;
 
   beforeEach(async () => {
+    warnings.length = 0;
     handle = createPgliteDatabase();
     await handle.migrate();
     const { db } = handle;
@@ -111,8 +115,13 @@ describe('DrizzleLoteRecoveryStore', () => {
     await handle.close();
   });
 
+  const warnings: string[] = [];
   const storeFor = (tenant: string) =>
-    createDrizzleLoteRecoveryStore({ db: handle.db, tenantId: tenant });
+    createDrizzleLoteRecoveryStore({
+      db: handle.db,
+      tenantId: tenant,
+      logger: { warn: (message) => warnings.push(message) },
+    });
   const guard = {
     expectedStatus: 'recovery',
     expectedLastPolledAt: HANDED_OVER_AT as Date | null,
@@ -256,7 +265,12 @@ describe('DrizzleLoteRecoveryStore', () => {
   });
 
   /** A second lote (inserted directly, in any status) with its own documents. */
-  async function seedLote(status: string, documentStatus: string, cdcs: string[]) {
+  async function seedLote(
+    status: string,
+    documentStatus: string,
+    cdcs: string[],
+    createdAt?: Date,
+  ) {
     const { db } = handle;
     const [est] = await db.select().from(tenantEstablishments);
     const [point] = await db.select().from(tenantExpeditionPoints);
@@ -288,6 +302,7 @@ describe('DrizzleLoteRecoveryStore', () => {
         environment: 'test',
         documentType: 1,
         status,
+        ...(createdAt ? { createdAt } : {}),
         lastPollMessage: status === 'processed' ? '1 document(s) need recovery' : null,
       })
       .returning();
@@ -412,6 +427,124 @@ describe('DrizzleLoteRecoveryStore', () => {
         status: 'processed',
         lastPollMessage: '0364: Consulta extemporanea',
       });
+    });
+  });
+
+  describe('a CDC that keeps answering 0420 (hold and alert)', () => {
+    const absent = (cdc: string) => ({ cdc, reason: '0420: CDC inexistente', absent: true });
+    const setAttempts = (cdc: string, attempts: number) =>
+      withTenantTransaction(handle.db, tenantId, (tx) =>
+        tx.update(documents).set({ transmissionAttempts: attempts }).where(eq(documents.cdc, cdc)),
+      );
+
+    it('counts each 0420 on the document without holding it before the bound', async () => {
+      await storeFor(tenantId).record(
+        loteId,
+        { resolutions: [], unresolved: [absent(CDC_B)] },
+        guard,
+      );
+      expect(await readDoc(CDC_B)).toMatchObject({
+        transmissionAttempts: 1,
+        transmissionHold: null,
+      });
+      expect(await readDoc(CDC_A)).toMatchObject({ transmissionAttempts: 0 });
+    });
+
+    it('holds the document at the third 0420 once 48 h passed since the send, and warns', async () => {
+      await setAttempts(CDC_B, 2);
+      await storeFor(tenantId).record(
+        loteId,
+        { resolutions: [approval(CDC_A)], unresolved: [absent(CDC_B)] },
+        guard,
+      );
+      expect(await readDoc(CDC_B)).toMatchObject({
+        transmissionAttempts: 3,
+        transmissionHold: RECOVERY_UNRESOLVED_HOLD,
+        status: 'submitted',
+      });
+      expect(RECOVERY_UNRESOLVED_HOLD).toBe('recovery:0420-unresolved');
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain(RECOVERY_UNRESOLVED_HOLD);
+    });
+
+    it('does not hold before 48 h since the send, however many 0420 came', async () => {
+      await setAttempts(CDC_B, 5);
+      await storeFor(tenantId).record(
+        loteId,
+        { resolutions: [], unresolved: [absent(CDC_B)] },
+        { ...guard, recoveredAt: new Date(SENT_AT.getTime() + 47 * 3_600_000) },
+      );
+      expect((await readDoc(CDC_B)).transmissionHold).toBeNull();
+    });
+
+    it('ignores failures and odd answers: they are not 0420 and never count toward a hold', async () => {
+      await setAttempts(CDC_B, 5);
+      await storeFor(tenantId).record(
+        loteId,
+        {
+          resolutions: [],
+          unresolved: [{ cdc: CDC_B, reason: 'Query failed (SifenTimeoutError)', absent: false }],
+        },
+        guard,
+      );
+      expect(await readDoc(CDC_B)).toMatchObject({
+        transmissionAttempts: 5,
+        transmissionHold: null,
+      });
+    });
+
+    it('settles the lote when every document left is held, so it stops being queried', async () => {
+      await setAttempts(CDC_B, 2);
+      await storeFor(tenantId).record(
+        loteId,
+        { resolutions: [approval(CDC_A)], unresolved: [absent(CDC_B)] },
+        guard,
+      );
+      expect(await readLote()).toMatchObject({ status: 'processed' });
+      expect((await readLote()).lastPollMessage).toContain('held');
+      expect((await storeFor(tenantId).load(loteId))?.cdcs).toEqual([]);
+    });
+
+    it('keeps the lote in recovery while a document is neither resolved nor held', async () => {
+      await setAttempts(CDC_A, 2);
+      await storeFor(tenantId).record(
+        loteId,
+        { resolutions: [], unresolved: [absent(CDC_A), absent(CDC_B)] },
+        guard,
+      );
+      expect((await readDoc(CDC_A)).transmissionHold).toBe(RECOVERY_UNRESOLVED_HOLD);
+      expect((await readDoc(CDC_B)).transmissionHold).toBeNull();
+      expect((await readLote()).status).toBe('recovery');
+      expect((await storeFor(tenantId).load(loteId))?.cdcs).toEqual([CDC_B]);
+    });
+
+    it('holds a queued document of an unknown lote, measured from the lote creation', async () => {
+      const unknown = await seedLote('unknown', 'queued', [CDC_C], SENT_AT);
+      await setAttempts(CDC_C, 2);
+      await storeFor(tenantId).record(
+        unknown,
+        { resolutions: [], unresolved: [absent(CDC_C)] },
+        unknownGuard,
+      );
+      expect(await readDoc(CDC_C)).toMatchObject({
+        status: 'queued',
+        transmissionHold: RECOVERY_UNRESOLVED_HOLD,
+      });
+      expect((await readLoteById(unknown)).status).toBe('processed');
+    });
+
+    it('writes no hold when the record loses the compare-and-set', async () => {
+      await setAttempts(CDC_B, 2);
+      await storeFor(tenantId).record(
+        loteId,
+        { resolutions: [], unresolved: [absent(CDC_B)] },
+        { ...guard, expectedLastPolledAt: new Date('2026-10-03T12:00:00.000Z') },
+      );
+      expect(await readDoc(CDC_B)).toMatchObject({
+        transmissionAttempts: 2,
+        transmissionHold: null,
+      });
+      expect(warnings).toEqual([]);
     });
   });
 });

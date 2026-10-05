@@ -327,4 +327,18 @@ describe('DrizzleTransmissionCycleStore', () => {
       [unknown, leftover].sort(),
     );
   });
+
+  it('does not list a processed lote whose submitted documents are all held', async () => {
+    const heldDoc = await addDocument(tenantId, 'submitted', 1);
+    await handle.db
+      .update(documents)
+      .set({ transmissionHold: 'recovery:0420-unresolved' })
+      .where(eq(documents.id, heldDoc));
+    await addLote(tenantId, 'processed', [heldDoc]);
+    const open = await addLote(tenantId, 'processed', [
+      await addDocument(tenantId, 'submitted', 2),
+      await addDocument(tenantId, 'submitted', 3),
+    ]);
+    expect(await store().recoverableLoteIds(at(30), 10)).toEqual([open]);
+  });
 });

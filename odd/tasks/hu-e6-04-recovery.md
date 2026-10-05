@@ -53,10 +53,10 @@ Out: synchronous emission (HU-E6-05), the 72 h deadline watch, portal UI.
 
 ## Tasks
 
-- [ ] T1 Migration 0031: lotes guard allows `recovery -> processed` (+ down script, snapshot, journal) and its DB test.
-- [ ] T2 `RecoverLoteByCdc` use case (unit tests with `FakeSifenGateway`).
-- [ ] T3 `createDrizzleLoteRecoveryStore` (load, record with CAS, settle via shared `settleDocument`; PGlite tests under RLS).
-- [ ] T4 `TransmissionCycle` + store: `recoverableLoteIds`, `recoverer` dep, report field; worker wiring.
+- [x] T1 Migration 0031: lotes guard allows `recovery -> processed` (+ down script, snapshot, journal) and its DB test.
+- [x] T2 `RecoverLoteByCdc` use case (unit tests with `FakeSifenGateway`).
+- [x] T3 `createDrizzleLoteRecoveryStore` (load, record with CAS, settle via shared `settleDocument`; PGlite tests under RLS).
+- [x] T4 `TransmissionCycle` + store: `recoverableLoteIds`, `recoverer` dep, report field; worker wiring.
 - [ ] T5 Unknown and stale `sending` lotes: stale-sending sweep to `unknown`; recover by a CDC of the lote; 0420 policy.
 - [ ] T6 Docs: roadmap checkbox, plan notes, PR descriptions.
 
@@ -86,3 +86,5 @@ Out: synchronous emission (HU-E6-05), the 72 h deadline watch, portal UI.
 ## Progress
 
 Route: one writer, inline per task. Strict TDD: each PR has a RED commit (failing tests only) then GREEN.
+
+PRs 1 to 5 implemented and verified locally (tsc, lint, depcruise, vitest --coverage at each branch tip). PR 6 (T5, T6) pending.

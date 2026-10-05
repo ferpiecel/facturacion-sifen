@@ -2,8 +2,21 @@ import { SifenFaultError, SifenTransportError } from '../errors.ts';
 import type { SifenGateway, SifenOperation } from '../port.ts';
 import type { SifenEndpoints } from './endpoints.ts';
 import { buildLoteMessage } from './lote-message.ts';
-import { buildConsultaLoteMessage } from './requests.ts';
-import { parseLoteReceipt, parseLoteResult } from './response-parsers.ts';
+import {
+  buildConsultaDEMessage,
+  buildConsultaLoteMessage,
+  buildConsultaRUCMessage,
+  buildEnvioDEMessage,
+  buildEventosMessage,
+} from './requests.ts';
+import {
+  parseConsultaDE,
+  parseConsultaRUC,
+  parseEventos,
+  parseLoteReceipt,
+  parseLoteResult,
+  parseProtocoloDE,
+} from './response-parsers.ts';
 import type { SoapTransport } from './transport.ts';
 
 /** MT v150 §12.3.2.1: siRecepLoteDE messages above 10 000 KB are rejected (0270). */
@@ -19,7 +32,7 @@ export interface SoapSifenGatewayOptions {
  * timeouts, transport failures, SOAP Faults and unusable responses surface as typed errors for the
  * caller to treat as "outcome unknown".
  */
-export class SoapSifenGateway implements Pick<SifenGateway, 'enviarLote' | 'consultarLote'> {
+export class SoapSifenGateway implements SifenGateway {
   private readonly options: SoapSifenGatewayOptions;
 
   constructor(options: SoapSifenGatewayOptions) {
@@ -39,6 +52,38 @@ export class SoapSifenGateway implements Pick<SifenGateway, 'enviarLote' | 'cons
       'consultarLote',
       buildConsultaLoteMessage(request.dId, request.dProtConsLote),
       parseLoteResult,
+    );
+  }
+
+  async enviarDESincronico(request: Parameters<SifenGateway['enviarDESincronico']>[0]) {
+    return await this.call(
+      'enviarDESincronico',
+      buildEnvioDEMessage(request.dId, request.de),
+      parseProtocoloDE,
+    );
+  }
+
+  async consultarDE(request: Parameters<SifenGateway['consultarDE']>[0]) {
+    return await this.call(
+      'consultarDE',
+      buildConsultaDEMessage(request.dId, request.cdc),
+      parseConsultaDE,
+    );
+  }
+
+  async enviarEventos(request: Parameters<SifenGateway['enviarEventos']>[0]) {
+    return await this.call(
+      'enviarEventos',
+      buildEventosMessage(request.dId, request.eventos),
+      parseEventos,
+    );
+  }
+
+  async consultarRUC(request: Parameters<SifenGateway['consultarRUC']>[0]) {
+    return await this.call(
+      'consultarRUC',
+      buildConsultaRUCMessage(request.dId, request.ruc),
+      parseConsultaRUC,
     );
   }
 

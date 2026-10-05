@@ -7,13 +7,14 @@ import { settleDocument, type Tx } from './settle-document.js';
 /** Hold code of a document whose CDC keeps answering 0420: released with `document:release-hold`. */
 export const RECOVERY_UNRESOLVED_HOLD = 'recovery:0420-unresolved';
 /**
- * A CDC is held at its third 0420, and never before 48 h after the lote was sent (Guía 2024: a lote
- * is processed within 24 h and queryable for 48 h): one 0420 may only mean "not processed yet", but
- * the same answer three times, 10 minutes apart, after the window is SIFEN saying it does not hold it.
- * The count is the document's `transmission_attempts`, which the release CLI resets, so an operator
- * who releases the hold gets three more passes before it is held again.
+ * A CDC that answers 0420 at least 48 h after the lote was sent is held. Guía 2024: SIFEN processes a
+ * lote within 24 h and lote queries are valid for 48 h, so past that window a 0420 is SIFEN saying it
+ * does not hold the DE; before it, 0420 may only mean "not processed yet" and is never held. There is
+ * deliberately no per-document counter: `transmission_attempts` belongs to the 0301 backoff and must
+ * not be shared, and a dedicated column would only add a marginal safety margin over the 48 h bound.
+ * The hold is reversible (`document:release-hold`); a released document that still answers 0420 is
+ * held again at the next pass.
  */
-const MAX_ABSENT_ANSWERS = 3;
 const HOLD_AFTER_MS = 48 * 60 * 60 * 1000;
 
 export interface DrizzleLoteRecoveryStoreOptions {
@@ -102,8 +103,8 @@ export function createDrizzleLoteRecoveryStore({
         const heldSince = current.sentAt ?? current.createdAt;
         const eligible = guard.recoveredAt.getTime() - heldSince.getTime() >= HOLD_AFTER_MS;
         const held: string[] = [];
-        for (const { cdc } of outcome.unresolved.filter((entry) => entry.absent)) {
-          const id = await countAbsentAnswer(tx, loteId, cdc, guard.recoveredAt, eligible);
+        for (const { cdc } of outcome.unresolved.filter((entry) => entry.absent && eligible)) {
+          const id = await holdAbsent(tx, loteId, cdc, guard.recoveredAt);
           if (id) held.push(id);
         }
         // Nothing left to query (every other document settled or held): the lote leaves its status.
@@ -130,11 +131,10 @@ export function createDrizzleLoteRecoveryStore({
               .update(lotes)
               .set({
                 status: 'processed',
-                lastPollMessage:
-                  `${reasonOf(current.message)} | held for an operator (${RECOVERY_UNRESOLVED_HOLD})`.replace(
-                    /^ \| /,
-                    '',
-                  ),
+                lastPollMessage: withNote(
+                  handOverReason(current.message),
+                  `held for an operator (${RECOVERY_UNRESOLVED_HOLD})`,
+                ),
               })
               .where(eq(lotes.id, loteId));
           }
@@ -152,58 +152,45 @@ export function createDrizzleLoteRecoveryStore({
 }
 
 /**
- * Counts one 0420 answer on the document and holds it when the bound is reached; returns its id when
- * it was held. Only a document still waiting for SIFEN (`queued` or `submitted`) and not held counts.
+ * Holds one document whose CDC answered 0420 past the window; returns its id when it was held. Only a
+ * document still waiting for SIFEN (`queued` or `submitted`) and not already held is touched.
  */
-async function countAbsentAnswer(
-  tx: Tx,
-  loteId: string,
-  cdc: string,
-  at: Date,
-  eligible: boolean,
-): Promise<string | null> {
-  const doc = (
-    await tx
-      .select({ id: documents.id, attempts: documents.transmissionAttempts })
-      .from(documents)
-      .innerJoin(
-        loteDocuments,
-        and(
-          eq(loteDocuments.tenantId, documents.tenantId),
-          eq(loteDocuments.documentId, documents.id),
-        ),
-      )
-      .where(
-        and(
-          eq(loteDocuments.loteId, loteId),
-          eq(documents.cdc, cdc),
-          inArray(documents.status, ['queued', 'submitted']),
-          isNull(documents.transmissionHold),
-        ),
-      )
-  ).at(0);
-  if (!doc) return null;
-  const attempts = doc.attempts + 1;
-  const hold = eligible && attempts >= MAX_ABSENT_ANSWERS;
-  await tx
+async function holdAbsent(tx: Tx, loteId: string, cdc: string, at: Date): Promise<string | null> {
+  const held = await tx
     .update(documents)
-    .set({
-      transmissionAttempts: attempts,
-      ...(hold ? { transmissionHold: RECOVERY_UNRESOLVED_HOLD } : {}),
-      updatedAt: at,
-    })
-    .where(eq(documents.id, doc.id));
-  return hold ? doc.id : null;
+    .set({ transmissionHold: RECOVERY_UNRESOLVED_HOLD, updatedAt: at })
+    .where(
+      and(
+        eq(documents.cdc, cdc),
+        inArray(documents.status, ['queued', 'submitted']),
+        isNull(documents.transmissionHold),
+        inArray(
+          documents.id,
+          tx
+            .select({ id: loteDocuments.documentId })
+            .from(loteDocuments)
+            .where(eq(loteDocuments.loteId, loteId)),
+        ),
+      ),
+    )
+    .returning({ id: documents.id });
+  return held.at(0)?.id ?? null;
 }
-
-const reasonOf = (message: string | null): string => (message ?? '').split(RECOVERY_NOTE)[0];
 
 /** Marks the start of the recovery's own text in `last_poll_message`; what precedes it is the hand-over reason. */
 const RECOVERY_NOTE = ' | recovery: ';
 
-/** The hand-over reason (0364, window elapsed...) is kept; only the recovery note after it is rewritten. */
+/** The hand-over reason (0364, window elapsed...): what precedes the recovery note, or nothing if there is none. */
+function handOverReason(message: string | null): string | null {
+  return (message ?? '').split(RECOVERY_NOTE)[0].replace(/^recovery: .*/, '') || null;
+}
+
+const withNote = (reason: string | null, note: string): string =>
+  reason === null ? note : `${reason} | ${note}`;
+
+/** The hand-over reason is kept; only the recovery note after it is rewritten. */
 function columnsFor({ unresolved }: LoteRecoveryOutcome, previous: string | null) {
-  const reason = (previous ?? '').split(RECOVERY_NOTE)[0].replace(/^recovery: .*/, '') || null;
+  const reason = handOverReason(previous);
   if (unresolved.length === 0) return { status: 'processed', lastPollMessage: reason };
   const note = `${String(unresolved.length)} document(s) still unresolved by CDC query`;
   return {

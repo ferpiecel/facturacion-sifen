@@ -300,14 +300,14 @@ describe('DrizzleTransmissionCycleStore', () => {
     const statusOf = async (id: string) =>
       (await handle.db.select().from(lotes).where(eq(lotes.id, id)))[0];
 
-    expect(await store().sweepStaleSending(at(2))).toBe(1);
+    expect(await store().sweepStaleSending(at(2), 100)).toBe(1);
 
     expect(await statusOf(stuck)).toMatchObject({ status: 'unknown' });
     expect((await statusOf(stuck)).responseMessage).toContain('no outcome');
     expect((await statusOf(recent)).status).toBe('sending');
     expect((await statusOf(pending)).status).toBe('pending');
     expect((await statusOf(theirs)).status).toBe('sending');
-    expect(await store().sweepStaleSending(at(2))).toBe(0);
+    expect(await store().sweepStaleSending(at(2), 100)).toBe(0);
   });
 
   it('lists unknown lotes and processed ones that still hold submitted documents for recovery', async () => {
@@ -340,5 +340,28 @@ describe('DrizzleTransmissionCycleStore', () => {
       await addDocument(tenantId, 'submitted', 3),
     ]);
     expect(await store().recoverableLoteIds(at(30), 10)).toEqual([open]);
+  });
+
+  it('sweeps strictly before the cutoff: a lote updated exactly at it is left alone', async () => {
+    const lote = await addLote(tenantId, 'sending', [
+      await addDocument(tenantId, 'queued', 1),
+      await addDocument(tenantId, 'queued', 2),
+    ]);
+    expect(await store().sweepStaleSending(at(2), 100)).toBe(0);
+    expect(await store().sweepStaleSending(new Date(at(2).getTime() + 1), 100)).toBe(1);
+    expect((await handle.db.select().from(lotes).where(eq(lotes.id, lote)))[0].status).toBe(
+      'unknown',
+    );
+  });
+
+  it('sweeps at most `limit` lotes per call, oldest first, and the rest on the next one', async () => {
+    const stuck: string[] = [];
+    for (const n of [1, 2, 3]) {
+      stuck.push(await addLote(tenantId, 'sending', [await addDocument(tenantId, 'queued', n)]));
+    }
+    expect(await store().sweepStaleSending(at(5), 2)).toBe(2);
+    expect(await store().sweepStaleSending(at(5), 2)).toBe(1);
+    expect(await store().sweepStaleSending(at(5), 2)).toBe(0);
+    expect(await store().sweepStaleSending(at(5), 0)).toBe(0);
   });
 });

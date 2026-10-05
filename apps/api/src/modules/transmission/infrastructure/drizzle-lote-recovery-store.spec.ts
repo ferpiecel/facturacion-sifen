@@ -14,7 +14,8 @@ import {
   type DatabaseHandle,
 } from '@sifen/db';
 import { seedWebhookEndpoint } from '../../../../test/support/document-seed.js';
-import type { LoteRecoveryOutcome } from '../application/recover-lote-by-cdc.js';
+import { FakeSifenGateway, sifenScenarios } from '@sifen/sifen-gateway';
+import { RecoverLoteByCdc, type LoteRecoveryOutcome } from '../application/recover-lote-by-cdc.js';
 import {
   createDrizzleLoteRecoveryStore,
   RECOVERY_UNRESOLVED_HOLD,
@@ -357,6 +358,43 @@ describe('DrizzleLoteRecoveryStore', () => {
       expect((await readLoteById(unknown)).status).toBe('unknown');
       expect((await readDoc(CDC_C)).status).toBe('approved');
       expect((await readDoc(CDC_D)).status).toBe('queued');
+    });
+
+    it('recovers a mixed 0422 / 0420 lote end to end: one approved, one left queued, lote unknown', async () => {
+      const unknown = await seedLote('unknown', 'queued', [CDC_C, CDC_D]);
+      const gateway = new FakeSifenGateway();
+      gateway.enqueue(
+        'consultarDE',
+        sifenScenarios.cdcEncontrado(`<rDE><DE Id="${CDC_C}"/></rDE>`),
+        sifenScenarios.cdcInexistente(),
+      );
+      let dId = 0n;
+      const recover = new RecoverLoteByCdc({
+        gateway,
+        store: storeFor(tenantId),
+        nextRequestId: () => Promise.resolve((dId += 1n)),
+        now: () => RECOVERED_AT,
+      });
+      expect(await recover.execute({ loteId: unknown })).toMatchObject({ status: 'incomplete' });
+      expect((await readDoc(CDC_C)).status).toBe('approved');
+      expect((await readDoc(CDC_D)).status).toBe('queued');
+      expect((await readLoteById(unknown)).status).toBe('unknown');
+      expect(gateway.callsTo('enviarLote')).toHaveLength(0);
+    });
+
+    it('rolls everything back when a later settlement fails after a document was confirmed', async () => {
+      await seedWebhookEndpoint(handle.db, tenantId);
+      const unknown = await seedLote('unknown', 'queued', [CDC_C]);
+      await expect(
+        storeFor(tenantId).record(
+          unknown,
+          { resolutions: [approval(CDC_C), approval(CDC_D)], unresolved: [] },
+          unknownGuard,
+        ),
+      ).rejects.toThrow(CDC_D);
+      expect((await readDoc(CDC_C)).status).toBe('queued');
+      expect((await readLoteById(unknown)).status).toBe('unknown');
+      expect(await handle.db.select().from(webhookDeliveries)).toEqual([]);
     });
 
     it('writes nothing when the expected status is not the lote status', async () => {

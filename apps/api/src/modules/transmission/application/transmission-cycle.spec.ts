@@ -68,7 +68,8 @@ function setup(o: Setup = {}) {
       log.push(`recoverable@${at.toISOString()}`);
       return Promise.resolve(o.recoverable ?? []);
     },
-    sweepStaleSending: (cutoff) => {
+    sweepStaleSending: (cutoff, limit) => {
+      limits.sweep = limit;
       log.push(`sweep@${cutoff.toISOString()}`);
       return o.sweepFails ? Promise.reject(new Error('db down')) : Promise.resolve(o.swept ?? 0);
     },
@@ -319,11 +320,11 @@ describe('TransmissionCycle', () => {
       held: [],
       stalePending: 0,
     });
-    expect(defaults.limits).toEqual({ sign: 50, send: 20, poll: 20, recover: 10 });
+    expect(defaults.limits).toEqual({ sign: 50, send: 20, poll: 20, recover: 10, sweep: 100 });
 
-    const custom = setup({ batch: { sign: 3, send: 2, poll: 1, recover: 4 } });
+    const custom = setup({ batch: { sign: 3, send: 2, poll: 1, recover: 4, sweep: 7 } });
     await custom.cycle.run();
-    expect(custom.limits).toEqual({ sign: 3, send: 2, poll: 1, recover: 4 });
+    expect(custom.limits).toEqual({ sign: 3, send: 2, poll: 1, recover: 4, sweep: 7 });
   });
 
   it('parks a document that fails signing with a deterministic error, by error class', async () => {

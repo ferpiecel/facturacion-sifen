@@ -197,6 +197,10 @@ describe('lotes', () => {
     ['unknown', 'recovery'],
     ['processed', 'sent'],
     ['processed', 'recovery'],
+    ['recovery', 'pending'],
+    ['recovery', 'sending'],
+    ['recovery', 'unknown'],
+    ['recovery', 'rejected'],
     ['recovery', 'sent'],
   ])('rejects the transition %s -> %s', async (from, to) => {
     const { db, a, lote } = await seed();

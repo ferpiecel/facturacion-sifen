@@ -775,6 +775,11 @@ export const documents = pgTable(
     signedAt: timestamp('signed_at', { withTimezone: true }),
     /** Times the lote carrying this document was refused with 0301; drives the re-queue cap (HU-E6-02). */
     transmissionAttempts: integer('transmission_attempts').notNull().default(0),
+    /**
+     * When the recovery queued the document again after SIFEN kept answering 0420 past the window
+     * (HU-E6-04): write-once, and the only door of the `submitted -> queued` transition.
+     */
+    resentAt: timestamp('resent_at', { withTimezone: true }),
     /** Not eligible for a new lote before this instant (backoff after 0301). */
     nextTransmissionAt: timestamp('next_transmission_at', { withTimezone: true }),
     /**

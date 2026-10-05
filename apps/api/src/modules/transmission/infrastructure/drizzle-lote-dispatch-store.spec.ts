@@ -4,6 +4,7 @@ import {
   createPgliteDatabase,
   documents,
   loteDocuments,
+  auditLog,
   lotes,
   tenantEstablishments,
   tenantExpeditionPoints,
@@ -176,6 +177,88 @@ describe('DrizzleLoteDispatchStore', () => {
       storeFor(tenantId).record(loteId, { status: 'sent', dProtConsLote: '1' }),
     ).rejects.toThrow(/not in sending/);
     expect((await readLote()).status).toBe('pending');
+  });
+
+  describe('a send that finishes after the sweep moved the lote to unknown', () => {
+    /** claim, then what `sweepStaleSending` does to a lote whose outcome was never recorded. */
+    async function sweptLote() {
+      await storeFor(tenantId).claim(loteId);
+      await handle.db.update(lotes).set({ status: 'unknown' }).where(eq(lotes.id, loteId));
+    }
+
+    it('still records the protocol, the poll schedule and submits the documents', async () => {
+      const cdcs = await seedDocuments(['queued']);
+      await sweptLote();
+      await storeFor(tenantId).record(loteId, { status: 'sent', dProtConsLote: '4500123' });
+      expect(await readLote()).toMatchObject({
+        status: 'sent',
+        sifenProtocol: '4500123',
+        nextPollAt: new Date('2026-10-01T12:10:00.000Z'),
+      });
+      expect(await statusOf(cdcs.queued)).toBe('submitted');
+    });
+
+    it('records a 0301 refusal of it and backs the documents off', async () => {
+      const cdcs = await seedDocuments(['queued']);
+      await sweptLote();
+      await storeFor(tenantId).record(loteId, {
+        status: 'rejected',
+        code: '0301',
+        reason: 'RUC bloqueado',
+      });
+      expect((await readLote()).status).toBe('rejected');
+      expect((await readDocument(cdcs.queued)).transmissionAttempts).toBe(1);
+    });
+
+    it('clears the recovery hold of the documents SIFEN did receive, with an audit row each', async () => {
+      await seedDocuments(['queued', 'queued', 'queued', 'approved']);
+      const byNumber = await handle.db
+        .select({ cdc: documents.cdc })
+        .from(documents)
+        .orderBy(documents.number);
+      const [recoveryHeld, otherHeld, plain, approved] = byNumber.map((d) => d.cdc);
+      const hold = (cdc: string, reason: string) =>
+        handle.db.update(documents).set({ transmissionHold: reason }).where(eq(documents.cdc, cdc));
+      await hold(recoveryHeld, 'recovery:0420-unresolved');
+      await hold(otherHeld, 'signing:CertificateNotFoundError');
+      await hold(approved, 'recovery:0420-unresolved');
+      await sweptLote();
+
+      await storeFor(tenantId).record(loteId, { status: 'sent', dProtConsLote: '4500123' });
+
+      expect(await readDocument(recoveryHeld)).toMatchObject({
+        status: 'submitted',
+        transmissionHold: null,
+      });
+      expect(await readDocument(otherHeld)).toMatchObject({
+        status: 'submitted',
+        transmissionHold: 'signing:CertificateNotFoundError',
+      });
+      expect(await readDocument(plain)).toMatchObject({ status: 'submitted' });
+      expect(await readDocument(approved)).toMatchObject({
+        status: 'approved',
+        transmissionHold: 'recovery:0420-unresolved',
+      });
+      const audits = await handle.db.select().from(auditLog);
+      expect(audits).toHaveLength(1);
+      expect(audits[0]).toMatchObject({
+        action: 'document.hold_released',
+        entityType: 'document',
+        actorType: 'operator',
+        actorId: 'transmission-worker',
+        before: { transmissionHold: 'recovery:0420-unresolved' },
+        after: { transmissionHold: null },
+      });
+    });
+
+    it('still refuses a lote that recovery already closed', async () => {
+      await sweptLote();
+      await handle.db.update(lotes).set({ status: 'processed' }).where(eq(lotes.id, loteId));
+      await expect(
+        storeFor(tenantId).record(loteId, { status: 'sent', dProtConsLote: '1' }),
+      ).rejects.toThrow(/not in sending or unknown/);
+      expect((await readLote()).sifenProtocol).toBeNull();
+    });
   });
 
   it('marks the queued documents of a sent lote as submitted', async () => {

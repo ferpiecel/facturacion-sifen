@@ -169,9 +169,27 @@ export function createDrizzleTransmissionCycleStore({
       return rows.map((row) => row.id);
     },
 
-    async sweepStaleSending(cutoff) {
-      const swept = await withTenantTransaction(db, tenantId, (tx) =>
-        tx
+    async sweepStaleSending(cutoff, limit) {
+      const swept = await withTenantTransaction(db, tenantId, (tx) => {
+        // A CTE, so the LIMIT applies to the locked rows (an IN subquery may be re-run and exceed it).
+        const picked = tx.$with('picked').as(
+          tx
+            .select({ id: lotes.id })
+            .from(lotes)
+            .where(
+              and(
+                eq(lotes.tenantId, tenantId),
+                eq(lotes.status, 'sending'),
+                lt(lotes.updatedAt, cutoff),
+              ),
+            )
+            .orderBy(asc(lotes.updatedAt), asc(lotes.id))
+            .limit(limit)
+            // A lote being recorded right now is skipped, not waited for: the next cycle sees it.
+            .for('update', { skipLocked: true }),
+        );
+        return tx
+          .with(picked)
           .update(lotes)
           .set({
             status: 'unknown',
@@ -180,13 +198,15 @@ export function createDrizzleTransmissionCycleStore({
           })
           .where(
             and(
-              eq(lotes.tenantId, tenantId),
+              // Re-checked on the row version the UPDATE sees: a lote that recorded `sent` after the ids
+              // were chosen is not forced back to `unknown`.
               eq(lotes.status, 'sending'),
               lt(lotes.updatedAt, cutoff),
+              inArray(lotes.id, tx.select({ id: picked.id }).from(picked)),
             ),
           )
-          .returning({ id: lotes.id }),
-      );
+          .returning({ id: lotes.id });
+      });
       return swept.length;
     },
 

@@ -673,6 +673,40 @@ describe('DrizzleLoteRecoveryStore', () => {
     });
   });
 
+  describe('capped passes over time', () => {
+    it('ask every CDC across passes even when none of them ever resolves (maxQueries 1)', async () => {
+      await handle.db.execute(
+        sql`update documents set updated_at = '2026-09-01T00:00:00Z' where cdc = ${CDC_A}`,
+      );
+      await handle.db.execute(
+        sql`update documents set updated_at = '2026-09-02T00:00:00Z' where cdc = ${CDC_B}`,
+      );
+      const gateway = new FakeSifenGateway();
+      gateway.setDefault('consultarDE', new Error('SIFEN unavailable'));
+      let now = RECOVERED_AT;
+      let dId = 0n;
+      const recover = new RecoverLoteByCdc({
+        gateway,
+        store: storeFor(tenantId),
+        nextRequestId: () => Promise.resolve((dId += 1n)),
+        now: () => now,
+        maxQueries: 1,
+      });
+
+      await recover.execute({ loteId });
+      now = new Date(now.getTime() + 11 * 60_000);
+      await recover.execute({ loteId });
+      now = new Date(now.getTime() + 11 * 60_000);
+      await recover.execute({ loteId });
+
+      expect(gateway.callsTo('consultarDE').map(([request]) => request.cdc)).toEqual([
+        CDC_A,
+        CDC_B,
+        CDC_A,
+      ]);
+    });
+  });
+
   describe('a failing alert', () => {
     it('cannot fail the record after the commit: the hold stays and record still returns true', async () => {
       const failing = createDrizzleLoteRecoveryStore({

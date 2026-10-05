@@ -253,6 +253,28 @@ describe('RecoverLoteByCdc', () => {
     expect(await recover.execute({ loteId: 'lote-1' })).toEqual({ status: 'stale' });
   });
 
+  describe('maxQueries validation', () => {
+    const build = (maxQueries: number) =>
+      new RecoverLoteByCdc({
+        gateway: new FakeSifenGateway(),
+        store: new InMemoryRecoveryStore(null),
+        nextRequestId: () => Promise.resolve(1n),
+        maxQueries,
+      });
+
+    it.each([0, -1, Number.NaN, 1.5, Number.POSITIVE_INFINITY])(
+      'rejects %s at construction: it would silently stop the lote from ever being asked',
+      (value) => {
+        expect(() => build(value)).toThrow(RangeError);
+        expect(() => build(value)).toThrow(/maxQueries/);
+      },
+    );
+
+    it('accepts 1, the smallest value that still makes progress', () => {
+      expect(() => build(1)).not.toThrow();
+    });
+  });
+
   describe('bounded and abortable queries', () => {
     const cdcsOf = (n: number): string[] =>
       Array.from({ length: n }, (_, i) => String(i + 1).padStart(44, '0'));

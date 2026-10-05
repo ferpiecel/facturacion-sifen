@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Header,
   HttpCode,
   HttpStatus,
   Inject,
@@ -41,6 +42,7 @@ export class WebhookEndpointsController {
 
   @Post()
   @RequireScopes('webhooks:write')
+  @Header('Cache-Control', 'private, no-store') // the response carries the secret
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() body: unknown) {
     const { endpoint, secret } = await this.endpoints
@@ -70,6 +72,7 @@ export class WebhookEndpointsController {
 
   @Post(':id/rotate-secret')
   @RequireScopes('webhooks:write')
+  @Header('Cache-Control', 'private, no-store') // the response carries the secret
   @HttpCode(HttpStatus.OK)
   async rotate(@Param('id') id: string) {
     const { endpoint, secret } = await this.endpoints

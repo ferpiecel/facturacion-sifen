@@ -6,7 +6,7 @@ describe('webhook endpoint input (HU-E11-01 API)', () => {
     'https://hooks.example.com/sifen',
     'https://hooks.example.com:8443/a?b=1#c',
     'https://8.8.8.8/x',
-    'https://[2606:4700:4700::1111]/x',
+    'https://8.8.4.4/y',
   ])('accepts the url %s', (url) => {
     expect(validateEndpointUrl(url)).toEqual({ ok: true, value: url });
   });
@@ -25,6 +25,7 @@ describe('webhook endpoint input (HU-E11-01 API)', () => {
     ['https://10.1.2.3/x', 'private literal'],
     ['https://169.254.169.254/latest', 'metadata literal'],
     ['https://[::1]/x', 'IPv6 loopback literal'],
+    ['https://[2606:4700:4700::1111]/x', 'any IPv6 literal (the DB CHECK rejects ":" in the host)'],
     ['https://[fd00::1]/x', 'IPv6 unique-local literal'],
     ['https://localhost/x', 'localhost'],
     ['https://api.localhost/x', 'localhost subdomain'],

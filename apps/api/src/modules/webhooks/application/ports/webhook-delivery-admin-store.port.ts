@@ -26,11 +26,14 @@ export interface DeliveryQuery {
 export interface WebhookDeliveryAdminStore {
   /** Newest first; may return up to `limit + 1` items so the service can tell whether a next page exists. */
   list(tenantId: string, query: DeliveryQuery): Promise<DeliveryView[]>;
-  /** Dead to pending, due now; `not-dead` when it is in any other state, null when unknown. */
+  /**
+   * Dead to pending, due now; `not-dead` when it is in any other state, `endpoint-inactive` when its
+   * endpoint is disabled (it would be claimed by nobody), null when unknown.
+   */
   replay(
     tenantId: string,
     actor: Actor,
     id: string,
     at: Date,
-  ): Promise<DeliveryView | 'not-dead' | null>;
+  ): Promise<DeliveryView | 'not-dead' | 'endpoint-inactive' | null>;
 }

@@ -24,8 +24,11 @@ const toView = (row: Row): EndpointView => ({
  * Audit shape: never the sealed secret. The version is called `key_version` because the audit
  * redactor masks any key containing "secret".
  */
+/** Scheme, host and path only: a query string or fragment may carry a token. */
+const auditableUrl = (url: string): string => url.split(/[?#]/)[0];
+
 const audited = (row: Row) => ({
-  url: row.url,
+  url: auditableUrl(row.url),
   events: row.events,
   active: row.active,
   key_version: row.secretVersion,
@@ -35,7 +38,9 @@ const ENTITY = 'webhook_endpoint';
 
 /** `WebhookEndpointStore` over `webhook_endpoints`: app_user inside the tenant's transaction, audit in the same one. */
 export function createDrizzleWebhookEndpointStore(db: Database): WebhookEndpointStore {
-  const byId = (id: string) => eq(webhookEndpoints.id, id);
+  // RLS already scopes every query to the tenant; the explicit predicate is defence in depth.
+  const byId = (tenantId: string, id: string) =>
+    and(eq(webhookEndpoints.tenantId, tenantId), eq(webhookEndpoints.id, id));
   return {
     insert(tenantId, actor, { id, url, events, sealed }) {
       return withTenantTransaction(db, tenantId, async (tx) => {
@@ -66,7 +71,7 @@ export function createDrizzleWebhookEndpointStore(db: Database): WebhookEndpoint
 
     async find(tenantId, id) {
       const rows = await withTenantTransaction(db, tenantId, (tx) =>
-        tx.select().from(webhookEndpoints).where(byId(id)),
+        tx.select().from(webhookEndpoints).where(byId(tenantId, id)),
       );
       const row = rows.at(0);
       return row
@@ -80,7 +85,7 @@ export function createDrizzleWebhookEndpointStore(db: Database): WebhookEndpoint
 
     update(tenantId, actor, id, patch) {
       return withTenantTransaction(db, tenantId, async (tx) => {
-        const before = (await tx.select().from(webhookEndpoints).where(byId(id))).at(0);
+        const before = (await tx.select().from(webhookEndpoints).where(byId(tenantId, id))).at(0);
         if (!before) return null;
         const [row] = await tx
           .update(webhookEndpoints)
@@ -89,7 +94,7 @@ export function createDrizzleWebhookEndpointStore(db: Database): WebhookEndpoint
             ...(patch.events !== undefined ? { events: [...patch.events] } : {}),
             ...(patch.active !== undefined ? { active: patch.active } : {}),
           })
-          .where(byId(id))
+          .where(byId(tenantId, id))
           .returning();
         await recordAudit(tx, {
           actor,
@@ -104,11 +109,11 @@ export function createDrizzleWebhookEndpointStore(db: Database): WebhookEndpoint
 
     rotate(tenantId, actor, id, change) {
       return withTenantTransaction(db, tenantId, async (tx) => {
-        const before = (await tx.select().from(webhookEndpoints).where(byId(id))).at(0);
+        const before = (await tx.select().from(webhookEndpoints).where(byId(tenantId, id))).at(0);
         if (!before) return null;
         if (before.secretVersion !== change.expectedVersion) return 'stale';
         // The guard trigger enforces version + 1, previous = old sealed, and a 7 day overlap at most.
-        const [row] = await tx
+        const rows = await tx
           .update(webhookEndpoints)
           .set({
             sealed: change.sealed,
@@ -116,8 +121,13 @@ export function createDrizzleWebhookEndpointStore(db: Database): WebhookEndpoint
             previousSealed: change.previousSealed,
             previousExpiresAt: change.previousExpiresAt,
           })
-          .where(and(byId(id), eq(webhookEndpoints.secretVersion, change.expectedVersion)))
+          .where(
+            and(byId(tenantId, id), eq(webhookEndpoints.secretVersion, change.expectedVersion)),
+          )
           .returning();
+        const row = rows.at(0);
+        // A concurrent rotation can win between the read above and this write: nothing to audit.
+        if (row === undefined) return 'stale';
         await recordAudit(tx, {
           actor,
           action: `${ENTITY}.rotate_secret`,

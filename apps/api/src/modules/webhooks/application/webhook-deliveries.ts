@@ -23,6 +23,13 @@ export class WebhookDeliveryNotDeadError extends Error {
   }
 }
 
+export class WebhookEndpointInactiveError extends Error {
+  constructor() {
+    super('endpoint inactive');
+    this.name = 'WebhookEndpointInactiveError';
+  }
+}
+
 const STATUSES = ['pending', 'failed', 'delivered', 'dead'];
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
@@ -97,6 +104,7 @@ export function createWebhookDeliveryService({
       const result = await store.replay(tenantId, actor, id, now());
       if (result === null) throw new WebhookDeliveryNotFoundError();
       if (result === 'not-dead') throw new WebhookDeliveryNotDeadError();
+      if (result === 'endpoint-inactive') throw new WebhookEndpointInactiveError();
       return result;
     },
   };

@@ -107,6 +107,14 @@ describe('/v1/webhooks (e2e)', () => {
     expect(list.body).not.toContain('ciphertext');
   });
 
+  it('keeps responses that carry a secret out of every cache', async () => {
+    const created = await create();
+    expect(created.headers['cache-control']).toBe('private, no-store');
+    const { id } = created.json<EndpointBody>();
+    const rotated = await call('POST', `/v1/webhooks/endpoints/${id}/rotate-secret`, owner);
+    expect(rotated.headers['cache-control']).toBe('private, no-store');
+  });
+
   it('rejects an invalid url or events with 422 and every error', async () => {
     const response = await create(owner, { url: 'https://10.0.0.1/hook', events: ['nope'] });
     expect(response.statusCode).toBe(422);

@@ -12,13 +12,9 @@ import { SafeWebhookHttp } from '../modules/webhooks/infrastructure/safe-webhook
 
 /**
  * Webhook delivery job wiring (HU-E11-01, plan §10 queue `webhook-delivery`). Deliberately free of
- * `bullmq`: the transmission worker (HU-E6-02 worker PRs) owns the Worker/Queue bootstrap, and plugs
- * this in with
- *
- *   new Worker(WEBHOOK_DELIVERY_QUEUE, createWebhookDeliveryProcessor({ db, ...createWebhookDeliveryDeps(process.env) }))
- *   const { name, data, opts } = webhookDeliveryJob(tenantId); queue.add(name, data, opts)
- *
- * once per tenant (the repeatable job is idempotent through its `jobId`).
+ * `bullmq`: `worker.ts` owns the Worker/Queue bootstrap (`createWebhookDeliveryQueue`/`Worker` in
+ * `queue.ts`) and `startTransmissionWorker` reconciles one repeatable `webhookDeliveryJob(tenantId)`
+ * per active tenant (idempotent through its scheduler key).
  */
 export const WEBHOOK_DELIVERY_QUEUE = 'webhook-delivery';
 const JOB_NAME = 'dispatch';

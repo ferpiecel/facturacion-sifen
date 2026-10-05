@@ -153,6 +153,7 @@ export function createDrizzleTransmissionCycleStore({
                       ON ${documents.tenantId} = ${loteDocuments.tenantId}
                       AND ${documents.id} = ${loteDocuments.documentId}
                     WHERE ${loteDocuments.loteId} = ${lotes.id} AND ${documents.status} = 'submitted'
+                      AND ${documents.transmissionHold} IS NULL
                   )`,
                 ),
               ),

@@ -23,6 +23,8 @@ export interface LoteRecoveryState {
 export interface UnresolvedCdc {
   readonly cdc: string;
   readonly reason: string;
+  /** SIFEN answered 0420 (no approved DE): the only answer that counts toward holding the document. */
+  readonly absent?: boolean;
 }
 
 export interface LoteRecoveryOutcome {
@@ -91,7 +93,7 @@ export class RecoverLoteByCdc {
     for (const cdc of lote.cdcs) {
       const answer = await this.query(cdc);
       if ('resolution' in answer) resolutions.push(answer.resolution);
-      else unresolved.push({ cdc, reason: answer.reason });
+      else unresolved.push({ cdc, ...answer });
     }
 
     const outcome = { resolutions, unresolved };
@@ -106,7 +108,7 @@ export class RecoverLoteByCdc {
 
   private async query(
     cdc: string,
-  ): Promise<{ resolution: DocumentResolution } | { reason: string }> {
+  ): Promise<{ resolution: DocumentResolution } | { reason: string; absent: boolean }> {
     try {
       const answer = await this.deps.gateway.consultarDE({
         dId: await this.deps.nextRequestId(),
@@ -125,10 +127,16 @@ export class RecoverLoteByCdc {
           },
         };
       }
-      return { reason: `${answer.dCodRes}: ${capped(answer.dMsgRes)}` };
+      return {
+        reason: `${answer.dCodRes}: ${capped(answer.dMsgRes)}`,
+        absent: answer.dCodRes === SIFEN_CODES.CDC_INEXISTENTE,
+      };
     } catch (error) {
       // Only the error class is kept: messages may carry hosts, paths or certificate details.
-      return { reason: `Query failed (${error instanceof Error ? error.name : 'unknown error'})` };
+      return {
+        reason: `Query failed (${error instanceof Error ? error.name : 'unknown error'})`,
+        absent: false,
+      };
     }
   }
 

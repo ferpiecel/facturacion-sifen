@@ -69,7 +69,7 @@ export function createTenantCycleFactory({
       }),
       recoverer: new RecoverLoteByCdc({
         gateway,
-        store: createDrizzleLoteRecoveryStore({ db, tenantId }),
+        store: createDrizzleLoteRecoveryStore({ db, tenantId, logger }),
         nextRequestId: () => store.nextRequestId(),
         now,
       }),

@@ -113,7 +113,11 @@ describe('DrizzleLoteRecoveryStore', () => {
 
   const storeFor = (tenant: string) =>
     createDrizzleLoteRecoveryStore({ db: handle.db, tenantId: tenant });
-  const guard = { expectedLastPolledAt: HANDED_OVER_AT as Date | null, recoveredAt: RECOVERED_AT };
+  const guard = {
+    expectedStatus: 'recovery',
+    expectedLastPolledAt: HANDED_OVER_AT as Date | null,
+    recoveredAt: RECOVERED_AT,
+  };
   const readLote = () =>
     withTenantTransaction(handle.db, tenantId, (tx) =>
       tx.select().from(lotes).where(eq(lotes.id, loteId)),
@@ -249,5 +253,165 @@ describe('DrizzleLoteRecoveryStore', () => {
     await storeFor(tenantId).record(loteId, recovered, guard);
     const deliveries = await handle.db.select().from(webhookDeliveries);
     expect(deliveries.map((d) => d.eventType)).toEqual(['document.approved', 'document.approved']);
+  });
+
+  /** A second lote (inserted directly, in any status) with its own documents. */
+  async function seedLote(status: string, documentStatus: string, cdcs: string[]) {
+    const { db } = handle;
+    const [est] = await db.select().from(tenantEstablishments);
+    const [point] = await db.select().from(tenantExpeditionPoints);
+    const [timbrado] = await db.select().from(tenantTimbrados);
+    const docs = await db
+      .insert(documents)
+      .values(
+        cdcs.map((cdc, i) => ({
+          tenantId,
+          environment: 'test' as const,
+          timbradoId: timbrado.id,
+          establishmentId: est.id,
+          expeditionPointId: point.id,
+          documentType: 1,
+          number: 100 + i,
+          cdc,
+          securityCode: '123456789',
+          status: documentStatus,
+          issuedAt: new Date('2026-01-01T12:00:00Z'),
+          totalAmount: '110000',
+          payload: {},
+        })),
+      )
+      .returning();
+    const [lote] = await db
+      .insert(lotes)
+      .values({
+        tenantId,
+        environment: 'test',
+        documentType: 1,
+        status,
+        lastPollMessage: status === 'processed' ? '1 document(s) need recovery' : null,
+      })
+      .returning();
+    await db
+      .insert(loteDocuments)
+      .values(docs.map((d) => ({ tenantId, loteId: lote.id, documentId: d.id })));
+    return lote.id;
+  }
+  const CDC_C = '01800695631001001000000312026010111234567893';
+  const CDC_D = '01800695631001001000000412026010111234567894';
+  const readLoteById = (id: string) =>
+    withTenantTransaction(handle.db, tenantId, (tx) =>
+      tx.select().from(lotes).where(eq(lotes.id, id)),
+    ).then((rows) => rows[0]);
+  const unknownGuard = { ...guard, expectedStatus: 'unknown', expectedLastPolledAt: null };
+
+  describe('lote sent without an answer (unknown)', () => {
+    it('loads the queued CDCs: SIFEN may hold them although the send was never confirmed', async () => {
+      const unknown = await seedLote('unknown', 'queued', [CDC_C, CDC_D]);
+      const state = await storeFor(tenantId).load(unknown);
+      expect(state).toMatchObject({ status: 'unknown', lastPolledAt: null });
+      expect([...(state?.cdcs ?? [])].sort()).toEqual([CDC_C, CDC_D]);
+    });
+
+    it('approves a found CDC through submitted, with both events, and closes the lote', async () => {
+      await seedWebhookEndpoint(handle.db, tenantId);
+      const unknown = await seedLote('unknown', 'queued', [CDC_C, CDC_D]);
+      const applied = await storeFor(tenantId).record(
+        unknown,
+        { resolutions: [approval(CDC_C), approval(CDC_D)], unresolved: [] },
+        unknownGuard,
+      );
+      expect(applied).toBe(true);
+      expect(await readLoteById(unknown)).toMatchObject({ status: 'processed' });
+      expect((await readDoc(CDC_C)).status).toBe('approved');
+      const events = await handle.db.select().from(webhookDeliveries);
+      expect(events.map((e) => e.eventType).sort()).toEqual([
+        'document.approved',
+        'document.approved',
+        'document.submitted',
+        'document.submitted',
+      ]);
+    });
+
+    it('keeps the lote unknown while a CDC is unresolved and leaves that document queued', async () => {
+      const unknown = await seedLote('unknown', 'queued', [CDC_C, CDC_D]);
+      await storeFor(tenantId).record(
+        unknown,
+        { resolutions: [approval(CDC_C)], unresolved: [{ cdc: CDC_D, reason: '0420' }] },
+        unknownGuard,
+      );
+      expect((await readLoteById(unknown)).status).toBe('unknown');
+      expect((await readDoc(CDC_C)).status).toBe('approved');
+      expect((await readDoc(CDC_D)).status).toBe('queued');
+    });
+
+    it('writes nothing when the expected status is not the lote status', async () => {
+      const unknown = await seedLote('unknown', 'queued', [CDC_C]);
+      expect(
+        await storeFor(tenantId).record(
+          unknown,
+          { resolutions: [approval(CDC_C)], unresolved: [] },
+          { ...unknownGuard, expectedStatus: 'recovery' },
+        ),
+      ).toBe(false);
+      expect((await readDoc(CDC_C)).status).toBe('queued');
+    });
+  });
+
+  describe('lote processed with documents left submitted', () => {
+    it('loads the submitted CDCs and settles them, keeping the lote processed', async () => {
+      const done = await seedLote('processed', 'submitted', [CDC_C, CDC_D]);
+      const store = storeFor(tenantId);
+      expect([...((await store.load(done))?.cdcs ?? [])].sort()).toEqual([CDC_C, CDC_D]);
+      const processedGuard = { ...guard, expectedStatus: 'processed', expectedLastPolledAt: null };
+      await store.record(
+        done,
+        { resolutions: [approval(CDC_C)], unresolved: [{ cdc: CDC_D, reason: '0420' }] },
+        processedGuard,
+      );
+      expect((await readLoteById(done)).status).toBe('processed');
+      expect((await readDoc(CDC_C)).status).toBe('approved');
+      expect((await store.load(done))?.cdcs).toEqual([CDC_D]);
+    });
+  });
+
+  describe('hand-over reason', () => {
+    it('is kept when a pass leaves CDCs unresolved, without piling up, and when it settles them', async () => {
+      await handle.db.execute(
+        sql`update lotes set last_poll_message = '0364: Consulta extemporanea' where id = ${loteId}`,
+      );
+      const store = storeFor(tenantId);
+      const pending = { resolutions: [approval(CDC_A)], unresolved: [{ cdc: CDC_B, reason: 'x' }] };
+      await store.record(loteId, pending, guard);
+      const first = (await readLote()).lastPollMessage ?? '';
+      expect(first).toContain('0364: Consulta extemporanea');
+      expect(first).toContain('1 document(s) still unresolved');
+
+      await store.record(
+        loteId,
+        { resolutions: [], unresolved: [{ cdc: CDC_B, reason: 'x' }] },
+        {
+          ...guard,
+          expectedLastPolledAt: RECOVERED_AT,
+          recoveredAt: new Date('2026-10-03T12:30:00Z'),
+        },
+      );
+      const second = (await readLote()).lastPollMessage ?? '';
+      expect(second.match(/0364: Consulta extemporanea/g)).toHaveLength(1);
+      expect(second.match(/still unresolved/g)).toHaveLength(1);
+
+      await store.record(
+        loteId,
+        { resolutions: [approval(CDC_B)], unresolved: [] },
+        {
+          ...guard,
+          expectedLastPolledAt: new Date('2026-10-03T12:30:00Z'),
+          recoveredAt: new Date('2026-10-03T12:45:00Z'),
+        },
+      );
+      expect(await readLote()).toMatchObject({
+        status: 'processed',
+        lastPollMessage: '0364: Consulta extemporanea',
+      });
+    });
   });
 });

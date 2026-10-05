@@ -193,7 +193,6 @@ describe('lotes', () => {
     ['unknown', 'sending'],
     ['pending', 'processed'],
     ['sending', 'processed'],
-    ['unknown', 'processed'],
     ['unknown', 'recovery'],
     ['processed', 'sent'],
     ['processed', 'recovery'],
@@ -223,6 +222,7 @@ describe('lotes', () => {
     ['sent', 'processed'],
     ['sent', 'recovery'],
     ['recovery', 'processed'],
+    ['unknown', 'processed'],
   ])('allows the transition %s -> %s', async (from, to) => {
     const { db, a, lote } = await seed();
     const [row] = await db

@@ -51,6 +51,32 @@ function setup(options: { tenants?: string[]; directoryFails?: boolean } = {}) {
   return { deps, events, logs, tick: () => tick?.() };
 }
 
+function withWebhooks(deps: ReturnType<typeof setup>['deps'], events: string[]) {
+  return {
+    ...deps,
+    webhooks: {
+      everyMs: 30_000,
+      schedules: {
+        list: () => Promise.resolve(['a', 'gone']),
+        upsert: (id: string, every: number) => {
+          events.push(`wh-upsert:${id}:${String(every)}`);
+          return Promise.resolve();
+        },
+        remove: (id: string) => {
+          events.push(`wh-remove:${id}`);
+          return Promise.resolve();
+        },
+      } satisfies TenantScheduleStore,
+      createWorker: () => ({
+        close: () => {
+          events.push('webhook-worker-closed');
+          return Promise.resolve();
+        },
+      }),
+    },
+  };
+}
+
 /** Spec: HU-E6-02 (S5e). Worker lifecycle: schedule every tenant, keep schedules fresh, stop gracefully. */
 describe('startTransmissionWorker', () => {
   it('schedules every tenant at the cadence, starts the worker and reconciles periodically', async () => {
@@ -85,5 +111,105 @@ describe('startTransmissionWorker', () => {
     expect(ok.logs.join('\n')).not.toContain('postgres://');
     expect(logs.join('\n')).not.toContain('postgres://');
     expect(tick).toBeTypeOf('function');
+  });
+
+  /** Spec: HU-E11-01. The webhook delivery queue runs next to the transmission one. */
+  it('also schedules the webhook delivery job per tenant, dropping the ones that are gone', async () => {
+    const { deps, events } = setup();
+
+    await startTransmissionWorker(withWebhooks(deps, events));
+
+    expect(events).toEqual([
+      'upsert:a:60000',
+      'upsert:b:60000',
+      'wh-upsert:a:30000',
+      'wh-upsert:b:30000',
+      'wh-remove:gone',
+      'interval:300000',
+    ]);
+  });
+
+  it('reconciles the webhook schedules on every periodic tick', async () => {
+    const { deps, events, tick } = setup();
+    await startTransmissionWorker(withWebhooks(deps, events));
+    events.length = 0;
+
+    tick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Webhook store already knows `a`: only the new tenant is added, the stale one removed.
+    expect(events).toEqual([
+      'upsert:a:60000',
+      'upsert:b:60000',
+      'wh-upsert:b:30000',
+      'wh-remove:gone',
+    ]);
+  });
+
+  it('closes the webhook worker together with the transmission one on stop', async () => {
+    const { deps, events } = setup();
+    const running = await startTransmissionWorker(withWebhooks(deps, events));
+
+    await running.stop();
+
+    expect(events.slice(-3)).toEqual([
+      'interval-cleared',
+      'worker-closed',
+      'webhook-worker-closed',
+    ]);
+  });
+
+  /** Review findings (HU-E11-01): one queue failing must not take the other down. */
+  it('starts and keeps scheduling transmission when the webhook reconcile fails, logging it apart', async () => {
+    const { deps, events, logs, tick } = setup();
+    const failing = withWebhooks(deps, events);
+    failing.webhooks.schedules.list = () => Promise.reject(new Error('redis://u:pw@h'));
+
+    const running = await startTransmissionWorker(failing);
+    events.length = 0;
+    tick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await running.stop();
+
+    expect(events.slice(0, 2)).toEqual(['upsert:a:60000', 'upsert:b:60000']);
+    expect(logs.filter((m) => m.includes('webhook schedule reconcile failed'))).toHaveLength(2);
+    expect(logs.join('\n')).not.toContain('redis://');
+    expect(events).toContain('webhook-worker-closed');
+  });
+
+  it('keeps reconciling webhooks when a periodic transmission reconcile fails', async () => {
+    const { deps, events, logs, tick } = setup();
+    const running = await startTransmissionWorker(withWebhooks(deps, events));
+    events.length = 0;
+    deps.schedules.upsert = () => Promise.reject(new Error('boom'));
+
+    tick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await running.stop();
+
+    expect(events).toContain('wh-upsert:b:30000');
+    expect(logs.join('\n')).toContain('tenant schedule reconcile failed');
+  });
+
+  it('closes the transmission worker when the webhook worker cannot be created', async () => {
+    const { deps, events } = setup();
+    const broken = withWebhooks(deps, events);
+    broken.webhooks.createWorker = () => {
+      throw new Error('no webhook worker');
+    };
+
+    await expect(startTransmissionWorker(broken)).rejects.toThrow('no webhook worker');
+
+    expect(events).toContain('worker-closed');
+  });
+
+  it('still closes the webhook worker when the transmission worker fails to close', async () => {
+    const { deps, events } = setup();
+    deps.createWorker = () => ({ close: () => Promise.reject(new Error('close failed')) });
+    const running = await startTransmissionWorker(withWebhooks(deps, events));
+
+    await expect(running.stop()).rejects.toThrow('close failed');
+
+    expect(events).toContain('webhook-worker-closed');
   });
 });

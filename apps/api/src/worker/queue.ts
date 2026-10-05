@@ -1,5 +1,10 @@
 import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
+import {
+  WEBHOOK_DELIVERY_QUEUE,
+  webhookDeliveryJob,
+  type WebhookDeliveryJobData,
+} from './webhook-delivery.processor.js';
 
 /** ADR-0013 queue for the per-tenant transmission cycle (sign, assemble, send and poll lotes). */
 export const TRANSMISSION_QUEUE = 'lote-build';
@@ -55,7 +60,18 @@ type ScheduleQueue = Pick<
   'upsertJobScheduler' | 'getJobSchedulers' | 'removeJobScheduler'
 >;
 
-export function createTenantScheduleStore(queue: ScheduleQueue): TenantScheduleStore {
+/** What a tenant's repeatable job is called and carries; the cadence and retention are common. */
+type TenantJob = (tenantId: string) => { name: string; data: TransmissionJobData };
+
+const transmissionJob: TenantJob = (tenantId) => ({
+  name: 'transmission-cycle',
+  data: { tenantId },
+});
+
+export function createTenantScheduleStore(
+  queue: ScheduleQueue,
+  job: TenantJob = transmissionJob,
+): TenantScheduleStore {
   return {
     async list() {
       const schedulers = await queue.getJobSchedulers(0, -1);
@@ -69,8 +85,7 @@ export function createTenantScheduleStore(queue: ScheduleQueue): TenantScheduleS
         `${SCHEDULER_PREFIX}${tenantId}`,
         { every: everyMs },
         {
-          name: 'transmission-cycle',
-          data: { tenantId },
+          ...job(tenantId),
           // Finished jobs are not history worth keeping: the cycle report is logged.
           opts: { removeOnComplete: true, removeOnFail: 100 },
         },
@@ -118,4 +133,52 @@ export function createTransmissionQueue(
   });
   logQueueErrors(queue, 'transmission queue', logger);
   return queue;
+}
+
+const webhookJob: TenantJob = (tenantId) => {
+  const { name, data } = webhookDeliveryJob(tenantId);
+  return { name, data };
+};
+
+/** The `webhook-delivery` schedules (HU-E11-01): same per-tenant scheduler keys, on their own queue. */
+export function createWebhookScheduleStore(queue: ScheduleQueue): TenantScheduleStore {
+  return createTenantScheduleStore(queue, webhookJob);
+}
+
+/** The `webhook-delivery` queue, with its errors routed to the logger. */
+export function createWebhookDeliveryQueue(
+  connection: Redis,
+  logger: QueueLogger,
+  prefix?: string,
+): Queue<WebhookDeliveryJobData> {
+  const queue = new Queue<WebhookDeliveryJobData>(WEBHOOK_DELIVERY_QUEUE, {
+    connection,
+    ...(prefix === undefined ? {} : { prefix }),
+  });
+  logQueueErrors(queue, 'webhook delivery queue', logger);
+  return queue;
+}
+
+export interface WebhookDeliveryWorkerOptions {
+  readonly connection: Redis;
+  readonly concurrency: number;
+  readonly process: (data: WebhookDeliveryJobData) => Promise<unknown>;
+  readonly prefix?: string;
+  readonly logger?: QueueLogger;
+}
+
+export function createWebhookDeliveryWorker({
+  connection,
+  concurrency,
+  process,
+  prefix,
+  logger,
+}: WebhookDeliveryWorkerOptions): Worker<WebhookDeliveryJobData> {
+  const worker = new Worker<WebhookDeliveryJobData>(
+    WEBHOOK_DELIVERY_QUEUE,
+    (job) => process(job.data),
+    { connection, concurrency, ...(prefix === undefined ? {} : { prefix }) },
+  );
+  if (logger) logQueueErrors(worker, 'webhook delivery worker', logger);
+  return worker;
 }

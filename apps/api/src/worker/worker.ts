@@ -11,6 +11,9 @@ import {
   createTenantScheduleStore,
   createTransmissionQueue,
   createTransmissionWorker,
+  createWebhookDeliveryQueue,
+  createWebhookDeliveryWorker,
+  createWebhookScheduleStore,
 } from './queue.js';
 import type { TransmissionJobData } from './queue.js';
 import { guardSimulatorTenants } from './simulator-guard.js';
@@ -22,6 +25,10 @@ import { createRedisTenantRunLock } from './tenant-run-lock.js';
 import { startTransmissionWorker } from './start-transmission-worker.js';
 import { createTenantCycleFactory } from './tenant-cycle-factory.js';
 import { TransmissionCycleProcessor, type WorkerLogger } from './transmission-cycle-processor.js';
+import {
+  createWebhookDeliveryDeps,
+  createWebhookDeliveryProcessor,
+} from './webhook-delivery.processor.js';
 import { createWorkerGateway } from './worker-gateway.js';
 import { loadWorkerConfig, WorkerConfigError } from './worker-config.js';
 
@@ -30,6 +37,7 @@ import { loadWorkerConfig, WorkerConfigError } from './worker-config.js';
 // the README ("Worker de transmisión"), and excluded from unit coverage in vitest.config.ts.
 
 const RECONCILE_EVERY_MS = 5 * 60_000;
+const WEBHOOK_DELIVERY_EVERY_MS = 30_000;
 
 const logger: WorkerLogger = {
   info: (message) => {
@@ -60,6 +68,7 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
 
   const connection = createRedisConnection(config.redisUrl, logger);
   const queue = createTransmissionQueue(connection, logger);
+  const webhookQueue = createWebhookDeliveryQueue(connection, logger);
 
   const processor = new TransmissionCycleProcessor({
     lock: createRedisTenantRunLock(connection, { ttlMs: config.lockTtlMs }),
@@ -76,6 +85,13 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
     logger,
   });
 
+  // Webhook delivery needs neither the tenant run lock (the store claims rows with SKIP LOCKED and a
+  // lease) nor the simulator guard (it never talks to SIFEN).
+  const processWebhooks = createWebhookDeliveryProcessor({
+    db: appHandle.db,
+    ...createWebhookDeliveryDeps(env),
+  });
+
   const running = await startTransmissionWorker({
     cycleIntervalMs: config.cycleIntervalMs,
     reconcileEveryMs: RECONCILE_EVERY_MS,
@@ -89,6 +105,17 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
     }),
     createWorker: (process) =>
       createTransmissionWorker({ connection, concurrency: config.concurrency, process, logger }),
+    webhooks: {
+      everyMs: WEBHOOK_DELIVERY_EVERY_MS,
+      schedules: createWebhookScheduleStore(webhookQueue),
+      createWorker: () =>
+        createWebhookDeliveryWorker({
+          connection,
+          concurrency: config.concurrency,
+          process: (data) => processWebhooks({ data }),
+          logger,
+        }),
+    },
     logger,
   });
   logger.info(`transmission worker started (cycle every ${String(config.cycleIntervalMs)} ms)`);
@@ -98,11 +125,27 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
     if (stopping) return;
     stopping = true;
     logger.info(`${signal} received, finishing the running cycles`);
-    void running
-      .stop()
-      .then(() => queue.close())
-      .then(() => connection.quit())
-      .then(() => Promise.all([appHandle.close(), platformHandle.close()]))
+    // Order worker, queues, connection, databases; a failing step never skips the later ones.
+    const closeAll = async () => {
+      const steps = [
+        () => running.stop(),
+        () => Promise.all([queue.close(), webhookQueue.close()]),
+        () => connection.quit(),
+        () => Promise.all([appHandle.close(), platformHandle.close()]),
+      ];
+      let first: unknown;
+      let failed = false;
+      for (const step of steps) {
+        try {
+          await step();
+        } catch (error) {
+          if (!failed) first = error;
+          failed = true;
+        }
+      }
+      if (failed) throw first;
+    };
+    void closeAll()
       .then(() => {
         process.exitCode = 0;
       })

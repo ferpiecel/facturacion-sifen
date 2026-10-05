@@ -9,7 +9,12 @@ export type {
   QrGenerator,
   XmlSigner,
 } from './emission-ports.ts';
-export { SifenTimeoutError, SifenTransportError } from './errors.ts';
+export {
+  SifenFaultError,
+  SifenProtocolError,
+  SifenTimeoutError,
+  SifenTransportError,
+} from './errors.ts';
 export { FakeSifenGateway } from './fake/fake-sifen-gateway.ts';
 export type { Scripted } from './fake/fake-sifen-gateway.ts';
 export * as sifenScenarios from './fake/scenarios.ts';
@@ -28,3 +33,30 @@ export type {
   SifenResultadoEvento,
   SifenRespuesta,
 } from './types.ts';
+export {
+  DEFAULT_MAX_RESPONSE_BYTES,
+  parseConsultaDE,
+  parseConsultaRUC,
+  parseEventos,
+  parseLoteReceipt,
+  parseLoteResult,
+  parseProtocoloDE,
+  parseSoapBody,
+} from './soap/response-parsers.ts';
+export type { ParseOptions } from './soap/response-parsers.ts';
+export { sifenEndpoints } from './soap/endpoints.ts';
+export type { EndpointOptions, SifenEndpoints } from './soap/endpoints.ts';
+export { createHttpsSoapTransport } from './soap/transport.ts';
+export type {
+  HttpsTransportOptions,
+  MtlsCredential,
+  MtlsCredentialSource,
+  SoapRequest,
+  SoapResponse,
+  SoapTransport,
+} from './soap/transport.ts';
+export { buildLoteMessage, buildLoteZip, measureLoteMessage } from './soap/lote-message.ts';
+export { SoapSifenGateway } from './soap/soap-sifen-gateway.ts';
+export type { SoapSifenGatewayOptions } from './soap/soap-sifen-gateway.ts';
+export { createSoapSifenGateway } from './soap/create-soap-gateway.ts';
+export type { CreateSoapSifenGatewayOptions } from './soap/create-soap-gateway.ts';

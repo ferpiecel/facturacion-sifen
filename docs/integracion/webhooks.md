@@ -75,6 +75,13 @@ El helper de referencia es `verifyWebhookSignature` (`apps/api/src/modules/webho
 `document.cancelled`, `document.number_voided`, `document.transmission_deadline_warning`,
 `document.notification.delivered`, `document.notification.failed`. Un endpoint sin filtro recibe todos.
 
+## Garantía de entrega: al menos una vez
+
+Los eventos se entregan **al menos una vez**, no exactamente una: si su receptor responde `2xx` pero la
+respuesta se pierde, o el envío se corta a mitad, el evento se reintenta. Como cada intento lleva un `t` nuevo,
+la firma **cambia entre intentos del mismo evento**: no use la firma como identificador. Deduplique siempre
+por el `id` del evento (`evt_...`), que es el mismo en todos los intentos, y haga el procesamiento idempotente.
+
 ## Reintentos
 
 Backoff exponencial desde 1 min, tope de 4 h por intervalo, con jitter (entre la mitad y el total del

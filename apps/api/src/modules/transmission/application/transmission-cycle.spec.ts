@@ -34,6 +34,9 @@ interface Setup {
   stalePending?: number;
   holdFails?: boolean;
   stalePendingAfterMs?: number;
+  swept?: number;
+  sweepFails?: boolean;
+  staleSendingAfterMs?: number;
   batch?: TransmissionCycleDeps['batch'];
 }
 
@@ -64,6 +67,10 @@ function setup(o: Setup = {}) {
       limits.recover = limit;
       log.push(`recoverable@${at.toISOString()}`);
       return Promise.resolve(o.recoverable ?? []);
+    },
+    sweepStaleSending: (cutoff) => {
+      log.push(`sweep@${cutoff.toISOString()}`);
+      return o.sweepFails ? Promise.reject(new Error('db down')) : Promise.resolve(o.swept ?? 0);
     },
     nextRequestId: () => o.nextRequestId?.() ?? Promise.resolve((dId += 1n)),
     holdDocument: (documentId, reason) => {
@@ -119,6 +126,7 @@ function setup(o: Setup = {}) {
     logger: { warn: (message) => warnings.push(message) },
     batch: o.batch,
     stalePendingAfterMs: o.stalePendingAfterMs,
+    staleSendingAfterMs: o.staleSendingAfterMs,
   });
   return { cycle, log, warnings, limits, holds, deferred, cutoffs };
 }
@@ -137,6 +145,7 @@ describe('TransmissionCycle', () => {
     expect(log).toEqual([
       `sign:${TENANT}:d1`,
       'assemble',
+      `sweep@${new Date(NOW.getTime() - 30 * 60_000).toISOString()}`,
       'send:l1:1',
       `due@${NOW.toISOString()}`,
       'poll:l2:2',
@@ -305,6 +314,7 @@ describe('TransmissionCycle', () => {
       sent: [],
       polled: [],
       recovered: [],
+      sweptSending: 0,
       failures: [],
       held: [],
       stalePending: 0,
@@ -394,6 +404,25 @@ describe('TransmissionCycle', () => {
     const custom = setup({ stalePendingAfterMs: 60_000 });
     await custom.cycle.run();
     expect(custom.cutoffs).toEqual([new Date(NOW.getTime() - 60_000)]);
+  });
+
+  it('sweeps lotes stuck in sending before sending, reports them, and survives a failing sweep', async () => {
+    const { cycle, log } = setup({ swept: 2, pending: [{ loteId: 'l1', lote: lote() }] });
+    const report = await cycle.run();
+    expect(report.sweptSending).toBe(2);
+    expect(log.findIndex((e) => e.startsWith('sweep@'))).toBeLessThan(
+      log.findIndex((e) => e.startsWith('send:')),
+    );
+
+    const custom = setup({ staleSendingAfterMs: 60_000 });
+    await custom.cycle.run();
+    expect(custom.log).toContain(`sweep@${new Date(NOW.getTime() - 60_000).toISOString()}`);
+
+    const failing = setup({ sweepFails: true, pending: [{ loteId: 'l1', lote: lote() }] });
+    const failed = await failing.cycle.run();
+    expect(failed.sweptSending).toBe(0);
+    expect(failed.failures).toEqual([{ step: 'send', error: 'Error' }]);
+    expect(failing.log).toContain('send:l1:1');
   });
 
   it('stops between units of work once its signal aborts (lost run lock) and says so', async () => {

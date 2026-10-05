@@ -12,6 +12,7 @@ const empty: CycleReport = {
   sent: [],
   polled: [],
   recovered: [],
+  sweptSending: 0,
   failures: [],
   held: [],
   stalePending: 0,
@@ -99,9 +100,10 @@ describe('TransmissionCycleProcessor', () => {
         { loteId: 'l2', status: 'processed' },
       ],
       recovered: [{ loteId: 'l3', status: 'recovered' }],
+      sweptSending: 3,
     });
     await processor.process({ tenantId: TENANT });
-    expect(logs[0].message).toContain('polled=2 recovered=1');
+    expect(logs[0].message).toContain('polled=2 recovered=1 swept=3');
   });
 
   it('logs a quiet summary, and warnings for held documents, stale lotes and failures', async () => {

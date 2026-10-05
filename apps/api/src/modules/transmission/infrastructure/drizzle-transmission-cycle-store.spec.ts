@@ -285,4 +285,46 @@ describe('DrizzleTransmissionCycleStore', () => {
     expect(await store().pendingOlderThan(at(5))).toBe(2);
     expect(await store().pendingOlderThan(at(0))).toBe(0);
   });
+
+  it('sweeps only the lotes stuck in sending before the cutoff to unknown, for this tenant', async () => {
+    const stuck = await addLote(tenantId, 'sending', [await addDocument(tenantId, 'queued', 1)]);
+    const recent = await addLote(tenantId, 'sending', [
+      await addDocument(tenantId, 'queued', 2),
+      await addDocument(tenantId, 'queued', 3),
+      await addDocument(tenantId, 'queued', 4),
+    ]);
+    const pending = await addLote(tenantId, 'pending', [await addDocument(tenantId, 'queued', 5)]);
+    const theirs = await addLote(otherTenantId, 'sending', [
+      await addDocument(otherTenantId, 'queued', 6),
+    ]);
+    const statusOf = async (id: string) =>
+      (await handle.db.select().from(lotes).where(eq(lotes.id, id)))[0];
+
+    expect(await store().sweepStaleSending(at(2))).toBe(1);
+
+    expect(await statusOf(stuck)).toMatchObject({ status: 'unknown' });
+    expect((await statusOf(stuck)).responseMessage).toContain('no outcome');
+    expect((await statusOf(recent)).status).toBe('sending');
+    expect((await statusOf(pending)).status).toBe('pending');
+    expect((await statusOf(theirs)).status).toBe('sending');
+    expect(await store().sweepStaleSending(at(2))).toBe(0);
+  });
+
+  it('lists unknown lotes and processed ones that still hold submitted documents for recovery', async () => {
+    const unknown = await addLote(tenantId, 'unknown', [await addDocument(tenantId, 'queued', 1)]);
+    const leftover = await addLote(tenantId, 'processed', [
+      await addDocument(tenantId, 'approved', 2),
+      await addDocument(tenantId, 'submitted', 3),
+    ]);
+    await addLote(tenantId, 'processed', [
+      await addDocument(tenantId, 'approved', 4),
+      await addDocument(tenantId, 'rejected', 5),
+      await addDocument(tenantId, 'approved', 6),
+    ]);
+    await addLote(otherTenantId, 'unknown', [await addDocument(otherTenantId, 'queued', 7)]);
+
+    expect([...(await store().recoverableLoteIds(at(30), 10))].sort()).toEqual(
+      [unknown, leftover].sort(),
+    );
+  });
 });

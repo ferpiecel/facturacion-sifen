@@ -70,6 +70,19 @@ export interface RecoverLoteByCdcDeps {
 
 const DEFAULT_MAX_QUERIES = 20;
 
+/**
+ * `maxQueries` must be a positive integer: 0, a negative number, NaN or a fraction would make a pass
+ * ask nothing (or an arbitrary number) while still stamping the lote as queried, so it would never
+ * be recovered. Rejected rather than clamped, like the other validated settings (`worker-config`):
+ * a misconfiguration should stop the wiring, not be silently repaired.
+ * @throws RangeError
+ */
+export function assertMaxQueries(value: number | undefined): void {
+  if (value !== undefined && (!Number.isInteger(value) || value < 1)) {
+    throw new RangeError(`maxQueries must be a positive integer, received ${String(value)}`);
+  }
+}
+
 export type RecoverLoteByCdcResult =
   | ({ readonly status: 'recovered' | 'incomplete' } & LoteRecoveryOutcome)
   | { readonly status: 'not-found' | 'not-recoverable' | 'not-due' | 'stale' | 'aborted' };
@@ -86,7 +99,9 @@ function deIdOf(xml: string): string | undefined {
  * not proof that it never received it, so such a CDC stays unresolved and is asked again.
  */
 export class RecoverLoteByCdc {
-  constructor(private readonly deps: RecoverLoteByCdcDeps) {}
+  constructor(private readonly deps: RecoverLoteByCdcDeps) {
+    assertMaxQueries(deps.maxQueries);
+  }
 
   async execute({
     loteId,

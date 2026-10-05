@@ -249,7 +249,7 @@ export class TransmissionCycle {
     );
     for (const loteId of due ?? []) {
       const result = await this.guard('recover', loteId, () =>
-        this.deps.recoverer.execute({ loteId }),
+        this.deps.recoverer.execute({ loteId, signal: this.signal }),
       );
       if (result) recovered.push({ loteId, status: result.status });
     }

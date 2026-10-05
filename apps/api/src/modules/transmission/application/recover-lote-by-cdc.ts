@@ -25,6 +25,8 @@ export interface UnresolvedCdc {
   readonly reason: string;
   /** SIFEN answered 0420 (no approved DE): the only answer that counts toward holding the document. */
   readonly absent?: boolean;
+  /** Not asked in this pass (query cap reached or run aborted): still pending, says nothing about SIFEN. */
+  readonly skipped?: true;
 }
 
 export interface LoteRecoveryOutcome {
@@ -57,11 +59,20 @@ export interface RecoverLoteByCdcDeps {
   /** Reserves the SIFEN request id (`dId`) of one query. */
   readonly nextRequestId: () => Promise<bigint>;
   readonly now?: () => Date;
+  /**
+   * Most `consultarDE` calls per execution (default 20). Calls are sequential and a SOAP call may take
+   * up to its timeout, so an unbounded lote of 50 CDCs could hold the tenant run lock for minutes;
+   * 20 keeps a pass near a minute at normal latency and a lote of 50 settles in three 10-minute passes.
+   * The cycle bounds the lotes per run (`batch.recover`), so a run asks at most `recover x maxQueries`.
+   */
+  readonly maxQueries?: number;
 }
+
+const DEFAULT_MAX_QUERIES = 20;
 
 export type RecoverLoteByCdcResult =
   | ({ readonly status: 'recovered' | 'incomplete' } & LoteRecoveryOutcome)
-  | { readonly status: 'not-found' | 'not-recoverable' | 'not-due' | 'stale' };
+  | { readonly status: 'not-found' | 'not-recoverable' | 'not-due' | 'stale' | 'aborted' };
 
 /** The `Id` attribute of the DE element: the document's own CDC, not any CDC it merely references. */
 function deIdOf(xml: string): string | undefined {
@@ -77,7 +88,15 @@ function deIdOf(xml: string): string | undefined {
 export class RecoverLoteByCdc {
   constructor(private readonly deps: RecoverLoteByCdcDeps) {}
 
-  async execute({ loteId }: { loteId: string }): Promise<RecoverLoteByCdcResult> {
+  async execute({
+    loteId,
+    signal,
+  }: {
+    loteId: string;
+    /** The cycle's run signal: when the tenant run lock is lost no further query starts. */
+    signal?: AbortSignal;
+  }): Promise<RecoverLoteByCdcResult> {
+    if (signal?.aborted) return { status: 'aborted' };
     const lote = await this.deps.store.load(loteId);
     if (!lote) return { status: 'not-found' };
     if (!RECOVERABLE_STATUSES.has(lote.status)) return { status: 'not-recoverable' };
@@ -90,7 +109,12 @@ export class RecoverLoteByCdc {
 
     const resolutions: DocumentResolution[] = [];
     const unresolved: UnresolvedCdc[] = [];
-    for (const cdc of lote.cdcs) {
+    const cap = this.deps.maxQueries ?? DEFAULT_MAX_QUERIES;
+    for (const [index, cdc] of lote.cdcs.entries()) {
+      if (index >= cap || signal?.aborted) {
+        unresolved.push({ cdc, reason: 'Not queried in this pass', skipped: true });
+        continue;
+      }
       const answer = await this.query(cdc);
       if ('resolution' in answer) resolutions.push(answer.resolution);
       else unresolved.push({ cdc, ...answer });

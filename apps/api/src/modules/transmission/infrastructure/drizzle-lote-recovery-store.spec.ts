@@ -362,6 +362,13 @@ describe('DrizzleLoteRecoveryStore', () => {
 
     it('recovers a mixed 0422 / 0420 lote end to end: one approved, one left queued, lote unknown', async () => {
       const unknown = await seedLote('unknown', 'queued', [CDC_C, CDC_D]);
+      // The pass asks the least recently queried first: pin C before D so the scripted answers line up.
+      await handle.db.execute(
+        sql`update documents set updated_at = '2026-09-01T00:00:00Z' where cdc = ${CDC_C}`,
+      );
+      await handle.db.execute(
+        sql`update documents set updated_at = '2026-09-02T00:00:00Z' where cdc = ${CDC_D}`,
+      );
       const gateway = new FakeSifenGateway();
       gateway.enqueue(
         'consultarDE',
@@ -650,6 +657,7 @@ describe('DrizzleLoteRecoveryStore', () => {
     });
 
     it('loads the least recently queried CDCs first, so a capped pass rotates through the lote', async () => {
+      await handle.db.execute(sql`update documents set updated_at = '2026-09-01T00:00:00Z'`);
       await storeFor(tenantId).record(
         loteId,
         {

@@ -25,6 +25,8 @@ export interface TenantCycleFactoryDeps {
   readonly cscs: CscSource;
   readonly logger?: { warn(message: string): void };
   readonly now?: () => Date;
+  /** Most CDC queries one recovery pass makes per lote (default 20, see `RecoverLoteByCdc`). */
+  readonly recoveryMaxQueries?: number;
 }
 
 /**
@@ -39,6 +41,7 @@ export function createTenantCycleFactory({
   cscs,
   logger,
   now,
+  recoveryMaxQueries,
 }: TenantCycleFactoryDeps): (tenantId: string) => TransmissionCycle {
   return (tenantId) => {
     const store = createDrizzleTransmissionCycleStore({ db, tenantId, now });
@@ -72,6 +75,7 @@ export function createTenantCycleFactory({
         store: createDrizzleLoteRecoveryStore({ db, tenantId, logger }),
         nextRequestId: () => store.nextRequestId(),
         now,
+        maxQueries: recoveryMaxQueries,
       }),
       now,
       logger,

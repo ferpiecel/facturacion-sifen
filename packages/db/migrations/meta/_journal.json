@@ -218,6 +218,13 @@
       "when": 1790983662814,
       "tag": "0030_transmission_retry",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1791226288217,
+      "tag": "0031_lote_recovery_transition",
+      "breakpoints": true
     }
   ]
 }

@@ -57,11 +57,12 @@ Out: synchronous emission (HU-E6-05), the 72 h deadline watch, portal UI.
 - [x] T2 `RecoverLoteByCdc` use case (unit tests with `FakeSifenGateway`).
 - [x] T3 `createDrizzleLoteRecoveryStore` (load, record with CAS, settle via shared `settleDocument`; PGlite tests under RLS).
 - [x] T4 `TransmissionCycle` + store: `recoverableLoteIds`, `recoverer` dep, report field; worker wiring.
-- [ ] T5 Unknown and stale `sending` lotes: stale-sending sweep to `unknown`; recover by a CDC of the lote; 0420 policy.
-- [ ] T5a (fold into T5) `processed` lotes with `needsRecovery` documents are never picked up again: make them recoverable by CDC too.
-- [ ] T5b Preserve the original hand-over reason (0364, 0360, window elapsed) instead of overwriting `last_poll_message` on each recovery pass.
+- [x] T5 Unknown and stale `sending` lotes: stale-sending sweep to `unknown`; recover by a CDC of the lote; 0420 policy.
+- [x] T5a (fold into T5) `processed` lotes with `needsRecovery` documents are never picked up again: make them recoverable by CDC too.
+- [x] T5b Preserve the original hand-over reason (0364, 0360, window elapsed) instead of overwriting `last_poll_message` on each recovery pass.
 - [ ] T7 (debt) Cap the CDC queries per run and per lote, and check the abort signal between sequential queries, so a large lote cannot hold the tenant lock or outlive its lease.
 - [ ] T8 (debt) Escalate a CDC that answers 0420 forever: hold or alert the document after a bound (age since send or attempts) instead of re-querying every 10 minutes indefinitely.
+- [ ] T9 Resend after 0420 past the window: DECISION PENDING (see the design note below); not implemented.
 - [ ] T6 Docs: roadmap checkbox, plan notes, PR descriptions.
 
 ## PR slices (chained, each about 400 changed lines or less; the generated snapshot is declared in PR 1)
@@ -73,7 +74,32 @@ Out: synchronous emission (HU-E6-05), the 72 h deadline watch, portal UI.
 | 3 | `feat/hu-e6-04-recovery-settle-refactor` | T3 | Extract `settleDocument` from the poll store (no behavior change) |
 | 4 | `feat/hu-e6-04-recovery-store` | T3 | Drizzle recovery store and its spec |
 | 5 | `feat/hu-e6-04-recovery-cycle` | T4 | Cycle recover step, `recoverableLoteIds`, factory wiring, end-to-end spec |
-| 6 | `feat/hu-e6-04-recovery-no-response` | T5, T6 | Planned: unknown and stale `sending` lotes, 0420 policy, docs |
+| 6 | `feat/hu-e6-04-recovery-no-response` | T5, T5a, T5b | Migration 0032 (`unknown -> processed`); recover `unknown` and `processed`-with-leftovers lotes by CDC; keep the hand-over reason |
+| 7 | `feat/hu-e6-04-recovery-stale-sending` | T5 | Sweep lotes stuck in `sending` to `unknown`; cycle recovers `unknown` and leftover lotes |
+| 8 | Pending | T6, T7, T8, T9 | Docs, per-run cap, 0420 escalation, resend (needs a decision) |
+
+## Decisions of PRs 6 and 7
+
+| Decision | Rationale |
+|---|---|
+| Migration 0032 adds only `unknown -> processed` (not `unknown -> recovery`) | `recovery` means the result query by protocol lapsed; an unknown lote has no protocol. A partial answer keeps the lote `unknown` and the resolved documents leave its pending list |
+| An `unknown` lote's documents are `queued`; on 0422 they go `queued -> submitted` (event `document.submitted`) and then `approved` in one transaction | The 0422 is the proof that SIFEN received the lote; the documents guard only allows approval from `submitted` |
+| Store CAS also guards on the loaded lote status (`expectedStatus`) | One use case and one store serve `recovery`, `unknown` and `processed` without races between them |
+| `processed` lotes are recoverable only while they still hold `submitted` documents; they stay `processed` | Needs no migration (no status change); fixes documents the poll left unsettled (`needsRecovery`) |
+| Hand-over reason kept: `last_poll_message` = reason + ` \| recovery: N document(s) still unresolved...`, rewritten (not appended) on each pass, and reduced to the reason when settled | No new column; the original 0364/0360/window reason survives |
+| `sending` older than 30 min (`staleSendingAfterMs`) becomes `unknown` at the start of the send step | A crash between claim and record leaves SIFEN possibly holding the lote; `sending -> unknown` was already allowed by the guard. A very slow send that finishes later fails its own record (`not in sending state`) instead of being resent |
+
+## T9 design note: resending after 0420 past the window (decision pending)
+
+Guía 2024 allows resending a DE answered 0420 ("does not exist or not approved"), taking the lote result into account first. We must keep the same CDC (correction does not alter its fields) and the same document. The `documents` guard forbids `submitted -> queued` (rank must increase), and `cdc` is unique and immutable, so a second document row for the same CDC is impossible.
+
+| Option | What it is | Pros | Cons |
+|---|---|---|---|
+| A. New lote attempt without changing the document guard | Let the assembler pick `submitted` documents whose every lote is closed as abandoned (new lote status or flag); `SendLote` already tolerates `submitted` | No change to the documents guard; same CDC | `submitted` stops meaning "SIFEN holds it"; assembler and LoteBuilder rules get a special case; harder to reason about in-process CDCs |
+| B. Relax the guard under audit | Allow the single transition `submitted -> queued` through a dedicated path: lote terminal (`recovery`/`unknown`), at least 48 h since the send, last answer 0420, `transmission_attempts` incremented, one `audit_log` row (hash chain) | Explicit, auditable, reuses the existing queue, backoff and attempt cap | Migration touching the documents guard; must be tightly scoped so nothing else can regress a status |
+| C. Hold and escalate, no automatic resend | After the window a 0420 CDC gets `transmission_hold` (`recovery:0420-after-window`) and an alert; an operator resubmits | No guard change; safest | Manual work for a case that is rare but real; needs an operator action and UI |
+
+Recommendation: C now (it is T8, small and safe, and it stops the endless 10-minute queries), then B for the actual resend, as a single audited transition with the preconditions above. A is not recommended. Needs your decision before T9.
 
 ## Acceptance criteria
 
@@ -93,4 +119,4 @@ Route: one writer, inline per task. Strict TDD: each PR has a RED commit (failin
 
 Review fixes applied after PRs #156 to #160 (log counts, DE Id match, recovery transitions); the findings above are recorded as debt, not implemented.
 
-PRs 1 to 5 implemented and verified locally (tsc, lint, depcruise, vitest --coverage at each branch tip). PR 6 (T5, T6) pending.
+PRs 1 to 7 implemented and verified locally (tsc, lint, depcruise, vitest --coverage at each branch tip). T6 to T9 pending.

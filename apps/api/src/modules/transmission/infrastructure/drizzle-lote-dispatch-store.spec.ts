@@ -45,8 +45,13 @@ describe('DrizzleLoteDispatchStore', () => {
     await handle.close();
   });
 
-  const storeFor = (tenant: string) =>
-    createDrizzleLoteDispatchStore({ db: handle.db, tenantId: tenant, now: () => NOW });
+  const storeFor = (tenant: string, maxTransmissionAttempts?: number) =>
+    createDrizzleLoteDispatchStore({
+      db: handle.db,
+      tenantId: tenant,
+      now: () => NOW,
+      maxTransmissionAttempts,
+    });
   const readLote = () =>
     withTenantTransaction(handle.db, tenantId, (tx) =>
       tx.select().from(lotes).where(eq(lotes.id, loteId)),
@@ -103,6 +108,10 @@ describe('DrizzleLoteDispatchStore', () => {
     }
     return cdcs;
   }
+  const readDocument = (cdc: string) =>
+    withTenantTransaction(handle.db, tenantId, (tx) =>
+      tx.select().from(documents).where(eq(documents.cdc, cdc)),
+    ).then((rows) => rows[0]);
   const statusOf = (cdc: string) =>
     withTenantTransaction(handle.db, tenantId, (tx) =>
       tx.select({ status: documents.status }).from(documents).where(eq(documents.cdc, cdc)),
@@ -193,6 +202,57 @@ describe('DrizzleLoteDispatchStore', () => {
     await store.claim(loteId);
     await store.record(loteId, { status: 'unknown', reason: 'timed out' });
     expect(await statusOf(cdcs.queued)).toBe('queued');
+  });
+
+  it('backs off the documents of a rejected lote, doubling the wait on each refusal', async () => {
+    const cdcs = await seedDocuments(['queued']);
+    const store = storeFor(tenantId);
+    await store.claim(loteId);
+    await store.record(loteId, { status: 'rejected', code: '0301', reason: 'RUC bloqueado' });
+    expect(await readDocument(cdcs.queued)).toMatchObject({
+      transmissionAttempts: 1,
+      nextTransmissionAt: new Date('2026-10-01T12:05:00.000Z'),
+      transmissionHold: null,
+    });
+
+    // The same document in a later lote, refused again.
+    const [next] = await handle.db
+      .insert(lotes)
+      .values({ tenantId, environment: 'test', documentType: 1 })
+      .returning();
+    await handle.db
+      .insert(loteDocuments)
+      .values({ tenantId, loteId: next.id, documentId: (await readDocument(cdcs.queued)).id });
+    await store.claim(next.id);
+    await store.record(next.id, { status: 'rejected', code: '0301', reason: 'again' });
+    expect(await readDocument(cdcs.queued)).toMatchObject({
+      transmissionAttempts: 2,
+      nextTransmissionAt: new Date('2026-10-01T12:10:00.000Z'),
+    });
+  });
+
+  it('holds a document for the operator once its attempts reach the cap, never dropping it', async () => {
+    const cdcs = await seedDocuments(['queued']);
+    const store = storeFor(tenantId, 1);
+    await store.claim(loteId);
+    await store.record(loteId, { status: 'rejected', code: '0301', reason: 'RUC bloqueado' });
+    expect(await readDocument(cdcs.queued)).toMatchObject({
+      status: 'queued',
+      transmissionAttempts: 1,
+      nextTransmissionAt: null,
+      transmissionHold: 'transmission:attempts-exhausted',
+    });
+  });
+
+  it('does not count an unknown or a sent outcome as a refusal', async () => {
+    const cdcs = await seedDocuments(['queued']);
+    const store = storeFor(tenantId);
+    await store.claim(loteId);
+    await store.record(loteId, { status: 'unknown', reason: 'timed out' });
+    expect(await readDocument(cdcs.queued)).toMatchObject({
+      transmissionAttempts: 0,
+      nextTransmissionAt: null,
+    });
   });
 
   it('enqueues a document.submitted event for each document that moved to submitted (outbox)', async () => {

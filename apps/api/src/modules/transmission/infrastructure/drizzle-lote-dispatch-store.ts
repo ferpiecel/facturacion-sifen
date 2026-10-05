@@ -3,14 +3,23 @@ import { documents, loteDocuments, lotes, withTenantTransaction, type Database }
 import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
 import type { LoteDispatchOutcome, LoteDispatchStore } from '../application/send-lote.js';
 
+/** First wait after a 0301; it doubles on each refusal up to the cap. */
+const BASE_BACKOFF_MS = 5 * 60 * 1000;
+const MAX_BACKOFF_MS = 2 * 60 * 60 * 1000;
+export const DEFAULT_MAX_TRANSMISSION_ATTEMPTS = 5;
+export const ATTEMPTS_EXHAUSTED_HOLD = 'transmission:attempts-exhausted';
 const FIRST_POLL_DELAY_MS = 10 * 60 * 1000;
 /** Lote queries are valid for 48 h after sending (0364). */
 const POLL_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+type Tx = Parameters<Parameters<typeof withTenantTransaction>[2]>[0];
 
 export interface DrizzleLoteDispatchStoreOptions {
   readonly db: Database;
   readonly tenantId: string;
   readonly now?: () => Date;
+  /** 0301 refusals after which a document is held for an operator instead of re-queued. */
+  readonly maxTransmissionAttempts?: number;
 }
 
 /** `LoteDispatchStore` over `lotes`; every call runs as app_user inside the tenant's transaction. */
@@ -18,6 +27,7 @@ export function createDrizzleLoteDispatchStore({
   db,
   tenantId,
   now = () => new Date(),
+  maxTransmissionAttempts = DEFAULT_MAX_TRANSMISSION_ATTEMPTS,
 }: DrizzleLoteDispatchStoreOptions): LoteDispatchStore {
   return {
     async claim(loteId) {
@@ -67,9 +77,46 @@ export function createDrizzleLoteDispatchStore({
             at: now(),
           });
         }
+        if (outcome.status === 'rejected') await backOff(tx, loteId);
       });
     },
   };
+
+  /**
+   * A refused lote leaves its documents `queued` and eligible; count the refusal and make them wait
+   * (doubling, capped) or, at the cap, hold them for an operator: they are never dropped.
+   */
+  async function backOff(tx: Tx, loteId: string): Promise<void> {
+    const queued = await tx
+      .select({ id: documents.id, attempts: documents.transmissionAttempts })
+      .from(documents)
+      .where(
+        and(
+          eq(documents.status, 'queued'),
+          inArray(
+            documents.id,
+            tx
+              .select({ id: loteDocuments.documentId })
+              .from(loteDocuments)
+              .where(eq(loteDocuments.loteId, loteId)),
+          ),
+        ),
+      );
+    for (const { id, attempts: before } of queued) {
+      const attempts = before + 1;
+      const exhausted = attempts >= maxTransmissionAttempts;
+      const wait = Math.min(BASE_BACKOFF_MS * 2 ** (attempts - 1), MAX_BACKOFF_MS);
+      await tx
+        .update(documents)
+        .set({
+          transmissionAttempts: attempts,
+          nextTransmissionAt: exhausted ? null : new Date(now().getTime() + wait),
+          ...(exhausted ? { transmissionHold: ATTEMPTS_EXHAUSTED_HOLD } : {}),
+          updatedAt: now(),
+        })
+        .where(eq(documents.id, id));
+    }
+  }
 }
 
 function columnsFor(outcome: LoteDispatchOutcome, at: Date): Partial<typeof lotes.$inferInsert> {

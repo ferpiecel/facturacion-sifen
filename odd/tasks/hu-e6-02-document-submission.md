@@ -74,12 +74,24 @@ lotes in process), plan v1.1 §8.1, backlog HU-E6-01/02/03.
         interval) and `lote-poll`, tenant enumeration port, graceful shutdown, no overlapping runs per
         tenant (BullMQ job id per tenant). Jobs stay rebuildable: Postgres is the source of truth
         (ADR-0013).
-  - [ ] **S5f — Retry hardening** (migration 0030 if a column is needed). A `0301`-rejected lote makes its
-        documents eligible again at once, so a scheduler would resend every cycle: add a retry cap and
-        backoff (per document attempt count and `next_attempt_at`). Also: a poisoned `pending` lote or
-        permanently unsignable `accepted` document (typed errors) must not sit at the head of the batch
-        forever (park with a reason after N attempts). A lote left `pending` by a crash before the claim
-        is picked up again by the cycle; a stale `sending` lote becomes `unknown` in HU-E6-04.
+  - [x] **S5f — Retry hardening** (migration 0030, columns on `documents`; `documents_guard` unchanged).
+    - S5f-1 (db): `transmission_attempts`, `next_transmission_at`, `transmission_hold` (plain code, format-checked).
+    - S5f-2 (app + cycle store): a document failing signing with a deterministic error
+      (`SigningDataIncompleteError`, `EstablishmentContactMissingError`, `CscNotConfiguredError`,
+      `DocumentEnvironmentMismatchError`, certificate not found/expired, `InvoiceXmlError`,
+      `InvoiceQrError`, `SigningMismatchError`) is held as `signing:<ErrorName>` and leaves the signing
+      batch; transient errors keep retrying. The report lists held documents and stale `pending` lotes.
+    - S5f-3 (dispatch + assembly stores): a 0301 counts one attempt per document and backs it off
+      (5 min doubling, capped at 2 h); at 5 attempts (configurable) the document is held as
+      `transmission:attempts-exhausted`, stays `queued`, never dropped. The assembler skips held and
+      backing-off documents.
+    - `pending` lotes: `pending` means never sent (ADR-0007: `sending` is set before the call), so the
+      cycle resends them safely every run (the claim is a compare-and-set). A lote whose send fails is
+      moved behind the others (`updated_at`) so it cannot starve the batch; lotes older than 15 min are
+      reported as stale. No cap or sweep: retrying costs nothing remote.
+    - Follow-ups: operator command to clear a hold (`documents.transmission_hold = NULL`, attempts reset)
+      and an automatic release when the tenant's fiscal configuration changes; alerting on `held` and
+      `stalePending` from the worker (S5e).
 
 ## Decisions
 
@@ -110,3 +122,17 @@ lotes in process), plan v1.1 §8.1, backlog HU-E6-01/02/03.
   (`SigningDataIncompleteError`) rather than inventing them: **the request schema must be extended (product
   decision, HU-E5) before real documents can be signed.**
 - `CscSource` uses the lowest slot of the tenant's CSCs for the environment (approved).
+
+## Supply-chain notes (pnpm audit --prod)
+
+- `facturacionelectronicapy-xmlsign` (via `@sifen/sifen-tips`, now a production dependency of the worker)
+  pulled the abandoned `xmldom` 0.6.0 (1 critical, GHSA-crh6-fp67-6883, plus 10 high and 3 moderate with
+  no patched release under that name) and `xml2js` 0.4.23 (GHSA-776f-qx25-q3cc). Fixed with pnpm
+  overrides in `pnpm-workspace.yaml`: `xmldom` -> `npm:@xmldom/xmldom@0.8.15` (the maintained fork, the
+  one `xml-crypto` already uses) and `xml2js` -> 0.6.2. The sifen-tips, emission and transmission signing
+  specs pass with them (signature, QR and strict XSD checks).
+- Open debt: `node-forge` <= 1.4.0 (high, GHSA-86w9-cpqp-85rv: RSA PKCS#1 v1.5 signature
+  *verification* accepts extra nested data) has no patched release yet. It is a direct dependency of
+  `apps/api` and of xmlsign. The code only parses `.p12` files and *signs*; re-check when a fixed
+  release exists.
+

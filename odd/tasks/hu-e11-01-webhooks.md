@@ -20,12 +20,25 @@ delivery history (backlog HU-E11-01; ADR-0011 anti-replay 5 min; plan v1.1 §19 
 - [x] S2b `feat/hu-e11-01-webhook-deliveries` (stacked on S2) — migration 0029 `webhook_deliveries` (retry queue, DLQ
       as `dead`, history columns), composite tenant FK, FORCE RLS. A per-attempt history table is a follow-up if
       the last-attempt columns prove too thin for the S5 history endpoint.
-- [ ] S3 dispatcher service + `WebhookHttpPort` (fake in tests): SSRF guard (https only; resolve DNS, block
-      private/loopback/link-local/CGNAT/metadata; connect to the vetted IP; no redirects; timeout; response cap),
-      re-checked on EVERY attempt (DNS can change; pin the vetted IP); 2xx = delivered, else `nextRetryAt`, null = dead;
-      the db only checks the url shape, all SSRF defence lives here; secret opened with `EnvelopeCipher` (new kind `webhook`).
-- [ ] S4 outbox: enqueue `webhook_deliveries` rows in the same tenant transaction as the document status change
-      (approved / approved_with_observations / rejected / cancelled / number_voided), idempotent per (event, endpoint).
+- [x] S3 dispatcher, stacked branches (each <= 400 lines): `feat/hu-e11-01-webhook-dispatcher` (SSRF address policy +
+      `WebhookSecretVault`, custody kind `webhook`, AAD tenant + endpoint id + version), `-dispatcher-http`
+      (`SafeWebhookHttp`: https only, resolve + block every private/loopback/link-local/CGNAT/multicast/mapped address,
+      pinned connect with original Host/SNI, no redirects, 5 s connect / 10 s total, 64 KiB body cap, re-checked per
+      attempt), `-dispatcher-service` (`WebhookDispatcher`: bounded claim with lease, fresh `t` per attempt, both secrets
+      during overlap, 2xx = delivered, else `nextRetryAt` or dead; stores only a code or `HTTP <status>`),
+      `-dispatcher-store` (Drizzle claim with `FOR UPDATE SKIP LOCKED` + lease, record).
+      Not wired yet: the Nest module and the BullMQ `webhook-delivery` worker/scheduler come with S4/S5.
+- [x] S4 outbox, stacked branches: `feat/hu-e11-01-webhook-outbox` (status -> event map, deterministic event id,
+      minimal data), `-outbox-enqueue` (`enqueueDocumentEvents(tx, ...)`), `-outbox-wiring` (called from acceptance,
+      `markSigned`, lote dispatch `sent` and lote poll settle, each in its own tenant transaction).
+      Decision: a shared helper, not a DB trigger: payload and event list live in TypeScript, RLS applies naturally
+      to the app_user transaction, no SECURITY DEFINER function is needed. Cancel/void write points (HU-E8) must call
+      the same helper. Event id = sha256(document id + event type): one event per document and type, so a retried
+      transition cannot duplicate (UNIQUE(endpoint_id, event_id) + ON CONFLICT DO NOTHING).
+- [x] S3-wiring `feat/hu-e11-01-webhook-worker`: `apps/api/src/worker/webhook-delivery.processor.ts`, bullmq-free
+      (processor, `createWebhookDeliveryDeps` from KMS_LOCAL_MASTER_KEY, repeatable job spec per tenant). Integration
+      point: the HU-E6-02 worker bootstrap registers `new Worker('webhook-delivery', processor)` and adds the
+      repeatable job for each tenant.
 - [ ] S5 API: register endpoint (secret returned once), rotate secret (overlap window), list/replay deliveries.
       Needs the event `data` shape (plan §19 payload) and `webhooks:write` scope.
 
@@ -49,6 +62,9 @@ Route: delegated writer per slice; strict TDD, RED commit then GREEN commit.
   the secret: `sealed` changes only with `secret_version + 1`, `previous_sealed = old sealed` and an overlap
   `previous_expires_at` in (now, now + 7 days]; previous_* is cleared only after it expired. The dispatcher signs
   with the current secret plus the previous one while it is unexpired (header carries both `v1`).
+- Delivery is at-least-once (a lost 2xx or a crash between send and record resends after the lease). Each attempt is
+  re-signed with a fresh `t`, so signatures differ per attempt; receivers dedupe by event `id` (documented in
+  `docs/integracion/webhooks.md`).
 - Events filter: empty = all events; duplicates rejected (`webhook_events_unique`).
 
 ## Verification (S1)

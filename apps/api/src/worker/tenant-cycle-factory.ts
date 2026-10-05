@@ -1,6 +1,6 @@
 import { TipsDeXmlBuilder, TipsQrGenerator, TipsXmlSigner } from '@sifen/sifen-tips';
 import type { Database } from '@sifen/db';
-import type { SifenGateway } from '@sifen/sifen-gateway';
+import { measureLoteMessage, type SifenGateway } from '@sifen/sifen-gateway';
 import type {
   CertificateSource,
   CscSource,
@@ -15,7 +15,6 @@ import { createDrizzleLoteAssemblyStore } from '../modules/transmission/infrastr
 import { createDrizzleLoteDispatchStore } from '../modules/transmission/infrastructure/drizzle-lote-dispatch-store.js';
 import { createDrizzleLotePollStore } from '../modules/transmission/infrastructure/drizzle-lote-poll-store.js';
 import { createDrizzleTransmissionCycleStore } from '../modules/transmission/infrastructure/drizzle-transmission-cycle-store.js';
-import { measureLoteMessage } from '../modules/transmission/infrastructure/lote-message.js';
 
 export interface TenantCycleFactoryDeps {
   readonly db: Database;

@@ -51,6 +51,32 @@ function setup(options: { tenants?: string[]; directoryFails?: boolean } = {}) {
   return { deps, events, logs, tick: () => tick?.() };
 }
 
+function withWebhooks(deps: ReturnType<typeof setup>['deps'], events: string[]) {
+  return {
+    ...deps,
+    webhooks: {
+      everyMs: 30_000,
+      schedules: {
+        list: () => Promise.resolve(['a', 'gone']),
+        upsert: (id: string, every: number) => {
+          events.push(`wh-upsert:${id}:${String(every)}`);
+          return Promise.resolve();
+        },
+        remove: (id: string) => {
+          events.push(`wh-remove:${id}`);
+          return Promise.resolve();
+        },
+      } satisfies TenantScheduleStore,
+      createWorker: () => ({
+        close: () => {
+          events.push('webhook-worker-closed');
+          return Promise.resolve();
+        },
+      }),
+    },
+  };
+}
+
 /** Spec: HU-E6-02 (S5e). Worker lifecycle: schedule every tenant, keep schedules fresh, stop gracefully. */
 describe('startTransmissionWorker', () => {
   it('schedules every tenant at the cadence, starts the worker and reconciles periodically', async () => {
@@ -85,5 +111,51 @@ describe('startTransmissionWorker', () => {
     expect(ok.logs.join('\n')).not.toContain('postgres://');
     expect(logs.join('\n')).not.toContain('postgres://');
     expect(tick).toBeTypeOf('function');
+  });
+
+  /** Spec: HU-E11-01. The webhook delivery queue runs next to the transmission one. */
+  it('also schedules the webhook delivery job per tenant, dropping the ones that are gone', async () => {
+    const { deps, events } = setup();
+
+    await startTransmissionWorker(withWebhooks(deps, events));
+
+    expect(events).toEqual([
+      'upsert:a:60000',
+      'upsert:b:60000',
+      'wh-upsert:a:30000',
+      'wh-upsert:b:30000',
+      'wh-remove:gone',
+      'interval:300000',
+    ]);
+  });
+
+  it('reconciles the webhook schedules on every periodic tick', async () => {
+    const { deps, events, tick } = setup();
+    await startTransmissionWorker(withWebhooks(deps, events));
+    events.length = 0;
+
+    tick();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Webhook store already knows `a`: only the new tenant is added, the stale one removed.
+    expect(events).toEqual([
+      'upsert:a:60000',
+      'upsert:b:60000',
+      'wh-upsert:b:30000',
+      'wh-remove:gone',
+    ]);
+  });
+
+  it('closes the webhook worker together with the transmission one on stop', async () => {
+    const { deps, events } = setup();
+    const running = await startTransmissionWorker(withWebhooks(deps, events));
+
+    await running.stop();
+
+    expect(events.slice(-3)).toEqual([
+      'interval-cleared',
+      'worker-closed',
+      'webhook-worker-closed',
+    ]);
   });
 });

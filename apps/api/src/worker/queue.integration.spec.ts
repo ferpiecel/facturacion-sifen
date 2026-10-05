@@ -5,6 +5,9 @@ import {
   createRedisConnection,
   createTenantScheduleStore,
   createTransmissionWorker,
+  createWebhookDeliveryQueue,
+  createWebhookDeliveryWorker,
+  createWebhookScheduleStore,
 } from './queue.js';
 import { startTransmissionWorker } from './start-transmission-worker.js';
 import { createRedisTenantRunLock } from './tenant-run-lock.js';
@@ -113,5 +116,46 @@ describe.skipIf(!REDIS_URL)('BullMQ transmission queue (real Redis)', () => {
     await running.stop();
 
     expect(seen).toEqual(new Set(['a', 'b']));
+  });
+
+  /** Spec: HU-E11-01. The `webhook-delivery` queue is separate from `lote-build` and keyed per tenant. */
+  it('keeps one webhook delivery schedule per tenant on its own queue', async () => {
+    const { prefix, connection } = open();
+    const transmission = new Queue('lote-build', { connection, prefix });
+    cleanup.push(() => transmission.close());
+    const queue = createWebhookDeliveryQueue(connection, { error: () => undefined }, prefix);
+    cleanup.push(() => queue.close());
+    const store = createWebhookScheduleStore(queue);
+
+    await store.upsert('t1', 30_000);
+    await store.upsert('t1', 10_000); // idempotent: still one
+    await store.upsert('t2', 30_000);
+    expect([...(await store.list())].sort()).toEqual(['t1', 't2']);
+    expect(await createTenantScheduleStore(transmission).list()).toEqual([]);
+
+    await store.remove('t1');
+    expect(await store.list()).toEqual(['t2']);
+  });
+
+  it('delivers each tenant webhook job to the processor with its tenant id', async () => {
+    const { prefix, connection } = open();
+    const queue = createWebhookDeliveryQueue(connection, { error: () => undefined }, prefix);
+    cleanup.push(() => queue.close());
+    const seen: string[] = [];
+    const worker = createWebhookDeliveryWorker({
+      connection,
+      prefix,
+      concurrency: 2,
+      process: (data) => {
+        seen.push(data.tenantId);
+        return Promise.resolve();
+      },
+    });
+    cleanup.push(() => worker.close());
+
+    await createWebhookScheduleStore(queue).upsert('t1', 100);
+    await until(() => seen.length >= 2);
+
+    expect(new Set(seen)).toEqual(new Set(['t1']));
   });
 });

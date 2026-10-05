@@ -47,9 +47,16 @@ export function createDrizzleLoteDispatchStore({
         const updated = await tx
           .update(lotes)
           .set({ ...columnsFor(outcome, now()), updatedAt: now() })
-          .where(and(eq(lotes.id, loteId), eq(lotes.status, 'sending')))
+          .where(
+            and(
+              eq(lotes.id, loteId),
+              // `unknown`: the sweep gave up on a slow send that has now finished; its protocol must not be lost.
+              inArray(lotes.status, ['sending', 'unknown']),
+            ),
+          )
           .returning({ id: lotes.id });
-        if (updated.length !== 1) throw new Error(`Lote ${loteId} is not in sending state`);
+        if (updated.length !== 1)
+          throw new Error(`Lote ${loteId} is not in sending or unknown state`);
         // SIFEN holds the lote: its documents are submitted (HU-E6-03 polls them). Only `queued`
         // ones move; anything else is left alone because failing here would strand the lote in
         // `sending`. After a 0301 or no answer they stay `queued` and can be re-queued.

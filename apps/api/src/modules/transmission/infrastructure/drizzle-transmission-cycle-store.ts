@@ -169,7 +169,7 @@ export function createDrizzleTransmissionCycleStore({
       return rows.map((row) => row.id);
     },
 
-    async sweepStaleSending(cutoff) {
+    async sweepStaleSending(cutoff, limit) {
       const swept = await withTenantTransaction(db, tenantId, (tx) =>
         tx
           .update(lotes)
@@ -179,10 +179,20 @@ export function createDrizzleTransmissionCycleStore({
             updatedAt: now(),
           })
           .where(
-            and(
-              eq(lotes.tenantId, tenantId),
-              eq(lotes.status, 'sending'),
-              lt(lotes.updatedAt, cutoff),
+            inArray(
+              lotes.id,
+              tx
+                .select({ id: lotes.id })
+                .from(lotes)
+                .where(
+                  and(
+                    eq(lotes.tenantId, tenantId),
+                    eq(lotes.status, 'sending'),
+                    lt(lotes.updatedAt, cutoff),
+                  ),
+                )
+                .orderBy(asc(lotes.updatedAt), asc(lotes.id))
+                .limit(limit),
             ),
           )
           .returning({ id: lotes.id }),

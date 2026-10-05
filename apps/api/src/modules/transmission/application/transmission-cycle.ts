@@ -21,9 +21,9 @@ export interface TransmissionCycleStore {
   dueLoteIds(now: Date, limit: number): Promise<readonly string[]>;
   /**
    * Moves lotes stuck in `sending` since before `cutoff` (a crash between claiming and recording the
-   * send) to `unknown`: SIFEN may hold them, so they are recovered by CDC, never resent. Returns how many.
+   * send) to `unknown`: SIFEN may hold them, so they are recovered by CDC, never resent. At most `limit` per call, oldest first. Returns how many.
    */
-  sweepStaleSending(cutoff: Date): Promise<number>;
+  sweepStaleSending(cutoff: Date, limit: number): Promise<number>;
   /**
    * Lotes to query by CDC, not queried in the last 10 minutes, never-queried first: `recovery`, `unknown`
    * (an unanswered send) and `processed` ones that still hold `submitted` documents.
@@ -67,6 +67,7 @@ export interface TransmissionCycleBatch {
   readonly send?: number;
   readonly poll?: number;
   readonly recover?: number;
+  readonly sweep?: number;
 }
 
 export interface TransmissionCycleDeps {
@@ -117,7 +118,7 @@ export interface CycleReport {
   readonly aborted?: true;
 }
 
-const DEFAULT_BATCH = { sign: 50, send: 20, poll: 20, recover: 10 } as const;
+const DEFAULT_BATCH = { sign: 50, send: 20, poll: 20, recover: 10, sweep: 100 } as const;
 const DEFAULT_STALE_PENDING_MS = 15 * 60_000;
 const DEFAULT_STALE_SENDING_MS = 30 * 60_000;
 const HELD_REPORT_LIMIT = 50;
@@ -200,7 +201,9 @@ export class TransmissionCycle {
       this.clock().getTime() - (this.deps.staleSendingAfterMs ?? DEFAULT_STALE_SENDING_MS),
     );
     return (
-      (await this.guard('send', undefined, () => this.deps.store.sweepStaleSending(cutoff))) ?? 0
+      (await this.guard('send', undefined, () =>
+        this.deps.store.sweepStaleSending(cutoff, this.batch.sweep),
+      )) ?? 0
     );
   }
 

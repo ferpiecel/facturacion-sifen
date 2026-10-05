@@ -61,8 +61,10 @@ Out: synchronous emission (HU-E6-05), the 72 h deadline watch, portal UI.
 - [x] T5a (fold into T5) `processed` lotes with `needsRecovery` documents are never picked up again: make them recoverable by CDC too.
 - [x] T5b Preserve the original hand-over reason (0364, 0360, window elapsed) instead of overwriting `last_poll_message` on each recovery pass.
 - [ ] T7 (debt) Cap the CDC queries per run and per lote, and check the abort signal between sequential queries, so a large lote cannot hold the tenant lock or outlive its lease.
-- [ ] T8 (debt) Escalate a CDC that answers 0420 forever: hold or alert the document after a bound (age since send or attempts) instead of re-querying every 10 minutes indefinitely.
-- [ ] T9 Resend after 0420 past the window: DECISION PENDING (see the design note below); not implemented.
+- [x] T8 (done in PR 8, `recovery-hold`) Escalate a CDC that answers 0420 forever: hold or alert the document after a bound (age since send or attempts) instead of re-querying every 10 minutes indefinitely.
+- [~] T9 Resend after 0420 past the window. Decision (tech lead): C first (hold + alert, done as T8 in PR 8), then B (one audited `submitted -> queued` transition) in a later PR. B is not implemented.
+- [x] T10 A send that finishes after the stale sweep is still recorded (`sending` or `unknown` accepted), so its protocol is not lost (PR 9).
+- [x] T11 The stale sweep is bounded (`batch.sweep`, default 100, oldest first, strictly before the cutoff) (PR 9).
 - [ ] T6 Docs: roadmap checkbox, plan notes, PR descriptions.
 
 ## PR slices (chained, each about 400 changed lines or less; the generated snapshot is declared in PR 1)
@@ -76,7 +78,9 @@ Out: synchronous emission (HU-E6-05), the 72 h deadline watch, portal UI.
 | 5 | `feat/hu-e6-04-recovery-cycle` | T4 | Cycle recover step, `recoverableLoteIds`, factory wiring, end-to-end spec |
 | 6 | `feat/hu-e6-04-recovery-no-response` | T5, T5a, T5b | Migration 0032 (`unknown -> processed`); recover `unknown` and `processed`-with-leftovers lotes by CDC; keep the hand-over reason |
 | 7 | `feat/hu-e6-04-recovery-stale-sending` | T5 | Sweep lotes stuck in `sending` to `unknown`; cycle recovers `unknown` and leftover lotes |
-| 8 | Pending | T6, T7, T8, T9 | Docs, per-run cap, 0420 escalation, resend (needs a decision) |
+| 8 | `feat/hu-e6-04-recovery-hold` | T8 | Hold + warning for a CDC that keeps answering 0420; lote settled when nothing is left to query |
+| 9 | `feat/hu-e6-04-recovery-late-record` | T10, T11 | Late send record accepted on `unknown`; bounded sweep; mixed 0422/0420 and rollback tests |
+| 10 | Pending | T6, T7, T9-B | Docs, per-run cap of CDC queries, audited resend |
 
 ## Decisions of PRs 6 and 7
 
@@ -88,6 +92,19 @@ Out: synchronous emission (HU-E6-05), the 72 h deadline watch, portal UI.
 | `processed` lotes are recoverable only while they still hold `submitted` documents; they stay `processed` | Needs no migration (no status change); fixes documents the poll left unsettled (`needsRecovery`) |
 | Hand-over reason kept: `last_poll_message` = reason + ` \| recovery: N document(s) still unresolved...`, rewritten (not appended) on each pass, and reduced to the reason when settled | No new column; the original 0364/0360/window reason survives |
 | `sending` older than 30 min (`staleSendingAfterMs`) becomes `unknown` at the start of the send step | A crash between claim and record leaves SIFEN possibly holding the lote; `sending -> unknown` was already allowed by the guard. A very slow send that finishes later fails its own record (`not in sending state`) instead of being resent |
+
+## Decisions of PRs 8 and 9
+
+| Decision | Rationale |
+|---|---|
+| Hold `recovery:0420-unresolved` at the third 0420 answer and never before 48 h after the send (`sent_at`, else the lote `created_at`) | One 0420 may only mean "not processed yet"; Guía 2024 says a lote is processed within 24 h and is queryable for 48 h. Three answers 10 minutes apart after the window is SIFEN saying it does not hold the DE |
+| The count is the document's `transmission_attempts`; only a 0420 counts (not timeouts or odd codes) | Reuses the existing column and `document:release-hold`, which resets it (and audits the release): a released document gets three more passes before it is held again. Documents mixing 0301 attempts only reach the hold sooner when they are also past 48 h |
+| The alert is a `warn` log per held document (plus the existing held-documents report in the worker) | There is no notification channel yet |
+| Held documents are not loaded for recovery and `recoverableLoteIds` ignores processed lotes whose submitted documents are all held | The lote stops being re-queried |
+| A lote whose remaining documents are all settled or held becomes `processed` (guard already allows it from `recovery` and `unknown`; no migration) | It leaves the recoverable states |
+| A released `queued` document of an unknown lote is picked up by the assembler again (that is the operator resubmit of option C); a released `submitted` document is queried again until B exists | Option C as decided |
+| `SendLote` record accepts `unknown` as well as `sending`; the guard already allows `unknown -> sent/rejected` | A slow send finishing after the sweep keeps its protocol; a lote already closed by recovery still refuses the record |
+| `sweepStaleSending(cutoff, limit)`, oldest first, strict `<` cutoff | Bounded work per cycle; a lote updated exactly at the cutoff is not stale |
 
 ## T9 design note: resending after 0420 past the window (decision pending)
 
@@ -119,4 +136,4 @@ Route: one writer, inline per task. Strict TDD: each PR has a RED commit (failin
 
 Review fixes applied after PRs #156 to #160 (log counts, DE Id match, recovery transitions); the findings above are recorded as debt, not implemented.
 
-PRs 1 to 7 implemented and verified locally (tsc, lint, depcruise, vitest --coverage at each branch tip). T6 to T9 pending.
+PRs 1 to 9 implemented and verified locally (tsc, lint, depcruise, vitest --coverage at each branch tip). Pending: T6, T7, T9-B.

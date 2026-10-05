@@ -127,6 +127,19 @@ describe('DrizzleLoteAssemblyStore', () => {
       ]);
     });
 
+    it('does not reassemble a held queued document of a processed lote until it is released', async () => {
+      const doc = await addDocument('queued');
+      await addLote('processed', [doc.id]);
+      const set = (values: Partial<typeof documents.$inferInsert>) =>
+        handle.db.update(documents).set(values).where(eq(documents.id, doc.id));
+      const ids = async () => (await storeFor(tenantId).readyDocuments()).map((d) => d.documentId);
+
+      await set({ transmissionHold: 'recovery:0420-unresolved' });
+      expect(await ids()).toEqual([]);
+      await set({ transmissionHold: null });
+      expect(await ids()).toEqual([doc.id]);
+    });
+
     it('leaves out documents that are held or still backing off, and takes them once due', async () => {
       const now = new Date('2026-10-05T09:00:00.000Z');
       const due = await addDocument('queued');

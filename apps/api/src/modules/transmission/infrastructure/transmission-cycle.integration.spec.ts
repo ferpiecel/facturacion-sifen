@@ -213,20 +213,29 @@ describe('TransmissionCycle end to end', () => {
     // Pacing: not queried by CDC until 10 minutes after the hand-over.
     expect((await cycle.run()).recovered).toEqual([]);
 
-    // First attempt: SIFEN does not know the CDC yet (0420) and nothing is settled or resent.
+    // Past the 48 h window a 0420 is definitive: the document is held (alert), the lote leaves
+    // recovery and nothing is resent.
     clock = new Date('2026-10-04T12:22:00Z');
     gateway.enqueue('consultarDE', sifenScenarios.cdcInexistente());
     expect((await cycle.run()).recovered).toEqual([{ loteId, status: 'incomplete' }]);
-    expect((await readDocument()).status).toBe('submitted');
+    expect(await readDocument()).toMatchObject({
+      status: 'submitted',
+      transmissionHold: 'recovery:0420-unresolved',
+    });
+    const [settled] = await withTenantTransaction(handle.db, tenantId, (tx) =>
+      tx.select().from(lotes),
+    );
+    expect(settled.status).toBe('processed');
+    clock = new Date('2026-10-04T12:40:00Z');
+    expect((await cycle.run()).recovered).toEqual([]);
 
-    clock = new Date('2026-10-04T12:33:00Z');
+    // An operator releases the hold; the document is queried again and SIFEN now has it (0422).
+    await withTenantTransaction(handle.db, tenantId, (tx) =>
+      tx.update(documents).set({ transmissionHold: null }).where(eq(documents.cdc, CDC)),
+    );
     gateway.enqueue('consultarDE', sifenScenarios.cdcEncontrado(`<rDE><DE Id="${CDC}"/></rDE>`));
     expect((await cycle.run()).recovered).toEqual([{ loteId, status: 'recovered' }]);
     expect((await readDocument()).status).toBe('approved');
-    const [lote] = await withTenantTransaction(handle.db, tenantId, (tx) =>
-      tx.select().from(lotes),
-    );
-    expect(lote.status).toBe('processed');
 
     expect((await cycle.run()).recovered).toEqual([]);
     expect(gateway.callsTo('enviarLote')).toHaveLength(1);

@@ -58,7 +58,8 @@ export class TransmissionCycleProcessor {
     logger.info(
       `transmission cycle tenant=${tenantId} signed=${String(report.signed)} ` +
         `skipped=${String(report.signSkipped)} assembled=${String(report.assembled)} ` +
-        `sent=${String(report.sent.length)} polled=${String(report.polled.length)}`,
+        `sent=${String(report.sent.length)} polled=${String(report.polled.length)} ` +
+        `recovered=${String(report.recovered.length)}`,
     );
     if (report.aborted) {
       logger.warn(

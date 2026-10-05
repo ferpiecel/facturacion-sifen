@@ -9,10 +9,12 @@ import { SignDocument } from '../modules/emission/application/sign-document.js';
 import { createDrizzleSigningStore } from '../modules/emission/infrastructure/drizzle-signing-store.js';
 import { LoteAssembler } from '../modules/transmission/application/assemble-lotes.js';
 import { PollLoteResult } from '../modules/transmission/application/poll-lote-result.js';
+import { RecoverLoteByCdc } from '../modules/transmission/application/recover-lote-by-cdc.js';
 import { SendLote } from '../modules/transmission/application/send-lote.js';
 import { TransmissionCycle } from '../modules/transmission/application/transmission-cycle.js';
 import { createDrizzleLoteAssemblyStore } from '../modules/transmission/infrastructure/drizzle-lote-assembly-store.js';
 import { createDrizzleLoteDispatchStore } from '../modules/transmission/infrastructure/drizzle-lote-dispatch-store.js';
+import { createDrizzleLoteRecoveryStore } from '../modules/transmission/infrastructure/drizzle-lote-recovery-store.js';
 import { createDrizzleLotePollStore } from '../modules/transmission/infrastructure/drizzle-lote-poll-store.js';
 import { createDrizzleTransmissionCycleStore } from '../modules/transmission/infrastructure/drizzle-transmission-cycle-store.js';
 
@@ -38,10 +40,11 @@ export function createTenantCycleFactory({
   logger,
   now,
 }: TenantCycleFactoryDeps): (tenantId: string) => TransmissionCycle {
-  return (tenantId) =>
-    new TransmissionCycle({
+  return (tenantId) => {
+    const store = createDrizzleTransmissionCycleStore({ db, tenantId, now });
+    return new TransmissionCycle({
       tenantId,
-      store: createDrizzleTransmissionCycleStore({ db, tenantId, now }),
+      store,
       signer: new SignDocument({
         store: createDrizzleSigningStore({ db, now }),
         certificates,
@@ -64,7 +67,14 @@ export function createTenantCycleFactory({
         store: createDrizzleLotePollStore({ db, tenantId }),
         now,
       }),
+      recoverer: new RecoverLoteByCdc({
+        gateway,
+        store: createDrizzleLoteRecoveryStore({ db, tenantId }),
+        nextRequestId: () => store.nextRequestId(),
+        now,
+      }),
       now,
       logger,
     });
+  };
 }

@@ -2,6 +2,7 @@ import type { SignDocument } from '../../emission/application/sign-document.js';
 import type { Lote } from '../domain/lote-builder.js';
 import type { LoteAssembler } from './assemble-lotes.js';
 import type { PollLoteResult } from './poll-lote-result.js';
+import type { RecoverLoteByCdc } from './recover-lote-by-cdc.js';
 import type { SendLote } from './send-lote.js';
 
 /** A `pending` lote with the signed documents it carries, ready for `SendLote`. */
@@ -18,6 +19,8 @@ export interface TransmissionCycleStore {
   pendingLotes(limit: number): Promise<readonly PendingLote[]>;
   /** `sent` lotes whose next query time has come, most overdue first. */
   dueLoteIds(now: Date, limit: number): Promise<readonly string[]>;
+  /** `recovery` lotes never queried by CDC or not in the last 10 minutes, never-queried first. */
+  recoverableLoteIds(now: Date, limit: number): Promise<readonly string[]>;
   /** Reserves the next SIFEN request id (`dId`) for the tenant and environment. */
   nextRequestId(): Promise<bigint>;
   /** Stops signing an `accepted` document until an operator clears it; `reason` is a plain code. */
@@ -55,6 +58,7 @@ export interface TransmissionCycleBatch {
   readonly sign?: number;
   readonly send?: number;
   readonly poll?: number;
+  readonly recover?: number;
 }
 
 export interface TransmissionCycleDeps {
@@ -64,6 +68,7 @@ export interface TransmissionCycleDeps {
   readonly assembler: Pick<LoteAssembler, 'assemble'>;
   readonly sender: Pick<SendLote, 'execute'>;
   readonly poller: Pick<PollLoteResult, 'execute'>;
+  readonly recoverer: Pick<RecoverLoteByCdc, 'execute'>;
   readonly batch?: TransmissionCycleBatch;
   readonly now?: () => Date;
   /** A `pending` lote older than this is reported as stale (default 15 minutes). */
@@ -71,7 +76,7 @@ export interface TransmissionCycleDeps {
   readonly logger?: { warn(message: string): void };
 }
 
-export type CycleStep = 'sign' | 'assemble' | 'send' | 'poll';
+export type CycleStep = 'sign' | 'assemble' | 'send' | 'poll' | 'recover';
 
 export interface CycleFailure {
   readonly step: CycleStep;
@@ -89,6 +94,8 @@ export interface CycleReport {
   readonly sendSkipped: number;
   readonly sent: readonly { readonly loteId: string; readonly status: string }[];
   readonly polled: readonly { readonly loteId: string; readonly status: string }[];
+  /** Lotes queried by CDC after 0364 or the 48 h window (HU-E6-04). */
+  readonly recovered: readonly { readonly loteId: string; readonly status: string }[];
   readonly failures: readonly CycleFailure[];
   /** Documents parked for an operator, as of the end of the run. */
   readonly held: readonly HeldDocument[];
@@ -98,13 +105,13 @@ export interface CycleReport {
   readonly aborted?: true;
 }
 
-const DEFAULT_BATCH = { sign: 50, send: 20, poll: 20 } as const;
+const DEFAULT_BATCH = { sign: 50, send: 20, poll: 20, recover: 10 } as const;
 const DEFAULT_STALE_PENDING_MS = 15 * 60_000;
 const HELD_REPORT_LIMIT = 50;
 
 /**
  * One tenant's transmission cycle (plan 8.1): sign accepted documents, assemble lotes, send pending
- * lotes, poll due ones. Steps are bounded by batch size and idempotent per document or lote, so
+ * lotes, poll due ones, recover by CDC the ones the poll gave up on. Steps are bounded by batch size and idempotent per document or lote, so
  * re-running is safe. A failure is recorded and logged (error class only) without stopping the
  * rest; the next run finds the work again. A scheduler (BullMQ, S5c) decides when to run it.
  */
@@ -128,6 +135,7 @@ export class TransmissionCycle {
     const assembled = await this.assemble();
     const sending = await this.sendPending();
     const polled = await this.pollDue();
+    const recovered = await this.recoverDue();
     const held =
       (await this.guard('sign', undefined, () =>
         this.deps.store.heldDocuments(HELD_REPORT_LIMIT),
@@ -142,6 +150,7 @@ export class TransmissionCycle {
       assembled,
       ...sending,
       polled,
+      recovered,
       failures: this.failures,
       held,
       stalePending,
@@ -203,6 +212,21 @@ export class TransmissionCycle {
       if (result) polled.push({ loteId, status: result.status });
     }
     return polled;
+  }
+
+  /** After polling: a lote the poll just handed to recovery waits its own 10 minutes first. */
+  private async recoverDue() {
+    const recovered: { loteId: string; status: string }[] = [];
+    const due = await this.guard('recover', undefined, () =>
+      this.deps.store.recoverableLoteIds(this.clock(), this.batch.recover),
+    );
+    for (const loteId of due ?? []) {
+      const result = await this.guard('recover', loteId, () =>
+        this.deps.recoverer.execute({ loteId }),
+      );
+      if (result) recovered.push({ loteId, status: result.status });
+    }
+    return recovered;
   }
 
   private clock(): Date {

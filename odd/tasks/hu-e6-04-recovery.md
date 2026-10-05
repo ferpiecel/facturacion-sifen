@@ -53,11 +53,15 @@ Out: synchronous emission (HU-E6-05), the 72 h deadline watch, portal UI.
 
 ## Tasks
 
-- [ ] T1 Migration 0031: lotes guard allows `recovery -> processed` (+ down script, snapshot, journal) and its DB test.
-- [ ] T2 `RecoverLoteByCdc` use case (unit tests with `FakeSifenGateway`).
-- [ ] T3 `createDrizzleLoteRecoveryStore` (load, record with CAS, settle via shared `settleDocument`; PGlite tests under RLS).
-- [ ] T4 `TransmissionCycle` + store: `recoverableLoteIds`, `recoverer` dep, report field; worker wiring.
+- [x] T1 Migration 0031: lotes guard allows `recovery -> processed` (+ down script, snapshot, journal) and its DB test.
+- [x] T2 `RecoverLoteByCdc` use case (unit tests with `FakeSifenGateway`).
+- [x] T3 `createDrizzleLoteRecoveryStore` (load, record with CAS, settle via shared `settleDocument`; PGlite tests under RLS).
+- [x] T4 `TransmissionCycle` + store: `recoverableLoteIds`, `recoverer` dep, report field; worker wiring.
 - [ ] T5 Unknown and stale `sending` lotes: stale-sending sweep to `unknown`; recover by a CDC of the lote; 0420 policy.
+- [ ] T5a (fold into T5) `processed` lotes with `needsRecovery` documents are never picked up again: make them recoverable by CDC too.
+- [ ] T5b Preserve the original hand-over reason (0364, 0360, window elapsed) instead of overwriting `last_poll_message` on each recovery pass.
+- [ ] T7 (debt) Cap the CDC queries per run and per lote, and check the abort signal between sequential queries, so a large lote cannot hold the tenant lock or outlive its lease.
+- [ ] T8 (debt) Escalate a CDC that answers 0420 forever: hold or alert the document after a bound (age since send or attempts) instead of re-querying every 10 minutes indefinitely.
 - [ ] T6 Docs: roadmap checkbox, plan notes, PR descriptions.
 
 ## PR slices (chained, each about 400 changed lines or less; the generated snapshot is declared in PR 1)
@@ -86,3 +90,7 @@ Out: synchronous emission (HU-E6-05), the 72 h deadline watch, portal UI.
 ## Progress
 
 Route: one writer, inline per task. Strict TDD: each PR has a RED commit (failing tests only) then GREEN.
+
+Review fixes applied after PRs #156 to #160 (log counts, DE Id match, recovery transitions); the findings above are recorded as debt, not implemented.
+
+PRs 1 to 5 implemented and verified locally (tsc, lint, depcruise, vitest --coverage at each branch tip). PR 6 (T5, T6) pending.

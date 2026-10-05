@@ -9,6 +9,7 @@ import {
   tenantFiscalProfiles,
   tenants,
   tenantTimbrados,
+  webhookDeliveries,
   withTenantTransaction,
   type DatabaseHandle,
 } from '@sifen/db';
@@ -19,6 +20,7 @@ import {
   type NotAcceptedDocument,
   type SignableDocument,
 } from '../application/ports/signing.port.js';
+import { seedWebhookEndpoint } from '../../../../test/support/document-seed.js';
 import { createDrizzleSigningStore } from './drizzle-signing-store.js';
 
 const CDC = buildCdc({
@@ -290,6 +292,15 @@ describe('DrizzleSigningStore', () => {
         store.markSigned(tenantId, documentId, signed),
       ]);
       expect(results.filter(Boolean)).toHaveLength(1);
+    });
+
+    it('enqueues one document.signed event, and none when nothing was signed (outbox)', async () => {
+      await seedWebhookEndpoint(handle.db, tenantId);
+      const store = storeFor(tenantId);
+      await store.markSigned(tenantId, documentId, signed);
+      await store.markSigned(tenantId, documentId, signed);
+      const rows = await handle.db.select().from(webhookDeliveries);
+      expect(rows.map((r) => r.eventType)).toEqual(['document.signed']);
     });
 
     it("does not touch another tenant's document", async () => {

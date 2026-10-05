@@ -11,8 +11,17 @@ allowBuilds:
   # their install scripts avoids running unneeded native builds.
   cpu-features: false
   esbuild: true
+  # Optional native speed-up of bullmq's msgpackr; it falls back to pure JS without it.
+  msgpackr-extract: false
   protobufjs: false
   ssh2: false
+
+# facturacionelectronicapy-xmlsign pins the abandoned `xmldom` 0.6.0 (critical GHSA-crh6-fp67-6883 and
+# more, no patched release under that name) and xml2js 0.4.x (GHSA-776f-qx25-q3cc). Point them at the
+# maintained fork already used by xml-crypto and at the patched xml2js; the signing specs prove it.
+overrides:
+  xmldom: npm:@xmldom/xmldom@0.8.15
+  xml2js: 0.6.2
 
 minimumReleaseAgeExclude:
   - '@nestjs/common@12.1.0'

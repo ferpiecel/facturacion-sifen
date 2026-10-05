@@ -28,8 +28,18 @@ delivery history (backlog HU-E11-01; ADR-0011 anti-replay 5 min; plan v1.1 §19 
       during overlap, 2xx = delivered, else `nextRetryAt` or dead; stores only a code or `HTTP <status>`),
       `-dispatcher-store` (Drizzle claim with `FOR UPDATE SKIP LOCKED` + lease, record).
       Not wired yet: the Nest module and the BullMQ `webhook-delivery` worker/scheduler come with S4/S5.
-- [ ] S4 outbox: enqueue `webhook_deliveries` rows in the same tenant transaction as the document status change
-      (approved / approved_with_observations / rejected / cancelled / number_voided), idempotent per (event, endpoint).
+- [x] S4 outbox, stacked branches: `feat/hu-e11-01-webhook-outbox` (status -> event map, deterministic event id,
+      minimal data), `-outbox-enqueue` (`enqueueDocumentEvents(tx, ...)`), `-outbox-wiring` (called from acceptance,
+      `markSigned`, lote dispatch `sent` and lote poll settle, each in its own tenant transaction).
+      Decision: a shared helper, not a DB trigger: payload and event list live in TypeScript, RLS applies naturally
+      to the app_user transaction, no SECURITY DEFINER function is needed. Cancel/void write points (HU-E8) must call
+      the same helper. Event id = sha256(document id + event type): one event per document and type, so a retried
+      transition cannot duplicate (UNIQUE(endpoint_id, event_id) + ON CONFLICT DO NOTHING).
+- [x] S3-wiring `feat/hu-e11-01-webhook-worker`: `apps/api/src/worker/webhook-delivery.processor.ts`, bullmq-free
+      (processor, `createWebhookDeliveryDeps` from KMS_LOCAL_MASTER_KEY, repeatable job spec per tenant). Integration
+      point: the HU-E6-02 worker bootstrap registers `new Worker('webhook-delivery', processor)` and adds the
+      repeatable job for each tenant. Done in #154 (`createWebhookDeliveryQueue`/`Worker`, reconciled per tenant,
+      failures isolated from transmission scheduling).
 - [x] S5 API, stacked branches (each <= 400 lines): `feat/hu-e11-01-webhook-api` (url/events validation, SSRF literals),
       `-api-service` (create/update/rotate/list, secret sealed under tenant + endpoint id + version),
       `-api-store` (Drizzle store + audit), `-api-deliveries` (history service, keyset paging, replay),

@@ -1,5 +1,5 @@
 import { crc32, deflateRawSync } from 'node:zlib';
-import { WIDEST_DID, assertDId, soapEnvelope } from './requests.ts';
+import { WIDEST_DID, assertDId, embeddable, soapEnvelope } from './requests.ts';
 
 /**
  * siRecepLoteDE request (Manual Técnico v150 §9.2): `rEnvioLote` carries `dId` and `xDE`,
@@ -9,10 +9,6 @@ const ENTRY_NAME = 'lote.xml';
 /** 1980-01-01 00:00:00, the ZIP epoch: fixed so the bytes (and the measure) are reproducible. */
 const DOS_TIME = 0;
 const DOS_DATE = 0x21;
-const XML_DECLARATION = /^\s*<\?xml[^?]*\?>\s*/;
-
-/** The signed DE is embedded as an element: its own XML declaration must go. */
-const embeddable = (xml: string): string => xml.replace(XML_DECLARATION, '').trim();
 
 function assertLote(xmls: readonly string[]): void {
   if (xmls.length === 0) throw new RangeError('A lote needs at least one document');

@@ -103,6 +103,7 @@ describe('DrizzleTransmissionCycleStore', () => {
         status,
         nextPollAt: nextPoll ?? null,
         createdAt: at(documentIds.length),
+        updatedAt: at(documentIds.length),
       })
       .returning();
     await handle.db
@@ -129,7 +130,8 @@ describe('DrizzleTransmissionCycleStore', () => {
     await handle.close();
   });
 
-  const store = () => createDrizzleTransmissionCycleStore({ db: handle.db, tenantId });
+  const store = () =>
+    createDrizzleTransmissionCycleStore({ db: handle.db, tenantId, now: () => at(30) });
 
   it('lists accepted documents of the current environment, oldest first and bounded', async () => {
     const late = await addDocument(tenantId, 'accepted', 5);
@@ -215,5 +217,48 @@ describe('DrizzleTransmissionCycleStore', () => {
 
     expect([...mine].sort()).toEqual([1n, 2n]);
     expect(await theirs.nextRequestId()).toBe(1n);
+  });
+
+  it('parks an accepted document: it leaves the signing batch and shows as held', async () => {
+    const poison = await addDocument(tenantId, 'accepted', 1);
+    const fine = await addDocument(tenantId, 'accepted', 2);
+    const signed = await addDocument(tenantId, 'signed', 3);
+
+    await store().holdDocument(poison, 'signing:CscNotConfiguredError');
+    await store().holdDocument(signed, 'signing:CscNotConfiguredError');
+
+    expect(await store().acceptedDocumentIds(10)).toEqual([fine]);
+    expect(await store().heldDocuments(10)).toEqual([
+      { documentId: poison, reason: 'signing:CscNotConfiguredError' },
+    ]);
+    expect(await store().heldDocuments(0)).toEqual([]);
+  });
+
+  it('lists every held document, whatever its status, for the operator', async () => {
+    const exhausted = await addDocument(tenantId, 'queued', 1);
+    await handle.db
+      .update(documents)
+      .set({ transmissionHold: 'transmission:attempts-exhausted' })
+      .where(eq(documents.id, exhausted));
+    await addDocument(otherTenantId, 'queued', 1);
+
+    expect(await store().heldDocuments(10)).toEqual([
+      { documentId: exhausted, reason: 'transmission:attempts-exhausted' },
+    ]);
+  });
+
+  it('moves a deferred pending lote behind the others and counts the stale ones', async () => {
+    const first = await addLote(tenantId, 'pending', [await addDocument(tenantId, 'queued', 1)]);
+    const second = await addLote(tenantId, 'pending', [
+      await addDocument(tenantId, 'queued', 2),
+      await addDocument(tenantId, 'queued', 3),
+    ]);
+
+    await store().deferPendingLote(first);
+
+    expect((await store().pendingLotes(10)).map((p) => p.loteId)).toEqual([second, first]);
+    expect(await store().pendingOlderThan(at(2))).toBe(1);
+    expect(await store().pendingOlderThan(at(5))).toBe(2);
+    expect(await store().pendingOlderThan(at(0))).toBe(0);
   });
 });

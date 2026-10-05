@@ -28,6 +28,10 @@ interface Setup {
   poll?: (id: string) => Promise<unknown>;
   listAccepted?: () => Promise<readonly string[]>;
   nextRequestId?: () => Promise<bigint>;
+  held?: { documentId: string; reason: string }[];
+  stalePending?: number;
+  holdFails?: boolean;
+  stalePendingAfterMs?: number;
   batch?: TransmissionCycleDeps['batch'];
 }
 
@@ -35,6 +39,9 @@ function setup(o: Setup = {}) {
   const log: string[] = [];
   const warnings: string[] = [];
   const limits: Record<string, number> = {};
+  const holds: [string, string][] = [];
+  const deferred: string[] = [];
+  const cutoffs: Date[] = [];
   let dId = 0n;
   const signed = (id: string) => ({ status: 'signed', cdc: id, signedAt: NOW });
   const store: TransmissionCycleStore = {
@@ -52,6 +59,20 @@ function setup(o: Setup = {}) {
       return Promise.resolve(o.due ?? []);
     },
     nextRequestId: () => o.nextRequestId?.() ?? Promise.resolve((dId += 1n)),
+    holdDocument: (documentId, reason) => {
+      if (o.holdFails) return Promise.reject(new Error('db down'));
+      holds.push([documentId, reason]);
+      return Promise.resolve();
+    },
+    heldDocuments: () => Promise.resolve(o.held ?? []),
+    deferPendingLote: (loteId) => {
+      deferred.push(loteId);
+      return Promise.resolve();
+    },
+    pendingOlderThan: (cutoff) => {
+      cutoffs.push(cutoff);
+      return Promise.resolve(o.stalePending ?? 0);
+    },
   };
   // The services are faked at their `execute`/`assemble` seam, so results are loosely typed.
   const cycle = new TransmissionCycle({
@@ -84,8 +105,9 @@ function setup(o: Setup = {}) {
     now: () => NOW,
     logger: { warn: (message) => warnings.push(message) },
     batch: o.batch,
+    stalePendingAfterMs: o.stalePendingAfterMs,
   });
-  return { cycle, log, warnings, limits };
+  return { cycle, log, warnings, limits, holds, deferred, cutoffs };
 }
 
 /** Spec: HU-E6-02 (S5a). One tenant's transmission cycle: sign, assemble, send, poll. */
@@ -243,11 +265,122 @@ describe('TransmissionCycle', () => {
       sent: [],
       polled: [],
       failures: [],
+      held: [],
+      stalePending: 0,
     });
     expect(defaults.limits).toEqual({ sign: 50, send: 20, poll: 20 });
 
     const custom = setup({ batch: { sign: 3, send: 2, poll: 1 } });
     await custom.cycle.run();
     expect(custom.limits).toEqual({ sign: 3, send: 2, poll: 1 });
+  });
+
+  it('parks a document that fails signing with a deterministic error, by error class', async () => {
+    const names = [
+      'SigningDataIncompleteError',
+      'EstablishmentContactMissingError',
+      'CscNotConfiguredError',
+      'DocumentEnvironmentMismatchError',
+      'CertificateNotFoundError',
+      'CertificateValidityError',
+      'InvoiceXmlError',
+    ];
+    const { cycle, holds } = setup({
+      accepted: names,
+      sign: (id) => Promise.reject(Object.assign(new Error('secret detail'), { name: id })),
+    });
+
+    const report = await cycle.run();
+
+    expect(holds).toEqual(names.map((name) => [name, `signing:${name}`]));
+    expect(report.failures).toHaveLength(names.length);
+    expect(JSON.stringify(holds)).not.toContain('secret');
+  });
+
+  it('keeps retrying a document that fails signing with a transient error', async () => {
+    const { cycle, holds } = setup({
+      accepted: ['d1'],
+      sign: () => Promise.reject(Object.assign(new Error('x'), { name: 'ConnectionError' })),
+    });
+
+    await cycle.run();
+
+    expect(holds).toEqual([]);
+  });
+
+  it('records a failed hold as a failure of the document and carries on', async () => {
+    const { cycle, log } = setup({
+      accepted: ['d1', 'd2'],
+      holdFails: true,
+      sign: () => Promise.reject(Object.assign(new Error('x'), { name: 'CscNotConfiguredError' })),
+    });
+
+    const report = await cycle.run();
+
+    expect(log).toContain(`sign:${TENANT}:d2`);
+    expect(report.failures.map((f) => f.error)).toEqual([
+      'CscNotConfiguredError',
+      'Error',
+      'CscNotConfiguredError',
+      'Error',
+    ]);
+  });
+
+  it('defers a pending lote whose send failed, so it does not hold the head of the queue', async () => {
+    const { cycle, deferred } = setup({
+      pending: [
+        { loteId: 'l1', lote: lote() },
+        { loteId: 'l2', lote: lote() },
+      ],
+      send: (id) =>
+        id === 'l1' ? Promise.reject(new Error('x')) : Promise.resolve({ status: 'sent' }),
+    });
+
+    await cycle.run();
+
+    expect(deferred).toEqual(['l1']);
+  });
+
+  it('reports the documents held for an operator and the pending lotes that are stale', async () => {
+    const held = [{ documentId: 'd9', reason: 'transmission:attempts-exhausted' }];
+    const { cycle, cutoffs } = setup({ held, stalePending: 2 });
+
+    const report = await cycle.run();
+
+    expect(report).toMatchObject({ held, stalePending: 2 });
+    expect(cutoffs).toEqual([new Date(NOW.getTime() - 15 * 60_000)]);
+
+    const custom = setup({ stalePendingAfterMs: 60_000 });
+    await custom.cycle.run();
+    expect(custom.cutoffs).toEqual([new Date(NOW.getTime() - 60_000)]);
+  });
+
+  it('stops between units of work once its signal aborts (lost run lock) and says so', async () => {
+    const controller = new AbortController();
+    const { cycle, log } = setup({
+      accepted: ['d1', 'd2'],
+      pending: [{ loteId: 'l1', lote: lote() }],
+      due: ['l2'],
+      sign: (id) => {
+        controller.abort();
+        return Promise.resolve({ status: 'signed', cdc: id, signedAt: NOW });
+      },
+    });
+
+    const report = await cycle.run({ signal: controller.signal });
+
+    expect(log).toEqual([`sign:${TENANT}:d1`]);
+    expect(report).toMatchObject({ signed: 1, aborted: true });
+  });
+
+  it('does not run at all with a signal that is already aborted, and omits the flag otherwise', async () => {
+    const aborted = setup({ accepted: ['d1'] });
+    expect(await aborted.cycle.run({ signal: AbortSignal.abort() })).toMatchObject({
+      signed: 0,
+      aborted: true,
+    });
+    expect(aborted.log).toEqual([]);
+
+    expect(await setup().cycle.run()).not.toHaveProperty('aborted');
   });
 });

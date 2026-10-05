@@ -50,7 +50,48 @@ lotes in process), plan v1.1 §8.1, backlog HU-E6-01/02/03.
         note in `invoice-xml.ts`); `markSigned` is one tenant transaction (`UPDATE ... WHERE status =
         'accepted'`, guard 0025). `CscSource` picks the lowest slot of the tenant's CSCs for the
         environment (decision to confirm).
-- [ ] **S5 — Worker wiring** (`lote-build` queue: assemble, then `SendLote` per lote).
+- [ ] **S5 — Pipeline worker.** Redis/BullMQ are not in the repo yet (no `bullmq`/`ioredis` dependency,
+      no Redis service in compose or CI), so the orchestration is built first as plain application code that
+      a scheduler only has to call (ADR-0003: API and worker are two entrypoints of the same code). Slices
+      of <= 400 lines each:
+  - [x] **S5a — `TransmissionCycle` service** (`transmission/application/transmission-cycle.ts`, ~410
+        lines with its spec): per tenant, in order, sign `accepted` documents (`SignDocument`), assemble
+        (`LoteAssembler`), send `pending` lotes (`SendLote`, one `dId` each), poll due lotes
+        (`PollLoteResult`). Each step is bounded (batch sizes 50/20/20), each document or lote is isolated,
+        failures are recorded in the report and logged with the error class only (no messages: they can
+        carry hosts, paths or key material). Port `TransmissionCycleStore` finds the work.
+  - [x] **S5b — Drizzle `TransmissionCycleStore`** (`drizzle-transmission-cycle-store.ts`): accepted
+        documents of the tenant's current environment, `pending` lotes with their signed XML and the
+        issuer RUC, due `sent` lotes, and `nextRequestId` (per tenant and environment).
+  - [x] **S5c — End-to-end test** (`transmission-cycle.integration.spec.ts`): pglite + real Drizzle
+        adapters + real Tips signing + `FakeSifenGateway`; `accepted -> signed -> queued -> submitted ->
+        approved`, then a further run is a no-op (no resend, no requery).
+  - [ ] **S5d — BullMQ infrastructure.** Add `bullmq` + `ioredis`, a Redis 7 service (compose, CI,
+        `.env.example`: `REDIS_URL`), `QueueModule`, and a `TenantAwareProcessor` base (ADR-0006: the job
+        carries `tenantId`, the processor opens the tenant context, `SET LOCAL` per transaction).
+  - [ ] **S5e — Worker entrypoint** (`apps/api/src/worker.ts`, same code as the API, ADR-0003):
+        composition of `TransmissionCycle` per tenant, a `lote-build` job per tenant (repeatable, a short
+        interval) and `lote-poll`, tenant enumeration port, graceful shutdown, no overlapping runs per
+        tenant (BullMQ job id per tenant). Jobs stay rebuildable: Postgres is the source of truth
+        (ADR-0013).
+  - [x] **S5f — Retry hardening** (migration 0030, columns on `documents`; `documents_guard` unchanged).
+    - S5f-1 (db): `transmission_attempts`, `next_transmission_at`, `transmission_hold` (plain code, format-checked).
+    - S5f-2 (app + cycle store): a document failing signing with a deterministic error
+      (`SigningDataIncompleteError`, `EstablishmentContactMissingError`, `CscNotConfiguredError`,
+      `DocumentEnvironmentMismatchError`, certificate not found/expired, `InvoiceXmlError`,
+      `InvoiceQrError`, `SigningMismatchError`) is held as `signing:<ErrorName>` and leaves the signing
+      batch; transient errors keep retrying. The report lists held documents and stale `pending` lotes.
+    - S5f-3 (dispatch + assembly stores): a 0301 counts one attempt per document and backs it off
+      (5 min doubling, capped at 2 h); at 5 attempts (configurable) the document is held as
+      `transmission:attempts-exhausted`, stays `queued`, never dropped. The assembler skips held and
+      backing-off documents.
+    - `pending` lotes: `pending` means never sent (ADR-0007: `sending` is set before the call), so the
+      cycle resends them safely every run (the claim is a compare-and-set). A lote whose send fails is
+      moved behind the others (`updated_at`) so it cannot starve the batch; lotes older than 15 min are
+      reported as stale. No cap or sweep: retrying costs nothing remote.
+    - Follow-ups: operator command to clear a hold (`documents.transmission_hold = NULL`, attempts reset)
+      and an automatic release when the tenant's fiscal configuration changes; alerting on `held` and
+      `stalePending` from the worker (S5e).
 
 ## Decisions
 

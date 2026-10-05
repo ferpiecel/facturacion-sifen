@@ -1,5 +1,6 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { documents, loteDocuments, lotes, withTenantTransaction, type Database } from '@sifen/db';
+import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
 import type { LoteDispatchOutcome, LoteDispatchStore } from '../application/send-lote.js';
 
 /** First wait after a 0301; it doubles on each refusal up to the cap. */
@@ -53,7 +54,7 @@ export function createDrizzleLoteDispatchStore({
         // ones move; anything else is left alone because failing here would strand the lote in
         // `sending`. After a 0301 or no answer they stay `queued` and can be re-queued.
         if (outcome.status === 'sent') {
-          await tx
+          const submitted = await tx
             .update(documents)
             .set({ status: 'submitted', updatedAt: now() })
             .where(
@@ -67,7 +68,14 @@ export function createDrizzleLoteDispatchStore({
                     .where(eq(loteDocuments.loteId, loteId)),
                 ),
               ),
-            );
+            )
+            .returning({ id: documents.id });
+          // Transactional outbox: document.submitted deliveries commit with the status change.
+          await enqueueDocumentEvents(tx, {
+            tenantId,
+            documentIds: submitted.map((row) => row.id),
+            at: now(),
+          });
         }
         if (outcome.status === 'rejected') await backOff(tx, loteId);
       });

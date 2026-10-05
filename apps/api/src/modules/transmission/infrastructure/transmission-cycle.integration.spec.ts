@@ -27,7 +27,7 @@ import { createDrizzleLoteAssemblyStore } from './drizzle-lote-assembly-store.js
 import { createDrizzleLoteDispatchStore } from './drizzle-lote-dispatch-store.js';
 import { createDrizzleLotePollStore } from './drizzle-lote-poll-store.js';
 import { createDrizzleTransmissionCycleStore } from './drizzle-transmission-cycle-store.js';
-import { measureLoteMessage } from './lote-message.js';
+import { measureLoteMessage } from '@sifen/sifen-gateway';
 
 const CDC = buildCdc({
   documentType: '01',

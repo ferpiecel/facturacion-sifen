@@ -1,5 +1,5 @@
-/** What a sealed secret protects (ADR-0009): a tenant's CSC or its `.p12`. */
-export type SecretKind = 'csc' | 'certificate';
+/** What a sealed secret protects (ADR-0009): a tenant's CSC, its `.p12` or a webhook signing secret. */
+export type SecretKind = 'csc' | 'certificate' | 'webhook';
 
 /**
  * Identity a ciphertext is cryptographically bound to (AES-GCM AAD). Opening
@@ -9,7 +9,8 @@ export type SecretKind = 'csc' | 'certificate';
 export interface SecretContext {
   readonly tenantId: string;
   readonly kind: SecretKind;
-  readonly environment: 'test' | 'production';
+  /** `none` for secrets that are not tied to a SIFEN environment (webhook signing secrets). */
+  readonly environment: 'test' | 'production' | 'none';
   readonly version: number;
   /** Optional slot identity (e.g. a CSC's idCSC); bound into the AAD when present. */
   readonly label?: string;

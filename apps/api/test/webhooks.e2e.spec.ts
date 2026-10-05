@@ -238,6 +238,28 @@ describe('/v1/webhooks (e2e)', () => {
       ).toEqual([]);
     });
 
+    it('hides whether a failure was a blocked address or a DNS failure (no internal probing)', async () => {
+      await insert({ status: 'dead', nextAttemptAt: null, lastError: 'blocked_address' });
+      await insert({ status: 'dead', nextAttemptAt: null, lastError: 'dns_failure' });
+      await insert({ status: 'dead', nextAttemptAt: null, lastError: 'timeout' });
+      const { items } = (await call('GET', '/v1/webhooks/deliveries', owner)).json<{
+        items: { last_error: string }[];
+      }>();
+      expect(items.map((i) => i.last_error).sort()).toEqual([
+        'timeout',
+        'unreachable',
+        'unreachable',
+      ]);
+    });
+
+    it('answers 409 when replaying onto an inactive endpoint', async () => {
+      const id = await insert({ status: 'dead', nextAttemptAt: null });
+      await call('PATCH', `/v1/webhooks/endpoints/${endpointId}`, owner, { active: false });
+      const response = await call('POST', `/v1/webhooks/deliveries/${id}/replay`, owner);
+      expect(response.statusCode).toBe(409);
+      expect(response.json<{ message: string }>().message).toBe('endpoint inactive');
+    });
+
     it('replays a dead delivery once, keeping its attempts, and audits it', async () => {
       const id = await insert({ status: 'dead', nextAttemptAt: null, attemptCount: 9 });
       const replayed = await call('POST', `/v1/webhooks/deliveries/${id}/replay`, owner);

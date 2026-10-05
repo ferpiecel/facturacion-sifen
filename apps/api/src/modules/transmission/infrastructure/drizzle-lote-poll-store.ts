@@ -1,5 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { documents, loteDocuments, lotes, withTenantTransaction, type Database } from '@sifen/db';
+import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
 import type {
   DocumentResolution,
   LotePollGuard,
@@ -64,7 +65,7 @@ export function createDrizzleLotePollStore({
         if (updated.length !== 1) return false;
         if (outcome.status === 'processed') {
           for (const resolution of outcome.resolutions) {
-            await settleDocument(tx, loteId, resolution, guard.polledAt);
+            await settleDocument(tx, tenantId, loteId, resolution, guard.polledAt);
           }
         }
         return true;
@@ -104,6 +105,7 @@ function columnsFor(outcome: LotePollOutcome, { polledAt }: LotePollGuard) {
 /** `submitted -> outcome`; a document already settled the same way is left alone, anything else aborts the transaction. */
 async function settleDocument(
   tx: Tx,
+  tenantId: string,
   loteId: string,
   { cdc, status, messages }: DocumentResolution,
   at: Date,
@@ -133,4 +135,6 @@ async function settleDocument(
     .returning({ id: documents.id });
   if (updated.length !== 1)
     throw new Error(`Document ${cdc} changed while settling lote ${loteId}`);
+  // Transactional outbox: the document.approved / rejected delivery commits with the settlement.
+  await enqueueDocumentEvents(tx, { tenantId, documentIds: [doc.id], at });
 }

@@ -3,6 +3,7 @@ import {
   tenantEstablishments,
   tenantExpeditionPoints,
   tenantTimbrados,
+  webhookEndpoints,
   type Database,
 } from '@sifen/db';
 
@@ -58,4 +59,21 @@ export async function seedDocuments(
     rows.push({ id: row.id, cdc, status });
   }
   return rows;
+}
+
+/** An active, all-events webhook endpoint with a placeholder sealed secret. */
+export async function seedWebhookEndpoint(db: Database, tenantId: string): Promise<string> {
+  const sealed = {
+    v: 1,
+    keyId: 'k',
+    wrappedKey: 'AA==',
+    nonce: 'AA==',
+    tag: 'AA==',
+    ciphertext: 'AA==',
+  };
+  const [row] = await db
+    .insert(webhookEndpoints)
+    .values({ tenantId, url: 'https://hooks.example.com/sifen', sealed })
+    .returning({ id: webhookEndpoints.id });
+  return row.id;
 }

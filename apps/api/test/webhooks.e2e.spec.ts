@@ -1,7 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
-import { auditLog, createPgliteDatabase, webhookEndpoints, type DatabaseHandle } from '@sifen/db';
+import {
+  auditLog,
+  createPgliteDatabase,
+  webhookDeliveries,
+  webhookEndpoints,
+  type DatabaseHandle,
+} from '@sifen/db';
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHttpAdapter } from '../src/bootstrap/http.js';
 import { AppModule } from '../src/app.module.js';
@@ -25,6 +32,7 @@ describe('/v1/webhooks (e2e)', () => {
   let owner: string;
   let readOnly: string;
   let other: string;
+  let tenantId: string;
 
   async function seedTenant(name: string, scopes: string[]) {
     const { id } = await createTenant(handle.db, name);
@@ -51,7 +59,7 @@ describe('/v1/webhooks (e2e)', () => {
     handle = createPgliteDatabase();
     await handle.migrate();
     const a = await seedTenant('Acme SA', ['webhooks:write', 'webhooks:read']);
-    owner = a.key;
+    [owner, tenantId] = [a.key, a.id];
     readOnly = (await seedTenant('Reader SA', ['webhooks:read'])).key;
     other = (await seedTenant('Other SA', ['webhooks:write', 'webhooks:read'])).key;
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
@@ -162,5 +170,124 @@ describe('/v1/webhooks (e2e)', () => {
     expect((await handle.db.select().from(auditLog)).map((a) => a.action)).toContain(
       'webhook_endpoint.rotate_secret',
     );
+  });
+
+  describe('deliveries', () => {
+    let endpointId: string;
+    const insert = async (over: Partial<typeof webhookDeliveries.$inferInsert> = {}) =>
+      (
+        await handle.db
+          .insert(webhookDeliveries)
+          .values({
+            tenantId,
+            endpointId,
+            eventId: `evt_${randomUUID().replaceAll('-', '')}`,
+            eventType: 'document.approved',
+            payload: { data: { cdc: 'private' } },
+            nextAttemptAt: new Date(),
+            ...over,
+          })
+          .returning()
+      )[0].id;
+
+    beforeEach(async () => {
+      endpointId = (await create()).json<EndpointBody>().id;
+    });
+
+    it('lists the history without payloads, filtered and paginated', async () => {
+      await insert();
+      const dead = await insert({
+        status: 'dead',
+        nextAttemptAt: null,
+        attemptCount: 9,
+        lastStatusCode: 500,
+        lastError: 'HTTP 500',
+      });
+      await insert();
+      const page = (
+        await call('GET', `/v1/webhooks/deliveries?endpoint_id=${endpointId}&limit=2`, owner)
+      ).json<{ items: { id: string }[]; next_cursor: string | null }>();
+      expect(page.items).toHaveLength(2);
+      expect(page.next_cursor).toEqual(expect.any(String));
+      const rest = (
+        await call(
+          'GET',
+          `/v1/webhooks/deliveries?limit=2&cursor=${page.next_cursor as string}`,
+          owner,
+        )
+      ).json<{ items: unknown[]; next_cursor: null }>();
+      expect(rest.items).toHaveLength(1);
+      const filtered = await call('GET', '/v1/webhooks/deliveries?status=dead', owner);
+      expect(filtered.json<{ items: object[] }>().items).toEqual([
+        expect.objectContaining({
+          id: dead,
+          endpoint_id: endpointId,
+          event_type: 'document.approved',
+          status: 'dead',
+          attempt_count: 9,
+          last_status_code: 500,
+          last_error: 'HTTP 500',
+        }),
+      ]);
+      expect(filtered.body).not.toContain('private');
+      expect((await call('GET', '/v1/webhooks/deliveries?status=bogus', owner)).statusCode).toBe(
+        422,
+      );
+      expect(
+        (await call('GET', '/v1/webhooks/deliveries', other)).json<{ items: unknown[] }>().items,
+      ).toEqual([]);
+    });
+
+    it('hides whether a failure was a blocked address or a DNS failure (no internal probing)', async () => {
+      await insert({ status: 'dead', nextAttemptAt: null, lastError: 'blocked_address' });
+      await insert({ status: 'dead', nextAttemptAt: null, lastError: 'dns_failure' });
+      await insert({ status: 'dead', nextAttemptAt: null, lastError: 'timeout' });
+      const { items } = (await call('GET', '/v1/webhooks/deliveries', owner)).json<{
+        items: { last_error: string }[];
+      }>();
+      expect(items.map((i) => i.last_error).sort()).toEqual([
+        'timeout',
+        'unreachable',
+        'unreachable',
+      ]);
+    });
+
+    it('answers 409 when replaying onto an inactive endpoint', async () => {
+      const id = await insert({ status: 'dead', nextAttemptAt: null });
+      await call('PATCH', `/v1/webhooks/endpoints/${endpointId}`, owner, { active: false });
+      const response = await call('POST', `/v1/webhooks/deliveries/${id}/replay`, owner);
+      expect(response.statusCode).toBe(409);
+      expect(response.json<{ message: string }>().message).toBe('endpoint inactive');
+    });
+
+    it('replays a dead delivery once, keeping its attempts, and audits it', async () => {
+      const id = await insert({ status: 'dead', nextAttemptAt: null, attemptCount: 9 });
+      const replayed = await call('POST', `/v1/webhooks/deliveries/${id}/replay`, owner);
+      expect(replayed.statusCode).toBe(200);
+      expect(replayed.json<{ status: string; attempt_count: number }>()).toMatchObject({
+        status: 'pending',
+        attempt_count: 9,
+      });
+      expect((await call('POST', `/v1/webhooks/deliveries/${id}/replay`, owner)).statusCode).toBe(
+        409,
+      );
+      expect((await call('POST', `/v1/webhooks/deliveries/${id}/replay`, other)).statusCode).toBe(
+        404,
+      );
+      expect(
+        (await call('POST', `/v1/webhooks/deliveries/${randomUUID()}/replay`, owner)).statusCode,
+      ).toBe(404);
+      expect(
+        (await call('POST', `/v1/webhooks/deliveries/${id}/replay`, readOnly)).statusCode,
+      ).toBe(403);
+      const [row] = await handle.db
+        .select()
+        .from(webhookDeliveries)
+        .where(eq(webhookDeliveries.id, id));
+      expect(row.status).toBe('pending');
+      expect((await handle.db.select().from(auditLog)).map((a) => a.action)).toContain(
+        'webhook_delivery.replay',
+      );
+    });
   });
 });

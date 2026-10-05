@@ -3,6 +3,7 @@ import type { DeliveryView } from '../../application/ports/webhook-delivery-admi
 import type { EndpointView } from '../../application/ports/webhook-endpoint-store.port.js';
 import {
   WebhookDeliveryNotDeadError,
+  WebhookEndpointInactiveError,
   WebhookEndpointNotFoundError,
   WebhookValidationError,
 } from '../../application/webhook-deliveries.js';
@@ -35,7 +36,8 @@ export function toHttpException(error: unknown): unknown {
   }
   if (
     error instanceof WebhookRotationConflictError ||
-    error instanceof WebhookDeliveryNotDeadError
+    error instanceof WebhookDeliveryNotDeadError ||
+    error instanceof WebhookEndpointInactiveError
   ) {
     return problem(HttpStatus.CONFLICT, error.message);
   }
@@ -53,6 +55,13 @@ export const endpointJson = (e: EndpointView) => ({
   updated_at: e.updatedAt.toISOString(),
 });
 
+/**
+ * A blocked address and a DNS failure look the same from outside: telling them apart would let an
+ * integrator probe which internal names resolve to private addresses.
+ */
+const publicError = (error: string | null): string | null =>
+  error === 'blocked_address' || error === 'dns_failure' ? 'unreachable' : error;
+
 export const deliveryJson = (d: DeliveryView) => ({
   id: d.id,
   endpoint_id: d.endpointId,
@@ -61,7 +70,7 @@ export const deliveryJson = (d: DeliveryView) => ({
   status: d.status,
   attempt_count: d.attemptCount,
   last_status_code: d.lastStatusCode,
-  last_error: d.lastError,
+  last_error: publicError(d.lastError),
   next_attempt_at: d.nextAttemptAt?.toISOString() ?? null,
   delivered_at: d.deliveredAt?.toISOString() ?? null,
   created_at: d.createdAt.toISOString(),

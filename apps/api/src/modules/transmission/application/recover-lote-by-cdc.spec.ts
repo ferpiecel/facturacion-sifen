@@ -61,7 +61,7 @@ describe('RecoverLoteByCdc', () => {
     expect(gateway.calls).toHaveLength(0);
   });
 
-  it.each(['pending', 'sending', 'sent', 'rejected', 'unknown', 'processed'])(
+  it.each(['pending', 'sending', 'sent', 'rejected'])(
     'does not recover a lote in %s state',
     async (status) => {
       const { recover, gateway, store } = setup(recoveryLote({ status }));
@@ -74,6 +74,29 @@ describe('RecoverLoteByCdc', () => {
   it('does not query again before 10 minutes after the last query', async () => {
     const { recover, gateway } = setup(recoveryLote(), 9 * MINUTE);
     expect(await recover.execute({ loteId: 'lote-1' })).toEqual({ status: 'not-due' });
+    expect(gateway.calls).toHaveLength(0);
+  });
+
+  it.each(['unknown', 'recovery', 'processed'])(
+    'recovers a %s lote by CDC and never resends it',
+    async (status) => {
+      const { recover, gateway, store } = setup(recoveryLote({ status, lastPolledAt: null }));
+      gateway.enqueue(
+        'consultarDE',
+        sifenScenarios.cdcEncontrado(xmlOf(cdcA)),
+        sifenScenarios.cdcInexistente(),
+      );
+      const result = await recover.execute({ loteId: 'lote-1' });
+      expect(result).toMatchObject({ status: 'incomplete', resolutions: [{ cdc: cdcA }] });
+      expect(store.recorded[0].guard).toMatchObject({ expectedStatus: status });
+      expect(gateway.callsTo('consultarDE')).toHaveLength(2);
+      expect(gateway.callsTo('enviarLote')).toHaveLength(0);
+    },
+  );
+
+  it('a processed lote with nothing pending is not recoverable', async () => {
+    const { recover, gateway } = setup(recoveryLote({ status: 'processed', cdcs: [] }));
+    expect(await recover.execute({ loteId: 'lote-1' })).toEqual({ status: 'not-recoverable' });
     expect(gateway.calls).toHaveLength(0);
   });
 
@@ -114,7 +137,14 @@ describe('RecoverLoteByCdc', () => {
     };
     expect(result).toEqual({ status: 'recovered', ...expected });
     expect(store.recorded).toEqual([
-      { outcome: expected, guard: { expectedLastPolledAt: HANDED_OVER_AT, recoveredAt: now } },
+      {
+        outcome: expected,
+        guard: {
+          expectedStatus: 'recovery',
+          expectedLastPolledAt: HANDED_OVER_AT,
+          recoveredAt: now,
+        },
+      },
     ]);
   });
 

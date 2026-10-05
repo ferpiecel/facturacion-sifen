@@ -97,14 +97,20 @@ Out: synchronous emission (HU-E6-05), the 72 h deadline watch, portal UI.
 
 | Decision | Rationale |
 |---|---|
-| Hold `recovery:0420-unresolved` at the third 0420 answer and never before 48 h after the send (`sent_at`, else the lote `created_at`) | One 0420 may only mean "not processed yet"; Guía 2024 says a lote is processed within 24 h and is queryable for 48 h. Three answers 10 minutes apart after the window is SIFEN saying it does not hold the DE |
-| The count is the document's `transmission_attempts`; only a 0420 counts (not timeouts or odd codes) | Reuses the existing column and `document:release-hold`, which resets it (and audits the release): a released document gets three more passes before it is held again. Documents mixing 0301 attempts only reach the hold sooner when they are also past 48 h |
+| Hold `recovery:0420-unresolved` at the first 0420 answered at least 48 h after the send (`sent_at`, else the lote `created_at`); a 0420 before that never counts | One 0420 may only mean "not processed yet"; Guía 2024: a lote is processed within 24 h and queryable for 48 h, so past the window a 0420 is definitive. No per-document counter: `transmission_attempts` belongs to the 0301 backoff and must not be shared, and a dedicated column would add a migration for a marginal safety margin |
+| Only a 0420 holds (not timeouts or odd codes); `document:release-hold` clears the hold, and a document that still answers 0420 is held again at the next pass | The hold is reversible and the release is audited by the CLI |
 | The alert is a `warn` log per held document (plus the existing held-documents report in the worker) | There is no notification channel yet |
 | Held documents are not loaded for recovery and `recoverableLoteIds` ignores processed lotes whose submitted documents are all held | The lote stops being re-queried |
 | A lote whose remaining documents are all settled or held becomes `processed` (guard already allows it from `recovery` and `unknown`; no migration) | It leaves the recoverable states |
 | A released `queued` document of an unknown lote is picked up by the assembler again (that is the operator resubmit of option C); a released `submitted` document is queried again until B exists | Option C as decided |
+| A late `sent` clears the `recovery:0420-unresolved` hold of the queued documents it submits (audit row `document.hold_released`, actor `operator` / `transmission-worker`); other holds stay | SIFEN did receive the lote, so the "absent" reason is gone |
+| The sweep picks lotes in a locking CTE (`FOR UPDATE SKIP LOCKED`, LIMIT on the locked rows) and its UPDATE re-checks status and cutoff | A lote recording `sent` meanwhile is neither forced to `unknown` nor waited for |
 | `SendLote` record accepts `unknown` as well as `sending`; the guard already allows `unknown -> sent/rejected` | A slow send finishing after the sweep keeps its protocol; a lote already closed by recovery still refuses the record |
 | `sweepStaleSending(cutoff, limit)`, oldest first, strict `<` cutoff | Bounded work per cycle; a lote updated exactly at the cutoff is not stale |
+
+### Debt left by PRs 8 and 9 (not implemented)
+
+- The hold itself writes no audit row (only releases do), and the warning is logged after the commit, so a crash between the two loses the alert (the worker's held-documents report still lists the document).
 
 ## T9 design note: resending after 0420 past the window (decision pending)
 

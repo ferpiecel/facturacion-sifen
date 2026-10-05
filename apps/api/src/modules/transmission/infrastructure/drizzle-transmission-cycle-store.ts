@@ -1,4 +1,4 @@
-import { and, asc, count, eq, inArray, isNotNull, isNull, lt, lte } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizzle-orm';
 import {
   documents,
   loteDocuments,
@@ -10,6 +10,9 @@ import {
   type Database,
 } from '@sifen/db';
 import type { PendingLote, TransmissionCycleStore } from '../application/transmission-cycle.js';
+
+/** Same spacing as the lote poll: CDC queries are at least 10 minutes apart (Guía 2024). */
+const RECOVERY_INTERVAL_MS = 10 * 60 * 1000;
 
 export interface DrizzleTransmissionCycleStoreOptions {
   readonly db: Database;
@@ -121,6 +124,31 @@ export function createDrizzleTransmissionCycleStore({
             and(eq(lotes.tenantId, tenantId), eq(lotes.status, 'sent'), lte(lotes.nextPollAt, now)),
           )
           .orderBy(asc(lotes.nextPollAt), asc(lotes.id))
+          .limit(limit),
+      );
+      return rows.map((row) => row.id);
+    },
+
+    async recoverableLoteIds(now, limit) {
+      const rows = await withTenantTransaction(db, tenantId, (tx) =>
+        tx
+          .select({ id: lotes.id })
+          .from(lotes)
+          .innerJoin(
+            tenants,
+            and(eq(tenants.id, lotes.tenantId), eq(tenants.environment, lotes.environment)),
+          )
+          .where(
+            and(
+              eq(lotes.tenantId, tenantId),
+              eq(lotes.status, 'recovery'),
+              or(
+                isNull(lotes.lastPolledAt),
+                lte(lotes.lastPolledAt, new Date(now.getTime() - RECOVERY_INTERVAL_MS)),
+              ),
+            ),
+          )
+          .orderBy(sql`${lotes.lastPolledAt} asc nulls first`, asc(lotes.id))
           .limit(limit),
       );
       return rows.map((row) => row.id);

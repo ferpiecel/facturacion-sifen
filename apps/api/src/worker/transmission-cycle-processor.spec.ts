@@ -92,6 +92,18 @@ describe('TransmissionCycleProcessor', () => {
     expect(events).toEqual([]);
   });
 
+  it('logs how many lotes were polled and recovered', async () => {
+    const { processor, logs } = setup({
+      polled: [
+        { loteId: 'l1', status: 'pending' },
+        { loteId: 'l2', status: 'processed' },
+      ],
+      recovered: [{ loteId: 'l3', status: 'recovered' }],
+    });
+    await processor.process({ tenantId: TENANT });
+    expect(logs[0].message).toContain('polled=2 recovered=1');
+  });
+
   it('logs a quiet summary, and warnings for held documents, stale lotes and failures', async () => {
     const quiet = setup({ signed: 2, sent: [{ loteId: 'l1', status: 'sent' }] });
     await quiet.processor.process({ tenantId: TENANT });

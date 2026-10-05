@@ -1,7 +1,9 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { documents, loteDocuments, lotes, withTenantTransaction, type Database } from '@sifen/db';
+import { recordAudit } from '../../audit/infrastructure/record-audit.js';
 import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
 import type { LoteDispatchOutcome, LoteDispatchStore } from '../application/send-lote.js';
+import { RECOVERY_UNRESOLVED_HOLD } from './drizzle-lote-recovery-store.js';
 
 /** First wait after a 0301; it doubles on each refusal up to the cap. */
 const BASE_BACKOFF_MS = 5 * 60 * 1000;
@@ -61,6 +63,7 @@ export function createDrizzleLoteDispatchStore({
         // ones move; anything else is left alone because failing here would strand the lote in
         // `sending`. After a 0301 or no answer they stay `queued` and can be re-queued.
         if (outcome.status === 'sent') {
+          await releaseRecoveryHolds(tx, loteId);
           const submitted = await tx
             .update(documents)
             .set({ status: 'submitted', updatedAt: now() })
@@ -140,5 +143,38 @@ function columnsFor(outcome: LoteDispatchOutcome, at: Date): Partial<typeof lote
       return { status: 'rejected', responseCode: outcome.code, responseMessage: outcome.reason };
     case 'unknown':
       return { status: 'unknown', responseMessage: outcome.reason };
+  }
+}
+
+/**
+ * SIFEN did receive this lote, so a document the recovery had held as absent (0420) is no longer
+ * absent: its hold is cleared as it moves to `submitted`, audited like the operator release.
+ */
+async function releaseRecoveryHolds(tx: Tx, loteId: string): Promise<void> {
+  const released = await tx
+    .update(documents)
+    .set({ transmissionHold: null })
+    .where(
+      and(
+        eq(documents.status, 'queued'),
+        eq(documents.transmissionHold, RECOVERY_UNRESOLVED_HOLD),
+        inArray(
+          documents.id,
+          tx
+            .select({ id: loteDocuments.documentId })
+            .from(loteDocuments)
+            .where(eq(loteDocuments.loteId, loteId)),
+        ),
+      ),
+    )
+    .returning({ id: documents.id });
+  for (const { id } of released) {
+    await recordAudit(tx, {
+      actor: { type: 'operator', id: 'transmission-worker' },
+      action: 'document.hold_released',
+      entity: { type: 'document', id },
+      before: { transmissionHold: RECOVERY_UNRESOLVED_HOLD },
+      after: { transmissionHold: null },
+    });
   }
 }

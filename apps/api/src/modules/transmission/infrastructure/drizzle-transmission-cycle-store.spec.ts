@@ -382,7 +382,7 @@ describe('DrizzleTransmissionCycleStore', () => {
 
     expect(await spied.sweepStaleSending(at(5), 10)).toBe(1);
 
-    const update = statements.find((query) => /^update "lotes"/i.test(query)) ?? '';
+    const update = statements.find((query) => /update "lotes"/i.test(query)) ?? '';
     expect(update).toMatch(/for update skip locked/i);
     expect(update.match(/"status" = \$/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
     expect(update.match(/"updated_at" < \$/g)?.length ?? 0).toBeGreaterThanOrEqual(2);

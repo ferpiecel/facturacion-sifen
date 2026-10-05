@@ -19,7 +19,15 @@ export interface TransmissionCycleStore {
   pendingLotes(limit: number): Promise<readonly PendingLote[]>;
   /** `sent` lotes whose next query time has come, most overdue first. */
   dueLoteIds(now: Date, limit: number): Promise<readonly string[]>;
-  /** `recovery` lotes never queried by CDC or not in the last 10 minutes, never-queried first. */
+  /**
+   * Moves lotes stuck in `sending` since before `cutoff` (a crash between claiming and recording the
+   * send) to `unknown`: SIFEN may hold them, so they are recovered by CDC, never resent. Returns how many.
+   */
+  sweepStaleSending(cutoff: Date): Promise<number>;
+  /**
+   * Lotes to query by CDC, not queried in the last 10 minutes, never-queried first: `recovery`, `unknown`
+   * (an unanswered send) and `processed` ones that still hold `submitted` documents.
+   */
   recoverableLoteIds(now: Date, limit: number): Promise<readonly string[]>;
   /** Reserves the next SIFEN request id (`dId`) for the tenant and environment. */
   nextRequestId(): Promise<bigint>;
@@ -73,6 +81,8 @@ export interface TransmissionCycleDeps {
   readonly now?: () => Date;
   /** A `pending` lote older than this is reported as stale (default 15 minutes). */
   readonly stalePendingAfterMs?: number;
+  /** A lote `sending` for longer than this lost its outcome and becomes `unknown` (default 30 minutes). */
+  readonly staleSendingAfterMs?: number;
   readonly logger?: { warn(message: string): void };
 }
 
@@ -96,6 +106,8 @@ export interface CycleReport {
   readonly polled: readonly { readonly loteId: string; readonly status: string }[];
   /** Lotes queried by CDC after 0364 or the 48 h window (HU-E6-04). */
   readonly recovered: readonly { readonly loteId: string; readonly status: string }[];
+  /** Lotes found stuck in `sending` and handed to recovery as `unknown`. */
+  readonly sweptSending: number;
   readonly failures: readonly CycleFailure[];
   /** Documents parked for an operator, as of the end of the run. */
   readonly held: readonly HeldDocument[];
@@ -107,6 +119,7 @@ export interface CycleReport {
 
 const DEFAULT_BATCH = { sign: 50, send: 20, poll: 20, recover: 10 } as const;
 const DEFAULT_STALE_PENDING_MS = 15 * 60_000;
+const DEFAULT_STALE_SENDING_MS = 30 * 60_000;
 const HELD_REPORT_LIMIT = 50;
 
 /**
@@ -133,6 +146,7 @@ export class TransmissionCycle {
     this.signal = signal;
     const signing = await this.signAccepted();
     const assembled = await this.assemble();
+    const sweptSending = await this.sweepStaleSending();
     const sending = await this.sendPending();
     const polled = await this.pollDue();
     const recovered = await this.recoverDue();
@@ -151,6 +165,7 @@ export class TransmissionCycle {
       ...sending,
       polled,
       recovered,
+      sweptSending,
       failures: this.failures,
       held,
       stalePending,
@@ -178,6 +193,15 @@ export class TransmissionCycle {
   private async assemble(): Promise<number> {
     const result = await this.guard('assemble', undefined, () => this.deps.assembler.assemble());
     return result?.lotes.length ?? 0;
+  }
+
+  private async sweepStaleSending(): Promise<number> {
+    const cutoff = new Date(
+      this.clock().getTime() - (this.deps.staleSendingAfterMs ?? DEFAULT_STALE_SENDING_MS),
+    );
+    return (
+      (await this.guard('send', undefined, () => this.deps.store.sweepStaleSending(cutoff))) ?? 0
+    );
   }
 
   private async sendPending() {

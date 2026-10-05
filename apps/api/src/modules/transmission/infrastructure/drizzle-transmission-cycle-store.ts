@@ -141,7 +141,21 @@ export function createDrizzleTransmissionCycleStore({
           .where(
             and(
               eq(lotes.tenantId, tenantId),
-              eq(lotes.status, 'recovery'),
+              or(
+                eq(lotes.status, 'recovery'),
+                eq(lotes.status, 'unknown'),
+                // Closed by the poll with documents it could not settle.
+                and(
+                  eq(lotes.status, 'processed'),
+                  sql`EXISTS (
+                    SELECT 1 FROM ${loteDocuments}
+                    JOIN ${documents}
+                      ON ${documents.tenantId} = ${loteDocuments.tenantId}
+                      AND ${documents.id} = ${loteDocuments.documentId}
+                    WHERE ${loteDocuments.loteId} = ${lotes.id} AND ${documents.status} = 'submitted'
+                  )`,
+                ),
+              ),
               or(
                 isNull(lotes.lastPolledAt),
                 lte(lotes.lastPolledAt, new Date(now.getTime() - RECOVERY_INTERVAL_MS)),
@@ -152,6 +166,27 @@ export function createDrizzleTransmissionCycleStore({
           .limit(limit),
       );
       return rows.map((row) => row.id);
+    },
+
+    async sweepStaleSending(cutoff) {
+      const swept = await withTenantTransaction(db, tenantId, (tx) =>
+        tx
+          .update(lotes)
+          .set({
+            status: 'unknown',
+            responseMessage: 'Send interrupted: no outcome was recorded',
+            updatedAt: now(),
+          })
+          .where(
+            and(
+              eq(lotes.tenantId, tenantId),
+              eq(lotes.status, 'sending'),
+              lt(lotes.updatedAt, cutoff),
+            ),
+          )
+          .returning({ id: lotes.id }),
+      );
+      return swept.length;
     },
 
     async holdDocument(documentId, reason) {

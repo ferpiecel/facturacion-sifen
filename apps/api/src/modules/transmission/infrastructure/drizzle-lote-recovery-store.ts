@@ -149,6 +149,17 @@ export function createDrizzleLoteRecoveryStore({
               .where(eq(lotes.id, loteId));
           }
         }
+        // After every UPDATE, like `releaseRecoveryHolds`: each audit insert takes the tenant's chain
+        // lock, so none is interleaved with the writes above. Same transaction as the holds.
+        for (const id of held) {
+          await recordAudit(tx, {
+            actor: TRANSMISSION_WORKER_ACTOR,
+            action: 'document.hold_placed',
+            entity: { type: 'document', id },
+            before: { transmissionHold: null },
+            after: { transmissionHold: RECOVERY_UNRESOLVED_HOLD },
+          });
+        }
         return held;
       });
       for (const id of result ?? []) {
@@ -193,7 +204,7 @@ async function touchQueried(
 }
 
 /**
- * Holds one document whose CDC answered 0420 past the window; returns its id when it was held. Only a
+ * Holds one document whose CDC answered 0420 past the window; returns its id when it was held (the caller audits it). Only a
  * document still waiting for SIFEN (`queued` or `submitted`) and not already held is touched.
  */
 async function holdAbsent(tx: Tx, loteId: string, cdc: string, at: Date): Promise<string | null> {
@@ -215,18 +226,7 @@ async function holdAbsent(tx: Tx, loteId: string, cdc: string, at: Date): Promis
       ),
     )
     .returning({ id: documents.id });
-  const id = held.at(0)?.id ?? null;
-  if (id) {
-    // Same transaction as the hold: the audit trail and the hold commit or roll back together.
-    await recordAudit(tx, {
-      actor: TRANSMISSION_WORKER_ACTOR,
-      action: 'document.hold_placed',
-      entity: { type: 'document', id },
-      before: { transmissionHold: null },
-      after: { transmissionHold: RECOVERY_UNRESOLVED_HOLD },
-    });
-  }
-  return id;
+  return held.at(0)?.id ?? null;
 }
 
 /** Marks the start of the recovery's own text in `last_poll_message`; what precedes it is the hand-over reason. */

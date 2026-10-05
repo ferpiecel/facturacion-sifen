@@ -12,6 +12,7 @@ import {
   type TenantTx,
 } from '@sifen/db';
 import { recordAudit } from '../../audit/infrastructure/record-audit.js';
+import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
 import {
   IdempotencyKeyCollisionError,
   type AcceptanceUnit,
@@ -112,6 +113,8 @@ function createUnit(tx: TenantTx, tenantId: string): AcceptanceUnit {
           .insert(documents)
           .values({ ...document, tenantId })
           .returning({ id: documents.id });
+        // Transactional outbox: the document.created delivery commits with the document.
+        await enqueueDocumentEvents(tx, { tenantId, documentIds: [row.id], at: new Date() });
         return { id: row.id };
       } catch (error) {
         if (isIdempotencyCollision(error)) throw new IdempotencyKeyCollisionError();

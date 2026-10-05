@@ -2,12 +2,19 @@ import { inflateRawSync } from 'node:zlib';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { SifenFaultError, SifenTimeoutError, SifenTransportError } from '../errors.ts';
 import {
+  CDC_A,
+  DE_XML,
+  consDEEncontradoXml,
+  consRUCEncontradoXml,
+  deAutorizadoXml,
+  eventosXml,
   fault12Xml,
   loteConcluidoXml,
   loteRecibidoXml,
 } from '../../test/fixtures/soap/responses.ts';
 import { startMtlsServer, type MtlsServer } from '../../test/support/mtls-server.ts';
 import { createTestPki, type TestPki } from '../../test/support/test-pki.ts';
+import { toCdc } from '../types.ts';
 import { sifenEndpoints } from './endpoints.ts';
 import { SoapSifenGateway } from './soap-sifen-gateway.ts';
 import { createHttpsSoapTransport } from './transport.ts';
@@ -38,6 +45,10 @@ async function gateway(
     {
       enviarLote: `${server.baseUrl}/de/ws/async/recibe-lote`,
       consultarLote: `${server.baseUrl}/de/ws/consultas/consulta-lote`,
+      enviarDESincronico: `${server.baseUrl}/de/ws/sync/recibe`,
+      consultarDE: `${server.baseUrl}/de/ws/consultas/consulta`,
+      enviarEventos: `${server.baseUrl}/de/ws/eventos/evento`,
+      consultarRUC: `${server.baseUrl}/de/ws/consultas/consulta-ruc`,
     },
     { allowCustomHost: true },
   );
@@ -140,5 +151,75 @@ describe('SoapSifenGateway.consultarLote', () => {
       ctx.gateway.consultarLote({ dId: 7n, dProtConsLote: '1</dProtConsLote><x/>' }),
     ).rejects.toBeInstanceOf(RangeError);
     expect(ctx.server.seen).toHaveLength(0);
+  });
+});
+
+const NS = 'http://ekuatia.set.gov.py/sifen/xsd';
+const envelopeOf = (root: string, inner: string): string =>
+  `<env:Envelope xmlns:env="http://www.w3.org/2003/05/soap-envelope"><env:Header/><env:Body><${root} xmlns="${NS}">${inner}</${root}></env:Body></env:Envelope>`;
+
+describe('SoapSifenGateway synchronous operations', () => {
+  it('enviarDESincronico embeds the signed DE (without its XML declaration) in xDE', async () => {
+    const ctx = await gateway();
+    ctx.server.respondWith((res) => res.writeHead(200).end(deAutorizadoXml));
+
+    const result = await ctx.gateway.enviarDESincronico({
+      dId: 5n,
+      de: `<?xml version="1.0"?>\n${DE_XML}`,
+    });
+
+    expect(result).toMatchObject({ dCodRes: '0260', dProtAut: '1234567890' });
+    expect(ctx.server.seen[0]).toMatchObject({
+      path: '/de/ws/sync/recibe',
+      body: envelopeOf('rEnviDe', `<dId>5</dId><xDE>${DE_XML}</xDE>`),
+    });
+  });
+
+  it('consultarDE posts rEnviConsDe with the CDC', async () => {
+    const ctx = await gateway();
+    ctx.server.respondWith((res) => res.writeHead(200).end(consDEEncontradoXml));
+
+    const result = await ctx.gateway.consultarDE({ dId: 6n, cdc: toCdc(CDC_A) });
+
+    expect(result.xmlDE).toBe(DE_XML);
+    expect(ctx.server.seen[0]?.body).toBe(
+      envelopeOf('rEnviConsDe', `<dId>6</dId><dCDC>${CDC_A}</dCDC>`),
+    );
+  });
+
+  it('consultarRUC posts rEnviConsRUC and refuses a RUC that is not 5-8 digits', async () => {
+    const ctx = await gateway();
+    ctx.server.respondWith((res) => res.writeHead(200).end(consRUCEncontradoXml));
+
+    const result = await ctx.gateway.consultarRUC({ dId: 8n, ruc: '80069563' });
+
+    expect(result.contribuyente?.facturadorElectronico).toBe(true);
+    expect(ctx.server.seen[0]?.body).toBe(
+      envelopeOf('rEnviConsRUC', '<dId>8</dId><dRUCCons>80069563</dRUCCons>'),
+    );
+    await expect(ctx.gateway.consultarRUC({ dId: 8n, ruc: '80069563-0' })).rejects.toBeInstanceOf(
+      RangeError,
+    );
+    expect(ctx.server.seen).toHaveLength(1);
+  });
+
+  it('enviarEventos wraps 1-15 events in dEvReg and refuses other counts', async () => {
+    const ctx = await gateway();
+    ctx.server.respondWith((res) => res.writeHead(200).end(eventosXml));
+    const evento = '<rGesEve xmlns="http://ekuatia.set.gov.py/sifen/xsd"><rEve Id="77"/></rGesEve>';
+
+    const result = await ctx.gateway.enviarEventos({ dId: 9n, eventos: [evento] });
+
+    expect(result.resultados).toHaveLength(2);
+    expect(ctx.server.seen[0]?.body).toBe(
+      envelopeOf('rEnviEventoDe', `<dId>9</dId><dEvReg>${evento}</dEvReg>`),
+    );
+    await expect(ctx.gateway.enviarEventos({ dId: 9n, eventos: [] })).rejects.toBeInstanceOf(
+      RangeError,
+    );
+    await expect(
+      ctx.gateway.enviarEventos({ dId: 9n, eventos: Array.from({ length: 16 }, () => evento) }),
+    ).rejects.toBeInstanceOf(RangeError);
+    expect(ctx.server.seen).toHaveLength(1);
   });
 });

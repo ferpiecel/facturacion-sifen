@@ -168,6 +168,21 @@ describe('RecoverLoteByCdc', () => {
     expect(result).toMatchObject({ status: 'incomplete', resolutions: [] });
   });
 
+  it.each([
+    ['only references the CDC', `<rDE><DE Id="${cdcB}"><dCdCDERef>${cdcA}</dCdCDERef></DE></rDE>`],
+    ['has a longer Id that starts with the CDC', `<rDE><DE Id="${cdcA}9"/></rDE>`],
+    ['has no DE Id', `<rDE><DE>${cdcA}</DE></rDE>`],
+  ])('a 0422 whose XML %s is not the queried DE', async (_case, xml) => {
+    const { recover, gateway } = setup(recoveryLote({ cdcs: [cdcA] }));
+    gateway.enqueue('consultarDE', sifenScenarios.cdcEncontrado(xml));
+    const result = await recover.execute({ loteId: 'lote-1' });
+    expect(result).toMatchObject({
+      status: 'incomplete',
+      resolutions: [],
+      unresolved: [{ cdc: cdcA }],
+    });
+  });
+
   it('a lote with no pending CDC is recovered without querying', async () => {
     const { recover, gateway } = setup(recoveryLote({ cdcs: [] }));
     expect(await recover.execute({ loteId: 'lote-1' })).toEqual({

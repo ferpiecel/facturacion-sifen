@@ -54,6 +54,11 @@ export type RecoverLoteByCdcResult =
   | ({ readonly status: 'recovered' | 'incomplete' } & LoteRecoveryOutcome)
   | { readonly status: 'not-found' | 'not-recoverable' | 'not-due' | 'stale' };
 
+/** The `Id` attribute of the DE element: the document's own CDC, not any CDC it merely references. */
+function deIdOf(xml: string): string | undefined {
+  return /<DE\b[^>]*\bId="([^"]*)"/.exec(xml)?.[1];
+}
+
 /**
  * Recovers a lote whose result query is no longer valid (0364, 0360 or 48 h elapsed) by asking
  * SIFEN for each of its documents by CDC (plan 8.1, Guía 2024): 0422 means the DE exists and is
@@ -97,7 +102,11 @@ export class RecoverLoteByCdc {
         dId: await this.deps.nextRequestId(),
         cdc: cdc as Parameters<SifenGateway['consultarDE']>[0]['cdc'],
       });
-      if (answer.dCodRes === SIFEN_CODES.CDC_ENCONTRADO && answer.xmlDE?.includes(cdc)) {
+      if (
+        answer.dCodRes === SIFEN_CODES.CDC_ENCONTRADO &&
+        answer.xmlDE !== null &&
+        deIdOf(answer.xmlDE) === cdc
+      ) {
         return {
           resolution: {
             cdc,

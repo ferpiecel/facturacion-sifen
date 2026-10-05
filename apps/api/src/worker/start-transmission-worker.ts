@@ -13,6 +13,15 @@ export interface StartTransmissionWorkerDeps {
   readonly createWorker: (process: (data: TransmissionJobData) => Promise<unknown>) => {
     close(): Promise<void>;
   };
+  /**
+   * Webhook delivery (HU-E11-01): its own queue and worker, scheduled per tenant at its own cadence
+   * and reconciled with the same tenant directory.
+   */
+  readonly webhooks?: {
+    readonly everyMs: number;
+    readonly schedules: TenantScheduleStore;
+    readonly createWorker: () => { close(): Promise<void> };
+  };
   readonly logger: WorkerLogger;
   readonly timers?: {
     setInterval(fn: () => void, ms: number): NodeJS.Timeout;
@@ -34,16 +43,26 @@ export async function startTransmissionWorker(
   deps: StartTransmissionWorkerDeps,
 ): Promise<RunningTransmissionWorker> {
   const timers = deps.timers ?? { setInterval, clearInterval };
-  const reconcile = (refresh: boolean) =>
-    reconcileTenantSchedules({
+  const reconcile = async (refresh: boolean) => {
+    await reconcileTenantSchedules({
       directory: deps.directory,
       schedules: deps.schedules,
       everyMs: deps.cycleIntervalMs,
       refresh,
     });
+    if (deps.webhooks) {
+      await reconcileTenantSchedules({
+        directory: deps.directory,
+        schedules: deps.webhooks.schedules,
+        everyMs: deps.webhooks.everyMs,
+        refresh,
+      });
+    }
+  };
 
   await reconcile(true);
   const worker = deps.createWorker(deps.process);
+  const webhookWorker = deps.webhooks?.createWorker();
   const timer = timers.setInterval(() => {
     reconcile(false).catch((error: unknown) => {
       const kind = error instanceof Error ? error.name : 'unknown error';
@@ -55,6 +74,7 @@ export async function startTransmissionWorker(
     async stop() {
       timers.clearInterval(timer);
       await worker.close();
+      await webhookWorker?.close();
     },
   };
 }

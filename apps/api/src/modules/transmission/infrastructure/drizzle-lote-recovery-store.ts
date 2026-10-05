@@ -1,4 +1,4 @@
-import { and, count, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { documents, loteDocuments, lotes, withTenantTransaction, type Database } from '@sifen/db';
 import type { LoteRecoveryOutcome, LoteRecoveryStore } from '../application/recover-lote-by-cdc.js';
 import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
@@ -52,7 +52,9 @@ export function createDrizzleLoteRecoveryStore({
               // An unknown lote never got a confirmed send: its documents are still queued.
               eq(documents.status, lote.status === 'unknown' ? 'queued' : 'submitted'),
             ),
-          );
+          )
+          // Least recently queried first: a capped pass rotates through the lote instead of starving its tail.
+          .orderBy(asc(documents.updatedAt), asc(documents.id));
         return {
           loteId: lote.id,
           status: lote.status,
@@ -100,6 +102,12 @@ export function createDrizzleLoteRecoveryStore({
           }
           await settleDocument(tx, tenantId, loteId, resolution, guard.recoveredAt);
         }
+        await touchQueried(
+          tx,
+          loteId,
+          outcome.unresolved.filter((entry) => !entry.skipped).map((entry) => entry.cdc),
+          guard.recoveredAt,
+        );
         const heldSince = current.sentAt ?? current.createdAt;
         const eligible = guard.recoveredAt.getTime() - heldSince.getTime() >= HOLD_AFTER_MS;
         const held: string[] = [];
@@ -142,13 +150,44 @@ export function createDrizzleLoteRecoveryStore({
         return held;
       });
       for (const id of result ?? []) {
-        logger?.warn(
-          `Document ${id} of tenant ${tenantId} held as ${RECOVERY_UNRESOLVED_HOLD}: its CDC keeps answering 0420`,
-        );
+        // The commit already happened: a failing logger must not turn a recorded pass into an error.
+        try {
+          logger?.warn(
+            `Document ${id} of tenant ${tenantId} held as ${RECOVERY_UNRESOLVED_HOLD}: its CDC keeps answering 0420`,
+          );
+        } catch {
+          // The hold is in the database and in the worker's held-documents report.
+        }
       }
       return result !== null;
     },
   };
+}
+
+/** Stamps the documents this pass asked about, so the next capped pass starts with the ones it did not. */
+async function touchQueried(
+  tx: Tx,
+  loteId: string,
+  cdcs: readonly string[],
+  at: Date,
+): Promise<void> {
+  if (cdcs.length === 0) return;
+  await tx
+    .update(documents)
+    .set({ updatedAt: at })
+    .where(
+      and(
+        inArray(documents.cdc, [...cdcs]),
+        inArray(documents.status, ['queued', 'submitted']),
+        inArray(
+          documents.id,
+          tx
+            .select({ id: loteDocuments.documentId })
+            .from(loteDocuments)
+            .where(eq(loteDocuments.loteId, loteId)),
+        ),
+      ),
+    );
 }
 
 /**

@@ -44,6 +44,7 @@ function setup(o: Setup = {}) {
   const log: string[] = [];
   const warnings: string[] = [];
   const limits: Record<string, number> = {};
+  const signals: (AbortSignal | undefined)[] = [];
   const holds: [string, string][] = [];
   const deferred: string[] = [];
   const cutoffs: Date[] = [];
@@ -118,8 +119,9 @@ function setup(o: Setup = {}) {
       },
     } as TransmissionCycleDeps['poller'],
     recoverer: {
-      execute: async ({ loteId }) => {
+      execute: async ({ loteId, signal }) => {
         log.push(`recover:${loteId}`);
+        signals.push(signal);
         return (await o.recover?.(loteId)) ?? { status: 'not-due' };
       },
     } as TransmissionCycleDeps['recoverer'],
@@ -129,7 +131,7 @@ function setup(o: Setup = {}) {
     stalePendingAfterMs: o.stalePendingAfterMs,
     staleSendingAfterMs: o.staleSendingAfterMs,
   });
-  return { cycle, log, warnings, limits, holds, deferred, cutoffs };
+  return { cycle, log, warnings, limits, holds, deferred, cutoffs, signals };
 }
 
 /** Spec: HU-E6-02 (S5a). One tenant's transmission cycle: sign, assemble, send, poll. */
@@ -424,6 +426,13 @@ describe('TransmissionCycle', () => {
     expect(failed.sweptSending).toBe(0);
     expect(failed.failures).toEqual([{ step: 'send', error: 'Error' }]);
     expect(failing.log).toContain('send:l1:1');
+  });
+
+  it('hands the run signal to the recoverer so it can stop between CDC queries', async () => {
+    const controller = new AbortController();
+    const { cycle, signals } = setup({ recoverable: ['l1', 'l2'] });
+    await cycle.run({ signal: controller.signal });
+    expect(signals).toEqual([controller.signal, controller.signal]);
   });
 
   it('stops between units of work once its signal aborts (lost run lock) and says so', async () => {

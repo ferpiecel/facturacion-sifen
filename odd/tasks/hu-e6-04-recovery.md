@@ -60,7 +60,7 @@ Out: synchronous emission (HU-E6-05), the 72 h deadline watch, portal UI.
 - [x] T5 Unknown and stale `sending` lotes: stale-sending sweep to `unknown`; recover by a CDC of the lote; 0420 policy.
 - [x] T5a (fold into T5) `processed` lotes with `needsRecovery` documents are never picked up again: make them recoverable by CDC too.
 - [x] T5b Preserve the original hand-over reason (0364, 0360, window elapsed) instead of overwriting `last_poll_message` on each recovery pass.
-- [ ] T7 (debt) Cap the CDC queries per run and per lote, and check the abort signal between sequential queries, so a large lote cannot hold the tenant lock or outlive its lease.
+- [x] T7 (done in PR 10, `recovery-cap-audit`) Cap the CDC queries per run and per lote, and check the abort signal between sequential queries, so a large lote cannot hold the tenant lock or outlive its lease.
 - [x] T8 (done in PR 8, `recovery-hold`) Escalate a CDC that answers 0420 forever: hold or alert the document after a bound (age since send or attempts) instead of re-querying every 10 minutes indefinitely.
 - [~] T9 Resend after 0420 past the window. Decision (tech lead): C first (hold + alert, done as T8 in PR 8), then B (one audited `submitted -> queued` transition) in a later PR. B is not implemented.
 - [x] T10 A send that finishes after the stale sweep is still recorded (`sending` or `unknown` accepted), so its protocol is not lost (PR 9).
@@ -108,6 +108,16 @@ Out: synchronous emission (HU-E6-05), the 72 h deadline watch, portal UI.
 | `SendLote` record accepts `unknown` as well as `sending`; the guard already allows `unknown -> sent/rejected` | A slow send finishing after the sweep keeps its protocol; a lote already closed by recovery still refuses the record |
 | `sweepStaleSending(cutoff, limit)`, oldest first, strict `<` cutoff | Bounded work per cycle; a lote updated exactly at the cutoff is not stale |
 
+### Decisions of PR 10 (T7 and alert safety)
+
+| Decision | Rationale |
+|---|---|
+| `RecoverLoteByCdc` asks at most `maxQueries` CDCs per execution, default 20, overridable through `recoveryMaxQueries` in the cycle factory | Queries are sequential SOAP calls; 20 keeps a pass near a minute at normal latency, and a lote of 50 settles in three 10-minute passes. The cycle already bounds lotes per run (`batch.recover`, 10), so a run asks at most 200 |
+| The cycle's run signal reaches the use case; it checks it before each query and returns `aborted` (no write) if already aborted | Same rule as the cycle: the unit in flight finishes, no new one starts when the tenant run lock is lost |
+| CDCs not asked (cap or abort) are recorded as `unresolved` with `skipped: true` and never as `absent` | The lote cannot close while they are pending, and silence is not a 0420, so they never count toward a hold |
+| `load` orders pending CDCs by `updated_at` and `record` stamps the documents it asked about | Round-robin: a capped pass starts with the CDCs it did not ask last time, so unresolved ones at the front cannot starve the tail |
+| A throwing `logger.warn` after the commit is swallowed | The pass is already recorded; the hold stays in the database and in the worker's held-documents report |
+
 ### Debt left by PRs 8 and 9 (not implemented)
 
 - The hold itself writes no audit row (only releases do), and the warning is logged after the commit, so a crash between the two loses the alert (the worker's held-documents report still lists the document).
@@ -142,4 +152,4 @@ Route: one writer, inline per task. Strict TDD: each PR has a RED commit (failin
 
 Review fixes applied after PRs #156 to #160 (log counts, DE Id match, recovery transitions); the findings above are recorded as debt, not implemented.
 
-PRs 1 to 9 implemented and verified locally (tsc, lint, depcruise, vitest --coverage at each branch tip). Pending: T6, T7, T9-B.
+PRs 1 to 9 implemented and verified locally (tsc, lint, depcruise, vitest --coverage at each branch tip). Pending: T6, T9-B.

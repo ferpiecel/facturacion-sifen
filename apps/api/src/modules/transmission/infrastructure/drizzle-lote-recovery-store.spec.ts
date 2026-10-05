@@ -362,6 +362,13 @@ describe('DrizzleLoteRecoveryStore', () => {
 
     it('recovers a mixed 0422 / 0420 lote end to end: one approved, one left queued, lote unknown', async () => {
       const unknown = await seedLote('unknown', 'queued', [CDC_C, CDC_D]);
+      // The pass asks the least recently queried first: pin C before D so the scripted answers line up.
+      await handle.db.execute(
+        sql`update documents set updated_at = '2026-09-01T00:00:00Z' where cdc = ${CDC_C}`,
+      );
+      await handle.db.execute(
+        sql`update documents set updated_at = '2026-09-02T00:00:00Z' where cdc = ${CDC_D}`,
+      );
       const gateway = new FakeSifenGateway();
       gateway.enqueue(
         'consultarDE',
@@ -628,6 +635,99 @@ describe('DrizzleLoteRecoveryStore', () => {
       );
       expect((await readDoc(CDC_B)).transmissionHold).toBeNull();
       expect(warnings).toEqual([]);
+    });
+  });
+
+  describe('bounded passes', () => {
+    it('leaves skipped CDCs untouched and the lote open, and touches the ones it did query', async () => {
+      await storeFor(tenantId).record(
+        loteId,
+        {
+          resolutions: [],
+          unresolved: [
+            { cdc: CDC_A, reason: '0420: CDC inexistente', absent: false },
+            { cdc: CDC_B, reason: 'Not queried in this pass', skipped: true },
+          ],
+        },
+        guard,
+      );
+      expect((await readDoc(CDC_A)).updatedAt).toEqual(RECOVERED_AT);
+      expect((await readDoc(CDC_B)).updatedAt).not.toEqual(RECOVERED_AT);
+      expect((await readLote()).status).toBe('recovery');
+    });
+
+    it('loads the least recently queried CDCs first, so a capped pass rotates through the lote', async () => {
+      await handle.db.execute(sql`update documents set updated_at = '2026-09-01T00:00:00Z'`);
+      await storeFor(tenantId).record(
+        loteId,
+        {
+          resolutions: [],
+          unresolved: [
+            { cdc: CDC_A, reason: 'x', absent: false },
+            { cdc: CDC_B, reason: 'Not queried in this pass', skipped: true },
+          ],
+        },
+        guard,
+      );
+      expect((await storeFor(tenantId).load(loteId))?.cdcs).toEqual([CDC_B, CDC_A]);
+    });
+  });
+
+  describe('capped passes over time', () => {
+    it('ask every CDC across passes even when none of them ever resolves (maxQueries 1)', async () => {
+      await handle.db.execute(
+        sql`update documents set updated_at = '2026-09-01T00:00:00Z' where cdc = ${CDC_A}`,
+      );
+      await handle.db.execute(
+        sql`update documents set updated_at = '2026-09-02T00:00:00Z' where cdc = ${CDC_B}`,
+      );
+      const gateway = new FakeSifenGateway();
+      gateway.setDefault('consultarDE', new Error('SIFEN unavailable'));
+      let now = RECOVERED_AT;
+      let dId = 0n;
+      const recover = new RecoverLoteByCdc({
+        gateway,
+        store: storeFor(tenantId),
+        nextRequestId: () => Promise.resolve((dId += 1n)),
+        now: () => now,
+        maxQueries: 1,
+      });
+
+      await recover.execute({ loteId });
+      now = new Date(now.getTime() + 11 * 60_000);
+      await recover.execute({ loteId });
+      now = new Date(now.getTime() + 11 * 60_000);
+      await recover.execute({ loteId });
+
+      expect(gateway.callsTo('consultarDE').map(([request]) => request.cdc)).toEqual([
+        CDC_A,
+        CDC_B,
+        CDC_A,
+      ]);
+    });
+  });
+
+  describe('a failing alert', () => {
+    it('cannot fail the record after the commit: the hold stays and record still returns true', async () => {
+      const failing = createDrizzleLoteRecoveryStore({
+        db: handle.db,
+        tenantId,
+        logger: {
+          warn: () => {
+            throw new Error('logger down');
+          },
+        },
+      });
+      const applied = await failing.record(
+        loteId,
+        {
+          resolutions: [approval(CDC_A)],
+          unresolved: [{ cdc: CDC_B, reason: '0420', absent: true }],
+        },
+        guard,
+      );
+      expect(applied).toBe(true);
+      expect((await readDoc(CDC_B)).transmissionHold).toBe(RECOVERY_UNRESOLVED_HOLD);
     });
   });
 });

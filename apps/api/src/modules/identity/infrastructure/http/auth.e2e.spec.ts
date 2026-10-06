@@ -1,6 +1,7 @@
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
 import {
+  authEvents,
   createPgliteDatabase,
   tenantMemberships,
   tenants,
@@ -302,21 +303,62 @@ describe('portal auth over HTTP (HU-E1-07 S5 core, without enrolment)', () => {
     expect((await c.send('POST', '/auth/mfa', { body: { code: '000000' } })).status).toBe(401);
   });
 
-  it('refuses a password-only login for a user without MFA: no enrolment endpoint, no session, no cookie', async () => {
+  it('answers a user without MFA exactly like a wrong password (no password oracle), audits it, and leaves no live session', async () => {
     const created = await new CreateUserUseCase(new Argon2SecretHasherAdapter()).execute({
       email: 'new@example.com',
       displayName: 'New',
       password: PASSWORD,
     });
-    await handle.db.insert(users).values(created);
+    const [row] = await handle.db.insert(users).values(created).returning({ id: users.id });
     const c = client();
-    const res = await c.send('POST', '/auth/login', {
+    const noMfa = await c.send('POST', '/auth/login', {
       body: { email: 'new@example.com', password: PASSWORD },
     });
-    expect(res.status).toBe(403);
-    expect(res.body).toMatchObject({ message: 'mfa_enrollment_required' });
-    expect(res.setCookies).toEqual([]);
+    const wrong = await c.send('POST', '/auth/login', {
+      body: { email: 'new@example.com', password: 'wrong password entirely' },
+    });
+    expect(noMfa.status).toBe(401);
+    expect(noMfa.body).toEqual(wrong.body);
+    expect(noMfa.setCookies).toEqual([]);
+    const live = await handle.db
+      .select()
+      .from(userSessions)
+      .where(eq(userSessions.userId, row?.id ?? ''));
+    expect(live.every((session) => session.revokedAt !== null)).toBe(true);
+    const events = await handle.db
+      .select()
+      .from(authEvents)
+      .where(eq(authEvents.userId, row?.id ?? ''));
+    expect(events.map((e) => e.event)).toContain('login.mfa_enrollment_required');
     expect((await c.send('POST', '/auth/mfa', { body: { code: '123456' } })).status).toBe(401);
+  });
+
+  it('logs out with only the refresh cookie: the whole family dies, even a replayed access cookie', async () => {
+    const c = client();
+    await signIn(c);
+    const access = c.jar.get(COOKIE_NAMES.access) ?? '';
+    const onlyRefresh = client();
+    onlyRefresh.jar.set(COOKIE_NAMES.refresh, c.jar.get(COOKIE_NAMES.refresh) ?? '');
+    const out = await onlyRefresh.send('POST', '/auth/logout');
+    expect(out.status).toBe(204);
+    expect(out.setCookies.every((line) => /Max-Age=0\b/.test(line))).toBe(true);
+    const replay = client();
+    replay.jar.set(COOKIE_NAMES.access, access);
+    expect((await replay.send('GET', '/auth/me')).status).toBe(401);
+  });
+
+  it('logs out a password-only (pending) session too: its cookie stops working', async () => {
+    const c = client();
+    await c.send('POST', '/auth/login', { body: { email: EMAIL, password: PASSWORD } });
+    expect(c.jar.has(COOKIE_NAMES.pending)).toBe(true);
+    const pendingCookie = c.jar.get(COOKIE_NAMES.pending) ?? '';
+    expect((await c.send('POST', '/auth/logout')).status).toBe(204);
+    expect(c.jar.size).toBe(0);
+    const replay = client();
+    replay.jar.set(COOKIE_NAMES.pending, pendingCookie);
+    expect(
+      (await replay.send('POST', '/auth/mfa', { body: { code: await nextCode() } })).status,
+    ).toBe(401);
   });
 
   it('keeps the API-key guard for everything else: /auth is public, /v1 still needs a key', async () => {

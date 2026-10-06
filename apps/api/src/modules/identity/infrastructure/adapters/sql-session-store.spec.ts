@@ -164,4 +164,22 @@ describe('SessionService over SqlSessionStore (HU-E1-07 S4)', () => {
       expect(results.filter(Boolean)).toHaveLength(1);
     });
   });
+
+  describe('logout by refresh token', () => {
+    it('revokes the whole family from the current or a rotated refresh token', async () => {
+      const userId = await newUser();
+      const first = await service.issue(userId, { mfaVerified: true });
+      const next = await service.refresh(first?.refreshToken ?? '');
+      await service.logoutByRefreshToken(first?.refreshToken ?? '');
+      expect(await service.authenticate(next?.accessToken ?? '')).toBeNull();
+      await expect(service.refresh(next?.refreshToken ?? '')).resolves.toBeNull();
+    });
+
+    it('does nothing for an unknown token', async () => {
+      const userId = await newUser();
+      const live = await service.issue(userId, { mfaVerified: true });
+      await service.logoutByRefreshToken('not-a-token');
+      expect(await service.authenticate(live?.accessToken ?? '')).not.toBeNull();
+    });
+  });
 });

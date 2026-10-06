@@ -15,7 +15,10 @@ import {
   RecoverLoteByCdc,
 } from '../modules/transmission/application/recover-lote-by-cdc.js';
 import { SendLote } from '../modules/transmission/application/send-lote.js';
-import { TransmissionCycle } from '../modules/transmission/application/transmission-cycle.js';
+import {
+  TransmissionCycle,
+  type TransmissionCycleBatch,
+} from '../modules/transmission/application/transmission-cycle.js';
 import { createDrizzleResendPreflightStore } from '../modules/transmission/infrastructure/drizzle-resend-preflight-store.js';
 import { createDrizzleLoteAssemblyStore } from '../modules/transmission/infrastructure/drizzle-lote-assembly-store.js';
 import { createDrizzleLoteDispatchStore } from '../modules/transmission/infrastructure/drizzle-lote-dispatch-store.js';
@@ -32,6 +35,8 @@ export interface TenantCycleFactoryDeps {
   readonly now?: () => Date;
   /** Most CDC queries one recovery pass makes per lote (default 20, see `RecoverLoteByCdc`). */
   readonly recoveryMaxQueries?: number;
+  /** Per-step batch sizes of the cycle (defaults in `TransmissionCycle`). */
+  readonly batch?: TransmissionCycleBatch;
 }
 
 /**
@@ -47,6 +52,7 @@ export function createTenantCycleFactory({
   logger,
   now,
   recoveryMaxQueries,
+  batch,
 }: TenantCycleFactoryDeps): (tenantId: string) => TransmissionCycle {
   // Fail when the worker is wired, not on the first tenant run.
   assertMaxQueries(recoveryMaxQueries);
@@ -91,6 +97,7 @@ export function createTenantCycleFactory({
       }),
       now,
       logger,
+      batch,
     });
   };
 }

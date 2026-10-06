@@ -40,7 +40,7 @@ Never commit real certificates; tests use `apps/api/test/support/test-pki.ts`.
   - [x] T1.3 `runOpsCommand`/`runCli` wiring (no KMS key or vault needed) and README "Operación".
   - [x] T1.4 Signing refuses a revoked certificate: covered by a regression test (`CertificateNotFoundError`
         from `open`, the transmission pipeline already holds the document as `signing:CertificateNotFoundError`).
-- [ ] **S2 — audited certificate access:** `certificate.added`/`certificate.replaced` audit in
+- [x] **S2 — `feat/hu-e3-02-certificate-audit`, audited certificate access:** `certificate.added`/`certificate.replaced` audit in
       `CertificateVault.add` and `certificate.accessed` (fingerprint only, actor = signing flow) in `open`.
 - [ ] **S3 — LRU + TTL cache** in front of `open` (short TTL, bounded size, zeroize on eviction and on
       revoke; revoke must invalidate or the TTL bounds the exposure, to be decided with S2 evidence).
@@ -68,3 +68,22 @@ and `document:release-holds`.
 ## Progress
 
 - S1: RED 0a60b7d (6 failing specs: unknown subcommand), GREEN in the next commit. No migration needed.
+- S2: RED 064638c (4 failing specs: added, replaced+revoked, accessed, fail-closed; the leftover revoke
+  cases and the two "writes nothing" specs already passed as regression guards), GREEN in the next commit.
+  No migration (0034 belongs to HU-E6-04; 0035 would be next if one were ever needed).
+
+## S2 decisions
+
+- `certificate.added` / `certificate.replaced` + `certificate.revoked` (old one) are written in the same
+  `db.transaction` as the insert/update, with `app.current_tenant` bound for `recordAudit`.
+- `certificate.accessed` is written inside the tenant transaction of `open`, after validity checks (no
+  usable certificate, no row) and committed before the key is touched. Row content: fingerprint,
+  environment and purpose only; actor is passed by the caller (worker: `system/transmission-worker`).
+- Anti-flood: audit on decrypt only, never on a cache hit. The audit lives inside `open`, so the S3 cache
+  must wrap `open` (cache miss = decrypt = one audit row); with a TTL the volume is about one row per
+  tenant per environment per TTL instead of one per signed document. Until S3, it is one row per signing.
+- Fail-closed: ADR-0009 says every key access is audited, so if the audit insert fails `open` throws
+  before decrypting. The failure is a plain error (not in the deterministic-signing set), so the
+  transmission cycle does not park the document: it is retried next cycle.
+- Audit payload keys avoid `certificate*` names (the redactor masks them): `previousId`, not `certificateId`.
+

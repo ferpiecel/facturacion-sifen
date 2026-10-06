@@ -392,7 +392,7 @@ describe('CertificateVault', () => {
       );
       const replaced = rows.find((r) => r.action === 'certificate.replaced');
       expect(replaced).toMatchObject({
-        before: { certificateId: first.id, fingerprint: first.fingerprint },
+        before: { previousId: first.id, fingerprint: first.fingerprint },
         after: { fingerprint: second.fingerprint, environment: 'test' },
       });
       expect(rows.find((r) => r.action === 'certificate.revoked')).toMatchObject({

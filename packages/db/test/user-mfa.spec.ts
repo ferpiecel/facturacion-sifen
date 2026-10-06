@@ -132,4 +132,40 @@ describe('user_mfa', () => {
       ),
     ).toContain('permission denied for table user_mfa');
   });
+
+  it('cannot erase the replay guard by setting last_used_step to NULL', async () => {
+    const { db, ana } = await seed();
+    await db.insert(userMfa).values({ userId: ana, sealed: SEALED });
+    await db.update(userMfa).set({ confirmedAt: new Date(), lastUsedStep: 10 });
+    expect(await causeOf(db.update(userMfa).set({ lastUsedStep: null }))).toContain(
+      'last_used_step cannot decrease',
+    );
+  });
+
+  it('lets recovery hashes only shrink once confirmed, never resurrect a consumed one', async () => {
+    const { db, ana } = await seed();
+    const other = 'b'.repeat(64);
+    await db.insert(userMfa).values({ userId: ana, sealed: SEALED });
+    await db
+      .update(userMfa)
+      .set({ confirmedAt: new Date(), lastUsedStep: 1, recoveryHashes: [CODE_HASH, other] });
+    await db.update(userMfa).set({ recoveryHashes: [other] });
+    expect(await causeOf(db.update(userMfa).set({ recoveryHashes: [other, CODE_HASH] }))).toContain(
+      'recovery_hashes can only shrink',
+    );
+    expect(await causeOf(db.update(userMfa).set({ recoveryHashes: ['c'.repeat(64)] }))).toContain(
+      'recovery_hashes can only shrink',
+    );
+  });
+
+  it('rejects a NULL element in the recovery hashes', async () => {
+    const { db, ana } = await seed();
+    expect(
+      await causeOf(
+        db.execute(
+          sql`insert into user_mfa (user_id, sealed, recovery_hashes) values (${ana}, ${JSON.stringify(SEALED)}::jsonb, array[null]::text[])`,
+        ),
+      ),
+    ).toContain('user_mfa_recovery_hashes_valid');
+  });
 });

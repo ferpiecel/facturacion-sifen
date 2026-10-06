@@ -57,8 +57,8 @@ describe('DrizzleMfaStore (HU-E1-07)', () => {
   it('confirms once, storing the step and the hashed recovery codes', async () => {
     const id = await newUser();
     await store.savePending(id, SEALED);
-    await expect(store.confirm(id, 100, [hex('a'), hex('b')])).resolves.toBe(true);
-    await expect(store.confirm(id, 101, [hex('c')])).resolves.toBe(false);
+    await expect(store.confirm(id, 100, [hex('a'), hex('b')], SEALED)).resolves.toBe(true);
+    await expect(store.confirm(id, 101, [hex('c')], SEALED)).resolves.toBe(false);
     const row = await store.find(id);
     expect(row).toMatchObject({ lastUsedStep: 100, recoveryHashes: [hex('a'), hex('b')] });
     expect(row?.confirmedAt).toBeInstanceOf(Date);
@@ -67,7 +67,7 @@ describe('DrizzleMfaStore (HU-E1-07)', () => {
   it('refuses to replace a confirmed enrolment with a pending one', async () => {
     const id = await newUser();
     await store.savePending(id, SEALED);
-    await store.confirm(id, 1, []);
+    await store.confirm(id, 1, [], SEALED);
     await expect(store.savePending(id, { ...SEALED, keyId: 'other' })).rejects.toThrow(
       /already confirmed/,
     );
@@ -77,7 +77,7 @@ describe('DrizzleMfaStore (HU-E1-07)', () => {
   it('advances the step only forward, atomically', async () => {
     const id = await newUser();
     await store.savePending(id, SEALED);
-    await store.confirm(id, 10, []);
+    await store.confirm(id, 10, [], SEALED);
     await expect(store.advanceStep(id, 11)).resolves.toBe(true);
     await expect(store.advanceStep(id, 11)).resolves.toBe(false);
     await expect(store.advanceStep(id, 5)).resolves.toBe(false);
@@ -89,7 +89,7 @@ describe('DrizzleMfaStore (HU-E1-07)', () => {
   it('consumes a recovery hash exactly once', async () => {
     const id = await newUser();
     await store.savePending(id, SEALED);
-    await store.confirm(id, 1, [hex('a'), hex('b')]);
+    await store.confirm(id, 1, [hex('a'), hex('b')], SEALED);
     await expect(store.consumeRecoveryCode(id, hex('a'))).resolves.toBe(true);
     await expect(store.consumeRecoveryCode(id, hex('a'))).resolves.toBe(false);
     await expect(store.consumeRecoveryCode(id, hex('z'))).resolves.toBe(false);
@@ -99,10 +99,31 @@ describe('DrizzleMfaStore (HU-E1-07)', () => {
   it('removes an enrolment so the user can enrol anew', async () => {
     const id = await newUser();
     await store.savePending(id, SEALED);
-    await store.confirm(id, 1, []);
+    await store.confirm(id, 1, [], SEALED);
     await store.remove(id);
     expect(await store.find(id)).toBeNull();
     await store.savePending(id, { ...SEALED, keyId: 'fresh' });
     expect((await store.find(id))?.sealed.keyId).toBe('fresh');
+  });
+
+  it('confirms only the secret the code was checked against', async () => {
+    const id = await newUser();
+    await store.savePending(id, SEALED);
+    const verified = SEALED;
+    await store.savePending(id, { ...SEALED, keyId: 'replaced-by-a-concurrent-enrol' });
+
+    await expect(store.confirm(id, 1, [], verified)).resolves.toBe(false);
+    expect((await store.find(id))?.confirmedAt).toBeNull();
+  });
+
+  it('spends a recovery code once when two logins race with it', async () => {
+    const id = await newUser();
+    await store.savePending(id, SEALED);
+    await store.confirm(id, 1, [hex('a')], SEALED);
+    const results = await Promise.all([
+      store.consumeRecoveryCode(id, hex('a')),
+      store.consumeRecoveryCode(id, hex('a')),
+    ]);
+    expect(results.filter(Boolean)).toHaveLength(1);
   });
 });

@@ -3,7 +3,7 @@
 CREATE FUNCTION "user_mfa_hashes_valid"(hashes text[]) RETURNS boolean
 LANGUAGE sql IMMUTABLE
 SET search_path = pg_catalog, pg_temp
-AS $$ SELECT cardinality(hashes) <= 10 AND NOT EXISTS (SELECT 1 FROM unnest(hashes) AS h WHERE h !~ '^[0-9a-f]{64}$') $$;
+AS $$ SELECT cardinality(hashes) <= 10 AND NOT EXISTS (SELECT 1 FROM unnest(hashes) AS h WHERE h IS NULL OR h !~ '^[0-9a-f]{64}$') $$;
 --> statement-breakpoint
 CREATE TABLE "user_mfa" (
 	"user_id" uuid PRIMARY KEY NOT NULL,
@@ -36,8 +36,14 @@ BEGIN
     IF NEW.sealed IS DISTINCT FROM OLD.sealed THEN
       RAISE EXCEPTION 'user_mfa: the sealed secret is immutable once confirmed';
     END IF;
+    -- A consumed recovery code can never come back: the set only shrinks (a reset deletes the row).
+    IF NOT (NEW.recovery_hashes <@ OLD.recovery_hashes)
+      OR cardinality(NEW.recovery_hashes) > cardinality(OLD.recovery_hashes) THEN
+      RAISE EXCEPTION 'user_mfa: recovery_hashes can only shrink once confirmed';
+    END IF;
   END IF;
-  IF OLD.last_used_step IS NOT NULL AND NEW.last_used_step < OLD.last_used_step THEN
+  IF OLD.last_used_step IS NOT NULL
+    AND (NEW.last_used_step IS NULL OR NEW.last_used_step < OLD.last_used_step) THEN
     RAISE EXCEPTION 'user_mfa: last_used_step cannot decrease';
   END IF;
   NEW.updated_at := now();

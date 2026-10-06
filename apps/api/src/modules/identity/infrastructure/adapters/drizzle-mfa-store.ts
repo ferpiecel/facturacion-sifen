@@ -38,11 +38,23 @@ export class DrizzleMfaStore implements MfaStore {
     }
   }
 
-  async confirm(userId: string, step: number, recoveryHashes: string[]): Promise<boolean> {
+  async confirm(
+    userId: string,
+    step: number,
+    recoveryHashes: string[],
+    expectedSealed: SealedSecret,
+  ): Promise<boolean> {
     const rows = await this.db
       .update(userMfa)
       .set({ confirmedAt: new Date(), lastUsedStep: step, recoveryHashes })
-      .where(and(eq(userMfa.userId, userId), isNull(userMfa.confirmedAt)))
+      .where(
+        and(
+          eq(userMfa.userId, userId),
+          isNull(userMfa.confirmedAt),
+          // Only the secret the code was checked against: a concurrent enrolment may have replaced it.
+          sql`${userMfa.sealed} = ${JSON.stringify(expectedSealed)}::jsonb`,
+        ),
+      )
       .returning({ userId: userMfa.userId });
     return rows.length > 0;
   }

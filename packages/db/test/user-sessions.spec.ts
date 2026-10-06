@@ -16,6 +16,8 @@ interface SessionRow {
   user_id: string;
   active_tenant_id: string | null;
   mfa_verified_at: Date | null;
+  access_expires_at: Date;
+  refresh_expires_at: Date;
 }
 
 /** Spec: HU-E1-07 S4 (DB part). Opaque tokens stored as SHA-256 only; every access goes through functions. */
@@ -79,6 +81,7 @@ describe('user_sessions and its resolver functions', () => {
     expect(await create('a', 'b')).toMatch(/^[0-9a-f-]{36}$/);
     const [row] = await resolve('a');
     expect(row).toMatchObject({ user_id: ana, active_tenant_id: null });
+    expect(new Date(row.refresh_expires_at).getTime()).toBeGreaterThan(Date.now());
     expect(row.mfa_verified_at).not.toBeNull();
     expect(await resolve('b')).toEqual([]);
   });

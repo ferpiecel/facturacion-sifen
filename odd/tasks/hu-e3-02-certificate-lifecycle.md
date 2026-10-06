@@ -59,11 +59,11 @@ Never commit real certificates; tests use `apps/api/test/support/test-pki.ts`.
 In `apps/api`: `tsc --noEmit -p tsconfig.json`, `run lint`, `exec depcruise src --config
 .dependency-cruiser.cjs`, `exec vitest run --coverage` (85%). `packages/db` only if touched.
 
-## Open product question (reported, not decided)
+## Decision (tech lead, security/compliance)
 
-Revoking the only active certificate blocks signing at once (documents are held as
-`signing:CertificateNotFoundError` and released with `document:release-holds` after a new `certificate:add`).
-Whether that is the desired immediate effect, or a grace period is wanted, is a product call.
+Revocation blocks signing immediately, with no grace period. Revocation is for compromised or replaced
+certificates. Documents are held as `signing:CertificateNotFoundError` until a new `certificate:add`
+and `document:release-holds`.
 
 ## Progress
 

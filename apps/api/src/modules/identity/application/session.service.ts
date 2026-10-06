@@ -113,6 +113,11 @@ export class SessionService implements SessionRevoker {
         };
   }
 
+  /** Logout from a refresh token alone (the access token may be gone): ends the whole family. */
+  async logoutByRefreshToken(refreshToken: string): Promise<void> {
+    if (refreshToken !== '') await this.store.revokeFamily(hashSessionToken(refreshToken));
+  }
+
   logout(sessionId: string): Promise<void> {
     return this.store.revoke(sessionId);
   }

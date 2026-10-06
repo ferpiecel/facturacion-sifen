@@ -112,8 +112,10 @@ export class AuthController {
     });
     if (result.status === 'invalid') throw invalid();
     if (result.status === 'mfa_enrollment_required') {
+      // Indistinguishable from a wrong password (no password oracle): the pending session is revoked, nothing is
+      // set, and `LoginService` has already audited `login.mfa_enrollment_required` server-side.
       await sessions.logout(result.session.sessionId);
-      throw problem(HttpStatus.FORBIDDEN, 'mfa_enrollment_required');
+      throw invalid();
     }
     this.cookies(reply, [
       buildSetCookie(
@@ -172,9 +174,16 @@ export class AuthController {
     @Res({ passthrough: true }) reply: HttpReply,
   ): Promise<void> {
     const { sessions } = this.services();
-    const token = this.cookie(request, COOKIE_NAMES.access);
-    const record = token ? await sessions.authenticate(token) : null;
+    // Whatever credentials the browser still holds, end them: the access session, a pending (password-only)
+    // session and the whole family of the refresh token. All cookies are cleared regardless.
+    const access = this.cookie(request, COOKIE_NAMES.access);
+    const pending = this.cookie(request, COOKIE_NAMES.pending);
+    const refresh = this.cookie(request, COOKIE_NAMES.refresh);
+    const record = access ? await sessions.authenticate(access) : null;
     if (record) await sessions.logout(record.sessionId);
+    const pendingRecord = pending ? await sessions.authenticatePending(pending) : null;
+    if (pendingRecord) await sessions.logout(pendingRecord.sessionId);
+    if (refresh) await sessions.logoutByRefreshToken(refresh);
     this.cookies(reply, ALL_COOKIES.map(clearCookie));
   }
 

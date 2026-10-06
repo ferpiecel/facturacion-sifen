@@ -91,6 +91,13 @@ export class SqlSessionStore implements SessionStore {
     return row?.n ?? 0;
   }
 
+  async revokeFamily(refreshHash: string): Promise<number> {
+    const row = (
+      await this.rows<{ n: number }>(sql`select revoke_session_family(${refreshHash}) as n`)
+    ).at(0);
+    return row?.n ?? 0;
+  }
+
   async listMemberships(userId: string): Promise<TenantMembership[]> {
     const rows = await this.rows<{ tenant_id: string; tenant_name: string; role: string }>(
       sql`select * from list_user_memberships(${userId})`,

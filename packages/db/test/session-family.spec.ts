@@ -19,7 +19,7 @@ describe('revoke_session_family', () => {
   });
 
   async function seed() {
-    handle = await createTestDatabase();
+    const db = (handle = await createTestDatabase()).db;
     const [ana] = (
       await handle.db
         .insert(users)
@@ -27,7 +27,7 @@ describe('revoke_session_family', () => {
         .returning()
     ).map((row) => row.id) as [string];
     const call = <T>(query: ReturnType<typeof sql>) =>
-      withAppRoleTransaction(handle!.db, (tx) => queryRows<T>(tx, query));
+      withAppRoleTransaction(db, (tx) => queryRows<T>(tx, query));
     await call(
       sql`select create_user_session(${ana}, ${h('a')}, ${h('b')}, ${FUTURE()}, ${FUTURE()}, ${FUTURE()}, true)`,
     );

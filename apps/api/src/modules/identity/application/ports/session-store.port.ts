@@ -47,6 +47,8 @@ export interface SessionStore {
   promote(pendingSessionId: string, next: PromotedSession): Promise<string | null>;
   revoke(sessionId: string): Promise<void>;
   revokeAllForUser(userId: string): Promise<number>;
+  /** Revokes every generation of the family a refresh token (current or rotated) belongs to; the count. */
+  revokeFamily(refreshHash: string): Promise<number>;
   listMemberships(userId: string): Promise<TenantMembership[]>;
   setActiveTenant(sessionId: string, tenantId: string): Promise<boolean>;
 }

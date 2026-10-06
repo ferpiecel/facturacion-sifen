@@ -61,19 +61,25 @@ const AUTHENTICATOR_ISSUER = 'Facturación electrónica';
       ) => {
         const pepper = loadAuthPepper(process.env);
         if (!db || !sessions) return null;
-        const store = new SqlMfaRuntimeStore(db);
         const vault = new MfaSecretVault(cipher);
+        const audit = new TenantMfaAuditLog(db);
         return new LoginService({
           credentials: new SqlUserCredentialLookup(db),
           verifier: new Argon2SecretVerifierAdapter(),
           throttle: new SqlLoginThrottle(db, pepper),
           events: new SqlAuthEventLog(db, pepper),
           sessions,
-          mfaStore: store,
-          enroll: new EnrollMfaUseCase(store, vault, AUTHENTICATOR_ISSUER),
-          confirm: new ConfirmMfaUseCase(store, vault, new TenantMfaAuditLog(db)),
-          verifyMfa: new VerifyMfaUseCase(store, vault, new TenantMfaAuditLog(db)),
-          mfaGuard: new SqlMfaAttemptGuard(db, MFA_CONSECUTIVE_FAILURE_CAP),
+          // Everything MFA is bound to one pending session: the SQL resolves the user from it, never from a caller.
+          mfa: (pendingHash: string) => {
+            const store = new SqlMfaRuntimeStore(db, pendingHash);
+            return {
+              store,
+              enroll: new EnrollMfaUseCase(store, vault, AUTHENTICATOR_ISSUER),
+              confirm: new ConfirmMfaUseCase(store, vault, audit),
+              verify: new VerifyMfaUseCase(store, vault, audit),
+              guard: new SqlMfaAttemptGuard(db, MFA_CONSECUTIVE_FAILURE_CAP, pendingHash),
+            };
+          },
         });
       },
       inject: [DATABASE, SESSION_SERVICE, EnvelopeCipher],

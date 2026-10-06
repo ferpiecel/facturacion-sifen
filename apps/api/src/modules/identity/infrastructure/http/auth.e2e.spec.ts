@@ -320,15 +320,9 @@ describe('portal auth over HTTP (HU-E1-07 S5 core, without enrolment)', () => {
     expect(noMfa.status).toBe(401);
     expect(noMfa.body).toEqual(wrong.body);
     expect(noMfa.setCookies).toEqual([]);
-    const live = await handle.db
-      .select()
-      .from(userSessions)
-      .where(eq(userSessions.userId, row?.id ?? ''));
+    const live = await handle.db.select().from(userSessions).where(eq(userSessions.userId, row.id));
     expect(live.every((session) => session.revokedAt !== null)).toBe(true);
-    const events = await handle.db
-      .select()
-      .from(authEvents)
-      .where(eq(authEvents.userId, row?.id ?? ''));
+    const events = await handle.db.select().from(authEvents).where(eq(authEvents.userId, row.id));
     expect(events.map((e) => e.event)).toContain('login.mfa_enrollment_required');
     expect((await c.send('POST', '/auth/mfa', { body: { code: '123456' } })).status).toBe(401);
   });

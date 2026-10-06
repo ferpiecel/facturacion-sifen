@@ -3,7 +3,9 @@ import { documents, loteDocuments, lotes, withTenantTransaction, type Database }
 import type { LoteRecoveryOutcome, LoteRecoveryStore } from '../application/recover-lote-by-cdc.js';
 import { recordAudit } from '../../audit/infrastructure/record-audit.js';
 import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
+import { recoverableInLote } from './recoverable-in-lote.js';
 import { settleDocument, type Tx } from './settle-document.js';
+import { DEFAULT_MAX_TRANSMISSION_ATTEMPTS } from './transmission-limits.js';
 import { TRANSMISSION_WORKER_ACTOR } from './transmission-audit-actor.js';
 
 /** Hold code of a document whose CDC keeps answering 0420: released with `document:release-hold`. */
@@ -53,6 +55,7 @@ export function createDrizzleLoteRecoveryStore({
               isNull(documents.transmissionHold),
               // An unknown lote never got a confirmed send: its documents are still queued.
               eq(documents.status, lote.status === 'unknown' ? 'queued' : 'submitted'),
+              recoverableInLote(loteId),
             ),
           )
           // Least recently queried first: a capped pass rotates through the lote instead of starving its tail.
@@ -113,9 +116,11 @@ export function createDrizzleLoteRecoveryStore({
         const heldSince = current.sentAt ?? current.createdAt;
         const eligible = guard.recoveredAt.getTime() - heldSince.getTime() >= HOLD_AFTER_MS;
         const held: string[] = [];
+        const resent: Resent[] = [];
         for (const { cdc } of outcome.unresolved.filter((entry) => entry.absent && eligible)) {
-          const id = await holdAbsent(tx, loteId, cdc, guard.recoveredAt);
-          if (id) held.push(id);
+          const action = await holdOrResend(tx, loteId, cdc, guard.recoveredAt);
+          if (action?.kind === 'hold') held.push(action.id);
+          else if (action) resent.push(action);
         }
         // Nothing left to query (every other document settled or held): the lote leaves its status.
         if (outcome.unresolved.length > 0 && guard.expectedStatus !== 'processed') {
@@ -134,6 +139,7 @@ export function createDrizzleLoteRecoveryStore({
                 eq(loteDocuments.loteId, loteId),
                 inArray(documents.status, ['queued', 'submitted']),
                 isNull(documents.transmissionHold),
+                recoverableInLote(loteId),
               ),
             );
           if ((open.at(0)?.total ?? 0) === 0) {
@@ -143,7 +149,9 @@ export function createDrizzleLoteRecoveryStore({
                 status: 'processed',
                 lastPollMessage: withNote(
                   handOverReason(current.message),
-                  `held for an operator (${RECOVERY_UNRESOLVED_HOLD})`,
+                  held.length > 0
+                    ? `held for an operator (${RECOVERY_UNRESOLVED_HOLD})`
+                    : 'queued again after 0420 past the window',
                 ),
               })
               .where(eq(lotes.id, loteId));
@@ -158,6 +166,15 @@ export function createDrizzleLoteRecoveryStore({
             entity: { type: 'document', id },
             before: { transmissionHold: null },
             after: { transmissionHold: RECOVERY_UNRESOLVED_HOLD },
+          });
+        }
+        for (const { id, before, attempts } of resent) {
+          await recordAudit(tx, {
+            actor: TRANSMISSION_WORKER_ACTOR,
+            action: 'document.resend_queued',
+            entity: { type: 'document', id },
+            before: { status: before, transmissionAttempts: attempts - 1 },
+            after: { status: 'queued', transmissionAttempts: attempts },
           });
         }
         return held;
@@ -192,6 +209,7 @@ async function touchQueried(
       and(
         inArray(documents.cdc, [...cdcs]),
         inArray(documents.status, ['queued', 'submitted']),
+        recoverableInLote(loteId),
         inArray(
           documents.id,
           tx
@@ -203,30 +221,73 @@ async function touchQueried(
     );
 }
 
+interface Resent {
+  readonly kind: 'resend';
+  readonly id: string;
+  /** Status before: `submitted` (queued again by the guard's one door) or `queued` (unanswered send). */
+  readonly before: string;
+  readonly attempts: number;
+}
+
 /**
- * Holds one document whose CDC answered 0420 past the window; returns its id when it was held (the caller audits it). Only a
- * document still waiting for SIFEN (`queued` or `submitted`) and not already held is touched.
+ * A CDC answered 0420 past the 48 h window (the caller checked): SIFEN does not hold the DE, and the
+ * Guía says to send it again with the same CDC. The first time (`resent_at` empty, attempts below the
+ * 0301 cap) the document is queued again: stamped, counted, `submitted -> queued` through the guard's
+ * audited door; the pre-send check verifies it once more before it joins a lote. Otherwise it is held
+ * for an operator. Only a document still waiting for SIFEN and not held is touched. The caller audits.
  */
-async function holdAbsent(tx: Tx, loteId: string, cdc: string, at: Date): Promise<string | null> {
-  const held = await tx
+async function holdOrResend(
+  tx: Tx,
+  loteId: string,
+  cdc: string,
+  at: Date,
+): Promise<{ kind: 'hold'; id: string } | Resent | null> {
+  const doc = (
+    await tx
+      .select({
+        id: documents.id,
+        status: documents.status,
+        attempts: documents.transmissionAttempts,
+        resentAt: documents.resentAt,
+      })
+      .from(documents)
+      .innerJoin(
+        loteDocuments,
+        and(
+          eq(loteDocuments.tenantId, documents.tenantId),
+          eq(loteDocuments.documentId, documents.id),
+        ),
+      )
+      .where(
+        and(
+          eq(loteDocuments.loteId, loteId),
+          eq(documents.cdc, cdc),
+          inArray(documents.status, ['queued', 'submitted']),
+          isNull(documents.transmissionHold),
+          recoverableInLote(loteId),
+        ),
+      )
+  ).at(0);
+  if (!doc) return null;
+  if (doc.resentAt === null && doc.attempts + 1 < DEFAULT_MAX_TRANSMISSION_ATTEMPTS) {
+    const attempts = doc.attempts + 1;
+    await tx
+      .update(documents)
+      // `now()`: the stamp and the lote creation time share the database clock, which orders them.
+      .set({
+        status: 'queued',
+        resentAt: sql`now()`,
+        transmissionAttempts: attempts,
+        updatedAt: at,
+      })
+      .where(eq(documents.id, doc.id));
+    return { kind: 'resend', id: doc.id, before: doc.status, attempts };
+  }
+  await tx
     .update(documents)
     .set({ transmissionHold: RECOVERY_UNRESOLVED_HOLD, updatedAt: at })
-    .where(
-      and(
-        eq(documents.cdc, cdc),
-        inArray(documents.status, ['queued', 'submitted']),
-        isNull(documents.transmissionHold),
-        inArray(
-          documents.id,
-          tx
-            .select({ id: loteDocuments.documentId })
-            .from(loteDocuments)
-            .where(eq(loteDocuments.loteId, loteId)),
-        ),
-      ),
-    )
-    .returning({ id: documents.id });
-  return held.at(0)?.id ?? null;
+    .where(eq(documents.id, doc.id));
+  return { kind: 'hold', id: doc.id };
 }
 
 /** Marks the start of the recovery's own text in `last_poll_message`; what precedes it is the hand-over reason. */

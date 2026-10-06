@@ -3,13 +3,14 @@ import { documents, loteDocuments, lotes, withTenantTransaction, type Database }
 import { recordAudit } from '../../audit/infrastructure/record-audit.js';
 import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
 import type { LoteDispatchOutcome, LoteDispatchStore } from '../application/send-lote.js';
+import { DEFAULT_MAX_TRANSMISSION_ATTEMPTS } from './transmission-limits.js';
 import { RECOVERY_UNRESOLVED_HOLD } from './drizzle-lote-recovery-store.js';
 import { TRANSMISSION_WORKER_ACTOR } from './transmission-audit-actor.js';
 
 /** First wait after a 0301; it doubles on each refusal up to the cap. */
 const BASE_BACKOFF_MS = 5 * 60 * 1000;
 const MAX_BACKOFF_MS = 2 * 60 * 60 * 1000;
-export const DEFAULT_MAX_TRANSMISSION_ATTEMPTS = 5;
+export { DEFAULT_MAX_TRANSMISSION_ATTEMPTS };
 export const ATTEMPTS_EXHAUSTED_HOLD = 'transmission:attempts-exhausted';
 const FIRST_POLL_DELAY_MS = 10 * 60 * 1000;
 /** Lote queries are valid for 48 h after sending (0364). */

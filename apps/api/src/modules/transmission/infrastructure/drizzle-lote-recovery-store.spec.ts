@@ -679,6 +679,7 @@ describe('DrizzleLoteRecoveryStore', () => {
       );
 
       const second = await seedLote('recovery', 'submitted', [CDC_C], SENT_AT);
+      await handle.db.execute(sql`update documents set resent_at = '2026-01-01T00:00:00Z'`);
       await handle.db.execute(
         sql`update lotes set last_poll_message = 'recovery: 1 document(s) still unresolved by CDC query' where id = ${second}`,
       );
@@ -807,6 +808,7 @@ describe('DrizzleLoteRecoveryStore', () => {
 
   describe('a failing alert', () => {
     it('cannot fail the record after the commit: the hold stays and record still returns true', async () => {
+      await handle.db.execute(sql`update documents set resent_at = '2026-01-01T00:00:00Z'`);
       const failing = createDrizzleLoteRecoveryStore({
         db: handle.db,
         tenantId,

@@ -480,6 +480,10 @@ describe('DrizzleLoteRecoveryStore', () => {
   describe('a CDC that answers 0420 after the 48 h window (hold and alert)', () => {
     const absent = (cdc: string) => ({ cdc, reason: '0420: CDC inexistente', absent: true });
     const AFTER_WINDOW = new Date(SENT_AT.getTime() + 48 * 3_600_000);
+    // Documents already resent once: a second 0420 past the window holds them (it never resends twice).
+    beforeEach(async () => {
+      await handle.db.execute(sql`update documents set resent_at = '2026-01-01T00:00:00Z'`);
+    });
     const setAttempts = (cdc: string, attempts: number) =>
       withTenantTransaction(handle.db, tenantId, (tx) =>
         tx.update(documents).set({ transmissionAttempts: attempts }).where(eq(documents.cdc, cdc)),
@@ -708,6 +712,7 @@ describe('DrizzleLoteRecoveryStore', () => {
 
     it('holds a queued document of an unknown lote, measured from the lote creation', async () => {
       const unknown = await seedLote('unknown', 'queued', [CDC_C], SENT_AT);
+      await handle.db.execute(sql`update documents set resent_at = '2026-01-01T00:00:00Z'`);
       await storeFor(tenantId).record(
         unknown,
         { resolutions: [], unresolved: [absent(CDC_C)] },
@@ -821,6 +826,188 @@ describe('DrizzleLoteRecoveryStore', () => {
       );
       expect(applied).toBe(true);
       expect((await readDoc(CDC_B)).transmissionHold).toBe(RECOVERY_UNRESOLVED_HOLD);
+    });
+  });
+
+  describe('the audited resend after a post-window 0420 (HU-E6-04, option B)', () => {
+    const absent = (cdc: string) => ({ cdc, reason: '0420: CDC inexistente', absent: true });
+    const setAttempts = (cdc: string, attempts: number) =>
+      withTenantTransaction(handle.db, tenantId, (tx) =>
+        tx.update(documents).set({ transmissionAttempts: attempts }).where(eq(documents.cdc, cdc)),
+      );
+
+    it('queues the submitted document again, stamped and counted, instead of holding it', async () => {
+      await storeFor(tenantId).record(
+        loteId,
+        { resolutions: [approval(CDC_A)], unresolved: [absent(CDC_B)] },
+        guard,
+      );
+      const resent = await readDoc(CDC_B);
+      expect(resent).toMatchObject({
+        status: 'queued',
+        transmissionAttempts: 1,
+        transmissionHold: null,
+        cdc: CDC_B,
+      });
+      expect(resent.resentAt).not.toBeNull();
+      expect(warnings).toEqual([]);
+    });
+
+    it('audits the resend as the system actor in the same transaction', async () => {
+      await storeFor(tenantId).record(
+        loteId,
+        { resolutions: [], unresolved: [absent(CDC_B)] },
+        guard,
+      );
+      const audits = await handle.db.select().from(auditLog);
+      expect(audits).toHaveLength(1);
+      expect(audits[0]).toMatchObject({
+        actorType: 'system',
+        actorId: 'transmission-worker',
+        action: 'document.resend_queued',
+        entityType: 'document',
+        before: { status: 'submitted', transmissionAttempts: 0 },
+        after: { status: 'queued', transmissionAttempts: 1 },
+      });
+      expect(audits[0].entityId).toBe((await readDoc(CDC_B)).id);
+    });
+
+    it('settles the lote once every document is approved, held or waiting to be resent', async () => {
+      await storeFor(tenantId).record(
+        loteId,
+        { resolutions: [approval(CDC_A)], unresolved: [absent(CDC_B)] },
+        guard,
+      );
+      expect(await readLote()).toMatchObject({ status: 'processed' });
+      expect((await storeFor(tenantId).load(loteId))?.cdcs).toEqual([]);
+    });
+
+    it('keeps the CDC, and never asks again for a document waiting to be resent', async () => {
+      await storeFor(tenantId).record(
+        loteId,
+        {
+          resolutions: [],
+          unresolved: [
+            absent(CDC_A),
+            { cdc: CDC_B, reason: 'Query failed (SifenTimeoutError)', absent: false },
+          ],
+        },
+        guard,
+      );
+      expect((await readDoc(CDC_A)).status).toBe('queued');
+      expect((await readLote()).status).toBe('recovery');
+      expect((await storeFor(tenantId).load(loteId))?.cdcs).toEqual([CDC_B]);
+    });
+
+    it('stamps a queued document of an unknown lote and leaves its lote', async () => {
+      const unknown = await seedLote('unknown', 'queued', [CDC_C], SENT_AT);
+      await storeFor(tenantId).record(
+        unknown,
+        { resolutions: [], unresolved: [absent(CDC_C)] },
+        unknownGuard,
+      );
+      const resent = await readDoc(CDC_C);
+      expect(resent).toMatchObject({ status: 'queued', transmissionAttempts: 1 });
+      expect(resent.resentAt).not.toBeNull();
+      expect((await readLoteById(unknown)).status).toBe('processed');
+    });
+
+    it('holds, never resends, a document that was already resent once', async () => {
+      await handle.db.execute(
+        sql`update documents set resent_at = '2026-01-01T00:00:00Z' where cdc = ${CDC_B}`,
+      );
+      await storeFor(tenantId).record(
+        loteId,
+        { resolutions: [], unresolved: [absent(CDC_B)] },
+        guard,
+      );
+      expect(await readDoc(CDC_B)).toMatchObject({
+        status: 'submitted',
+        transmissionHold: RECOVERY_UNRESOLVED_HOLD,
+        transmissionAttempts: 0,
+      });
+    });
+
+    it('applies the attempt cap of the 0301 backoff: at the last attempt it holds instead', async () => {
+      await setAttempts(CDC_A, 3);
+      await setAttempts(CDC_B, 4);
+      await storeFor(tenantId).record(
+        loteId,
+        { resolutions: [], unresolved: [absent(CDC_A), absent(CDC_B)] },
+        guard,
+      );
+      expect(await readDoc(CDC_A)).toMatchObject({ status: 'queued', transmissionAttempts: 4 });
+      expect(await readDoc(CDC_B)).toMatchObject({
+        status: 'submitted',
+        transmissionAttempts: 4,
+        transmissionHold: RECOVERY_UNRESOLVED_HOLD,
+      });
+    });
+
+    it('never resends before 48 h since the send, nor on an answer that is not 0420', async () => {
+      const store = storeFor(tenantId);
+      await store.record(
+        loteId,
+        { resolutions: [], unresolved: [absent(CDC_A)] },
+        { ...guard, recoveredAt: new Date(SENT_AT.getTime() + 48 * 3_600_000 - 1) },
+      );
+      await store.record(
+        loteId,
+        {
+          resolutions: [],
+          unresolved: [{ cdc: CDC_B, reason: 'Query failed (SifenTimeoutError)', absent: false }],
+        },
+        { ...guard, expectedLastPolledAt: new Date(SENT_AT.getTime() + 48 * 3_600_000 - 1) },
+      );
+      expect(await readDoc(CDC_A)).toMatchObject({ status: 'submitted', resentAt: null });
+      expect(await readDoc(CDC_B)).toMatchObject({ status: 'submitted', resentAt: null });
+    });
+
+    it('leaves a document that a newer lote carries to that lote', async () => {
+      const [doc] = await handle.db.select().from(documents).where(eq(documents.cdc, CDC_B));
+      const [newer] = await handle.db
+        .insert(lotes)
+        .values({
+          tenantId,
+          environment: 'test',
+          documentType: 1,
+          status: 'sent',
+          sentAt: RECOVERED_AT,
+        })
+        .returning();
+      await handle.db
+        .insert(loteDocuments)
+        .values({ tenantId, loteId: newer.id, documentId: doc.id });
+
+      expect((await storeFor(tenantId).load(loteId))?.cdcs).toEqual([CDC_A]);
+      await storeFor(tenantId).record(
+        loteId,
+        { resolutions: [], unresolved: [absent(CDC_B)] },
+        guard,
+      );
+      expect(await readDoc(CDC_B)).toMatchObject({ status: 'submitted', resentAt: null });
+    });
+
+    it('rolls the resend back when its audit row cannot be written', async () => {
+      await handle.db.execute(sql`
+        create function fail_resend_audit() returns trigger language plpgsql as $$
+        begin
+          if new.action = 'document.resend_queued' then raise exception 'audit down'; end if;
+          return new;
+        end $$`);
+      await handle.db.execute(
+        sql`create trigger fail_resend_audit before insert on audit_log for each row execute function fail_resend_audit()`,
+      );
+      await expect(
+        storeFor(tenantId).record(
+          loteId,
+          { resolutions: [approval(CDC_A)], unresolved: [absent(CDC_B)] },
+          guard,
+        ),
+      ).rejects.toThrow();
+      expect(await readDoc(CDC_B)).toMatchObject({ status: 'submitted', resentAt: null });
+      expect((await readDoc(CDC_A)).status).toBe('submitted');
+      expect((await readLote()).status).toBe('recovery');
     });
   });
 });

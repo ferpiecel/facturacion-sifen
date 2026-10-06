@@ -387,4 +387,30 @@ describe('DrizzleTransmissionCycleStore', () => {
     expect(update.match(/"status" = \$/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
     expect(update.match(/"updated_at" < \$/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
   });
+
+  it('does not list a processed lote whose submitted documents are waiting to be resent or live in a newer lote', async () => {
+    const waiting = await addDocument(tenantId, 'submitted', 1);
+    const moved = await addDocument(tenantId, 'submitted', 2);
+    const open = await addDocument(tenantId, 'submitted', 3);
+    const lotWaiting = await addLote(tenantId, 'processed', [waiting]);
+    const lotMoved = await addLote(tenantId, 'processed', [moved]);
+    const lotOpen = await addLote(tenantId, 'processed', [open]);
+    // `waiting` was queued again after its lote existed and no newer lote carries it yet.
+    await handle.db
+      .update(documents)
+      .set({ status: 'queued', resentAt: new Date(Date.now() + 60_000), transmissionAttempts: 1 })
+      .where(eq(documents.id, waiting));
+    // `moved` is carried by a newer lote that is its own recoverable business.
+    await handle.db
+      .update(documents)
+      .set({ resentAt: new Date(Date.now() - 3_600_000) })
+      .where(eq(documents.id, moved));
+    const newer = await addLote(tenantId, 'sent', [moved], at(40));
+    expect(newer).not.toBe(lotMoved);
+
+    const ids = await store().recoverableLoteIds(at(30), 10);
+    expect(ids).toContain(lotOpen);
+    expect(ids).not.toContain(lotWaiting);
+    expect(ids).not.toContain(lotMoved);
+  });
 });

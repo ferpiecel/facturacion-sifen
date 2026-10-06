@@ -197,49 +197,39 @@ describe('TransmissionCycle end to end', () => {
     expect(gateway.callsTo('consultarLote')).toHaveLength(1);
   });
 
-  it('recovers a lote by CDC after the 48 h window without ever resending it (HU-E6-04)', async () => {
-    const gateway = new FakeSifenGateway();
+  /** First send, then 48 h of silence: the lote ends in recovery at 12:11 two days later. */
+  async function handedOverToRecovery(gateway: FakeSifenGateway) {
     gateway.enqueue('enviarLote', sifenScenarios.loteRecibido('4500123'));
     const cycle = buildCycle(gateway);
     const first = await cycle.run();
     const loteId = first.sent[0].loteId;
-
-    // 48 h later SIFEN no longer answers lote queries (0364): the lote is handed to recovery.
     clock = new Date('2026-10-04T12:11:00Z');
     gateway.enqueue('consultarLote', sifenScenarios.loteConcluido([]));
     expect((await cycle.run()).polled).toEqual([{ loteId, status: 'recovery' }]);
     expect((await readDocument()).status).toBe('submitted');
-
     // Pacing: not queried by CDC until 10 minutes after the hand-over.
     expect((await cycle.run()).recovered).toEqual([]);
+    return { cycle, loteId };
+  }
+  const allLotes = () =>
+    withTenantTransaction(handle.db, tenantId, (tx) => tx.select().from(lotes));
 
-    // Past the 48 h window a 0420 is definitive: the document is held (alert), the lote leaves
-    // recovery and nothing is resent.
+  it('queues the document again once after a post-window 0420 and closes its old lote (HU-E6-04)', async () => {
+    const gateway = new FakeSifenGateway();
+    const { cycle, loteId } = await handedOverToRecovery(gateway);
+
+    // Past the 48 h window a 0420 is definitive: the document is queued again (once), its old lote closes.
     clock = new Date('2026-10-04T12:22:00Z');
     gateway.enqueue('consultarDE', sifenScenarios.cdcInexistente());
     expect((await cycle.run()).recovered).toEqual([{ loteId, status: 'incomplete' }]);
     expect(await readDocument()).toMatchObject({
-      status: 'submitted',
-      transmissionHold: 'recovery:0420-unresolved',
+      status: 'queued',
+      cdc: CDC,
+      transmissionAttempts: 1,
+      transmissionHold: null,
     });
-    const [settled] = await withTenantTransaction(handle.db, tenantId, (tx) =>
-      tx.select().from(lotes),
-    );
-    expect(settled.status).toBe('processed');
-    clock = new Date('2026-10-04T12:40:00Z');
-    expect((await cycle.run()).recovered).toEqual([]);
-
-    // An operator releases the hold; the document is queried again and SIFEN now has it (0422).
-    await withTenantTransaction(handle.db, tenantId, (tx) =>
-      tx.update(documents).set({ transmissionHold: null }).where(eq(documents.cdc, CDC)),
-    );
-    gateway.enqueue('consultarDE', sifenScenarios.cdcEncontrado(`<rDE><DE Id="${CDC}"/></rDE>`));
-    expect((await cycle.run()).recovered).toEqual([{ loteId, status: 'recovered' }]);
-    expect((await readDocument()).status).toBe('approved');
-
-    expect((await cycle.run()).recovered).toEqual([]);
-    expect(gateway.callsTo('enviarLote')).toHaveLength(1);
-    expect(gateway.callsTo('consultarDE')).toHaveLength(2);
+    expect((await readDocument()).resentAt).not.toBeNull();
+    expect((await allLotes()).map((l) => l.status)).toEqual(['processed']);
   });
 
   it('recovers a send that got no answer by CDC and never resends it (HU-E6-04)', async () => {

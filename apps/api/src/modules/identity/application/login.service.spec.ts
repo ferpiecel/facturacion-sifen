@@ -33,13 +33,14 @@ function setup(
   const locked = new Set(opts.locked ?? []);
   const failures: [string, ThrottleLimit][] = [];
   const events: AuthEvent[] = [];
+  const clear = vi.fn<LoginThrottle['clear']>().mockResolvedValue(undefined);
   const throttle: LoginThrottle = {
     isLocked: (s) => Promise.resolve(locked.has(s)),
     recordFailure: (s, l) => {
       failures.push([s, l]);
       return Promise.resolve(false);
     },
-    clear: vi.fn<LoginThrottle['clear']>().mockResolvedValue(undefined),
+    clear,
   };
   const log: AuthEventLog = {
     record: (e) => {
@@ -54,14 +55,12 @@ function setup(
       .mockImplementation((_u: string, o: { mfaVerified: boolean }) =>
         Promise.resolve(o.mfaVerified ? full : pending),
       ),
-    authenticate: vi
-      .fn()
-      .mockResolvedValue({
-        sessionId: 'pending-1',
-        userId: 'u-1',
-        activeTenantId: null,
-        mfaVerified: false,
-      }),
+    authenticate: vi.fn().mockResolvedValue({
+      sessionId: 'pending-1',
+      userId: 'u-1',
+      activeTenantId: null,
+      mfaVerified: false,
+    }),
     memberships: vi.fn().mockResolvedValue([{ tenantId: 't-a', tenantName: 'A', role: 'admin' }]),
     logout: vi.fn().mockResolvedValue(undefined),
   };
@@ -85,7 +84,7 @@ function setup(
     verifyMfa: { execute: mfa.verify } as never,
     now: () => 1_000,
   });
-  return { service, verify, throttle, failures, events, sessions, mfa };
+  return { service, verify, clear, failures, events, sessions, mfa };
 }
 
 describe('LoginService.start (password step)', () => {
@@ -155,9 +154,9 @@ describe('LoginService.start (password step)', () => {
   );
 
   it('clears the account counter after a good password but never the IP one', async () => {
-    const { service, throttle } = setup();
+    const { service, clear } = setup();
     await service.start({ email: 'ana@example.com', password: 'pw', ip: '203.0.113.9' });
-    expect(throttle.clear).toHaveBeenCalledExactlyOnceWith('account:ana@example.com');
+    expect(clear).toHaveBeenCalledExactlyOnceWith('account:ana@example.com');
   });
 
   it('never records the password in an event', async () => {
@@ -169,7 +168,7 @@ describe('LoginService.start (password step)', () => {
 
 describe('LoginService MFA steps', () => {
   it('verifies the code and swaps the pending session for a fresh verified one (no fixation)', async () => {
-    const { service, sessions, events, throttle } = setup();
+    const { service, sessions, events, clear } = setup();
     expect(await service.verifyMfa({ pendingToken: 'p-access', code: '123456' })).toEqual({
       session: full,
       tenants: [{ tenantId: 't-a', tenantName: 'A', role: 'admin' }],
@@ -177,7 +176,7 @@ describe('LoginService MFA steps', () => {
     expect(sessions.issue).toHaveBeenCalledWith('u-1', { mfaVerified: true });
     expect(sessions.logout).toHaveBeenCalledWith('pending-1');
     expect(events.map((e) => e.event)).toEqual(['login.succeeded']);
-    expect(throttle.clear).toHaveBeenCalledWith('mfa:u-1');
+    expect(clear).toHaveBeenCalledWith('mfa:u-1');
   });
 
   it('refuses a wrong code, counts it against the user and audits it, leaving the pending session', async () => {

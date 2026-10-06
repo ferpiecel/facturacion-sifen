@@ -27,7 +27,7 @@ export const IN_PROCESS_LOTE_STATUSES = ['pending', 'sending', 'sent', 'unknown'
  * recovery's resend (`resent_at`) leaves the older lote behind (it may stay `recovery` for its other
  * documents) and only a newer lote carries the document from then on.
  */
-const stillCarries = sql`NOT (${documents.resentAt} IS NOT NULL AND ${documents.resentAt} > ${lotes.createdAt})`;
+export const stillCarries = sql`NOT (${documents.resentAt} IS NOT NULL AND ${documents.resentAt} > ${lotes.createdAt})`;
 
 /** `LoteAssemblyStore` over `documents`, `lotes` and `lote_documents`, run as app_user inside the tenant's transaction. */
 export function createDrizzleLoteAssemblyStore({

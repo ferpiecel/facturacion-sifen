@@ -400,11 +400,17 @@ describe('DrizzleTransmissionCycleStore', () => {
       .update(documents)
       .set({ status: 'queued', resentAt: new Date(Date.now() + 60_000), transmissionAttempts: 1 })
       .where(eq(documents.id, waiting));
-    // `moved` is carried by a newer lote that is its own recoverable business.
+    // `moved` was queued again (the door: its lote is processed), long before the newer lote that
+    // now carries it was created: that newer lote is its own recoverable business.
     await handle.db
       .update(documents)
-      .set({ resentAt: new Date(Date.now() - 3_600_000) })
+      .set({
+        status: 'queued',
+        resentAt: new Date(Date.now() - 3_600_000),
+        transmissionAttempts: 1,
+      })
       .where(eq(documents.id, moved));
+    await handle.db.update(documents).set({ status: 'submitted' }).where(eq(documents.id, moved));
     const newer = await addLote(tenantId, 'sent', [moved], at(40));
     expect(newer).not.toBe(lotMoved);
 

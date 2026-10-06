@@ -6,11 +6,17 @@ SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
   tenant_env public.tenant_environment;
+  door_ok boolean;
+  stamping boolean;
 BEGIN
   -- A tenant row hidden by RLS is left to the row-level security policy.
   SELECT t.environment INTO tenant_env FROM public.tenants t WHERE t.id = NEW.tenant_id;
   IF FOUND AND tenant_env IS DISTINCT FROM NEW.environment THEN
     RAISE EXCEPTION 'documents: environment must match the tenant''s current environment';
+  END IF;
+  -- resent_at is only ever set by the recovery queueing a document again (HU-E6-04), never on INSERT.
+  IF TG_OP = 'INSERT' AND NEW.resent_at IS NOT NULL THEN
+    RAISE EXCEPTION 'documents: resent_at can only be set when the recovery queues the document again';
   END IF;
   IF TG_OP = 'UPDATE' THEN
     IF NEW.id IS DISTINCT FROM OLD.id
@@ -51,28 +57,40 @@ BEGIN
     IF OLD.resent_at IS NOT NULL AND NEW.resent_at IS DISTINCT FROM OLD.resent_at THEN
       RAISE EXCEPTION 'documents: resent_at is write-once';
     END IF;
+    -- The one way to set it, and the one way back from submitted: the recovery queues the document
+    -- again. Stamped now, the attempt counted (+1), nothing holds it and one of its lotes has given up
+    -- on it (recovery, unknown or processed). A submitted or an already queued document (the one of an
+    -- unanswered send) may be stamped, always ending queued.
+    stamping := OLD.resent_at IS NULL AND NEW.resent_at IS NOT NULL;
+    IF stamping THEN
+      IF NOT (OLD.status IN ('submitted', 'queued') AND NEW.status = 'queued') THEN
+        RAISE EXCEPTION 'documents: resent_at can only be set when the recovery queues the document again';
+      END IF;
+      door_ok := NEW.transmission_attempts = OLD.transmission_attempts + 1
+        AND NEW.transmission_hold IS NULL
+        AND EXISTS (
+          SELECT 1
+          FROM public.lote_documents ld
+          JOIN public.lotes l ON l.tenant_id = ld.tenant_id AND l.id = ld.lote_id
+          WHERE ld.tenant_id = NEW.tenant_id
+            AND ld.document_id = NEW.id
+            AND l.status IN ('recovery', 'unknown', 'processed')
+        );
+      IF NOT door_ok THEN
+        IF OLD.status = 'submitted' THEN
+          RAISE EXCEPTION 'documents: invalid status transition % -> %', OLD.status, NEW.status;
+        END IF;
+        RAISE EXCEPTION 'documents: resent_at can only be set when the recovery queues the document again';
+      END IF;
+    END IF;
     -- Statuses only move forward; a SIFEN outcome is entered once, from submitted (HU-E6-03).
     IF NEW.status IS DISTINCT FROM OLD.status THEN
       IF public.documents_status_rank(NEW.status) IS NULL
         OR public.documents_status_rank(OLD.status) IS NULL THEN
         RAISE EXCEPTION 'documents: unranked status % -> %', OLD.status, NEW.status;
       END IF;
-      -- The one way back (HU-E6-04): SIFEN kept answering 0420 past the window, so the recovery queues
-      -- a submitted document again. Only if it is stamped now (resent_at, once), the attempt is
-      -- counted, nothing holds it and its lote has given up on it (recovery, unknown or processed).
       IF OLD.status = 'submitted' AND NEW.status = 'queued' THEN
-        IF NEW.resent_at IS NULL
-          OR NEW.resent_at IS NOT DISTINCT FROM OLD.resent_at
-          OR NEW.transmission_attempts <> OLD.transmission_attempts + 1
-          OR NEW.transmission_hold IS NOT NULL
-          OR NOT EXISTS (
-            SELECT 1
-            FROM public.lote_documents ld
-            JOIN public.lotes l ON l.tenant_id = ld.tenant_id AND l.id = ld.lote_id
-            WHERE ld.tenant_id = NEW.tenant_id
-              AND ld.document_id = NEW.id
-              AND l.status IN ('recovery', 'unknown', 'processed')
-          ) THEN
+        IF NOT stamping THEN
           RAISE EXCEPTION 'documents: invalid status transition % -> %', OLD.status, NEW.status;
         END IF;
       ELSIF NOT (

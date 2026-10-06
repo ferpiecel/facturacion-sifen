@@ -192,7 +192,9 @@ export class TransmissionCycle {
   }
 
   private async assemble(): Promise<number> {
-    const result = await this.guard('assemble', undefined, () => this.deps.assembler.assemble());
+    const result = await this.guard('assemble', undefined, () =>
+      this.deps.assembler.assemble({ signal: this.signal }),
+    );
     return result?.lotes.length ?? 0;
   }
 

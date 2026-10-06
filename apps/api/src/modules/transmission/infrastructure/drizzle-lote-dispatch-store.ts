@@ -39,7 +39,7 @@ export function createDrizzleLoteDispatchStore({
       const claimed = await withTenantTransaction(db, tenantId, (tx) =>
         tx
           .update(lotes)
-          .set({ status: 'sending', updatedAt: now() })
+          .set({ status: 'sending', sendAttemptedAt: now(), updatedAt: now() })
           .where(and(eq(lotes.id, loteId), eq(lotes.status, 'pending')))
           .returning({ id: lotes.id }),
       );

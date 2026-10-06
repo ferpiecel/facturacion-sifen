@@ -8,16 +8,23 @@ import { settleDocument, type Tx } from './settle-document.js';
 import { DEFAULT_MAX_TRANSMISSION_ATTEMPTS } from './transmission-limits.js';
 import { TRANSMISSION_WORKER_ACTOR } from './transmission-audit-actor.js';
 
-/** Hold code of a document whose CDC keeps answering 0420: released with `document:release-hold`. */
-export const RECOVERY_UNRESOLVED_HOLD = 'recovery:0420-unresolved';
 /**
- * A CDC that answers 0420 at least 48 h after the lote was sent is held. Guía 2024: SIFEN processes a
- * lote within 24 h and lote queries are valid for 48 h, so past that window a 0420 is SIFEN saying it
- * does not hold the DE; before it, 0420 may only mean "not processed yet" and is never held. There is
- * deliberately no per-document counter: `transmission_attempts` belongs to the 0301 backoff and must
- * not be shared, and a dedicated column would only add a marginal safety margin over the 48 h bound.
- * The hold is reversible (`document:release-hold`); a released document that still answers 0420 is
- * held again at the next pass.
+ * Hold codes (released with `document:release-hold`, which clears the hold only: an operator release of a
+ * `recovery:0420-unresolved` document, never resent, now lets the next 0420 resend it automatically):
+ * - `recovery:0420-unresolved`: 0420 past the window, but the send instant is unknown (a lote that
+ *   predates `send_attempted_at`), so it is never resent;
+ * - `recovery:0420-after-resend`: 0420 again for a document already resent once;
+ * - `recovery:attempts-exhausted`: the shared 0301 attempt cap leaves no room for a resend.
+ */
+export const RECOVERY_UNRESOLVED_HOLD = 'recovery:0420-unresolved';
+export const RECOVERY_AFTER_RESEND_HOLD = 'recovery:0420-after-resend';
+export const RECOVERY_ATTEMPTS_EXHAUSTED_HOLD = 'recovery:attempts-exhausted';
+/**
+ * A CDC that answers 0420 at least 48 h after the send was attempted is acted on: resent once, else
+ * held. Guía 2024: SIFEN processes a lote within 24 h and lote queries are valid for 48 h, so past that
+ * window a 0420 is SIFEN saying it does not hold the DE; before it, 0420 may only mean "not processed
+ * yet" and nothing is done. There is no per-document counter: `transmission_attempts` belongs to the
+ * 0301 backoff (it only caps the resend), and the time rule is enough.
  */
 const HOLD_AFTER_MS = 48 * 60 * 60 * 1000;
 
@@ -75,6 +82,7 @@ export function createDrizzleLoteRecoveryStore({
           await tx
             .select({
               message: lotes.lastPollMessage,
+              sendAttemptedAt: lotes.sendAttemptedAt,
               sentAt: lotes.sentAt,
               createdAt: lotes.createdAt,
             })
@@ -113,13 +121,18 @@ export function createDrizzleLoteRecoveryStore({
           outcome.unresolved.filter((entry) => !entry.skipped).map((entry) => entry.cdc),
           guard.recoveredAt,
         );
-        const heldSince = current.sentAt ?? current.createdAt;
+        // The window counts from when the send was attempted: a lote may wait pending for days, and
+        // SIFEN starts processing only when it is sent. Lotes that predate the stamp fall back to
+        // `sent_at`, then (an unanswered send of that time) to their creation.
+        const heldSince = current.sendAttemptedAt ?? current.sentAt ?? current.createdAt;
         const eligible = guard.recoveredAt.getTime() - heldSince.getTime() >= HOLD_AFTER_MS;
-        const held: string[] = [];
+        // Without a real send instant (legacy rows) the window is only a guess: never resend, hold.
+        const canResend = (current.sendAttemptedAt ?? current.sentAt) !== null;
+        const held: Held[] = [];
         const resent: Resent[] = [];
         for (const { cdc } of outcome.unresolved.filter((entry) => entry.absent && eligible)) {
-          const action = await holdOrResend(tx, loteId, cdc, guard.recoveredAt);
-          if (action?.kind === 'hold') held.push(action.id);
+          const action = await holdOrResend(tx, loteId, cdc, guard.recoveredAt, canResend);
+          if (action?.kind === 'hold') held.push(action);
           else if (action) resent.push(action);
         }
         // Nothing left to query (every other document settled or held): the lote leaves its status.
@@ -150,7 +163,7 @@ export function createDrizzleLoteRecoveryStore({
                 lastPollMessage: withNote(
                   handOverReason(current.message),
                   held.length > 0
-                    ? `held for an operator (${RECOVERY_UNRESOLVED_HOLD})`
+                    ? `held for an operator (${held[0].code})`
                     : 'queued again after 0420 past the window',
                 ),
               })
@@ -159,13 +172,13 @@ export function createDrizzleLoteRecoveryStore({
         }
         // After every UPDATE, like `releaseRecoveryHolds`: each audit insert takes the tenant's chain
         // lock, so none is interleaved with the writes above. Same transaction as the holds.
-        for (const id of held) {
+        for (const { id, code } of held) {
           await recordAudit(tx, {
             actor: TRANSMISSION_WORKER_ACTOR,
             action: 'document.hold_placed',
             entity: { type: 'document', id },
             before: { transmissionHold: null },
-            after: { transmissionHold: RECOVERY_UNRESOLVED_HOLD },
+            after: { transmissionHold: code },
           });
         }
         for (const { id, before, attempts } of resent) {
@@ -179,11 +192,11 @@ export function createDrizzleLoteRecoveryStore({
         }
         return held;
       });
-      for (const id of result ?? []) {
+      for (const { id, code } of result ?? []) {
         // The commit already happened: a failing logger must not turn a recorded pass into an error.
         try {
           logger?.warn(
-            `Document ${id} of tenant ${tenantId} held as ${RECOVERY_UNRESOLVED_HOLD}: its CDC keeps answering 0420`,
+            `Document ${id} of tenant ${tenantId} held as ${code}: its CDC keeps answering 0420`,
           );
         } catch {
           // The hold is in the database and in the worker's held-documents report.
@@ -221,6 +234,12 @@ async function touchQueried(
     );
 }
 
+interface Held {
+  readonly kind: 'hold';
+  readonly id: string;
+  readonly code: string;
+}
+
 interface Resent {
   readonly kind: 'resend';
   readonly id: string;
@@ -231,17 +250,19 @@ interface Resent {
 
 /**
  * A CDC answered 0420 past the 48 h window (the caller checked): SIFEN does not hold the DE, and the
- * Guía says to send it again with the same CDC. The first time (`resent_at` empty, attempts below the
- * 0301 cap) the document is queued again: stamped, counted, `submitted -> queued` through the guard's
- * audited door; the pre-send check verifies it once more before it joins a lote. Otherwise it is held
- * for an operator. Only a document still waiting for SIFEN and not held is touched. The caller audits.
+ * Guía says to send it again with the same CDC. The first time (`resent_at` empty, attempts leaving
+ * room under the 0301 cap, and a known send instant) the document is queued again: stamped, counted,
+ * `submitted -> queued` through the guard's audited door; the pre-send check verifies it once more
+ * before it joins a lote. Otherwise it is held for an operator with the reason that applies. Only a
+ * document still waiting for SIFEN and not held is touched. The caller audits.
  */
 async function holdOrResend(
   tx: Tx,
   loteId: string,
   cdc: string,
   at: Date,
-): Promise<{ kind: 'hold'; id: string } | Resent | null> {
+  canResend: boolean,
+): Promise<Held | Resent | null> {
   const doc = (
     await tx
       .select({
@@ -269,7 +290,8 @@ async function holdOrResend(
       )
   ).at(0);
   if (!doc) return null;
-  if (doc.resentAt === null && doc.attempts + 1 < DEFAULT_MAX_TRANSMISSION_ATTEMPTS) {
+  const roomForResend = doc.attempts + 1 < DEFAULT_MAX_TRANSMISSION_ATTEMPTS;
+  if (canResend && doc.resentAt === null && roomForResend) {
     const attempts = doc.attempts + 1;
     await tx
       .update(documents)
@@ -283,11 +305,16 @@ async function holdOrResend(
       .where(eq(documents.id, doc.id));
     return { kind: 'resend', id: doc.id, before: doc.status, attempts };
   }
+  const code = !canResend
+    ? RECOVERY_UNRESOLVED_HOLD
+    : doc.resentAt !== null
+      ? RECOVERY_AFTER_RESEND_HOLD
+      : RECOVERY_ATTEMPTS_EXHAUSTED_HOLD;
   await tx
     .update(documents)
-    .set({ transmissionHold: RECOVERY_UNRESOLVED_HOLD, updatedAt: at })
+    .set({ transmissionHold: code, updatedAt: at })
     .where(eq(documents.id, doc.id));
-  return { kind: 'hold', id: doc.id };
+  return { kind: 'hold', id: doc.id, code };
 }
 
 /** Marks the start of the recovery's own text in `last_poll_message`; what precedes it is the hand-over reason. */

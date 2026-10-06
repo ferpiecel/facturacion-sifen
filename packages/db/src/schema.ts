@@ -887,6 +887,12 @@ export const lotes = pgTable(
     responseCode: varchar('response_code', { length: 8 }),
     /** `dMsgRes`, or why the outcome is unknown. */
     responseMessage: text('response_message'),
+    /**
+     * When the send was attempted (`pending -> sending`, HU-E6-04). Unlike `sent_at` it exists for a
+     * send that got no answer, and it is when SIFEN may have started processing: the 48 h window of the
+     * recovery counts from it. Null for lotes that predate it.
+     */
+    sendAttemptedAt: timestamp('send_attempted_at', { withTimezone: true }),
     sentAt: timestamp('sent_at', { withTimezone: true }),
     /** First lote query: `sent_at` + 10 min. */
     nextPollAt: timestamp('next_poll_at', { withTimezone: true }),

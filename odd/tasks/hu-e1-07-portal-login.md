@@ -48,6 +48,8 @@ Unblocks HU-E12-01/02 (portal list and detail) and is the `user` actor of the au
   breached-password corpus (k-anonymity) is a later port. Unknown and malformed emails cost one Argon2 verification (dummy hash).
 - D8 Operator-created users get the audit row in a tenant (`audit_log.tenant_id` NOT NULL): `user:create` takes `--tenant`
   and `--role`; an existing email is reused (its password is untouched), so an accountant joins a second tenant.
+- D9 TOTP secret AAD: kind `mfa`, tenant slot `platform`, label = user id (a user belongs to no single tenant).
+- D10 Recovery codes: 16 base32 chars (80 bits), SHA-256 (fast hash is fine for 80 random bits; passwords use Argon2id).
 - D6 Email stored lower-case (CHECK), unique.
 
 ## Product questions (answers needed; defaults proposed)
@@ -77,7 +79,18 @@ no SSO in MVP (RF-24), roles list (PRD A4).
       `CreateUserUseCase`. RED 48342f3, GREEN 2224f84 (+ 77eb58e); S2b RED 39d4d85, GREEN 6b56848. Verified: api tsc, lint, depcruise, 1587 tests, coverage 97.6% funcs.
 - [x] S2b `feat/hu-e1-07-user-cli` (stacked on S2) — operator CLI `user:create` (`--password -` from stdin), creates or
       reuses the user, adds the membership, audits as `operator` in the tenant. Split out to stay <= 400 lines. Verified: api tsc, lint, depcruise, 1604 tests, coverage 97.6% funcs.
-- [ ] S3 TOTP: domain (RFC 6238, replay guard), sealed secret column + migration 0038, enrol/verify use cases, recovery codes.
+- [x] S3 TOTP MFA, PROVISIONAL (applies product defaults 1 and 3 until the PO answers), three stacked branches:
+  - S3a `feat/hu-e1-07-totp` (on S2b): RFC 6238 domain (HMAC-SHA1, 6 digits, 30 s, +/-1 step, constant-time, last-used-step
+    replay guard, otpauth URI), 10 SHA-256-hashed recovery codes, `MfaSecretVault` (new secret kind `mfa`; AAD tenant slot
+    `platform`, label = user id). RED 3892dc0, GREEN 3aa11fa.
+  - S3b `feat/hu-e1-07-mfa-flows`: ports (`MfaStore`, `MfaSecretSealer`, `SessionRevoker`, `MfaAuditLog`) and the
+    Enroll/Confirm/Verify/Reset use cases. Reset: owner/admin reset others, only the operator resets an owner, never self;
+    removes the enrolment, calls `SessionRevoker` (S4 supplies the real one), audits. RED 6630525, GREEN 63d0931. About 510
+    lines (tests are 60%); split at PR time if the 400-line rule is applied strictly (reset into its own PR).
+  - S3c `feat/hu-e1-07-mfa-store`: migration 0038 `user_mfa` (sealed secret, step, hashed codes, FORCE RLS, no app_user grant,
+    guard trigger, down script) and `DrizzleMfaStore` (conditional UPDATEs). RED 633d731 / a89bdb3, GREEN 97b124d / this tip.
+  - Still PROVISIONAL and not wired: enrol-at-first-login enforcement comes with S4 (login), the wiring of audit to
+    `recordAudit` and the CLI/endpoint for reset comes with S4/S5.
 - [ ] S4 Sessions + login/MFA use cases + lockout/rate limit + audit events; resolver role migration 0039.
 - [ ] S5 API/BFF endpoints (`/auth/*`), cookie, CSRF, active-tenant selection and switch; ADR for D1-D4.
 - [ ] S6 Portal UI in `apps/web`: login, MFA, tenant picker, role-aware guard.
@@ -85,5 +98,6 @@ no SSO in MVP (RF-24), roles list (PRD A4).
 ## Progress
 
 - Route: explore delegated none (map done inline over 8 reads); writer inline (single writer, one DB slice).
+- Review fixes (NFKC password, argv/stdin, atomic user:create) merged forward through all branches.
 - S2/S2b done (branches `feat/hu-e1-07-password`, `feat/hu-e1-07-user-cli`, not pushed). Next: S3 once product questions 1 and 3 are answered.
 - S1 done: RED b1f5929 (9 failing), GREEN with migration 0037; @sifen/db tsc, lint, coverage and postgres-driver tests green; api tsc + depcruise green. Next: S2 (password domain), independent of the TOTP and session questions.

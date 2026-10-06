@@ -14,15 +14,22 @@ interface MfaRow {
 const enrolmentUnavailable = () => new Error('MFA enrolment is not available yet');
 
 /**
- * The login-time half of `MfaStore` for the runtime connection (`app_user` through the `mfa_*` functions of
+ * The login-time half of `MfaStore` for the runtime connection, BOUND to one pending session (the SHA-256 of
+ * its token): the `userId` arguments of the port are ignored and the functions resolve the user from that live
+ * pending session, so a caller cannot read or spend another user's MFA state. (`app_user` through the `mfa_*` functions of
  * migration 0042): read the enrolment, spend a TOTP step, spend a recovery code. The enrolment writes need the
  * operator connection today (`DrizzleMfaStore`); the portal has no enrolment endpoint yet, so they refuse.
  */
 export class SqlMfaRuntimeStore implements MfaStore {
-  constructor(private readonly db: Database) {}
+  constructor(
+    private readonly db: Database,
+    private readonly pendingHash: string,
+  ) {}
 
-  async find(userId: string): Promise<MfaRecord | null> {
-    const row = (await callFunction<MfaRow>(this.db, sql`select * from mfa_find(${userId})`)).at(0);
+  async find(): Promise<MfaRecord | null> {
+    const row = (
+      await callFunction<MfaRow>(this.db, sql`select * from mfa_find(${this.pendingHash})`)
+    ).at(0);
     return row
       ? {
           sealed: row.sealed,
@@ -33,21 +40,21 @@ export class SqlMfaRuntimeStore implements MfaStore {
       : null;
   }
 
-  async advanceStep(userId: string, step: number): Promise<boolean> {
+  async advanceStep(_userId: string, step: number): Promise<boolean> {
     const row = (
       await callFunction<{ ok: boolean }>(
         this.db,
-        sql`select mfa_advance_step(${userId}, ${step}) as ok`,
+        sql`select mfa_advance_step(${this.pendingHash}, ${step}) as ok`,
       )
     ).at(0);
     return row?.ok === true;
   }
 
-  async consumeRecoveryCode(userId: string, hash: string): Promise<boolean> {
+  async consumeRecoveryCode(_userId: string, hash: string): Promise<boolean> {
     const row = (
       await callFunction<{ ok: boolean }>(
         this.db,
-        sql`select mfa_consume_recovery_code(${userId}, ${hash}) as ok`,
+        sql`select mfa_consume_recovery_code(${this.pendingHash}, ${hash}) as ok`,
       )
     ).at(0);
     return row?.ok === true;

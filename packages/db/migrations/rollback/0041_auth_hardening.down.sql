@@ -109,8 +109,8 @@ BEGIN
   RETURN attempts <= p_max;
 END;
 $$;
-DROP FUNCTION IF EXISTS public.mfa_attempt_succeeded(uuid);
-DROP FUNCTION IF EXISTS public.mfa_attempt_reserve(uuid, integer);
+DROP FUNCTION IF EXISTS public.mfa_attempt_succeeded(text);
+DROP FUNCTION IF EXISTS public.mfa_attempt_reserve(text, integer);
 DROP POLICY IF EXISTS "session_resolver_mfa_attempts" ON "user_mfa";
 REVOKE SELECT (user_id, consecutive_failures, mfa_locked_at), UPDATE (consecutive_failures, mfa_locked_at) ON "user_mfa" FROM session_resolver;
 DROP POLICY IF EXISTS "session_resolver_stamp" ON "users";

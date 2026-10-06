@@ -138,50 +138,69 @@ $$;
 --> statement-breakpoint
 -- Consecutive second-factor failures per user, independent of the per-window throttle (re-review finding: 5 per
 -- 15 minutes is ~480 guesses a day for an attacker who knows the password). The attempt is reserved atomically
--- BEFORE the code is checked; only mfa_attempt_succeeded resets the count; reaching the cap sets mfa_locked_at
+-- BEFORE the code is checked, identified by the caller's live pending session (not a user id); only
+-- mfa_attempt_succeeded resets the count; reaching the cap sets mfa_locked_at
 -- and the user cannot verify again until an MFA reset removes the row (an owner/admin or the operator).
 GRANT SELECT (user_id, consecutive_failures, mfa_locked_at), UPDATE (consecutive_failures, mfa_locked_at) ON "user_mfa" TO session_resolver;
 --> statement-breakpoint
 CREATE POLICY "session_resolver_mfa_attempts" ON "user_mfa" FOR ALL TO session_resolver USING (true) WITH CHECK (true);
 --> statement-breakpoint
-CREATE FUNCTION public.mfa_attempt_reserve(p_user_id uuid, p_cap integer)
+CREATE FUNCTION public.mfa_attempt_reserve(p_pending_hash text, p_cap integer)
 RETURNS boolean
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
+  target uuid;
   attempts integer;
 BEGIN
   IF p_cap < 1 THEN
     RAISE EXCEPTION 'mfa_attempt_reserve: cap must be positive';
   END IF;
+  -- The user is resolved HERE from a live PENDING session identified by the hash of its secret token, never
+  -- taken from the caller: whoever holds no pending token cannot count against, lock or reset another user.
+  SELECT s.user_id INTO target
+  FROM public.user_sessions AS s JOIN public.users AS u ON u.id = s.user_id
+  WHERE s.access_hash = p_pending_hash AND s.mfa_verified_at IS NULL AND s.revoked_at IS NULL
+    AND s.rotated_at IS NULL AND s.access_expires_at > pg_catalog.now()
+    AND s.absolute_expires_at > pg_catalog.now() AND u.disabled_at IS NULL
+    AND s.created_at >= u.sessions_valid_after;
+  IF NOT FOUND THEN
+    RETURN false;
+  END IF;
   UPDATE public.user_mfa AS m SET
     consecutive_failures = LEAST(m.consecutive_failures + 1, p_cap + 1),
     mfa_locked_at = CASE WHEN m.consecutive_failures + 1 > p_cap THEN pg_catalog.now() ELSE NULL END
-  WHERE m.user_id = p_user_id AND m.mfa_locked_at IS NULL
+  WHERE m.user_id = target AND m.mfa_locked_at IS NULL
   RETURNING m.consecutive_failures INTO attempts;
   IF NOT FOUND THEN
     -- No row: nothing to guess (allowed); a locked row: refused.
-    RETURN NOT EXISTS (SELECT 1 FROM public.user_mfa AS m WHERE m.user_id = p_user_id);
+    RETURN NOT EXISTS (SELECT 1 FROM public.user_mfa AS m WHERE m.user_id = target);
   END IF;
   RETURN attempts <= p_cap;
 END;
 $$;
 --> statement-breakpoint
-CREATE FUNCTION public.mfa_attempt_succeeded(p_user_id uuid)
+CREATE FUNCTION public.mfa_attempt_succeeded(p_pending_hash text)
 RETURNS void
 LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, pg_temp
 AS $$
-  UPDATE public.user_mfa SET consecutive_failures = 0 WHERE user_id = p_user_id AND mfa_locked_at IS NULL
+  UPDATE public.user_mfa SET consecutive_failures = 0
+  WHERE mfa_locked_at IS NULL AND user_id = (
+    SELECT s.user_id FROM public.user_sessions AS s JOIN public.users AS u ON u.id = s.user_id
+    WHERE s.access_hash = p_pending_hash AND s.mfa_verified_at IS NULL AND s.revoked_at IS NULL
+      AND s.rotated_at IS NULL AND s.access_expires_at > pg_catalog.now()
+      AND s.absolute_expires_at > pg_catalog.now() AND u.disabled_at IS NULL
+      AND s.created_at >= u.sessions_valid_after)
 $$;
 --> statement-breakpoint
-ALTER FUNCTION public.mfa_attempt_reserve(uuid, integer) OWNER TO session_resolver;
+ALTER FUNCTION public.mfa_attempt_reserve(text, integer) OWNER TO session_resolver;
 --> statement-breakpoint
-REVOKE ALL ON FUNCTION public.mfa_attempt_reserve(uuid, integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.mfa_attempt_reserve(text, integer) FROM PUBLIC;
 --> statement-breakpoint
-GRANT EXECUTE ON FUNCTION public.mfa_attempt_reserve(uuid, integer) TO app_user;
+GRANT EXECUTE ON FUNCTION public.mfa_attempt_reserve(text, integer) TO app_user;
 --> statement-breakpoint
-ALTER FUNCTION public.mfa_attempt_succeeded(uuid) OWNER TO session_resolver;
+ALTER FUNCTION public.mfa_attempt_succeeded(text) OWNER TO session_resolver;
 --> statement-breakpoint
-REVOKE ALL ON FUNCTION public.mfa_attempt_succeeded(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.mfa_attempt_succeeded(text) FROM PUBLIC;
 --> statement-breakpoint
-GRANT EXECUTE ON FUNCTION public.mfa_attempt_succeeded(uuid) TO app_user;
+GRANT EXECUTE ON FUNCTION public.mfa_attempt_succeeded(text) TO app_user;

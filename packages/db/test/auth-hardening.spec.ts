@@ -143,16 +143,18 @@ describe('auth hardening', () => {
     });
   });
 
-  describe('consecutive MFA failure cap (per user, only a success resets it)', () => {
+  describe('consecutive MFA failure cap (per user, only a success resets it, only through a live pending session)', () => {
+    /** Ana has a confirmed MFA row and a live PENDING session whose token hash is h('a'). */
     async function withMfa() {
       const ctx = await seed();
       await ctx.db.insert(userMfa).values({ userId: ctx.ana, sealed: SEALED });
       await ctx.db.update(userMfa).set({ confirmedAt: new Date(), lastUsedStep: 1 });
-      const attempt = async (cap = 4) =>
-        (
-          await ctx.call<{ ok: boolean }>(sql`select mfa_attempt_reserve(${ctx.ana}, ${cap}) as ok`)
-        )[0].ok;
-      return { ...ctx, attempt };
+      await ctx.create('a', 'b', false);
+      const attempt = async (cap = 4, hash = h('a')) =>
+        (await ctx.call<{ ok: boolean }>(sql`select mfa_attempt_reserve(${hash}, ${cap}) as ok`))[0]
+          .ok;
+      const succeeded = (hash = h('a')) => ctx.call(sql`select mfa_attempt_succeeded(${hash})`);
+      return { ...ctx, attempt, succeeded };
     }
 
     it('allows cap attempts, then refuses and locks the user', async () => {
@@ -173,10 +175,10 @@ describe('auth hardening', () => {
     });
 
     it('counts across windows: only a success resets, never the passing of time', async () => {
-      const { attempt, call, ana } = await withMfa();
+      const { attempt, succeeded } = await withMfa();
       await attempt();
       await attempt();
-      await call(sql`select mfa_attempt_succeeded(${ana})`);
+      await succeeded();
       expect([await attempt(), await attempt(), await attempt(), await attempt()]).toEqual([
         true,
         true,
@@ -187,9 +189,9 @@ describe('auth hardening', () => {
     });
 
     it('stays locked after a success is reported, until an MFA reset removes the row', async () => {
-      const { attempt, call, ana, db } = await withMfa();
+      const { attempt, succeeded, ana, db } = await withMfa();
       for (let i = 0; i < 5; i += 1) await attempt();
-      await call(sql`select mfa_attempt_succeeded(${ana})`);
+      await succeeded();
       expect(await attempt()).toBe(false);
       await db.delete(userMfa);
       await db.insert(userMfa).values({ userId: ana, sealed: SEALED });
@@ -203,9 +205,69 @@ describe('auth hardening', () => {
     });
 
     it('does not block a user who has no enrolment row', async () => {
-      const { call, ana } = await seed();
-      const [row] = await call<{ ok: boolean }>(sql`select mfa_attempt_reserve(${ana}, 3) as ok`);
+      const { call, create } = await seed();
+      await create('a', 'b', false);
+      const [row] = await call<{ ok: boolean }>(
+        sql`select mfa_attempt_reserve(${h('a')}, 3) as ok`,
+      );
       expect(row.ok).toBe(true);
+    });
+
+    describe('a caller cannot act on a user it holds no live pending session of', () => {
+      it.each([
+        ['an unknown hash', () => Promise.resolve(h('9'))],
+        [
+          'a verified (non-pending) session',
+          async (ctx: { create: (a: string, b: string, m: boolean) => Promise<string | null> }) => {
+            await ctx.create('c', 'd', true);
+            return h('c');
+          },
+        ],
+      ])('refuses %s and changes nothing', async (_name, prepare) => {
+        const ctx = await withMfa();
+        const hash = await prepare(ctx);
+        expect(await ctx.attempt(4, hash)).toBe(false);
+        await ctx.succeeded(hash);
+        const [row] = await queryRows<{ n: number }>(
+          ctx.db,
+          sql`select consecutive_failures as n from user_mfa`,
+        );
+        expect(row.n).toBe(0);
+      });
+
+      it('refuses a revoked or expired pending session', async () => {
+        const ctx = await withMfa();
+        await ctx.create('e', 'f', false, new Date(Date.now() + 120_000).toISOString());
+        await ctx.db
+          .update(userSessions)
+          .set({ accessExpiresAt: new Date(Date.now() - 1000) })
+          .where(sql`access_hash = ${h('e')}`);
+        expect(await ctx.attempt(4, h('e'))).toBe(false);
+        await ctx.call(sql`select revoke_user_sessions(${ctx.ana})`);
+        expect(await ctx.attempt(4, h('a'))).toBe(false);
+      });
+
+      it("acts only on the session's own user: another user's count and lock are untouchable", async () => {
+        const ctx = await withMfa();
+        const [bob] = (
+          await ctx.db
+            .insert(users)
+            .values({ email: 'bob@example.com', passwordHash: HASH, displayName: 'Bob' })
+            .returning()
+        ).map((row) => row.id) as [string];
+        await ctx.db.insert(userMfa).values({ userId: bob, sealed: SEALED });
+        await ctx.db
+          .update(userMfa)
+          .set({ confirmedAt: new Date(), lastUsedStep: 1, consecutiveFailures: 3 })
+          .where(sql`user_id = ${bob}`);
+        for (let i = 0; i < 4; i += 1) await ctx.attempt(4);
+        await ctx.succeeded();
+        const rows = await queryRows<{ user_id: string; n: number }>(
+          ctx.db,
+          sql`select user_id, consecutive_failures as n from user_mfa`,
+        );
+        expect(rows.find((r) => r.user_id === bob)?.n).toBe(3);
+      });
     });
   });
 });

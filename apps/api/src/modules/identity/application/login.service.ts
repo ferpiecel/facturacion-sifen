@@ -1,4 +1,5 @@
 import { normalizeEmail } from '../domain/email.js';
+import { hashSessionToken } from '../domain/session-token.js';
 import {
   MAX_PASSWORD_LENGTH,
   normalizePassword,
@@ -38,17 +39,25 @@ export const MFA_LIMIT: ThrottleLimit = { max: 5, windowSeconds: 900, lockSecond
  */
 export const MFA_CONSECUTIVE_FAILURE_CAP = 20;
 
+/**
+ * Everything that touches MFA state, built for ONE pending session (from the hash of its token). The SQL behind
+ * it resolves the user from that live pending session, so no code path here can name another user's id.
+ */
+export interface MfaForPending {
+  store: Pick<MfaStore, 'find'>;
+  enroll: EnrollMfaUseCase;
+  confirm: ConfirmMfaUseCase;
+  verify: VerifyMfaUseCase;
+  guard: MfaAttemptGuard;
+}
+
 export interface LoginDeps {
   credentials: UserCredentialLookup;
   verifier: SecretVerifier;
   throttle: LoginThrottle;
   events: AuthEventLog;
   sessions: SessionService;
-  mfaStore: MfaStore;
-  enroll: EnrollMfaUseCase;
-  confirm: ConfirmMfaUseCase;
-  verifyMfa: VerifyMfaUseCase;
-  mfaGuard: MfaAttemptGuard;
+  mfa: (pendingAccessHash: string) => MfaForPending;
   now?: () => number;
 }
 
@@ -102,7 +111,16 @@ export class LoginService {
     const session = await this.deps.sessions.issue(verified.userId, { mfaVerified: false });
     if (!session) return { status: 'invalid' };
     await this.deps.events.record({ event: 'login.password_ok', userId: verified.userId, subject });
-    const enrolled = (await this.deps.mfaStore.find(verified.userId))?.confirmedAt != null;
+    const mfa = this.deps.mfa(hashSessionToken(session.accessToken));
+    const enrolled = (await mfa.store.find(verified.userId))?.confirmedAt != null;
+    if (!enrolled) {
+      // Recorded server-side only: the HTTP answer must not tell a password holder whether MFA is set up.
+      await this.deps.events.record({
+        event: 'login.mfa_enrollment_required',
+        userId: verified.userId,
+        subject,
+      });
+    }
     return { status: enrolled ? 'mfa_required' : 'mfa_enrollment_required', session };
   }
 
@@ -119,20 +137,23 @@ export class LoginService {
   async beginEnrollment(input: { pendingToken: string; account: string }) {
     const pending = await this.pendingUser(input.pendingToken);
     if (!pending) return null;
-    return this.deps.enroll.execute({ userId: pending.userId, email: input.account });
+    return this.deps.mfa(hashSessionToken(input.pendingToken)).enroll.execute({
+      userId: pending.userId,
+      email: input.account,
+    });
   }
 
   /**
    * Reserves a second-factor attempt for the pending user before any code is checked. When the limit is hit
    * the pending session is revoked (the user must log in again) and the attempt is refused unchecked.
    */
-  private async reserveMfaAttempt(pending: {
-    userId: string;
-    sessionId: string;
-  }): Promise<boolean> {
+  private async reserveMfaAttempt(
+    pending: { userId: string; sessionId: string },
+    mfa: MfaForPending,
+  ): Promise<boolean> {
     const withinWindow = await this.deps.throttle.reserve(`mfa:${pending.userId}`, MFA_LIMIT);
     // A window refusal never reaches the code check, so it does not consume the consecutive cap.
-    const withinCap = withinWindow && (await this.deps.mfaGuard.reserve(pending.userId));
+    const withinCap = withinWindow && (await mfa.guard.reserve());
     if (withinCap) return true;
     await this.deps.sessions.logout(pending.sessionId);
     await this.deps.events.record({
@@ -148,9 +169,10 @@ export class LoginService {
     code: string;
   }): Promise<(LoggedIn & { recoveryCodes: string[] }) | null> {
     const pending = await this.pendingUser(input.pendingToken);
-    if (!pending || !(await this.reserveMfaAttempt(pending))) return null;
+    const mfa = this.deps.mfa(hashSessionToken(input.pendingToken));
+    if (!pending || !(await this.reserveMfaAttempt(pending, mfa))) return null;
     const tenants = await this.deps.sessions.memberships(pending.userId);
-    const confirmed = await this.deps.confirm.execute({
+    const confirmed = await mfa.confirm.execute({
       userId: pending.userId,
       code: input.code,
       tenantIds: tenants.map((t) => t.tenantId),
@@ -158,16 +180,17 @@ export class LoginService {
     });
     if (!confirmed) return null;
     await this.deps.throttle.clear(`mfa:${pending.userId}`);
-    await this.deps.mfaGuard.succeeded(pending.userId);
+    await mfa.guard.succeeded();
     const done = await this.finish(pending, tenants);
     return done && { ...done, recoveryCodes: confirmed.recoveryCodes };
   }
 
   async verifyMfa(input: { pendingToken: string; code: string }): Promise<LoggedIn | null> {
     const pending = await this.pendingUser(input.pendingToken);
-    if (!pending || !(await this.reserveMfaAttempt(pending))) return null;
+    const mfa = this.deps.mfa(hashSessionToken(input.pendingToken));
+    if (!pending || !(await this.reserveMfaAttempt(pending, mfa))) return null;
     const tenants = await this.deps.sessions.memberships(pending.userId);
-    const ok = await this.deps.verifyMfa.execute({
+    const ok = await mfa.verify.execute({
       userId: pending.userId,
       code: input.code,
       tenantIds: tenants.map((t) => t.tenantId),
@@ -182,7 +205,7 @@ export class LoginService {
       return null;
     }
     await this.deps.throttle.clear(`mfa:${pending.userId}`);
-    await this.deps.mfaGuard.succeeded(pending.userId);
+    await mfa.guard.succeeded();
     return this.finish(pending, tenants);
   }
 

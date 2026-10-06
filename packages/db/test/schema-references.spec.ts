@@ -9,11 +9,13 @@ import {
   partners,
   tenantEstablishments,
   tenantExpeditionPoints,
+  tenantMemberships,
   tenantFiscalEconomicActivities,
   tenantFiscalProfiles,
   tenantProbe,
   tenants,
   tenantTimbrados,
+  users,
 } from '../src/schema.js';
 
 /**
@@ -53,6 +55,11 @@ describe('schema foreign key targets', () => {
 
   it('tenant_fiscal_economic_activities.tenant_id references tenants', () => {
     expectForeignKeyTargets(tenantFiscalEconomicActivities, ['tenants']);
+  });
+
+  it('tenant_memberships references tenants and users; users has no foreign keys', () => {
+    expectForeignKeyTargets(tenantMemberships, ['tenants', 'users']);
+    expectForeignKeyTargets(users, []);
   });
 
   it('partners has no foreign keys', () => {

@@ -44,7 +44,7 @@ describe('users and tenant_memberships', () => {
         ])
         .returning()
     ).map((row) => row.id);
-    return { db, a: a as string, b: b as string, ana: ana as string, bob: bob as string };
+    return { db, a: a, b: b, ana: ana, bob: bob };
   }
 
   it('stores an Argon2id hash and no other credential column yet', async () => {

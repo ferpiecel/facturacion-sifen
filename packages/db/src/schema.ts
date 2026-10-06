@@ -120,6 +120,62 @@ export const apiKeys = pgTable(
   ],
 );
 
+/** `tenant_memberships.role`: what a portal user may do inside one tenant (PRD A4, HU-E1-07). */
+export const portalRole = pgEnum('portal_role', ['owner', 'admin', 'emisor', 'lector']);
+
+/**
+ * Portal users (HU-E1-07): a global identity, deliberately without `tenant_id`
+ * because one person (typically an accountant) can belong to several tenants.
+ * `password_hash` is an Argon2id PHC string hashed by the application. RLS is
+ * enabled and forced and `app_user` has no grant, so request code can never
+ * read it; pre-authentication lookups use a dedicated resolver role in a later
+ * slice (same pattern as `api_keys`, migration 0003). Emails are stored lower-case.
+ */
+export const users = pgTable(
+  'users',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    email: varchar('email', { length: 254 }).notNull(),
+    passwordHash: text('password_hash').notNull(),
+    displayName: varchar('display_name', { length: 255 }).notNull(),
+    disabledAt: timestamp('disabled_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('users_email_key').on(table.email),
+    check(
+      'users_email_lowercase',
+      sql`${table.email} = lower(${table.email}) AND position('@' in ${table.email}) > 1`,
+    ),
+    check('users_password_hash_argon2id', sql`${table.passwordHash} LIKE '$argon2id$%'`),
+  ],
+);
+
+/**
+ * Which tenants a user belongs to and with which role (HU-E1-07). Tenant-scoped
+ * under the standard `tenant_isolation` policy. A membership is never moved to
+ * another tenant or user; only its role changes.
+ */
+export const tenantMemberships = pgTable(
+  'tenant_memberships',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    role: portalRole('role').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('tenant_memberships_tenant_id_user_id_key').on(table.tenantId, table.userId),
+    index('tenant_memberships_user_id_idx').on(table.userId),
+  ],
+);
+
 /** `tenant_fiscal_profiles.taxpayer_type`: iTipCont (MT v150 §D2, D103). */
 export const fiscalTaxpayerType = pgEnum('fiscal_taxpayer_type', [
   'persona_fisica',
@@ -964,6 +1020,7 @@ export const TENANT_TABLES = [
   'tenant_fiscal_profiles',
   'tenant_certificates',
   'tenant_cscs',
+  'tenant_memberships',
   'tenant_probe',
   'tenant_request_sequences',
   'tenant_timbrados',

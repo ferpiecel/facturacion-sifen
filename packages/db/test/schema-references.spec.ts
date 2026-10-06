@@ -16,6 +16,7 @@ import {
   tenants,
   tenantTimbrados,
   userMfa,
+  userSessions,
   users,
 } from '../src/schema.js';
 
@@ -61,6 +62,10 @@ describe('schema foreign key targets', () => {
   it('tenant_memberships references tenants and users; users has no foreign keys', () => {
     expectForeignKeyTargets(tenantMemberships, ['tenants', 'users']);
     expectForeignKeyTargets(users, []);
+  });
+
+  it('user_sessions references users and tenants', () => {
+    expectForeignKeyTargets(userSessions, ['users', 'tenants']);
   });
 
   it('user_mfa.user_id references users', () => {

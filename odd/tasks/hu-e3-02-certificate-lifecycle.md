@@ -104,3 +104,13 @@ and `document:release-holds`.
 - No logging in the cache; failed opens are never cached. No single-flight (the tenant run lock already
   serializes a tenant's cycle).
 
+
+### S3 review fixes
+
+- Expiry was lazy-only, so an idle tenant's plaintext outlived the TTL. Chosen: sweep on every `open`
+  (any tenant) plus an unref'd interval that only runs while the cache holds entries and is cancelled by
+  `clear()`. A sweep on `open` alone would not help an idle worker (no calls), and a permanent interval
+  would keep an empty cache's timer alive; the lazily started one covers both. Bound: plaintext lives at
+  most TTL + sweep interval (<= 30 s). The worker keeps the cache instance and calls `clear()` on shutdown
+  (after `running.stop()`); that wiring is in the untested process entrypoint.
+- Documented the inherent TOCTOU between the status re-check and signing in the class docstring.

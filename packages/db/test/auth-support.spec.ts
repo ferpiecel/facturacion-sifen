@@ -28,16 +28,13 @@ describe('auth throttle, auth events and credential lookup', () => {
     ).map((row) => row.id) as [string];
     const call = <T>(query: ReturnType<typeof sql>) =>
       withAppRoleTransaction(db, (tx) => queryRows<T>(tx, query));
-    const fail = async (key = KEY, max = 3) =>
+    const reserve = async (key = KEY, max = 3) =>
       (
-        await call<{ locked: boolean }>(
-          sql`select auth_throttle_fail(${key}, ${max}, 900, 900) as locked`,
+        await call<{ ok: boolean }>(
+          sql`select auth_throttle_reserve(${key}, ${max}, 900, 900) as ok`,
         )
-      )[0].locked;
-    const locked = async (key = KEY) =>
-      (await call<{ locked: boolean }>(sql`select auth_throttle_locked(${key}) as locked`))[0]
-        .locked;
-    return { db, ana, call, fail, locked };
+      )[0].ok;
+    return { db, ana, call, reserve };
   }
 
   it('forces RLS and gives app_user no direct access to the new tables', async () => {
@@ -54,50 +51,56 @@ describe('auth throttle, auth events and credential lookup', () => {
     await expect(call(sql`select * from auth_events`)).rejects.toThrow();
   });
 
-  it('locks a key at the configured number of failures and not before', async () => {
-    const { fail, locked } = await seed();
-    expect(await locked()).toBe(false);
-    expect(await fail()).toBe(false);
-    expect(await fail()).toBe(false);
-    expect(await locked()).toBe(false);
-    expect(await fail()).toBe(true);
-    expect(await locked()).toBe(true);
+  it('reserves an attempt BEFORE it is verified: max are allowed, the next one is refused and locks', async () => {
+    const { reserve } = await seed();
+    expect([await reserve(), await reserve(), await reserve()]).toEqual([true, true, true]);
+    expect(await reserve()).toBe(false);
+    expect(await reserve()).toBe(false);
   });
 
-  it('keeps keys independent and clears a key on success', async () => {
-    const { call, fail, locked } = await seed();
-    await fail();
-    await fail();
-    await fail();
-    expect(await locked('b'.repeat(64))).toBe(false);
+  it('lets at most max of N concurrent attempts through', async () => {
+    const { reserve } = await seed();
+    const results = await Promise.all(Array.from({ length: 25 }, () => reserve(KEY, 5)));
+    expect(results.filter(Boolean)).toHaveLength(5);
+  });
+
+  it('keeps keys independent and releases the key on success (clear)', async () => {
+    const { call, reserve } = await seed();
+    await reserve();
+    await reserve();
+    await reserve();
+    expect(await reserve()).toBe(false);
+    expect(await reserve('b'.repeat(64))).toBe(true);
     await call(sql`select auth_throttle_clear(${KEY})`);
-    expect(await locked()).toBe(false);
-    expect(await fail()).toBe(false);
+    expect(await reserve()).toBe(true);
   });
 
   it('starts a fresh window once the previous one has expired', async () => {
-    const { db, fail, locked } = await seed();
-    await fail();
-    await fail();
+    const { db, reserve } = await seed();
+    await reserve();
+    await reserve();
     await db.execute(sql`update auth_throttle set window_started_at = now() - interval '1 hour'`);
-    expect(await fail()).toBe(false);
-    expect(await locked()).toBe(false);
+    expect([await reserve(), await reserve(), await reserve()]).toEqual([true, true, true]);
   });
 
-  it('releases the lock when it has expired', async () => {
-    const { db, fail, locked } = await seed();
-    await fail();
-    await fail();
-    await fail();
+  it('allows attempts again once the lock has expired', async () => {
+    const { db, reserve } = await seed();
+    for (let i = 0; i < 3; i += 1) await reserve();
+    expect(await reserve()).toBe(false);
     await db.execute(sql`update auth_throttle set locked_until = now() - interval '1 second'`);
-    expect(await locked()).toBe(false);
+    expect(await reserve()).toBe(true);
   });
 
-  it('refuses malformed keys', async () => {
+  it('refuses malformed keys and nonsensical limits', async () => {
     const { call } = await seed();
     await expect(
-      call(sql`select auth_throttle_fail('not-a-digest', 5, 900, 900)`),
+      call(sql`select auth_throttle_reserve('not-a-digest', 5, 900, 900)`),
     ).rejects.toThrow();
+    for (const args of ['0, 900, 900', '5, 0, 900', '5, 900, 0']) {
+      await expect(
+        call(sql.raw(`select auth_throttle_reserve('${KEY}', ${args})`)),
+      ).rejects.toThrow();
+    }
   });
 
   it('records pre-tenant auth events, with or without a user, and never overwrites them', async () => {

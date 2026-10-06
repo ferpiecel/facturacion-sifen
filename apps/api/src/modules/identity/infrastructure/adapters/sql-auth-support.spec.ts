@@ -1,4 +1,5 @@
 import { authEvents, createPgliteDatabase, users, type DatabaseHandle } from '@sifen/db';
+import { createHash, createHmac } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SqlAuthEventLog } from './sql-auth-event-log.js';
@@ -7,6 +8,7 @@ import { SqlUserCredentialLookup } from './sql-user-credential-lookup.js';
 
 const HASH = '$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$aGFzaA';
 const LIMIT = { max: 2, windowSeconds: 900, lockSeconds: 900 };
+const PEPPER = Buffer.alloc(32, 7);
 
 describe('SQL login support adapters (HU-E1-07 S4)', () => {
   let handle: DatabaseHandle;
@@ -20,16 +22,25 @@ describe('SQL login support adapters (HU-E1-07 S4)', () => {
     await handle.close();
   });
 
+  it('throttles by a PEPPERED hash: neither the raw subject nor its plain SHA-256 is stored', async () => {
+    const throttle = new SqlLoginThrottle(handle.db, PEPPER);
+    await throttle.reserve('pepper-probe@example.com', LIMIT);
+    const plain = createHash('sha256').update('pepper-probe@example.com').digest('hex');
+    const peppered = createHmac('sha256', PEPPER).update('pepper-probe@example.com').digest('hex');
+    const rows = JSON.stringify(await handle.db.execute(sql`select key from auth_throttle`));
+    expect(rows).toContain(peppered);
+    expect(rows).not.toContain(plain);
+  });
+
   it('throttles by a hashed subject: the raw email or IP never reaches the database', async () => {
-    const throttle = new SqlLoginThrottle(handle.db);
+    const throttle = new SqlLoginThrottle(handle.db, PEPPER);
     const key = 'ana@example.com';
-    expect(await throttle.isLocked(key)).toBe(false);
-    expect(await throttle.recordFailure(key, LIMIT)).toBe(false);
-    expect(await throttle.recordFailure(key, LIMIT)).toBe(true);
-    expect(await throttle.isLocked(key)).toBe(true);
-    expect(await throttle.isLocked('someone-else')).toBe(false);
+    expect(await throttle.reserve(key, LIMIT)).toBe(true);
+    expect(await throttle.reserve(key, LIMIT)).toBe(true);
+    expect(await throttle.reserve(key, LIMIT)).toBe(false);
+    expect(await throttle.reserve('someone-else', LIMIT)).toBe(true);
     await throttle.clear(key);
-    expect(await throttle.isLocked(key)).toBe(false);
+    expect(await throttle.reserve(key, LIMIT)).toBe(true);
     const rows = await handle.db.execute(sql`select key from auth_throttle`);
     expect(JSON.stringify(rows)).not.toContain('ana@example.com');
   });
@@ -39,7 +50,7 @@ describe('SQL login support adapters (HU-E1-07 S4)', () => {
       .insert(users)
       .values({ email: 'evt@example.com', passwordHash: HASH, displayName: 'E' })
       .returning({ id: users.id });
-    const log = new SqlAuthEventLog(handle.db);
+    const log = new SqlAuthEventLog(handle.db, PEPPER);
     await log.record({
       event: 'login.succeeded',
       userId: user.id,

@@ -52,7 +52,7 @@ no SSO in MVP (RF-24), roles list (PRD A4).
 
 ## Slices
 
-- [ ] S1 `feat/hu-e1-07-portal-login` — migration 0037: `users`, `tenant_memberships` + `portal_role` enum, FORCE RLS,
+- [x] S1 `feat/hu-e1-07-portal-login` — migration 0037: `users`, `tenant_memberships` + `portal_role` enum, FORCE RLS,
       down script, snapshot, journal. Independent of the product questions.
   - Acceptance: users unique by lower-case email, no `app_user` grant; memberships unique per (tenant, user), role enum of 4,
     `tenant_isolation` policy for `app_user`, identity columns immutable; RLS drift check covers it.
@@ -67,4 +67,4 @@ no SSO in MVP (RF-24), roles list (PRD A4).
 ## Progress
 
 - Route: explore delegated none (map done inline over 8 reads); writer inline (single writer, one DB slice).
-- Next step: S1 RED (failing schema tests), then GREEN (schema + migration 0037).
+- S1 done: RED b1f5929 (9 failing), GREEN with migration 0037; @sifen/db tsc, lint, coverage and postgres-driver tests green; api tsc + depcruise green. Next: S2 (password domain), independent of the TOTP and session questions.

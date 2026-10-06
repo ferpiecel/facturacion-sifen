@@ -8,8 +8,6 @@ import { Argon2SecretVerifierAdapter } from './argon2-secret-verifier.adapter.js
 describe('portal password create then verify with the real Argon2 adapters', () => {
   const NFC = 'café au lait es muy rico';
   const NFD = 'café au lait es muy rico';
-  const COMPAT = 'café au lait es muy rico'.replace('au', 'ﬁu');
-
   async function login(created: string, attempt: string) {
     const user = await new CreateUserUseCase(new Argon2SecretHasherAdapter()).execute({
       email: 'ana@example.com',

@@ -37,8 +37,17 @@ const SEQUENCES = [
 const SERVICE_WORDS = ['sifen', 'facturacion'];
 const MIN_CONTEXT_WORD_LENGTH = 4;
 
-function normalize(password: string): string {
+/**
+ * The one canonical form of a password: hashing, verification and the policy all use it, so the same
+ * text typed on another keyboard or in another Unicode form is the same secret.
+ */
+export function normalizePassword(password: string): string {
   return password.normalize('NFKC');
+}
+
+/** Length in code points of the normalized form (what `varchar` limits and the policy count). */
+export function passwordLength(password: string): number {
+  return Array.from(normalizePassword(password)).length;
 }
 
 function isCommon(candidate: string): boolean {
@@ -61,8 +70,8 @@ function isContextSpecific(candidate: string, context: PasswordContext): boolean
 
 /** Returns every policy issue of `password`; an empty list means it is acceptable. */
 export function validatePassword(password: string, context: PasswordContext = {}): PasswordIssue[] {
-  const candidate = normalize(password);
-  const length = Array.from(candidate).length;
+  const candidate = normalizePassword(password);
+  const length = passwordLength(candidate);
   const issues: PasswordIssue[] = [];
   if (length < MIN_PASSWORD_LENGTH) issues.push('too_short');
   if (length > MAX_PASSWORD_LENGTH) issues.push('too_long');

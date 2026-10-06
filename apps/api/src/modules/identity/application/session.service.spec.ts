@@ -15,19 +15,19 @@ const RECORD: SessionRecord = {
 };
 
 function setup(overrides: Partial<SessionStore> = {}) {
-  const store: SessionStore = {
-    create: vi.fn().mockResolvedValue('s-1'),
-    resolve: vi.fn().mockResolvedValue(RECORD),
-    rotate: vi.fn().mockResolvedValue(RECORD),
-    revoke: vi.fn().mockResolvedValue(undefined),
-    revokeAllForUser: vi.fn().mockResolvedValue(2),
+  const mocks = {
+    create: vi.fn<SessionStore['create']>().mockResolvedValue('s-1'),
+    resolve: vi.fn<SessionStore['resolve']>().mockResolvedValue(RECORD),
+    rotate: vi.fn<SessionStore['rotate']>().mockResolvedValue(RECORD),
+    revoke: vi.fn<SessionStore['revoke']>().mockResolvedValue(undefined),
+    revokeAllForUser: vi.fn<SessionStore['revokeAllForUser']>().mockResolvedValue(2),
     listMemberships: vi
-      .fn()
+      .fn<SessionStore['listMemberships']>()
       .mockResolvedValue([{ tenantId: 't-a', tenantName: 'A', role: 'admin' }]),
-    setActiveTenant: vi.fn().mockResolvedValue(true),
-    ...overrides,
+    setActiveTenant: vi.fn<SessionStore['setActiveTenant']>().mockResolvedValue(true),
   };
-  return { store, service: new SessionService(store, CONFIG, () => NOW) };
+  const store: SessionStore = { ...mocks, ...overrides };
+  return { store: mocks, service: new SessionService(store, CONFIG, () => NOW) };
 }
 
 describe('SessionService', () => {
@@ -35,7 +35,7 @@ describe('SessionService', () => {
     const { service, store } = setup();
     const issued = await service.issue('u-1', { mfaVerified: false });
     expect(issued).toMatchObject({ sessionId: 's-1' });
-    const call = vi.mocked(store.create).mock.calls[0]?.[0];
+    const call = store.create.mock.calls[0]?.[0];
     expect(call).toMatchObject({
       userId: 'u-1',
       mfaVerified: false,

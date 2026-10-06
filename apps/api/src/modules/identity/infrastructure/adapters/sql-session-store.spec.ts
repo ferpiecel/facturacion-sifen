@@ -35,7 +35,7 @@ describe('SessionService over SqlSessionStore (HU-E1-07 S4)', () => {
       .insert(users)
       .values({ email: `u${String(counter)}@example.com`, passwordHash: HASH, displayName: 'U' })
       .returning({ id: users.id });
-    return (row as { id: string }).id;
+    return row.id;
   }
 
   it('issues, authenticates, refreshes and invalidates the old pair', async () => {

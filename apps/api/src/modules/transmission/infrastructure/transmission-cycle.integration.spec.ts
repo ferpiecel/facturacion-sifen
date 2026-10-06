@@ -245,18 +245,41 @@ describe('TransmissionCycle end to end', () => {
     expect((await readDocument()).resentAt).not.toBeNull();
     expect((await allLotes()).map((l) => l.status)).toEqual(['processed']);
 
-    // The next run verifies the CDC once more (still 0420), then sends it in a new lote.
+    // 8 minutes after the recovery's query the check must not ask again (10 min between queries).
     clock = new Date('2026-10-04T12:30:00Z');
+    const tooSoon = await cycle.run();
+    expect(tooSoon).toMatchObject({ assembled: 0, sent: [] });
+    expect(gateway.callsTo('consultarDE')).toHaveLength(1);
+
+    // Ten minutes after it the next run verifies the CDC once more (still 0420), then sends it in a new lote.
+    clock = new Date('2026-10-04T12:33:00Z');
     gateway.enqueue('consultarDE', sifenScenarios.cdcInexistente());
     gateway.enqueue('enviarLote', sifenScenarios.loteRecibido('4500999'));
     const resend = await cycle.run();
     expect(resend.assembled).toBe(1);
     expect(resend.sent.map((s) => s.status)).toEqual(['sent']);
+    const resentLoteId = resend.sent[0].loteId;
     expect((await readDocument()).status).toBe('submitted');
     expect(gateway.callsTo('enviarLote')).toHaveLength(2);
     const [[original], [resentCall]] = gateway.callsTo('enviarLote');
     expect(resentCall.des).toEqual(original.des);
     expect(gateway.callsTo('consultarDE')).toHaveLength(2);
+    expect((await allLotes()).find((l) => l.id === loteId)?.status).toBe('processed');
+
+    // The resent lote is polled and handed to recovery; 48 h after ITS send a second 0420 holds the
+    // document (no third send), with its own reason.
+    clock = new Date('2026-10-04T12:45:00Z');
+    gateway.enqueue('consultarLote', sifenScenarios.loteConcluido([]));
+    expect((await cycle.run()).polled).toEqual([{ loteId: resentLoteId, status: 'processed' }]);
+    clock = new Date('2026-10-06T12:34:00Z');
+    gateway.enqueue('consultarDE', sifenScenarios.cdcInexistente());
+    expect((await cycle.run()).recovered).toEqual([{ loteId: resentLoteId, status: 'incomplete' }]);
+    expect(await readDocument()).toMatchObject({
+      status: 'submitted',
+      transmissionAttempts: 1,
+      transmissionHold: 'recovery:0420-after-resend',
+    });
+    expect(gateway.callsTo('enviarLote')).toHaveLength(2);
   });
 
   it('never resends a document SIFEN approved after the recovery looked (0422 race)', async () => {
@@ -269,7 +292,7 @@ describe('TransmissionCycle end to end', () => {
     expect((await readDocument()).status).toBe('queued');
 
     // Between that 0420 and the send SIFEN approved the DE: the pre-send check finds it.
-    clock = new Date('2026-10-04T12:30:00Z');
+    clock = new Date('2026-10-04T12:33:00Z');
     gateway.enqueue('consultarDE', sifenScenarios.cdcEncontrado(`<rDE><DE Id="${CDC}"/></rDE>`));
     const run = await cycle.run();
     expect(run.assembled).toBe(0);
@@ -326,20 +349,32 @@ describe('TransmissionCycle end to end', () => {
     expect(gateway.callsTo('enviarLote')).toHaveLength(1);
   });
 
-  it('does not resend while SIFEN cannot be asked: the document waits for the next run', async () => {
+  it('does not resend while SIFEN cannot be asked: it is asked again 10 minutes later, not every run', async () => {
     const gateway = new FakeSifenGateway();
     const { cycle, loteId } = await handedOverToRecovery(gateway);
     clock = new Date('2026-10-04T12:22:00Z');
     gateway.enqueue('consultarDE', sifenScenarios.cdcInexistente());
     await cycle.run();
 
-    clock = new Date('2026-10-04T12:30:00Z');
+    clock = new Date('2026-10-04T12:33:00Z');
     gateway.enqueue('consultarDE', new SifenTimeoutError('consultarDE'));
     const run = await cycle.run();
     expect(run).toMatchObject({ assembled: 0, sent: [] });
     expect((await readDocument()).status).toBe('queued');
     expect(gateway.callsTo('enviarLote')).toHaveLength(1);
     expect((await allLotes()).map((l) => l.id)).toEqual([loteId]);
+
+    // Two minutes later it waits (the fake clock drives the pacing): no new query.
+    clock = new Date('2026-10-04T12:35:00Z');
+    await cycle.run();
+    expect(gateway.callsTo('consultarDE')).toHaveLength(2);
+
+    // Ten minutes after the failed check it asks again, and now sends.
+    clock = new Date('2026-10-04T12:44:00Z');
+    gateway.enqueue('consultarDE', sifenScenarios.cdcInexistente());
+    gateway.enqueue('enviarLote', sifenScenarios.loteRecibido('4500999'));
+    expect((await cycle.run()).sent.map((s) => s.status)).toEqual(['sent']);
+    expect(gateway.callsTo('consultarDE')).toHaveLength(3);
   });
 
   it('recovers a send that got no answer by CDC and never resends it (HU-E6-04)', async () => {

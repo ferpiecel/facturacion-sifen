@@ -7,7 +7,9 @@ import {
   withTenantTransaction,
   type Database,
 } from '@sifen/db';
+import { recordAudit } from '../../audit/infrastructure/record-audit.js';
 import type { LoteAssemblyStore } from '../application/assemble-lotes.js';
+import { TRANSMISSION_WORKER_ACTOR } from './transmission-audit-actor.js';
 
 export interface DrizzleLoteAssemblyStoreOptions {
   readonly db: Database;
@@ -102,12 +104,23 @@ export function createDrizzleLoteAssemblyStore({
     },
 
     async holdResend(documentId, reason) {
-      await withTenantTransaction(db, tenantId, (tx) =>
-        tx
+      await withTenantTransaction(db, tenantId, async (tx) => {
+        const held = await tx
           .update(documents)
           .set({ transmissionHold: reason, updatedAt: now() })
-          .where(waitingToBeResent(tenantId, documentId)),
-      );
+          .where(waitingToBeResent(tenantId, documentId))
+          .returning({ id: documents.id });
+        // Like the recovery's holds: audited in the same transaction, after the write.
+        for (const { id } of held) {
+          await recordAudit(tx, {
+            actor: TRANSMISSION_WORKER_ACTOR,
+            action: 'document.hold_placed',
+            entity: { type: 'document', id },
+            before: { transmissionHold: null },
+            after: { transmissionHold: reason },
+          });
+        }
+      });
     },
 
     async cdcsInProcess(cdcs) {

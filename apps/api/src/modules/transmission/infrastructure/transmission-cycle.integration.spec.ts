@@ -335,6 +335,47 @@ describe('TransmissionCycle end to end', () => {
     expect((await readDocument()).transmissionHold).toBe('signing:SecretDecryptionError');
   });
 
+  it('keeps retrying while the KMS is down and signs once it is back (no parking)', async () => {
+    const { db } = handle;
+    const psc = createTestAuthority('Test PSC Root');
+    const real = createLocalKms(undefined, 'test', () => undefined);
+    let down = false;
+    const kms = {
+      generateDataKey: () => real.generateDataKey(),
+      unwrapDataKey: (wrapped: Buffer, keyId: string) =>
+        down
+          ? Promise.reject(new Error('connect ETIMEDOUT kms.internal'))
+          : real.unwrapDataKey(wrapped, keyId),
+    };
+    const vault = new CertificateVault(new EnvelopeCipher(kms), {
+      trustedPscRoots: [new X509Certificate(psc.pem)],
+    });
+    await vault.add(db, {
+      tenantId,
+      environment: 'test',
+      p12: issueTestPkcs12(psc, { serialNumber: 'RUC80000001-3' }, 'pw').p12,
+      password: 'pw',
+    });
+    const gateway = new FakeSifenGateway();
+    gateway.enqueue('enviarLote', sifenScenarios.loteRecibido('4500123'));
+    const cycle = buildCycle(gateway, {
+      certificates: createCertificateSource({ db, vault, actor: TRANSMISSION_WORKER_ACTOR }),
+    });
+
+    down = true;
+    const outage = [await cycle.run(), await cycle.run()];
+    for (const report of outage) {
+      expect(report.failures).toEqual([
+        { step: 'sign', id: (await readDocument()).id, error: 'KeyServiceUnavailableError' },
+      ]);
+      expect(report.held).toEqual([]);
+    }
+    expect((await readDocument()).transmissionHold).toBeNull();
+
+    down = false;
+    expect(await cycle.run()).toMatchObject({ signed: 1, failures: [] });
+  });
+
   it('backs off after a 0301, retries when due and holds the document at the cap', async () => {
     const gateway = new FakeSifenGateway();
     gateway.setDefault('enviarLote', sifenScenarios.loteNoEncolado('RUC bloqueado'));

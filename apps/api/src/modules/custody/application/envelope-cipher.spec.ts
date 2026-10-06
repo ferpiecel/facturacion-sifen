@@ -6,7 +6,12 @@ import {
   type SecretContext,
 } from '../domain/sealed-secret.js';
 import { EnvelopeCipher } from './envelope-cipher.js';
-import type { DataKey, KeyManagementService } from './ports/key-management.port.js';
+import {
+  KeyServiceUnavailableError,
+  KeyUnwrapError,
+  type DataKey,
+  type KeyManagementService,
+} from './ports/key-management.port.js';
 
 /** Test double: "wraps" by XOR so a tampered wrapped key unwraps to a wrong key. */
 class FakeKms implements KeyManagementService {
@@ -19,7 +24,7 @@ class FakeKms implements KeyManagementService {
   }
 
   unwrapDataKey(wrappedKey: Buffer, keyId: string): Promise<Buffer> {
-    if (keyId !== 'fake:1') return Promise.reject(new Error('unknown key id'));
+    if (keyId !== 'fake:1') return Promise.reject(new KeyUnwrapError());
     return Promise.resolve(xor(wrappedKey));
   }
 }
@@ -204,5 +209,50 @@ describe('EnvelopeCipher', () => {
       expect(text).not.toContain(value);
     }
     expect((error as Error).cause).toBeUndefined();
+  });
+
+  describe('KMS outages are transient, not decryption failures', () => {
+    const failing = (error: Error) => {
+      const kms = new FakeKms();
+      return {
+        kms,
+        cipher: new EnvelopeCipher({
+          ...kms,
+          generateDataKey: () => kms.generateDataKey(),
+          unwrapDataKey: () => Promise.reject(error),
+        }),
+      };
+    };
+
+    it('turns any non-KeyUnwrapError failure of unwrapDataKey into KeyServiceUnavailableError, with no detail', async () => {
+      const { sealed } = await seal();
+      const { cipher } = failing(
+        Object.assign(new Error('connect ECONNRESET 10.0.0.7 token=s3cret-token'), {
+          code: 'ECONNRESET',
+        }),
+      );
+
+      const error = await cipher.open(sealed, CONTEXT).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(KeyServiceUnavailableError);
+      expect(error).not.toBeInstanceOf(SecretDecryptionError);
+      expect((error as Error).cause).toBeUndefined();
+      const text =
+        JSON.stringify(error) + String((error as Error).message) + String((error as Error).stack);
+      expect(text).not.toContain('s3cret-token');
+      expect(text).not.toContain('10.0.0.7');
+    });
+
+    it('lets a KeyServiceUnavailableError from the KMS through', async () => {
+      const { sealed } = await seal();
+      const { cipher } = failing(new KeyServiceUnavailableError());
+      await expect(cipher.open(sealed, CONTEXT)).rejects.toBeInstanceOf(KeyServiceUnavailableError);
+    });
+
+    it('keeps SecretDecryptionError for an unknown key or a rejected wrapped key', async () => {
+      const { sealed } = await seal();
+      const { cipher } = failing(new KeyUnwrapError());
+      await expect(cipher.open(sealed, CONTEXT)).rejects.toBeInstanceOf(SecretDecryptionError);
+    });
   });
 });

@@ -363,6 +363,21 @@ describe('TransmissionCycle', () => {
     expect(holds).toEqual([]);
   });
 
+  it('keeps retrying a document whose KMS is unavailable instead of parking it', async () => {
+    const { cycle, holds } = setup({
+      accepted: ['d1'],
+      sign: () =>
+        Promise.reject(Object.assign(new Error('x'), { name: 'KeyServiceUnavailableError' })),
+    });
+
+    const report = await cycle.run();
+
+    expect(report.failures).toEqual([
+      { step: 'sign', id: 'd1', error: 'KeyServiceUnavailableError' },
+    ]);
+    expect(holds).toEqual([]);
+  });
+
   it('records a failed hold as a failure of the document and carries on', async () => {
     const { cycle, log } = setup({
       accepted: ['d1', 'd2'],

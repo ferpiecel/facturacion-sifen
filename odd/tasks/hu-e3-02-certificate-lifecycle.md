@@ -104,3 +104,13 @@ and `document:release-holds`.
 - No logging in the cache; failed opens are never cached. No single-flight (the tenant run lock already
   serializes a tenant's cycle).
 
+
+## S3b — `fix/hu-e3-02-decrypt-error-parks` (chained on S3)
+
+- `SecretDecryptionError` (corrupt sealed blob or wrong key; also raised by the CSC vault) joins
+  `DETERMINISTIC_SIGNING_ERRORS`: the document parks as `signing:SecretDecryptionError` and an operator
+  releases it after fixing the secret. Without it every cycle retried, committed another
+  `certificate.accessed` row (fail-closed audit commits before the decrypt) and failed again, growing the
+  audit hash chain without bound.
+- Guards added: `add`/`replace` audit atomicity (a failed audit rolls back the certificate and keeps the old
+  one active) and the access audit staying committed when the decrypt later fails.

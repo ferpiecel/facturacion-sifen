@@ -6,6 +6,18 @@ export interface ReadyDocument {
   readonly cdc: string;
   /** Signed DE XML. */
   readonly xml: string;
+  /** Queued again by the recovery after SIFEN kept answering 0420 (`resent_at`): it must be verified before it is sent. */
+  readonly resent?: boolean;
+}
+
+/**
+ * What the last look at SIFEN says about a resent document: `send` (still 0420), `approved` (SIFEN
+ * now holds it, so it was settled instead) or `wait` (could not tell: never a reason to send).
+ */
+export type ResendVerdict = 'send' | 'approved' | 'wait';
+
+export interface ResendCheck {
+  verify(document: ReadyDocument): Promise<ResendVerdict>;
 }
 
 export interface LoteAssemblyStore {
@@ -27,7 +39,13 @@ export interface LoteAssemblerDeps {
   readonly store: LoteAssemblyStore;
   readonly measureMessage: LoteBuilderDeps['measureMessage'];
   readonly logger?: { warn(message: string): void };
+  /** Verifies resent documents right before they join a lote; without it they are never sent. */
+  readonly resendCheck?: ResendCheck;
+  /** Most resent documents verified per run (default 20); the rest wait for the next run. */
+  readonly maxResendChecks?: number;
 }
+
+const DEFAULT_MAX_RESEND_CHECKS = 20;
 
 export interface AssembledLote {
   readonly loteId: string;
@@ -67,7 +85,8 @@ export class LoteAssembler {
     if (all.length === 0) return { lotes: [], skipped: [], conflicted: [] };
 
     const skipped: SkippedDocument[] = [];
-    const ready = all.filter((document) => {
+    const cleared = await this.clearResent(all, skipped);
+    const ready = cleared.filter((document) => {
       if (isValidCdc(document.cdc)) return true;
       skipped.push({ cdc: document.cdc, reason: 'invalid-cdc' });
       return false;
@@ -104,6 +123,42 @@ export class LoteAssembler {
       else lotes.push({ loteId, documentType: lote.documentType, cdcs });
     }
     return { lotes, skipped, conflicted };
+  }
+
+  /**
+   * A resent document joins a lote only if SIFEN still answers 0420 for its CDC at this moment: the
+   * only way a resend could duplicate a CDC is SIFEN approving it after the recovery's last 0420.
+   */
+  private async clearResent(
+    documents: readonly ReadyDocument[],
+    skipped: SkippedDocument[],
+  ): Promise<ReadyDocument[]> {
+    const cap = this.deps.maxResendChecks ?? DEFAULT_MAX_RESEND_CHECKS;
+    let checks = 0;
+    const kept: ReadyDocument[] = [];
+    for (const document of documents) {
+      if (!document.resent) {
+        kept.push(document);
+        continue;
+      }
+      let verdict: ResendVerdict = 'wait';
+      if (this.deps.resendCheck && checks < cap) {
+        checks += 1;
+        try {
+          verdict = await this.deps.resendCheck.verify(document);
+        } catch {
+          verdict = 'wait';
+        }
+      }
+      if (verdict === 'send') kept.push(document);
+      else {
+        skipped.push({
+          cdc: document.cdc,
+          reason: verdict === 'approved' ? 'resend-already-approved' : 'resend-unverified',
+        });
+      }
+    }
+    return kept;
   }
 
   private fill(

@@ -242,6 +242,21 @@ describe('lotes', () => {
     expect(sending.sendAttemptedAt).toEqual(at);
   });
 
+  it('makes send_attempted_at write-once: moving it would reopen the 48 h window', async () => {
+    const { db, a, lote } = await seed();
+    const [row] = await db.insert(lotes).values(lote(a)).returning();
+    const first = new Date('2026-10-05T12:00:00Z');
+    await update(db, a, row.id, { status: 'sending', sendAttemptedAt: first });
+    expect(
+      await causeOf(update(db, a, row.id, { sendAttemptedAt: new Date('2026-10-07T12:00:00Z') })),
+    ).toContain('send_attempted_at');
+    expect(await causeOf(update(db, a, row.id, { sendAttemptedAt: null }))).toContain(
+      'send_attempted_at',
+    );
+    const [kept] = await update(db, a, row.id, { responseMessage: 'still there' });
+    expect(kept.sendAttemptedAt).toEqual(first);
+  });
+
   it('allows updating other columns without changing the status', async () => {
     const { db, a, lote } = await seed();
     const [row] = await db

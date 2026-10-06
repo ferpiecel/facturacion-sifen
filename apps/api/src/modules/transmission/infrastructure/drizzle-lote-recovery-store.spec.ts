@@ -922,6 +922,17 @@ describe('DrizzleLoteRecoveryStore', () => {
       expect(warnings).toEqual([]);
     });
 
+    it('keeps the pre-send check 10 minutes after the recovery query (the 10 min minimum between queries)', async () => {
+      await storeFor(tenantId).record(
+        loteId,
+        { resolutions: [], unresolved: [absent(CDC_B)] },
+        guard,
+      );
+      expect((await readDoc(CDC_B)).nextTransmissionAt).toEqual(
+        new Date(RECOVERED_AT.getTime() + 10 * 60_000),
+      );
+    });
+
     it('audits the resend as the system actor in the same transaction', async () => {
       await storeFor(tenantId).record(
         loteId,

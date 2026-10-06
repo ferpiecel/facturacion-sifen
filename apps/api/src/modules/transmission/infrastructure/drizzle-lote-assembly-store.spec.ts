@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import {
+  auditLog,
   createPgliteDatabase,
   documents,
   loteDocuments,
@@ -414,6 +415,26 @@ describe('DrizzleLoteAssemblyStore', () => {
       await storeFor(tenantId).holdResend(plain.id, 'resend:precheck-unresolved');
       expect((await readDoc(resent.id)).transmissionHold).toBe('resend:precheck-unresolved');
       expect((await readDoc(plain.id)).transmissionHold).toBeNull();
+    });
+
+    it('audits the hold as the system actor, only when it holds', async () => {
+      const resent = await addDocument('queued');
+      const plain = await addDocument('queued');
+      await stamp(resent.id, RESENT);
+      await storeFor(tenantId).holdResend(plain.id, 'resend:precheck-unresolved');
+      expect(await handle.db.select().from(auditLog)).toEqual([]);
+
+      await storeFor(tenantId).holdResend(resent.id, 'resend:precheck-unresolved');
+      const audits = await handle.db.select().from(auditLog);
+      expect(audits).toHaveLength(1);
+      expect(audits[0]).toMatchObject({
+        actorType: 'system',
+        actorId: 'transmission-worker',
+        action: 'document.hold_placed',
+        entityId: resent.id,
+        before: { transmissionHold: null },
+        after: { transmissionHold: 'resend:precheck-unresolved' },
+      });
     });
 
     it('is not blocked by the older lote it left, but is by a newer one that carries it', async () => {

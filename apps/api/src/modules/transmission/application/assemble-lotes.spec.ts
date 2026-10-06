@@ -248,6 +248,8 @@ describe('LoteAssembler', () => {
           measureMessage: small,
           resendCheck,
           maxResendChecks,
+          now: () => NOW,
+          logger: { warn: (message) => warnings.push(message) },
         }),
       };
     };

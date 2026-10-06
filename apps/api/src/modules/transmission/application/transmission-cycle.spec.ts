@@ -102,7 +102,7 @@ function setup(o: Setup = {}) {
       },
     } as TransmissionCycleDeps['signer'],
     assembler: {
-      assemble: async ({ signal }: { signal?: AbortSignal } = {}) => {
+      assemble: async ({ signal }: { signal?: AbortSignal }) => {
         assembleSignals.push(signal);
         log.push('assemble');
         return (await o.assemble?.()) ?? { lotes: [], skipped: [], conflicted: [] };

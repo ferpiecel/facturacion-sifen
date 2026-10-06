@@ -421,7 +421,9 @@ describe('DrizzleLoteAssemblyStore', () => {
       const old = await addLote('recovery', [doc.id]);
       expect((await storeFor(tenantId).readyDocuments()).map((d) => d.documentId)).toEqual([]);
       // Queued again after that lote existed: the old lote is no longer its business.
-      await setDoc(doc.id, { resentAt: new Date(Date.now() + 60_000), transmissionAttempts: 1 });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await setDoc(doc.id, { resentAt: new Date(), transmissionAttempts: 1 });
+      await new Promise((resolve) => setTimeout(resolve, 20));
       expect((await storeFor(tenantId).readyDocuments()).map((d) => d.documentId)).toEqual([
         doc.id,
       ]);

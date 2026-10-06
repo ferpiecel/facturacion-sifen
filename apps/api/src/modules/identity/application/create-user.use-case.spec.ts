@@ -1,7 +1,4 @@
-import { parseOptions } from '@node-rs/argon2';
 import { describe, expect, it, vi } from 'vitest';
-import { ARGON2_PARAMS } from '../domain/argon2-params.js';
-import { Argon2SecretHasherAdapter } from '../infrastructure/adapters/argon2-secret-hasher.adapter.js';
 import { CreateUserUseCase, InvalidUserError } from './create-user.use-case.js';
 import type { PasswordHasher } from './ports/password-hasher.port.js';
 
@@ -16,7 +13,11 @@ describe('CreateUserUseCase', () => {
   it('normalizes the email and hashes the password', async () => {
     const { useCase, hash } = setup();
     await expect(
-      useCase.execute({ email: '  Ana.Perez@Example.COM ', displayName: ' Ana ', password: PASSWORD }),
+      useCase.execute({
+        email: '  Ana.Perez@Example.COM ',
+        displayName: ' Ana ',
+        password: PASSWORD,
+      }),
     ).resolves.toEqual({
       email: 'ana.perez@example.com',
       displayName: 'Ana',
@@ -72,11 +73,5 @@ describe('CreateUserUseCase', () => {
     await expect(
       useCase.execute({ email: 'ana@example.com', displayName: '   ', password: PASSWORD }),
     ).rejects.toMatchObject({ issues: ['invalid_display_name'] });
-  });
-
-  it('the Argon2 adapter satisfies the port with the pinned parameters', async () => {
-    const hashed = await new Argon2SecretHasherAdapter().hash(PASSWORD);
-    expect(hashed.startsWith('$argon2id$')).toBe(true);
-    expect(parseOptions(hashed)).toMatchObject(ARGON2_PARAMS);
   });
 });

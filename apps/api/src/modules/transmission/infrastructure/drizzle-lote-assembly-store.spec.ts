@@ -143,9 +143,11 @@ describe('DrizzleLoteAssemblyStore', () => {
     it('flags the documents the recovery queued again (resent_at), and only those', async () => {
       const plain = await addDocument('queued');
       const again = await addDocument('queued');
+      // The guard only lets the recovery stamp it: a closed lote carries the document, attempt counted.
+      await addLote('processed', [again.id]);
       await handle.db
         .update(documents)
-        .set({ resentAt: new Date('2026-10-05T12:00:00Z') })
+        .set({ resentAt: new Date('2026-10-05T12:00:00Z'), transmissionAttempts: 1 })
         .where(eq(documents.id, again.id));
       const rows = await storeFor(tenantId).readyDocuments();
       expect(rows.map((r) => [r.documentId, r.resent])).toEqual([

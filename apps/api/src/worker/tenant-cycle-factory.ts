@@ -7,6 +7,7 @@ import type {
 } from '../modules/emission/application/ports/signing.port.js';
 import { SignDocument } from '../modules/emission/application/sign-document.js';
 import { createDrizzleSigningStore } from '../modules/emission/infrastructure/drizzle-signing-store.js';
+import { ResendPreflight } from '../modules/transmission/application/resend-preflight.js';
 import { LoteAssembler } from '../modules/transmission/application/assemble-lotes.js';
 import { PollLoteResult } from '../modules/transmission/application/poll-lote-result.js';
 import {
@@ -15,6 +16,7 @@ import {
 } from '../modules/transmission/application/recover-lote-by-cdc.js';
 import { SendLote } from '../modules/transmission/application/send-lote.js';
 import { TransmissionCycle } from '../modules/transmission/application/transmission-cycle.js';
+import { createDrizzleResendPreflightStore } from '../modules/transmission/infrastructure/drizzle-resend-preflight-store.js';
 import { createDrizzleLoteAssemblyStore } from '../modules/transmission/infrastructure/drizzle-lote-assembly-store.js';
 import { createDrizzleLoteDispatchStore } from '../modules/transmission/infrastructure/drizzle-lote-dispatch-store.js';
 import { createDrizzleLoteRecoveryStore } from '../modules/transmission/infrastructure/drizzle-lote-recovery-store.js';
@@ -65,6 +67,11 @@ export function createTenantCycleFactory({
         store: createDrizzleLoteAssemblyStore({ db, tenantId, now }),
         measureMessage: measureLoteMessage,
         logger,
+        resendCheck: new ResendPreflight({
+          gateway,
+          store: createDrizzleResendPreflightStore({ db, tenantId, now }),
+          nextRequestId: () => store.nextRequestId(),
+        }),
       }),
       sender: new SendLote({
         gateway,

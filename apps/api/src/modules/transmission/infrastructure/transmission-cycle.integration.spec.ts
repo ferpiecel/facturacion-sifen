@@ -133,7 +133,10 @@ describe('TransmissionCycle end to end', () => {
     await handle.close();
   });
 
-  function buildCycle(gateway: FakeSifenGateway, options: { csc?: boolean } = {}) {
+  function buildCycle(
+    gateway: FakeSifenGateway,
+    options: { csc?: boolean; batch?: { send?: number } } = {},
+  ) {
     const { db } = handle;
     const dev = generateDevCertificate();
     const now = () => clock;
@@ -141,6 +144,7 @@ describe('TransmissionCycle end to end', () => {
       db,
       gateway,
       now,
+      batch: options.batch,
       certificates: {
         open: () => Promise.resolve({ p12: Buffer.from(dev.p12), password: dev.password }),
       },
@@ -268,6 +272,47 @@ describe('TransmissionCycle end to end', () => {
     clock = new Date('2026-10-04T13:00:00Z');
     const quiet = await cycle.run();
     expect(quiet).toMatchObject({ assembled: 0, sent: [], recovered: [] });
+    expect(gateway.callsTo('enviarLote')).toHaveLength(1);
+  });
+
+  it('never resends a lote that waited pending for days: the 48 h count from the send attempt (HU-E6-04)', async () => {
+    const gateway = new FakeSifenGateway();
+    const base = new Date();
+    clock = base;
+    // The lote is assembled but nothing is sent for 50 hours (no send batch).
+    const idle = buildCycle(gateway, { batch: { send: 0 } });
+    expect((await idle.run()).assembled).toBe(1);
+    expect((await allLotes()).map((l) => l.status)).toEqual(['pending']);
+
+    // 50 h later it is sent and the answer is lost: the lote is `unknown`, SIFEN may be processing it.
+    const hour = 3_600_000;
+    clock = new Date(base.getTime() + 50 * hour);
+    gateway.enqueue('enviarLote', new SifenTimeoutError('enviarLote'));
+    gateway.enqueue('consultarDE', sifenScenarios.cdcInexistente());
+    const cycle = buildCycle(gateway);
+    const sendRun = await cycle.run();
+    expect(sendRun.sent.map((s) => s.status)).toEqual(['unknown']);
+    const loteId = sendRun.sent[0].loteId;
+    // 0420 right away: the lote is 50 h old but was sent seconds ago, so nothing is done.
+    expect(sendRun.recovered).toEqual([{ loteId, status: 'incomplete' }]);
+
+    // Still inside 48 h of the send attempt, an hour later and again 40 h later: never resent, never held.
+    for (const later of [hour, 40 * hour]) {
+      clock = new Date(base.getTime() + 50 * hour + later);
+      gateway.enqueue('consultarDE', sifenScenarios.cdcInexistente());
+      await cycle.run();
+      expect(await readDocument()).toMatchObject({ status: 'queued', transmissionHold: null });
+      expect((await readDocument()).resentAt).toBeNull();
+    }
+    expect(gateway.callsTo('enviarLote')).toHaveLength(1);
+    expect((await allLotes()).map((l) => l.status)).toEqual(['unknown']);
+
+    // 48 h after the attempt, and only then, a 0420 queues the document again (once).
+    clock = new Date(base.getTime() + 98 * hour + 60_000);
+    gateway.enqueue('consultarDE', sifenScenarios.cdcInexistente());
+    await cycle.run();
+    expect(await readDocument()).toMatchObject({ status: 'queued', transmissionAttempts: 1 });
+    expect((await readDocument()).resentAt).not.toBeNull();
     expect(gateway.callsTo('enviarLote')).toHaveLength(1);
   });
 

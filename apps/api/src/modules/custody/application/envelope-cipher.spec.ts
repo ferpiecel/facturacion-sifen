@@ -217,7 +217,6 @@ describe('EnvelopeCipher', () => {
       return {
         kms,
         cipher: new EnvelopeCipher({
-          ...kms,
           generateDataKey: () => kms.generateDataKey(),
           unwrapDataKey: () => Promise.reject(error),
         }),
@@ -238,7 +237,7 @@ describe('EnvelopeCipher', () => {
       expect(error).not.toBeInstanceOf(SecretDecryptionError);
       expect((error as Error).cause).toBeUndefined();
       const text =
-        JSON.stringify(error) + String((error as Error).message) + String((error as Error).stack);
+        JSON.stringify(error) + (error as Error).message + String((error as Error).stack);
       expect(text).not.toContain('s3cret-token');
       expect(text).not.toContain('10.0.0.7');
     });

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { hashSessionToken } from '../domain/session-token.js';
 import { DUMMY_HASH } from './authenticate-api-key.use-case.js';
 import {
   ACCOUNT_LIMIT,
@@ -98,17 +99,20 @@ function setup(opts: Options = {}) {
     confirm: vi.fn().mockResolvedValue({ recoveryCodes: ['aaaa-bbbb-cccc-dddd'] }),
     verify: mfaVerify,
   };
+  const mfaFor = vi.fn().mockImplementation(() => ({
+    store: { find: mfa.find },
+    enroll: { execute: mfa.enroll },
+    confirm: { execute: mfa.confirm },
+    verify: { execute: mfa.verify },
+    guard: { reserve: guardReserve, succeeded: guardSucceeded },
+  }));
   const service = new LoginService({
     credentials: { findByEmail: () => Promise.resolve(opts.user === undefined ? USER : opts.user) },
     verifier: { verify },
     throttle,
     events: log,
     sessions: sessions as never,
-    mfaStore: { find: mfa.find } as never,
-    enroll: { execute: mfa.enroll } as never,
-    confirm: { execute: mfa.confirm } as never,
-    verifyMfa: { execute: mfa.verify } as never,
-    mfaGuard: { reserve: guardReserve, succeeded: guardSucceeded },
+    mfa: mfaFor as never,
     now: () => 1_000,
   });
   return {
@@ -124,6 +128,33 @@ function setup(opts: Options = {}) {
     guardSucceeded,
   };
 }
+
+describe('MFA state is reachable only through the pending session (no caller-chosen user id)', () => {
+  it('builds the MFA capabilities from the hash of the pending token, at every step', async () => {
+    const { service, mfaFor } = setup();
+    await service.verifyMfa({ pendingToken: 'p-access', code: '123456' });
+    expect(mfaFor).toHaveBeenCalledWith(hashSessionToken('p-access'));
+    const login = setup();
+    await login.service.start({ email: 'a@example.com', password: 'pw' });
+    expect(login.mfaFor).toHaveBeenCalledWith(hashSessionToken('p-access'));
+  });
+
+  it('asks the guard without a user id: it is bound to the pending session', async () => {
+    const { service, guardReserve, guardSucceeded } = setup();
+    await service.verifyMfa({ pendingToken: 'p-access', code: '123456' });
+    expect(guardReserve).toHaveBeenCalledWith();
+    expect(guardSucceeded).toHaveBeenCalledWith();
+  });
+
+  it('audits a user without MFA server-side, so the response need not tell the caller', async () => {
+    const { service, events } = setup({ confirmedMfa: false });
+    await service.start({ email: 'a@example.com', password: 'pw' });
+    expect(events.map((e) => e.event)).toEqual([
+      'login.password_ok',
+      'login.mfa_enrollment_required',
+    ]);
+  });
+});
 
 describe('LoginService.start (password step)', () => {
   it('opens a PENDING session and asks for the second factor when MFA is enrolled', async () => {
@@ -266,7 +297,7 @@ describe('LoginService MFA steps', () => {
     it('reports a success so the count resets, and only then', async () => {
       const ok = setup();
       await ok.service.verifyMfa({ pendingToken: 'p-access', code: '123456' });
-      expect(ok.guardSucceeded).toHaveBeenCalledExactlyOnceWith('u-1');
+      expect(ok.guardSucceeded).toHaveBeenCalledOnce();
       const bad = setup({ mfaOk: false });
       await bad.service.verifyMfa({ pendingToken: 'p-access', code: '000000' });
       expect(bad.guardSucceeded).not.toHaveBeenCalled();

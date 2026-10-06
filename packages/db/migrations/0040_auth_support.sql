@@ -56,38 +56,43 @@ FOR EACH ROW EXECUTE FUNCTION "auth_events_append_only"();
 CREATE TRIGGER "auth_events_no_truncate" BEFORE TRUNCATE ON "auth_events"
 FOR EACH STATEMENT EXECUTE FUNCTION "auth_events_append_only"();
 --> statement-breakpoint
-CREATE FUNCTION public.auth_throttle_locked(p_key text)
-RETURNS boolean
-LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, pg_temp
-AS $$
-  SELECT EXISTS (SELECT 1 FROM public.auth_throttle AS t WHERE t.key = p_key AND t.locked_until > pg_catalog.now())
-$$;
---> statement-breakpoint
--- Counts one failure atomically (a single upsert, so concurrent attempts cannot undercount) and locks the
--- key for p_lock_seconds once p_max failures fall inside one window of p_window_seconds. Returns whether
--- the key is now locked.
-CREATE FUNCTION public.auth_throttle_fail(p_key text, p_max integer, p_window_seconds integer, p_lock_seconds integer)
+-- Reserves one attempt BEFORE it is verified, in a single upsert: the counter is incremented first and the
+-- caller proceeds only when the answer is true, so N concurrent attempts cannot all slip past a check that
+-- is read before the failures are counted. At most p_max attempts per window get true; reaching p_max locks
+-- the key for p_lock_seconds, and every attempt on a locked key is refused (counted up to p_max + 1 so the
+-- counter stays bounded, without extending the lock). A success calls auth_throttle_clear, which unlocks;
+-- a window or a lock that has expired starts a fresh count.
+CREATE FUNCTION public.auth_throttle_reserve(p_key text, p_max integer, p_window_seconds integer, p_lock_seconds integer)
 RETURNS boolean
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
-  is_locked boolean;
+  attempts integer;
 BEGIN
+  IF p_max < 1 OR p_window_seconds < 1 OR p_lock_seconds < 1 THEN
+    RAISE EXCEPTION 'auth_throttle_reserve: limits must be positive';
+  END IF;
   INSERT INTO public.auth_throttle AS t (key, failures, window_started_at, locked_until)
   VALUES (p_key, 1, pg_catalog.now(),
           CASE WHEN p_max <= 1 THEN pg_catalog.now() + pg_catalog.make_interval(secs => p_lock_seconds) END)
   ON CONFLICT (key) DO UPDATE SET
-    failures = CASE WHEN t.window_started_at + pg_catalog.make_interval(secs => p_window_seconds) <= pg_catalog.now()
-                    THEN 1 ELSE t.failures + 1 END,
-    window_started_at = CASE WHEN t.window_started_at + pg_catalog.make_interval(secs => p_window_seconds) <= pg_catalog.now()
-                             THEN pg_catalog.now() ELSE t.window_started_at END,
+    failures = CASE
+      WHEN t.window_started_at + pg_catalog.make_interval(secs => p_window_seconds) <= pg_catalog.now()
+        OR t.locked_until <= pg_catalog.now() THEN 1
+      ELSE LEAST(t.failures + 1, p_max + 1) END,
+    window_started_at = CASE
+      WHEN t.window_started_at + pg_catalog.make_interval(secs => p_window_seconds) <= pg_catalog.now()
+        OR t.locked_until <= pg_catalog.now() THEN pg_catalog.now()
+      ELSE t.window_started_at END,
     locked_until = CASE
-      WHEN (CASE WHEN t.window_started_at + pg_catalog.make_interval(secs => p_window_seconds) <= pg_catalog.now()
-                 THEN 1 ELSE t.failures + 1 END) >= p_max
-      THEN pg_catalog.now() + pg_catalog.make_interval(secs => p_lock_seconds)
+      WHEN t.window_started_at + pg_catalog.make_interval(secs => p_window_seconds) <= pg_catalog.now()
+        OR t.locked_until <= pg_catalog.now() THEN
+          CASE WHEN p_max <= 1 THEN pg_catalog.now() + pg_catalog.make_interval(secs => p_lock_seconds) END
+      WHEN t.failures + 1 >= p_max THEN
+        COALESCE(t.locked_until, pg_catalog.now() + pg_catalog.make_interval(secs => p_lock_seconds))
       ELSE t.locked_until END
-  RETURNING t.locked_until > pg_catalog.now() INTO is_locked;
-  RETURN COALESCE(is_locked, false);
+  RETURNING t.failures INTO attempts;
+  RETURN attempts <= p_max;
 END;
 $$;
 --> statement-breakpoint
@@ -110,17 +115,11 @@ AS $$
   SELECT u.id, u.password_hash, u.disabled_at IS NOT NULL FROM public.users AS u WHERE u.email = p_email
 $$;
 --> statement-breakpoint
-ALTER FUNCTION public.auth_throttle_locked(text) OWNER TO session_resolver;
+ALTER FUNCTION public.auth_throttle_reserve(text, integer, integer, integer) OWNER TO session_resolver;
 --> statement-breakpoint
-REVOKE ALL ON FUNCTION public.auth_throttle_locked(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.auth_throttle_reserve(text, integer, integer, integer) FROM PUBLIC;
 --> statement-breakpoint
-GRANT EXECUTE ON FUNCTION public.auth_throttle_locked(text) TO app_user;
---> statement-breakpoint
-ALTER FUNCTION public.auth_throttle_fail(text, integer, integer, integer) OWNER TO session_resolver;
---> statement-breakpoint
-REVOKE ALL ON FUNCTION public.auth_throttle_fail(text, integer, integer, integer) FROM PUBLIC;
---> statement-breakpoint
-GRANT EXECUTE ON FUNCTION public.auth_throttle_fail(text, integer, integer, integer) TO app_user;
+GRANT EXECUTE ON FUNCTION public.auth_throttle_reserve(text, integer, integer, integer) TO app_user;
 --> statement-breakpoint
 ALTER FUNCTION public.auth_throttle_clear(text) OWNER TO session_resolver;
 --> statement-breakpoint

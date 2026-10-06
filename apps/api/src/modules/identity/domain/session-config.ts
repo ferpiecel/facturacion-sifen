@@ -26,7 +26,8 @@ function integer(
 ): number {
   const raw = env[name];
   if (raw === undefined || raw === '') return fallback;
-  const value = Number(raw);
+  // Plain decimal digits only: Number() would also accept '1e3', '0x12c', ' 300 ', '300.0' or '+300'.
+  const value = /^\d{1,9}$/.test(raw) ? Number(raw) : NaN;
   if (!Number.isInteger(value) || value < min || value > max) {
     throw new SessionConfigError(`${name} is out of range`);
   }

@@ -48,10 +48,46 @@ export class SessionService implements SessionRevoker {
       : { sessionId, accessToken, refreshToken, accessExpiresAt, refreshExpiresAt };
   }
 
-  authenticate(accessToken: string): Promise<SessionRecord | null> {
+  /**
+   * The VERIFIED session of an access token (password and second factor done). This is the default path a
+   * guard must use: a pending session (password only) is never returned here.
+   */
+  async authenticate(accessToken: string): Promise<SessionRecord | null> {
+    const record = await this.lookup(accessToken);
+    return record?.mfaVerified === true ? record : null;
+  }
+
+  /** The PENDING session of an access token (password done, second factor not): login uses it, nothing else. */
+  async authenticatePending(accessToken: string): Promise<SessionRecord | null> {
+    const record = await this.lookup(accessToken);
+    return record !== null && !record.mfaVerified ? record : null;
+  }
+
+  private lookup(accessToken: string): Promise<SessionRecord | null> {
     return accessToken === ''
       ? Promise.resolve(null)
       : this.store.resolve(hashSessionToken(accessToken));
+  }
+
+  /**
+   * Swaps a pending session for a verified one with a fresh token pair, atomically and only while the pending
+   * session is still live (see `promote_user_session`); null when it is not.
+   */
+  async promote(pendingSessionId: string): Promise<IssuedSession | null> {
+    const accessToken = generateSessionToken();
+    const refreshToken = generateSessionToken();
+    const accessExpiresAt = this.expiry(this.config.accessTtlSeconds);
+    const refreshExpiresAt = this.expiry(this.config.refreshTtlSeconds);
+    const sessionId = await this.store.promote(pendingSessionId, {
+      accessHash: hashSessionToken(accessToken),
+      refreshHash: hashSessionToken(refreshToken),
+      accessExpiresAt,
+      refreshExpiresAt,
+      absoluteExpiresAt: this.expiry(this.config.absoluteTtlSeconds),
+    });
+    return sessionId === null
+      ? null
+      : { sessionId, accessToken, refreshToken, accessExpiresAt, refreshExpiresAt };
   }
 
   /** Rotates the pair; reuse of an old refresh token revokes the whole family (see migration 0039). */

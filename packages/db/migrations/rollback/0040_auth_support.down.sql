@@ -1,6 +1,5 @@
 -- Manual rollback for 0040 (functions, triggers, policies and grants hand-written there, then the tables).
-DROP FUNCTION IF EXISTS public.auth_throttle_locked(text);
-DROP FUNCTION IF EXISTS public.auth_throttle_fail(text, integer, integer, integer);
+DROP FUNCTION IF EXISTS public.auth_throttle_reserve(text, integer, integer, integer);
 DROP FUNCTION IF EXISTS public.auth_throttle_clear(text);
 DROP FUNCTION IF EXISTS public.record_auth_event(uuid, text, text, jsonb);
 DROP FUNCTION IF EXISTS public.resolve_user_credentials(text);

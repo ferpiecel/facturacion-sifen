@@ -222,4 +222,50 @@ describe('user_sessions and its resolver functions', () => {
       expect(await resolve('a')).toEqual([]);
     });
   });
+
+  describe('promote_user_session (pending to verified, atomically)', () => {
+    it('consumes the pending session and issues a new verified one in a new family', async () => {
+      const { call, create, resolve, ana } = await seed();
+      const pending = await create('a', 'b', { mfa: false });
+      const [row] = await call<{ id: string | null }>(
+        sql`select promote_user_session(${pending}, ${h('c')}, ${h('d')}, ${FUTURE().toISOString()}, ${FUTURE().toISOString()}, ${ABSOLUTE().toISOString()}) as id`,
+      );
+      expect(row.id).toMatch(/^[0-9a-f-]{36}$/);
+      expect(await resolve('a')).toEqual([]);
+      const [verified] = await resolve('c');
+      expect(verified).toMatchObject({ user_id: ana });
+      expect(verified.mfa_verified_at).not.toBeNull();
+    });
+
+    it('issues nothing when the pending session is gone, already promoted, revoked, expired or not pending', async () => {
+      const { call, create, ana } = await seed();
+      const go = async (id: string | null, tag: string) =>
+        (
+          await call<{ id: string | null }>(
+            sql`select promote_user_session(${id}, ${h(tag)}, ${h('f')}, ${FUTURE().toISOString()}, ${FUTURE().toISOString()}, ${ABSOLUTE().toISOString()}) as id`,
+          )
+        )[0].id;
+      const pending = await create('a', 'b', { mfa: false });
+      expect(await go(pending, '1')).not.toBeNull();
+      expect(await go(pending, '2')).toBeNull();
+      const revoked = await create('7', '8', { mfa: false });
+      await call(sql`select revoke_user_sessions(${ana})`);
+      expect(await go(revoked, '3')).toBeNull();
+      const verified = await create('9', '0', { mfa: true });
+      expect(await go(verified, '4')).toBeNull();
+      const expired = await create('e', 'd', { mfa: false, access: PAST(), refresh: PAST() });
+      expect(await go(expired, '5')).toBeNull();
+    });
+
+    it('lets only one of two concurrent promotions of the same pending session win', async () => {
+      const { call, create } = await seed();
+      const pending = await create('a', 'b', { mfa: false });
+      const one = (tag: string, other: string) =>
+        call<{ id: string | null }>(
+          sql`select promote_user_session(${pending}, ${h(tag)}, ${h(other)}, ${FUTURE().toISOString()}, ${FUTURE().toISOString()}, ${ABSOLUTE().toISOString()}) as id`,
+        );
+      const results = await Promise.all([one('c', 'd'), one('e', 'f')]);
+      expect(results.filter((rows) => rows[0].id !== null)).toHaveLength(1);
+    });
+  });
 });

@@ -337,6 +337,7 @@ describe('TransmissionCycle', () => {
       'DocumentEnvironmentMismatchError',
       'CertificateNotFoundError',
       'CertificateValidityError',
+      'SecretDecryptionError',
       'InvoiceXmlError',
     ];
     const { cycle, holds } = setup({

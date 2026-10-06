@@ -466,6 +466,75 @@ describe('CertificateVault', () => {
     });
   });
 
+  describe('audit atomicity (HU-E3-02)', () => {
+    const failing = (cipher: EnvelopeCipher, action: string) =>
+      new CertificateVault(cipher, {
+        trustedPscRoots: [new X509Certificate(psc.pem)],
+        recordAudit: (_tx, entry) =>
+          entry.action === action ? Promise.reject(new Error('audit down')) : Promise.resolve(),
+      });
+
+    it('stores no certificate when its audit row cannot be written', async () => {
+      const { db, cipher, a } = await setup();
+      await expect(
+        failing(cipher, 'certificate.added').add(db, {
+          tenantId: a,
+          environment: 'test',
+          p12: issue().p12,
+          password: PASSWORD,
+        }),
+      ).rejects.toThrow('audit down');
+      expect(await db.select().from(tenantCertificates)).toEqual([]);
+    });
+
+    it('keeps the old certificate active when the replacement cannot be audited', async () => {
+      const { db, vault, cipher, a } = await setup();
+      const first = await vault.add(db, {
+        tenantId: a,
+        environment: 'test',
+        p12: issue().p12,
+        password: PASSWORD,
+      });
+      await expect(
+        failing(cipher, 'certificate.replaced').add(db, {
+          tenantId: a,
+          environment: 'test',
+          p12: issue().p12,
+          password: PASSWORD,
+          replace: true,
+        }),
+      ).rejects.toThrow('audit down');
+      const rows = await db.select().from(tenantCertificates);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ id: first.id, status: 'active', revokedAt: null });
+    });
+
+    it('keeps the access audit committed when the decrypt later fails', async () => {
+      const { db, vault, a } = await setup();
+      await vault.add(db, {
+        tenantId: a,
+        environment: 'test',
+        p12: issue().p12,
+        password: PASSWORD,
+      });
+      await db.execute(
+        sql`alter table tenant_certificates disable trigger tenant_certificates_guard`,
+      );
+      const [row] = await db.select().from(tenantCertificates);
+      await db
+        .update(tenantCertificates)
+        .set({ sealed: { ...(row.sealed as object), ciphertext: 'AAAA' } });
+
+      await expect(vault.open(db, a, 'test', ACCESS)).rejects.toThrow(SecretDecryptionError);
+
+      const accessed = await db
+        .select()
+        .from(auditLog)
+        .where(eq(auditLog.action, 'certificate.accessed'));
+      expect(accessed).toHaveLength(1);
+    });
+  });
+
   describe('currentFingerprint (cache revalidation, HU-E3-02)', () => {
     it('returns the active, valid fingerprint without decrypting or auditing', async () => {
       const { db, vault, a } = await setup();

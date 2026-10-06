@@ -75,3 +75,12 @@ describe('CreateUserUseCase', () => {
     ).rejects.toMatchObject({ issues: ['invalid_display_name'] });
   });
 });
+
+describe('CreateUserUseCase password normalization (NFKC)', () => {
+  it('hashes the NFKC form, so every Unicode spelling of a password yields the same secret', async () => {
+    const { useCase, hash } = setup();
+    const nfd = 'café au lait es muy rico';
+    await useCase.execute({ email: 'ana@example.com', displayName: 'Ana', password: nfd });
+    expect(hash).toHaveBeenCalledWith('café au lait es muy rico');
+  });
+});

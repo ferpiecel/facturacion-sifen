@@ -50,4 +50,24 @@ describe('VerifyPasswordUseCase', () => {
     await expect(useCase.execute('ana@example.com', 'pw')).resolves.toBeNull();
     expect(verify).toHaveBeenCalledOnce();
   });
+
+  it('verifies the NFKC form of the password, whatever its Unicode spelling', async () => {
+    const { useCase, verify } = setup(USER, true);
+    await useCase.execute('ana@example.com', 'cafe\u0301 \ufb01rst-rate');
+    expect(verify).toHaveBeenCalledWith('caf\u00e9 first-rate', 'real-hash');
+  });
+
+  it('spends one dummy verification, not Argon2 over the whole input, on an oversized password', async () => {
+    const { useCase, verify } = setup(USER, true);
+    await expect(useCase.execute('ana@example.com', 'a'.repeat(129))).resolves.toBeNull();
+    expect(verify).toHaveBeenCalledOnce();
+    expect(verify).toHaveBeenCalledWith('', DUMMY_HASH);
+  });
+
+  it('keeps accepting a password of exactly the maximum length', async () => {
+    const { useCase } = setup(USER, true);
+    await expect(useCase.execute('ana@example.com', 'a'.repeat(128))).resolves.toEqual({
+      userId: 'user-1',
+    });
+  });
 });

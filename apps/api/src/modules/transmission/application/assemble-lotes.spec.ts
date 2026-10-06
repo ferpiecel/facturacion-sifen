@@ -31,6 +31,9 @@ const doc = (n: number, documentType = '01', rucBase = '44444401', rucDv = 7): R
 
 class InMemoryAssemblyStore implements LoteAssemblyStore {
   readonly created: { documentType: number; documentIds: readonly string[] }[] = [];
+  readonly deferred: { documentId: string; until: Date }[] = [];
+  readonly held: { documentId: string; reason: string }[] = [];
+  failDefer = false;
   /** Document ids that stop being ready between read and create. */
   readonly stale = new Set<string>();
 
@@ -45,6 +48,17 @@ class InMemoryAssemblyStore implements LoteAssemblyStore {
 
   cdcsInProcess(cdcs: readonly string[]): Promise<ReadonlySet<string>> {
     return Promise.resolve(new Set(cdcs.filter((cdc) => this.inProcess.has(cdc))));
+  }
+
+  deferDocument(documentId: string, until: Date): Promise<void> {
+    if (this.failDefer) return Promise.reject(new Error('db down'));
+    this.deferred.push({ documentId, until });
+    return Promise.resolve();
+  }
+
+  holdResend(documentId: string, reason: string): Promise<void> {
+    this.held.push({ documentId, reason });
+    return Promise.resolve();
   }
 
   createLote(input: {
@@ -205,12 +219,18 @@ describe('LoteAssembler', () => {
   });
 
   describe('resent documents (HU-E6-04)', () => {
-    const resent = (n: number): ReadyDocument => ({ ...doc(n), resent: true });
+    const NOW = new Date('2026-10-05T12:00:00Z');
+    const resent = (n: number, resentAt = new Date(NOW.getTime() - 60_000)): ReadyDocument => ({
+      ...doc(n),
+      resent: true,
+      resentAt,
+    });
     const setupResend = (
       ready: readonly ReadyDocument[],
       verdict: (document: ReadyDocument) => ResendVerdict | Promise<ResendVerdict>,
       maxResendChecks?: number,
     ) => {
+      const warnings: string[] = [];
       const store = new InMemoryAssemblyStore(ready);
       const checked: string[] = [];
       const resendCheck: ResendCheck = {
@@ -220,6 +240,7 @@ describe('LoteAssembler', () => {
         },
       };
       return {
+        warnings,
         store,
         checked,
         assembler: new LoteAssembler({
@@ -227,6 +248,8 @@ describe('LoteAssembler', () => {
           measureMessage: small,
           resendCheck,
           maxResendChecks,
+          now: () => NOW,
+          logger: { warn: (message) => warnings.push(message) },
         }),
       };
     };
@@ -278,6 +301,58 @@ describe('LoteAssembler', () => {
         'resend-unverified',
         'resend-unverified',
       ]);
+    });
+
+    it('paces a document it could not verify: asked again 10 minutes later, not every run', async () => {
+      const unsure = resent(2);
+      const { assembler, store } = setupResend([unsure], () => 'wait');
+      await assembler.assemble();
+      expect(store.deferred).toEqual([
+        { documentId: unsure.documentId, until: new Date(NOW.getTime() + 10 * 60_000) },
+      ]);
+      expect(store.held).toEqual([]);
+    });
+
+    it('holds a document that stays unverifiable for 6 hours, with its own reason and an alert', async () => {
+      const stuck = resent(2, new Date(NOW.getTime() - 6 * 3_600_000));
+      const { assembler, store, warnings } = setupResend([stuck], () => 'wait');
+      const result = await assembler.assemble();
+      expect(store.held).toEqual([
+        { documentId: stuck.documentId, reason: 'resend:precheck-unresolved' },
+      ]);
+      expect(store.deferred).toEqual([]);
+      expect(result.skipped).toEqual([{ cdc: stuck.cdc, reason: 'resend-held' }]);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('resend:precheck-unresolved');
+    });
+
+    it('does not hold before the 6 hours are over', async () => {
+      const waiting = resent(2, new Date(NOW.getTime() - 6 * 3_600_000 + 1));
+      const { assembler, store } = setupResend([waiting], () => 'wait');
+      await assembler.assemble();
+      expect(store.held).toEqual([]);
+      expect(store.deferred).toHaveLength(1);
+    });
+
+    it('stops verifying once the run is aborted and leaves the rest untouched', async () => {
+      const controller = new AbortController();
+      const docs = [resent(1), resent(2), resent(3)];
+      const { assembler, checked, store } = setupResend(docs, () => {
+        controller.abort();
+        return 'send';
+      });
+      const result = await assembler.assemble({ signal: controller.signal });
+      expect(checked).toHaveLength(1);
+      expect(store.deferred).toEqual([]);
+      expect(result.skipped.map((s) => s.reason)).toEqual(['resend-aborted', 'resend-aborted']);
+    });
+
+    it('still assembles the rest when deferring a document fails', async () => {
+      const { assembler, store } = setupResend([doc(1), resent(2)], () => 'wait');
+      store.failDefer = true;
+      const result = await assembler.assemble();
+      expect(store.created).toHaveLength(1);
+      expect(result.skipped).toHaveLength(1);
     });
 
     it('never sends a resent document when no check is configured', async () => {

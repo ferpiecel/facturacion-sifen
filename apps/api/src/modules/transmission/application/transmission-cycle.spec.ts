@@ -45,6 +45,7 @@ function setup(o: Setup = {}) {
   const warnings: string[] = [];
   const limits: Record<string, number> = {};
   const signals: (AbortSignal | undefined)[] = [];
+  const assembleSignals: (AbortSignal | undefined)[] = [];
   const holds: [string, string][] = [];
   const deferred: string[] = [];
   const cutoffs: Date[] = [];
@@ -101,7 +102,8 @@ function setup(o: Setup = {}) {
       },
     } as TransmissionCycleDeps['signer'],
     assembler: {
-      assemble: async () => {
+      assemble: async ({ signal }: { signal?: AbortSignal }) => {
+        assembleSignals.push(signal);
         log.push('assemble');
         return (await o.assemble?.()) ?? { lotes: [], skipped: [], conflicted: [] };
       },
@@ -131,7 +133,7 @@ function setup(o: Setup = {}) {
     stalePendingAfterMs: o.stalePendingAfterMs,
     staleSendingAfterMs: o.staleSendingAfterMs,
   });
-  return { cycle, log, warnings, limits, holds, deferred, cutoffs, signals };
+  return { cycle, log, warnings, limits, holds, deferred, cutoffs, signals, assembleSignals };
 }
 
 /** Spec: HU-E6-02 (S5a). One tenant's transmission cycle: sign, assemble, send, poll. */
@@ -449,6 +451,13 @@ describe('TransmissionCycle', () => {
     const { cycle, signals } = setup({ recoverable: ['l1', 'l2'] });
     await cycle.run({ signal: controller.signal });
     expect(signals).toEqual([controller.signal, controller.signal]);
+  });
+
+  it('hands the run signal to the assembler so it can stop between resend checks', async () => {
+    const controller = new AbortController();
+    const { cycle, assembleSignals } = setup();
+    await cycle.run({ signal: controller.signal });
+    expect(assembleSignals).toEqual([controller.signal]);
   });
 
   it('stops between units of work once its signal aborts (lost run lock) and says so', async () => {

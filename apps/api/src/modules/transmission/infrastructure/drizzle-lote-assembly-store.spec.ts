@@ -108,6 +108,15 @@ describe('DrizzleLoteAssemblyStore', () => {
     return lote;
   }
 
+  /** Queues a document "again" the way the recovery does: carried by a closed lote, stamped, attempt counted. */
+  async function stampResent(id: string, resentAt: Date) {
+    await addLote('processed', [id]);
+    await handle.db
+      .update(documents)
+      .set({ resentAt, transmissionAttempts: 1 })
+      .where(eq(documents.id, id));
+  }
+
   const statusOf = (id: string) =>
     withTenantTransaction(handle.db, tenantId, (tx) =>
       tx.select({ status: documents.status }).from(documents).where(eq(documents.id, id)),
@@ -143,12 +152,7 @@ describe('DrizzleLoteAssemblyStore', () => {
     it('flags the documents the recovery queued again (resent_at), and only those', async () => {
       const plain = await addDocument('queued');
       const again = await addDocument('queued');
-      // The guard only lets the recovery stamp it: a closed lote carries the document, attempt counted.
-      await addLote('processed', [again.id]);
-      await handle.db
-        .update(documents)
-        .set({ resentAt: new Date('2026-10-05T12:00:00Z'), transmissionAttempts: 1 })
-        .where(eq(documents.id, again.id));
+      await stampResent(again.id, new Date('2026-10-05T12:00:00Z'));
       const rows = await storeFor(tenantId).readyDocuments();
       expect(rows.map((r) => [r.documentId, r.resent])).toEqual([
         [plain.id, false],
@@ -365,6 +369,74 @@ describe('DrizzleLoteAssemblyStore', () => {
       await expect(
         storeFor(tenantId).createLote({ documentType: 1, documentIds: [] }),
       ).rejects.toThrow(/at least one/);
+    });
+  });
+
+  describe('documents the recovery queued again (HU-E6-04)', () => {
+    const RESENT = new Date('2099-01-01T00:00:00Z');
+    const setDoc = (id: string, values: Partial<typeof documents.$inferInsert>) =>
+      handle.db.update(documents).set(values).where(eq(documents.id, id));
+    const stamp = stampResent;
+    const readDoc = (id: string) =>
+      withTenantTransaction(handle.db, tenantId, (tx) =>
+        tx.select().from(documents).where(eq(documents.id, id)),
+      ).then((rows) => rows[0]);
+
+    it('returns when it was queued again', async () => {
+      const doc = await addDocument('queued');
+      await stamp(doc.id, RESENT);
+      expect((await storeFor(tenantId).readyDocuments())[0]).toMatchObject({
+        resent: true,
+        resentAt: RESENT,
+      });
+    });
+
+    it('defers only a queued, resent, unheld document, until the given instant', async () => {
+      const resent = await addDocument('queued');
+      const plain = await addDocument('queued');
+      const held = await addDocument('queued');
+      await stamp(resent.id, RESENT);
+      await stamp(held.id, RESENT);
+      await setDoc(held.id, { transmissionHold: 'x:y' });
+      const until = new Date('2099-01-02T00:00:00Z');
+      for (const id of [resent.id, plain.id, held.id])
+        await storeFor(tenantId).deferDocument(id, until);
+      expect((await readDoc(resent.id)).nextTransmissionAt).toEqual(until);
+      expect((await readDoc(plain.id)).nextTransmissionAt).toBeNull();
+      expect((await readDoc(held.id)).nextTransmissionAt).toBeNull();
+    });
+
+    it('holds only a queued, resent, unheld document', async () => {
+      const resent = await addDocument('queued');
+      const plain = await addDocument('queued');
+      await stamp(resent.id, RESENT);
+      await storeFor(tenantId).holdResend(resent.id, 'resend:precheck-unresolved');
+      await storeFor(tenantId).holdResend(plain.id, 'resend:precheck-unresolved');
+      expect((await readDoc(resent.id)).transmissionHold).toBe('resend:precheck-unresolved');
+      expect((await readDoc(plain.id)).transmissionHold).toBeNull();
+    });
+
+    it('is not blocked by the older lote it left, but is by a newer one that carries it', async () => {
+      const doc = await addDocument('queued');
+      const old = await addLote('recovery', [doc.id]);
+      expect((await storeFor(tenantId).readyDocuments()).map((d) => d.documentId)).toEqual([]);
+      // Queued again after that lote existed: the old lote is no longer its business.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await setDoc(doc.id, { resentAt: new Date(), transmissionAttempts: 1 });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect((await storeFor(tenantId).readyDocuments()).map((d) => d.documentId)).toEqual([
+        doc.id,
+      ]);
+      expect((await storeFor(tenantId).cdcsInProcess([doc.cdc])).size).toBe(0);
+      expect(old.status).toBe('recovery');
+      const created = await storeFor(tenantId).createLote({
+        documentType: 1,
+        documentIds: [doc.id],
+      });
+      expect(created).not.toBeNull();
+      // A newer lote carrying it blocks again.
+      expect((await storeFor(tenantId).readyDocuments()).map((d) => d.documentId)).toEqual([]);
+      expect((await storeFor(tenantId).cdcsInProcess([doc.cdc])).has(doc.cdc)).toBe(true);
     });
   });
 });

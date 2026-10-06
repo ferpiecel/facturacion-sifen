@@ -8,6 +8,8 @@ export interface ReadyDocument {
   readonly xml: string;
   /** Queued again by the recovery after SIFEN kept answering 0420 (`resent_at`): it must be verified before it is sent. */
   readonly resent?: boolean;
+  /** When it was queued again; the pre-send check gives up on it a while after. */
+  readonly resentAt?: Date;
 }
 
 /**
@@ -23,6 +25,13 @@ export interface ResendCheck {
 export interface LoteAssemblyStore {
   /** Documents ready for transmission (`signed` or `queued`), oldest first. */
   readyDocuments(): Promise<readonly ReadyDocument[]>;
+  /**
+   * Postpones a resent document (`next_transmission_at`): the pre-send check could not verify it and
+   * asks again later, not every run. Only a queued, resent, unheld document is touched.
+   */
+  deferDocument(documentId: string, until: Date): Promise<void>;
+  /** Holds a resent document for an operator when the pre-send check never resolves (same guard as `deferDocument`). */
+  holdResend(documentId: string, reason: string): Promise<void>;
   /** Those of `cdcs` that belong to a lote still in process. */
   cdcsInProcess(cdcs: readonly string[]): Promise<ReadonlySet<string>>;
   /**
@@ -43,9 +52,18 @@ export interface LoteAssemblerDeps {
   readonly resendCheck?: ResendCheck;
   /** Most resent documents verified per run (default 20); the rest wait for the next run. */
   readonly maxResendChecks?: number;
+  readonly now?: () => Date;
 }
 
 const DEFAULT_MAX_RESEND_CHECKS = 20;
+/** An unverifiable resent document is asked again after this, as with every other 10-minute query. */
+const RESEND_RETRY_MS = 10 * 60 * 1000;
+/**
+ * ...and held after this long without a clean answer: 6 hours is 36 paced tries, far longer than a
+ * passing SIFEN outage, so what remains is a persistent problem for a person to look at.
+ */
+const RESEND_GIVE_UP_MS = 6 * 60 * 60 * 1000;
+export const RESEND_PRECHECK_UNRESOLVED_HOLD = 'resend:precheck-unresolved';
 
 export interface AssembledLote {
   readonly loteId: string;
@@ -80,12 +98,12 @@ export interface AssembleLotesResult {
 export class LoteAssembler {
   constructor(private readonly deps: LoteAssemblerDeps) {}
 
-  async assemble(): Promise<AssembleLotesResult> {
+  async assemble({ signal }: { signal?: AbortSignal } = {}): Promise<AssembleLotesResult> {
     const all = await this.deps.store.readyDocuments();
     if (all.length === 0) return { lotes: [], skipped: [], conflicted: [] };
 
     const skipped: SkippedDocument[] = [];
-    const cleared = await this.clearResent(all, skipped);
+    const cleared = await this.clearResent(all, skipped, signal);
     const ready = cleared.filter((document) => {
       if (isValidCdc(document.cdc)) return true;
       skipped.push({ cdc: document.cdc, reason: 'invalid-cdc' });
@@ -132,6 +150,7 @@ export class LoteAssembler {
   private async clearResent(
     documents: readonly ReadyDocument[],
     skipped: SkippedDocument[],
+    signal: AbortSignal | undefined,
   ): Promise<ReadyDocument[]> {
     const cap = this.deps.maxResendChecks ?? DEFAULT_MAX_RESEND_CHECKS;
     let checks = 0;
@@ -141,9 +160,16 @@ export class LoteAssembler {
         kept.push(document);
         continue;
       }
+      if (signal?.aborted) {
+        // The run lost its lock: no query starts, and nothing is written for this document.
+        skipped.push({ cdc: document.cdc, reason: 'resend-aborted' });
+        continue;
+      }
       let verdict: ResendVerdict = 'wait';
+      let asked = false;
       if (this.deps.resendCheck && checks < cap) {
         checks += 1;
+        asked = true;
         try {
           verdict = await this.deps.resendCheck.verify(document);
         } catch {
@@ -151,14 +177,38 @@ export class LoteAssembler {
         }
       }
       if (verdict === 'send') kept.push(document);
-      else {
+      else if (verdict === 'approved') {
+        skipped.push({ cdc: document.cdc, reason: 'resend-already-approved' });
+      } else {
         skipped.push({
           cdc: document.cdc,
-          reason: verdict === 'approved' ? 'resend-already-approved' : 'resend-unverified',
+          reason: (await this.wait(document, asked)) ? 'resend-held' : 'resend-unverified',
         });
       }
     }
     return kept;
+  }
+
+  /** Paces a document the check could not resolve, or holds it after 6 hours. True when it was held. */
+  private async wait(document: ReadyDocument, asked: boolean): Promise<boolean> {
+    if (!asked) return false; // over the per-run cap: untouched, it is asked on a later run
+    const now = (this.deps.now ?? (() => new Date()))();
+    try {
+      if (document.resentAt && now.getTime() - document.resentAt.getTime() >= RESEND_GIVE_UP_MS) {
+        await this.deps.store.holdResend(document.documentId, RESEND_PRECHECK_UNRESOLVED_HOLD);
+        this.deps.logger?.warn(
+          `LoteAssembler: document ${document.documentId} held as ${RESEND_PRECHECK_UNRESOLVED_HOLD}: SIFEN could not be asked about its CDC for 6 hours`,
+        );
+        return true;
+      }
+      await this.deps.store.deferDocument(
+        document.documentId,
+        new Date(now.getTime() + RESEND_RETRY_MS),
+      );
+    } catch {
+      // The document stays queued and is asked again on the next run.
+    }
+    return false;
   }
 
   private fill(

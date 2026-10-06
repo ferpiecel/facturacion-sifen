@@ -35,7 +35,7 @@ describe('DrizzleMfaStore (HU-E1-07)', () => {
       .insert(users)
       .values({ email: `u${String(counter)}@example.com`, passwordHash: HASH, displayName: 'U' })
       .returning({ id: users.id });
-    return (row as { id: string }).id;
+    return row.id;
   }
 
   it('finds nothing for a user without enrolment', async () => {

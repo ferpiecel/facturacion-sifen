@@ -139,6 +139,10 @@ export const users = pgTable(
     passwordHash: text('password_hash').notNull(),
     displayName: varchar('display_name', { length: 255 }).notNull(),
     disabledAt: timestamp('disabled_at', { withTimezone: true }),
+    /** Sessions created before this instant are dead (revoke-all stamps it), whatever their rows say. */
+    sessionsValidAfter: timestamp('sessions_valid_after', { withTimezone: true })
+      .notNull()
+      .default(sql`'epoch'`),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -167,6 +171,10 @@ export const userMfa = pgTable(
     sealed: jsonb('sealed').notNull(),
     confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
     lastUsedStep: bigint('last_used_step', { mode: 'number' }),
+    /** Consecutive second-factor attempts since the last success (HU-E1-07 hardening); only a success resets it. */
+    consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+    /** Set when the cap is reached: the user cannot verify MFA until an MFA reset removes this row. */
+    mfaLockedAt: timestamp('mfa_locked_at', { withTimezone: true }),
     recoveryHashes: text('recovery_hashes')
       .array()
       .notNull()

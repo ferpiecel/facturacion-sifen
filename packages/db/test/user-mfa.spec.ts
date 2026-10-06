@@ -59,8 +59,10 @@ describe('user_mfa', () => {
     expect(columns.map((c) => c.column_name)).toEqual(
       [
         'confirmed_at',
+        'consecutive_failures',
         'created_at',
         'last_used_step',
+        'mfa_locked_at',
         'recovery_hashes',
         'sealed',
         'updated_at',

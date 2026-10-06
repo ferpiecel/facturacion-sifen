@@ -288,6 +288,13 @@
       "when": 1791291047892,
       "tag": "0040_auth_support",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1791308488331,
+      "tag": "0041_auth_hardening",
+      "breakpoints": true
     }
   ]
 }

@@ -229,3 +229,36 @@ ALTER FUNCTION public.set_user_session_tenant(uuid, uuid) OWNER TO session_resol
 REVOKE ALL ON FUNCTION public.set_user_session_tenant(uuid, uuid) FROM PUBLIC;
 --> statement-breakpoint
 GRANT EXECUTE ON FUNCTION public.set_user_session_tenant(uuid, uuid) TO app_user;
+--> statement-breakpoint
+-- Swaps a PENDING session (password done, second factor just verified) for a new verified one in a single
+-- statement: the pending row is revoked only if it is still live, unrevoked, unrotated and pending, and the
+-- new family is created only from that revocation. A revoke-all or a MFA reset that lands in between, or a
+-- second concurrent promotion, therefore yields no session (NULL) instead of an extra verified one.
+CREATE FUNCTION public.promote_user_session(
+  p_pending_id uuid, p_access_hash text, p_refresh_hash text,
+  p_access_expires timestamptz, p_refresh_expires timestamptz, p_absolute_expires timestamptz)
+RETURNS uuid
+LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, pg_temp
+AS $$
+  WITH consumed AS (
+    UPDATE public.user_sessions AS s SET revoked_at = pg_catalog.now()
+    WHERE s.id = p_pending_id AND s.revoked_at IS NULL AND s.rotated_at IS NULL
+      AND s.mfa_verified_at IS NULL AND s.access_expires_at > pg_catalog.now()
+      AND s.absolute_expires_at > pg_catalog.now()
+    RETURNING s.user_id)
+  INSERT INTO public.user_sessions
+    (user_id, family_id, access_hash, refresh_hash, access_expires_at, refresh_expires_at,
+     absolute_expires_at, mfa_verified_at)
+  SELECT c.user_id, pg_catalog.gen_random_uuid(), p_access_hash, p_refresh_hash,
+         LEAST(p_access_expires, p_absolute_expires), LEAST(p_refresh_expires, p_absolute_expires),
+         p_absolute_expires, pg_catalog.now()
+  FROM consumed AS c
+  WHERE EXISTS (SELECT 1 FROM public.users AS u WHERE u.id = c.user_id AND u.disabled_at IS NULL)
+  RETURNING id
+$$;
+--> statement-breakpoint
+ALTER FUNCTION public.promote_user_session(uuid, text, text, timestamptz, timestamptz, timestamptz) OWNER TO session_resolver;
+--> statement-breakpoint
+REVOKE ALL ON FUNCTION public.promote_user_session(uuid, text, text, timestamptz, timestamptz, timestamptz) FROM PUBLIC;
+--> statement-breakpoint
+GRANT EXECUTE ON FUNCTION public.promote_user_session(uuid, text, text, timestamptz, timestamptz, timestamptz) TO app_user;

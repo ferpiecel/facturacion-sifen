@@ -1,4 +1,5 @@
 -- Manual rollback for 0039 (functions, policies, grants and the resolver role hand-written there, then the table).
+DROP FUNCTION IF EXISTS public.promote_user_session(uuid, text, text, timestamptz, timestamptz, timestamptz);
 DROP FUNCTION IF EXISTS public.create_user_session(uuid, text, text, timestamptz, timestamptz, timestamptz, boolean);
 DROP FUNCTION IF EXISTS public.resolve_user_session(text);
 DROP FUNCTION IF EXISTS public.rotate_user_session(text, text, text, timestamptz, timestamptz);

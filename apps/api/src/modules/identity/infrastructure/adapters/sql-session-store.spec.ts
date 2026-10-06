@@ -63,7 +63,8 @@ describe('SessionService over SqlSessionStore (HU-E1-07 S4)', () => {
   it('a pending session authenticates as not MFA-verified and can never refresh', async () => {
     const userId = await newUser();
     const pending = await service.issue(userId, { mfaVerified: false });
-    expect(await service.authenticate(pending?.accessToken ?? '')).toMatchObject({
+    expect(await service.authenticate(pending?.accessToken ?? '')).toBeNull();
+    expect(await service.authenticatePending(pending?.accessToken ?? '')).toMatchObject({
       mfaVerified: false,
     });
     await expect(service.refresh(pending?.refreshToken ?? '')).resolves.toBeNull();
@@ -130,6 +131,37 @@ describe('SessionService over SqlSessionStore (HU-E1-07 S4)', () => {
         .where(eq(userSessions.id, issued?.sessionId ?? ''));
       await expect(service.refresh(issued?.refreshToken ?? '')).resolves.toBeNull();
       expect(await service.authenticate(issued?.accessToken ?? '')).toBeNull();
+    });
+  });
+
+  describe('promote (pending to verified)', () => {
+    it('issues a verified session, kills the pending one and refuses a second promotion', async () => {
+      const userId = await newUser();
+      const pending = await service.issue(userId, { mfaVerified: false });
+      const verified = await service.promote(pending?.sessionId ?? '');
+      expect(await service.authenticatePending(pending?.accessToken ?? '')).toBeNull();
+      expect(await service.authenticate(verified?.accessToken ?? '')).toMatchObject({
+        userId,
+        mfaVerified: true,
+      });
+      await expect(service.promote(pending?.sessionId ?? '')).resolves.toBeNull();
+    });
+
+    it("issues nothing when the user's sessions were revoked in between", async () => {
+      const userId = await newUser();
+      const pending = await service.issue(userId, { mfaVerified: false });
+      await service.revokeAllForUser(userId);
+      await expect(service.promote(pending?.sessionId ?? '')).resolves.toBeNull();
+    });
+
+    it('lets only one of two concurrent promotions win', async () => {
+      const userId = await newUser();
+      const pending = await service.issue(userId, { mfaVerified: false });
+      const results = await Promise.all([
+        service.promote(pending?.sessionId ?? ''),
+        service.promote(pending?.sessionId ?? ''),
+      ]);
+      expect(results.filter(Boolean)).toHaveLength(1);
     });
   });
 });

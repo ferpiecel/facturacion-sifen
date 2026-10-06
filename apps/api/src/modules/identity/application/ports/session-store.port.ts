@@ -25,6 +25,8 @@ export interface TenantMembership {
   role: string;
 }
 
+export type PromotedSession = Omit<NewSession, 'userId' | 'mfaVerified'>;
+
 /** Persistence of sessions; every call is a single atomic operation (see migration 0039). */
 export interface SessionStore {
   /** The new session id, or null for an unknown or disabled user. */
@@ -38,6 +40,11 @@ export interface SessionStore {
     accessExpiresAt: Date,
     refreshExpiresAt: Date,
   ): Promise<SessionRecord | null>;
+  /**
+   * Atomically revokes a still-live PENDING session and creates a verified one from it; the new session id,
+   * or null when the pending session is gone, revoked, expired, not pending or already promoted.
+   */
+  promote(pendingSessionId: string, next: PromotedSession): Promise<string | null>;
   revoke(sessionId: string): Promise<void>;
   revokeAllForUser(userId: string): Promise<number>;
   listMemberships(userId: string): Promise<TenantMembership[]>;

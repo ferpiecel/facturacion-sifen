@@ -7,7 +7,11 @@ import {
   type SealedSecret,
   type SecretContext,
 } from '../domain/sealed-secret.js';
-import type { KeyManagementService } from './ports/key-management.port.js';
+import {
+  KeyServiceUnavailableError,
+  KeyUnwrapError,
+  type KeyManagementService,
+} from './ports/key-management.port.js';
 
 const ALGORITHM = 'aes-256-gcm';
 const NONCE_BYTES = 12;
@@ -48,7 +52,8 @@ export class EnvelopeCipher {
    * tag check fails). Not zeroized: the returned buffer, which the caller owns.
    *
    * @throws SecretDecryptionError on any malformed input, tampering, context
-   *   mismatch or unknown key.
+   *   mismatch or a key the KMS permanently refuses ({@link KeyUnwrapError}).
+   * @throws KeyServiceUnavailableError when the KMS call fails for any other reason (transient).
    */
   async open(sealed: SealedSecret, context: SecretContext): Promise<Buffer> {
     let dataKey: Buffer | undefined;
@@ -66,19 +71,31 @@ export class EnvelopeCipher {
       ) {
         throw new SecretDecryptionError();
       }
-      dataKey = await this.kms.unwrapDataKey(wrappedKey, sealed.keyId);
+      dataKey = await this.unwrap(wrappedKey, sealed.keyId);
       const decipher = createDecipheriv(ALGORITHM, dataKey, nonce, { authTagLength: TAG_BYTES });
       decipher.setAAD(encodeAad(context));
       decipher.setAuthTag(tag);
       chunks.push(decipher.update(ciphertext));
       chunks.push(decipher.final());
       return Buffer.concat(chunks);
-    } catch {
+    } catch (error) {
+      // A KMS outage is retryable; never report it as a (permanent) decryption failure.
+      if (error instanceof KeyServiceUnavailableError) throw error;
       // No cause attached: parse, KMS or OpenSSL errors must not leak into logs.
       throw new SecretDecryptionError();
     } finally {
       dataKey?.fill(0);
       for (const chunk of chunks) chunk.fill(0);
+    }
+  }
+
+  /** Only a {@link KeyUnwrapError} is a permanent refusal; anything else is assumed transient. */
+  private async unwrap(wrappedKey: Buffer, keyId: string): Promise<Buffer> {
+    try {
+      return await this.kms.unwrapDataKey(wrappedKey, keyId);
+    } catch (error) {
+      // Neither the cause nor its message is carried over (endpoints, tokens).
+      throw error instanceof KeyUnwrapError ? error : new KeyServiceUnavailableError();
     }
   }
 }

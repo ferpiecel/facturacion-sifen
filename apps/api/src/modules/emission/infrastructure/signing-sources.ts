@@ -8,6 +8,7 @@ export interface CertificateOpener {
     db: Database,
     tenantId: string,
     environment: 'test' | 'production',
+    access: { actor: { type: 'system'; id: string }; purpose: string },
   ): Promise<{ p12: Buffer; password: string }>;
 }
 
@@ -25,11 +26,17 @@ export interface CscOpener {
 export function createCertificateSource({
   db,
   vault,
+  actor,
 }: {
   db: Database;
   vault: CertificateOpener;
+  /** The system actor recorded in the audit of every decrypt (purpose: signing). */
+  actor: { type: 'system'; id: string };
 }): CertificateSource {
-  return { open: (tenantId, environment) => vault.open(db, tenantId, environment) };
+  return {
+    open: (tenantId, environment) =>
+      vault.open(db, tenantId, environment, { actor, purpose: 'signing' }),
+  };
 }
 
 /**

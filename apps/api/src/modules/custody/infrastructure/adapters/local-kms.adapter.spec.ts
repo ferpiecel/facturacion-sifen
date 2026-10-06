@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { KeyUnwrapError, LocalKmsAdapter, createLocalKms } from './local-kms.adapter.js';
+import { KeyUnwrapError } from '../../application/ports/key-management.port.js';
+import { LocalKmsAdapter, createLocalKms } from './local-kms.adapter.js';
 
 const MASTER_KEY = randomBytes(32).toString('base64');
 

@@ -117,6 +117,7 @@ function setup(opts: Options = {}) {
   });
   return {
     service,
+    mfaFor,
     verify,
     clear,
     reservations,

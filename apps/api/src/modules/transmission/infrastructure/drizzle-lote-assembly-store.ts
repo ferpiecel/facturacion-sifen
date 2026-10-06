@@ -20,7 +20,7 @@ export interface DrizzleLoteAssemblyStoreOptions {
 const DEFAULT_BATCH_SIZE = 500;
 const READY_STATUSES = ['signed', 'queued'];
 /** SIFEN may hold the CDCs of these lotes (ADR-0007, plan 8.1); `rejected` and `processed` are finished. */
-const IN_PROCESS_LOTE_STATUSES = ['pending', 'sending', 'sent', 'unknown', 'recovery'];
+export const IN_PROCESS_LOTE_STATUSES = ['pending', 'sending', 'sent', 'unknown', 'recovery'];
 
 /** `LoteAssemblyStore` over `documents`, `lotes` and `lote_documents`, run as app_user inside the tenant's transaction. */
 export function createDrizzleLoteAssemblyStore({
@@ -33,7 +33,12 @@ export function createDrizzleLoteAssemblyStore({
     async readyDocuments() {
       const rows = await withTenantTransaction(db, tenantId, (tx) =>
         tx
-          .select({ documentId: documents.id, cdc: documents.cdc, xml: documents.signedXml })
+          .select({
+            documentId: documents.id,
+            cdc: documents.cdc,
+            xml: documents.signedXml,
+            resentAt: documents.resentAt,
+          })
           .from(documents)
           // Only the tenant's current environment: documents of a previous one must never be picked
           // (nor starve the batch).
@@ -71,7 +76,11 @@ export function createDrizzleLoteAssemblyStore({
           .orderBy(asc(documents.createdAt), asc(documents.id))
           .limit(batchSize),
       );
-      return rows.map((row) => ({ ...row, xml: row.xml ?? '' }));
+      return rows.map(({ resentAt, ...row }) => ({
+        ...row,
+        xml: row.xml ?? '',
+        resent: resentAt !== null,
+      }));
     },
 
     async cdcsInProcess(cdcs) {

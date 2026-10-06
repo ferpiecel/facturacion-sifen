@@ -88,7 +88,7 @@ export type RecoverLoteByCdcResult =
   | { readonly status: 'not-found' | 'not-recoverable' | 'not-due' | 'stale' | 'aborted' };
 
 /** The `Id` attribute of the DE element: the document's own CDC, not any CDC it merely references. */
-function deIdOf(xml: string): string | undefined {
+export function deIdOf(xml: string): string | undefined {
   return /<DE\b[^>]*\bId="([^"]*)"/.exec(xml)?.[1];
 }
 

@@ -42,8 +42,8 @@ describe('createPortalUser (HU-E1-07, operator CLI)', () => {
 
     expect(result.created).toBe(true);
     const [user] = await handle.db.select().from(users).where(eq(users.id, result.userId));
-    expect(user?.email).toBe('ana@example.com');
-    expect(user?.passwordHash.startsWith('$argon2id$')).toBe(true);
+    expect(user.email).toBe('ana@example.com');
+    expect(user.passwordHash.startsWith('$argon2id$')).toBe(true);
     const memberships = await handle.db
       .select()
       .from(tenantMemberships)
@@ -85,8 +85,8 @@ describe('createPortalUser (HU-E1-07, operator CLI)', () => {
 
     expect(second).toEqual({ userId: first.userId, created: false });
     const [after] = await handle.db.select().from(users).where(eq(users.id, first.userId));
-    expect(after?.passwordHash).toBe(before?.passwordHash);
-    expect(after?.displayName).toBe('Ana');
+    expect(after.passwordHash).toBe(before.passwordHash);
+    expect(after.displayName).toBe('Ana');
     const audit = await handle.db.select().from(auditLog).where(eq(auditLog.tenantId, b));
     expect(audit.map((row) => row.action)).toEqual(['membership.added']);
   });

@@ -43,6 +43,11 @@ Unblocks HU-E12-01/02 (portal list and detail) and is the `user` actor of the au
 - D4 Pre-tenant auth events (failed login, MFA before a tenant is chosen) go to a non-tenant `auth_events` table; once a
   tenant is active, events go to `audit_log`. Decided in slice 4.
 - D5 TOTP with `node:crypto` HMAC-SHA1 (RFC 6238), no new dependency.
+- D7 Password policy per NIST SP 800-63B: min 12 / max 128 code points (NFKC, no truncation), no composition rules,
+  embedded blocklist (common passwords, sequences, repeats) plus service words and the account's email local part. A
+  breached-password corpus (k-anonymity) is a later port. Unknown and malformed emails cost one Argon2 verification (dummy hash).
+- D8 Operator-created users get the audit row in a tenant (`audit_log.tenant_id` NOT NULL): `user:create` takes `--tenant`
+  and `--role`; an existing email is reused (its password is untouched), so an accountant joins a second tenant.
 - D6 Email stored lower-case (CHECK), unique.
 
 ## Product questions (answers needed; defaults proposed)
@@ -57,8 +62,11 @@ no SSO in MVP (RF-24), roles list (PRD A4).
   - Acceptance: users unique by lower-case email, no `app_user` grant; memberships unique per (tenant, user), role enum of 4,
     `tenant_isolation` policy for `app_user`, identity columns immutable; RLS drift check covers it.
   - Checks: `@sifen/db` tsc, lint, `vitest run --coverage`.
-- [ ] S2 Password domain and use cases in `apps/api/.../identity`: `PasswordHasher` port reusing `ARGON2_PARAMS`, password
-      policy, `verifyPassword` with dummy hash, create user (operator-provisioned).
+- [x] S2 `feat/hu-e1-07-password` (stacked on S1) — password domain and use cases in `apps/api/.../identity`: password
+      policy, `PasswordHasher` port (Argon2 adapter, pinned `ARGON2_PARAMS`), `VerifyPasswordUseCase` (dummy hash),
+      `CreateUserUseCase`. RED 48342f3, GREEN follows. Verified: api tsc, lint, depcruise, 1587 tests, coverage 97.6% funcs.
+- [ ] S2b `feat/hu-e1-07-user-cli` (stacked on S2) — operator CLI `user:create` (`--password -` from stdin), creates or
+      reuses the user, adds the membership, audits as `operator` in the tenant. Split out to stay <= 400 lines.
 - [ ] S3 TOTP: domain (RFC 6238, replay guard), sealed secret column + migration 0038, enrol/verify use cases, recovery codes.
 - [ ] S4 Sessions + login/MFA use cases + lockout/rate limit + audit events; resolver role migration 0039.
 - [ ] S5 API/BFF endpoints (`/auth/*`), cookie, CSRF, active-tenant selection and switch; ADR for D1-D4.

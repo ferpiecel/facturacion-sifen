@@ -1,4 +1,6 @@
+import { parseOptions } from '@node-rs/argon2';
 import { describe, expect, it } from 'vitest';
+import { ARGON2_PARAMS } from '../../domain/argon2-params.js';
 import { parseApiKey } from '../../domain/api-key.js';
 import { IssueApiKeyUseCase } from '../../application/issue-api-key.use-case.js';
 import { Argon2SecretVerifierAdapter } from './argon2-secret-verifier.adapter.js';
@@ -25,5 +27,12 @@ describe('Argon2SecretHasherAdapter', () => {
 
     await expect(verifier.verify(secret, issued.secretHash)).resolves.toBe(true);
     await expect(verifier.verify('wrong-secret', issued.secretHash)).resolves.toBe(false);
+  });
+
+  it('satisfies the PasswordHasher port with the pinned parameters (portal passwords, HU-E1-07)', async () => {
+    const hashed = await new Argon2SecretHasherAdapter().hash('correct horse battery staple');
+
+    expect(hashed.startsWith('$argon2id$')).toBe(true);
+    expect(parseOptions(hashed)).toMatchObject(ARGON2_PARAMS);
   });
 });

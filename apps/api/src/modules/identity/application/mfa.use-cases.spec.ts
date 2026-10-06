@@ -1,6 +1,5 @@
-import { randomBytes } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import type { SealedSecret } from '../../custody/domain/sealed-secret.js';
+import { SecretDecryptionError, type SealedSecret } from '../../custody/domain/sealed-secret.js';
 import { hashRecoveryCode } from '../domain/recovery-codes.js';
 import { totpAt } from '../domain/totp.js';
 import {
@@ -35,7 +34,7 @@ class FakeSealer implements MfaSecretSealer {
     });
   }
   open(sealed: SealedSecret, userId: string): Promise<Buffer> {
-    if (sealed.keyId !== userId) return Promise.reject(new Error('wrong user'));
+    if (sealed.keyId !== userId) return Promise.reject(new SecretDecryptionError());
     return Promise.resolve(Buffer.from(sealed.ciphertext, 'base64'));
   }
 }
@@ -215,7 +214,7 @@ describe('VerifyMfaUseCase', () => {
   it('accepts each recovery code once, audited, in any spelling', async () => {
     const { store, sealer, audit, recoveryCodes, events } = await enrolled();
     const verify = new VerifyMfaUseCase(store, sealer, audit);
-    const code = (recoveryCodes[2] as string).toUpperCase().replaceAll('-', ' ');
+    const code = recoveryCodes[2].toUpperCase().replaceAll('-', ' ');
     await expect(verify.execute({ userId: 'user-1', code, nowMs: NOW })).resolves.toBe(true);
     await expect(verify.execute({ userId: 'user-1', code, nowMs: NOW })).resolves.toBe(false);
     expect((await store.find('user-1'))?.recoveryHashes).toHaveLength(9);

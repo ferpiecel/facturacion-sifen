@@ -67,20 +67,28 @@ describe('signing sources (HU-E6-02, S4b)', () => {
       const certificate = { p12: Buffer.from('p12'), password: 'pw' };
       const source = createCertificateSource({
         db: handle.db,
+        actor: { type: 'system', id: 'transmission-worker' },
         vault: {
-          open: (_db, tenantId, environment) => {
-            calls.push([tenantId, environment]);
+          open: (_db, tenantId, environment, access) => {
+            calls.push([tenantId, environment, access]);
             return Promise.resolve(certificate);
           },
         },
       });
       expect(await source.open(a, 'production')).toBe(certificate);
-      expect(calls).toEqual([[a, 'production']]);
+      expect(calls).toEqual([
+        [
+          a,
+          'production',
+          { actor: { type: 'system', id: 'transmission-worker' }, purpose: 'signing' },
+        ],
+      ]);
     });
 
     it('lets the vault errors through', async () => {
       const source = createCertificateSource({
         db: handle.db,
+        actor: { type: 'system', id: 'transmission-worker' },
         vault: { open: () => Promise.reject(new RangeError('no active certificate')) },
       });
       await expect(source.open(a, 'test')).rejects.toThrow(RangeError);

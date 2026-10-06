@@ -57,6 +57,7 @@ const DETERMINISTIC_SIGNING_ERRORS: ReadonlySet<string> = new Set([
   'DocumentEnvironmentMismatchError',
   'CertificateNotFoundError',
   'CertificateValidityError',
+  'SecretDecryptionError',
   'InvoiceXmlError',
   'InvoiceQrError',
   'SigningMismatchError',

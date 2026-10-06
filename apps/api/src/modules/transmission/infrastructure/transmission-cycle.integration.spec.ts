@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { X509Certificate } from 'node:crypto';
+import { eq, sql } from 'drizzle-orm';
 import {
+  auditLog,
   createPgliteDatabase,
   documents,
+  tenantCertificates,
   lotes,
   tenantEstablishments,
   tenantExpeditionPoints,
@@ -14,9 +17,16 @@ import {
   type DatabaseHandle,
 } from '@sifen/db';
 import { FakeSifenGateway, SifenTimeoutError, sifenScenarios, toCdc } from '@sifen/sifen-gateway';
+import { createTestAuthority, issueTestPkcs12 } from '../../../../test/support/test-pki.js';
 import { generateDevCertificate } from '../../../../test/support/dev-certificate.js';
+import type { CertificateSource } from '../../emission/application/ports/signing.port.js';
 import { createTenantCycleFactory } from '../../../worker/tenant-cycle-factory.js';
+import { CertificateVault } from '../../certificates/infrastructure/certificate-vault.js';
+import { EnvelopeCipher } from '../../custody/application/envelope-cipher.js';
+import { createLocalKms } from '../../custody/infrastructure/adapters/local-kms.adapter.js';
 import { buildCdc } from '../../emission/domain/cdc.js';
+import { createCertificateSource } from '../../emission/infrastructure/signing-sources.js';
+import { TRANSMISSION_WORKER_ACTOR } from './transmission-audit-actor.js';
 
 const CDC = buildCdc({
   documentType: '01',
@@ -133,7 +143,10 @@ describe('TransmissionCycle end to end', () => {
     await handle.close();
   });
 
-  function buildCycle(gateway: FakeSifenGateway, options: { csc?: boolean } = {}) {
+  function buildCycle(
+    gateway: FakeSifenGateway,
+    options: { csc?: boolean; certificates?: CertificateSource } = {},
+  ) {
     const { db } = handle;
     const dev = generateDevCertificate();
     const now = () => clock;
@@ -141,7 +154,7 @@ describe('TransmissionCycle end to end', () => {
       db,
       gateway,
       now,
-      certificates: {
+      certificates: options.certificates ?? {
         open: () => Promise.resolve({ p12: Buffer.from(dev.p12), password: dev.password }),
       },
       cscs: {
@@ -275,6 +288,82 @@ describe('TransmissionCycle end to end', () => {
     expect(second.failures).toEqual([]);
     expect(second.held).toHaveLength(1);
     expect((await readDocument()).status).toBe('accepted');
+  });
+
+  it('parks a document whose certificate cannot be decrypted and stops auditing further accesses', async () => {
+    const { db } = handle;
+    const psc = createTestAuthority('Test PSC Root');
+    const cipher = new EnvelopeCipher(createLocalKms(undefined, 'test', () => undefined));
+    const vault = new CertificateVault(cipher, { trustedPscRoots: [new X509Certificate(psc.pem)] });
+    await vault.add(db, {
+      tenantId,
+      environment: 'test',
+      p12: issueTestPkcs12(psc, { serialNumber: 'RUC80000001-3' }, 'pw').p12,
+      password: 'pw',
+    });
+    await db.execute(
+      sql`alter table tenant_certificates disable trigger tenant_certificates_guard`,
+    );
+    const [row] = await db.select().from(tenantCertificates);
+    await db
+      .update(tenantCertificates)
+      .set({ sealed: { ...(row.sealed as object), ciphertext: 'AAAA' } });
+    const cycle = buildCycle(new FakeSifenGateway(), {
+      certificates: createCertificateSource({ db, vault, actor: TRANSMISSION_WORKER_ACTOR }),
+    });
+    const accessed = () =>
+      db.select().from(auditLog).where(eq(auditLog.action, 'certificate.accessed'));
+
+    const first = await cycle.run();
+    expect(first.held).toEqual([
+      { documentId: (await readDocument()).id, reason: 'signing:SecretDecryptionError' },
+    ]);
+    expect(await accessed()).toHaveLength(1);
+
+    for (let i = 0; i < 3; i += 1) await cycle.run();
+    expect(await accessed()).toHaveLength(1);
+    expect((await readDocument()).transmissionHold).toBe('signing:SecretDecryptionError');
+  });
+
+  it('keeps retrying while the KMS is down and signs once it is back (no parking)', async () => {
+    const { db } = handle;
+    const psc = createTestAuthority('Test PSC Root');
+    const real = createLocalKms(undefined, 'test', () => undefined);
+    let down = false;
+    const kms = {
+      generateDataKey: () => real.generateDataKey(),
+      unwrapDataKey: (wrapped: Buffer, keyId: string) =>
+        down
+          ? Promise.reject(new Error('connect ETIMEDOUT kms.internal'))
+          : real.unwrapDataKey(wrapped, keyId),
+    };
+    const vault = new CertificateVault(new EnvelopeCipher(kms), {
+      trustedPscRoots: [new X509Certificate(psc.pem)],
+    });
+    await vault.add(db, {
+      tenantId,
+      environment: 'test',
+      p12: issueTestPkcs12(psc, { serialNumber: 'RUC80000001-3' }, 'pw').p12,
+      password: 'pw',
+    });
+    const gateway = new FakeSifenGateway();
+    gateway.enqueue('enviarLote', sifenScenarios.loteRecibido('4500123'));
+    const cycle = buildCycle(gateway, {
+      certificates: createCertificateSource({ db, vault, actor: TRANSMISSION_WORKER_ACTOR }),
+    });
+
+    down = true;
+    const outage = [await cycle.run(), await cycle.run()];
+    for (const report of outage) {
+      expect(report.failures).toEqual([
+        { step: 'sign', id: (await readDocument()).id, error: 'KeyServiceUnavailableError' },
+      ]);
+      expect(report.held).toEqual([]);
+    }
+    expect((await readDocument()).transmissionHold).toBeNull();
+
+    down = false;
+    expect(await cycle.run()).toMatchObject({ signed: 1, failures: [] });
   });
 
   it('backs off after a 0301, retries when due and holds the document at the cap', async () => {

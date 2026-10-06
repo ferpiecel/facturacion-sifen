@@ -109,7 +109,26 @@ no SSO in MVP (RF-24), roles list (PRD A4).
   - Security review fixes (RED/GREEN on each branch, merged forward): atomic attempt reservation `auth_throttle_reserve` before verifying (concurrency tests: 25 DB attempts, 40 password and 5000 MFA attempts reach the real check at most max times), `AUTH_SUBJECT_PEPPER` HMAC of stored subjects (required outside development/test), `promote_user_session` for an atomic pending-to-verified swap, `authenticate` verified-only plus `authenticatePending`, strict decimal TTL parsing. IP limit now counts attempts (60/15 min). Open product risk for the PO: enrolment takeover by whoever knows the password of a user without MFA.
   - Not wired: the Nest module/DI, HTTP and cookies (S5), the MfaStore still on the operator connection (needs its own resolver
     functions), login success audit into `audit_log` once a tenant is selected (S5), reset CLI/endpoint.
-- [ ] S5 API/BFF endpoints (`/auth/*`), cookie, CSRF, active-tenant selection and switch; ADR for D1-D4.
+- [x] S4+ hardening and S5 core (no enrolment), stacked: `feat/hu-e1-07-auth-hardening` (0041: `users.sessions_valid_after` closes the
+  revoke-all vs promote race without row locks, promote clamped to the pending cap, throttle lock outlives its window, per-user
+  consecutive MFA failure cap 20 reset only by a success, lock until MFA reset) -> `mfa-cap` (guard + LoginService) -> `mfa-runtime`
+  (0042 mfa_* functions, `SqlMfaRuntimeStore`, `TenantMfaAuditLog`) -> `http-core` (config, `__Host-` Strict cookies, exact-Origin CSRF,
+  client IP via trusted proxy hops only, IPv6 /64) -> `http-session` (verified-only guard re-reading membership per request) -> `http`
+  (`/auth` login, mfa, refresh, logout, me, tenants, select-tenant; e2e). No enrolment endpoint: PO has not decided how a new user
+  activates MFA; a user without MFA gets 403 and no cookie. Refresh cookie cannot be path-scoped (`__Host-` forces Path=/).
+- Security review fixes on the S5 stack: no password oracle (a user without MFA gets the same 401 as a wrong password, audited as
+  `login.mfa_enrollment_required`); logout ends the access session, a pending session and the refresh family (migration 0043
+  `revoke_session_family`); the MFA SQL functions no longer take a user id: 0041 `mfa_attempt_*` and 0042 `mfa_*` were edited in place
+  (not merged, so no any-user variant is ever applied) to take the SHA-256 of a live PENDING session token and resolve the user inside,
+  and LoginService builds its MFA store, use cases and guard per pending session.
+- Debt recorded (not implemented): (1) `sessions_valid_after` is stamped with `clock_timestamp()` while `created_at` is the transaction
+  start, so a session created in the microsecond window around a revoke-all can survive or die by clock skew; revisit with a monotonic
+  sequence if it matters. (2) The MFA cap (20 consecutive failures) is an accepted targeted DoS (anyone with a password can lock a user
+  until an MFA reset): needs an ADR and an alert on `login.mfa_cap_reached`. (3) README must state that `AUTH_TRUST_PROXY_HOPS` has to
+  match the real proxy chain (wrong value lets a client choose its throttle IP, or throttles the proxy itself). (4) Missing tests from the
+  reviews: refused-attempt lock timing across windows end to end, `SessionGuard` with a real DB, tenant audit failure paths, retention of
+  `auth_throttle`/`auth_events`, concurrency of refresh over HTTP.
+- [ ] S5 (rest) enrolment endpoint (blocked on the PO), reset endpoint/CLI, ADR for D1-D4. Original S5 line: API/BFF endpoints (`/auth/*`), cookie, CSRF, active-tenant selection and switch; ADR for D1-D4.
 - [ ] S6 Portal UI in `apps/web`: login, MFA, tenant picker, role-aware guard.
 
 ## Progress

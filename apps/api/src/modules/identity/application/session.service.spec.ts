@@ -26,6 +26,7 @@ function setup(overrides: Partial<SessionStore> = {}) {
       .mockResolvedValue([{ tenantId: 't-a', tenantName: 'A', role: 'admin' }]),
     setActiveTenant: vi.fn<SessionStore['setActiveTenant']>().mockResolvedValue(true),
     promote: vi.fn<SessionStore['promote']>().mockResolvedValue('s-2'),
+    revokeFamily: vi.fn<SessionStore['revokeFamily']>().mockResolvedValue(1),
   };
   const store: SessionStore = { ...mocks, ...overrides };
   return { store: mocks, service: new SessionService(store, CONFIG, () => NOW) };

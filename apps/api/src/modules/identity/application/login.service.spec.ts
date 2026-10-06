@@ -1,8 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
+import { hashSessionToken } from '../domain/session-token.js';
 import { DUMMY_HASH } from './authenticate-api-key.use-case.js';
-import { ACCOUNT_LIMIT, IP_LIMIT, LoginService, MFA_LIMIT } from './login.service.js';
+import {
+  ACCOUNT_LIMIT,
+  IP_LIMIT,
+  LoginService,
+  MFA_CONSECUTIVE_FAILURE_CAP,
+  MFA_LIMIT,
+} from './login.service.js';
 import type { AuthEvent, AuthEventLog } from './ports/auth-event-log.port.js';
 import type { LoginThrottle, ThrottleLimit } from './ports/login-throttle.port.js';
+import type { MfaAttemptGuard } from './ports/mfa-attempt-guard.port.js';
 import type { SecretVerifier } from './ports/secret-verifier.port.js';
 import type { IssuedSession } from './session.service.js';
 
@@ -28,6 +36,9 @@ interface Options {
   locked?: string[];
   mfaOk?: boolean;
   promoted?: IssuedSession | null;
+  /** The per-window throttle never refuses (isolates the consecutive cap). */
+  windowOpen?: boolean;
+  capReached?: boolean;
 }
 
 function setup(opts: Options = {}) {
@@ -42,6 +53,7 @@ function setup(opts: Options = {}) {
     reservations.push([subject, limit]);
     const n = (counts.get(subject) ?? 0) + 1;
     counts.set(subject, n);
+    if (opts.windowOpen && subject.startsWith('mfa:')) return Promise.resolve(true);
     return Promise.resolve(!locked.has(subject) && n <= limit.max);
   });
   const clear = vi.fn<LoginThrottle['clear']>().mockResolvedValue(undefined);
@@ -68,6 +80,13 @@ function setup(opts: Options = {}) {
     memberships: vi.fn().mockResolvedValue([{ tenantId: 't-a', tenantName: 'A', role: 'admin' }]),
     logout: vi.fn().mockResolvedValue(undefined),
   };
+  let attempts = 0;
+  const guardReserve = vi.fn<MfaAttemptGuard['reserve']>().mockImplementation(() => {
+    order.push('guard');
+    attempts += 1;
+    return Promise.resolve(opts.capReached !== true && attempts <= MFA_CONSECUTIVE_FAILURE_CAP);
+  });
+  const guardSucceeded = vi.fn<MfaAttemptGuard['succeeded']>().mockResolvedValue(undefined);
   const mfaVerify = vi.fn().mockImplementation(() => {
     order.push('mfa');
     return Promise.resolve(opts.mfaOk ?? true);
@@ -80,20 +99,63 @@ function setup(opts: Options = {}) {
     confirm: vi.fn().mockResolvedValue({ recoveryCodes: ['aaaa-bbbb-cccc-dddd'] }),
     verify: mfaVerify,
   };
+  const mfaFor = vi.fn().mockImplementation(() => ({
+    store: { find: mfa.find },
+    enroll: { execute: mfa.enroll },
+    confirm: { execute: mfa.confirm },
+    verify: { execute: mfa.verify },
+    guard: { reserve: guardReserve, succeeded: guardSucceeded },
+  }));
   const service = new LoginService({
     credentials: { findByEmail: () => Promise.resolve(opts.user === undefined ? USER : opts.user) },
     verifier: { verify },
     throttle,
     events: log,
     sessions: sessions as never,
-    mfaStore: { find: mfa.find } as never,
-    enroll: { execute: mfa.enroll } as never,
-    confirm: { execute: mfa.confirm } as never,
-    verifyMfa: { execute: mfa.verify } as never,
+    mfa: mfaFor as never,
     now: () => 1_000,
   });
-  return { service, verify, clear, reservations, order, events, sessions, mfa };
+  return {
+    service,
+    mfaFor,
+    verify,
+    clear,
+    reservations,
+    order,
+    events,
+    sessions,
+    mfa,
+    guardReserve,
+    guardSucceeded,
+  };
 }
+
+describe('MFA state is reachable only through the pending session (no caller-chosen user id)', () => {
+  it('builds the MFA capabilities from the hash of the pending token, at every step', async () => {
+    const { service, mfaFor } = setup();
+    await service.verifyMfa({ pendingToken: 'p-access', code: '123456' });
+    expect(mfaFor).toHaveBeenCalledWith(hashSessionToken('p-access'));
+    const login = setup();
+    await login.service.start({ email: 'a@example.com', password: 'pw' });
+    expect(login.mfaFor).toHaveBeenCalledWith(hashSessionToken('p-access'));
+  });
+
+  it('asks the guard without a user id: it is bound to the pending session', async () => {
+    const { service, guardReserve, guardSucceeded } = setup();
+    await service.verifyMfa({ pendingToken: 'p-access', code: '123456' });
+    expect(guardReserve).toHaveBeenCalledWith();
+    expect(guardSucceeded).toHaveBeenCalledWith();
+  });
+
+  it('audits a user without MFA server-side, so the response need not tell the caller', async () => {
+    const { service, events } = setup({ confirmedMfa: false });
+    await service.start({ email: 'a@example.com', password: 'pw' });
+    expect(events.map((e) => e.event)).toEqual([
+      'login.password_ok',
+      'login.mfa_enrollment_required',
+    ]);
+  });
+});
 
 describe('LoginService.start (password step)', () => {
   it('opens a PENDING session and asks for the second factor when MFA is enrolled', async () => {
@@ -201,7 +263,7 @@ describe('LoginService MFA steps', () => {
     const { service, reservations, order } = setup();
     await service.verifyMfa({ pendingToken: 'p-access', code: '123456' });
     expect(reservations).toEqual([['mfa:u-1', MFA_LIMIT]]);
-    expect(order).toEqual(['reserve:mfa:u-1', 'mfa']);
+    expect(order).toEqual(['reserve:mfa:u-1', 'guard', 'mfa']);
   });
 
   it('lets at most MFA_LIMIT.max of a concurrent burst of codes be checked', async () => {
@@ -212,6 +274,43 @@ describe('LoginService MFA steps', () => {
       ),
     );
     expect(mfa.verify).toHaveBeenCalledTimes(MFA_LIMIT.max);
+  });
+
+  describe('consecutive failure cap (per user, only a success resets it)', () => {
+    it('lets at most the cap of failures through across any number of windows', async () => {
+      const { service, mfa } = setup({ mfaOk: false, windowOpen: true });
+      await Promise.all(
+        Array.from({ length: 300 }, (_, i) =>
+          service.verifyMfa({ pendingToken: 'p-access', code: String(i).padStart(6, '0') }),
+        ),
+      );
+      expect(mfa.verify).toHaveBeenCalledTimes(MFA_CONSECUTIVE_FAILURE_CAP);
+    });
+
+    it('revokes the pending session, audits the cap and never checks the code once it is reached', async () => {
+      const { service, mfa, sessions, events } = setup({ capReached: true });
+      expect(await service.verifyMfa({ pendingToken: 'p-access', code: '123456' })).toBeNull();
+      expect(mfa.verify).not.toHaveBeenCalled();
+      expect(sessions.logout).toHaveBeenCalledWith('pending-1');
+      expect(events.map((e) => e.event)).toEqual(['login.mfa_cap_reached']);
+    });
+
+    it('reports a success so the count resets, and only then', async () => {
+      const ok = setup();
+      await ok.service.verifyMfa({ pendingToken: 'p-access', code: '123456' });
+      expect(ok.guardSucceeded).toHaveBeenCalledOnce();
+      const bad = setup({ mfaOk: false });
+      await bad.service.verifyMfa({ pendingToken: 'p-access', code: '000000' });
+      expect(bad.guardSucceeded).not.toHaveBeenCalled();
+    });
+
+    it('applies to the enrolment confirmation code too', async () => {
+      const { service, mfa } = setup({ confirmedMfa: false, capReached: true });
+      expect(
+        await service.completeEnrollment({ pendingToken: 'p-access', code: '123456' }),
+      ).toBeNull();
+      expect(mfa.confirm).not.toHaveBeenCalled();
+    });
   });
 
   it('revokes the pending session when the lock trips and never checks the code', async () => {

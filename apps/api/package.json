@@ -13,6 +13,7 @@
     "start": "node dist/main.js",
     "worker": "node dist/worker/worker.js",
     "ops": "node dist/cli/ops.js",
+    "openapi": "tsc -p tsconfig.build.json && node dist/cli/openapi.js",
     "coverage": "vitest run --coverage"
   },
   "dependencies": {

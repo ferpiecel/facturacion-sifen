@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs';
 import { PATH_METADATA, METHOD_METADATA } from '@nestjs/common/constants.js';
 import { RequestMethod } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
-import { AppModule } from '../../app.module.js';
-import { IS_PUBLIC_KEY } from '../identity/infrastructure/decorators/public.decorator.js';
-import { REQUIRED_SCOPES_KEY } from '../identity/infrastructure/decorators/require-scopes.decorator.js';
+import { AppModule } from '../../../app.module.js';
+import { IS_PUBLIC_KEY } from '../../identity/infrastructure/decorators/public.decorator.js';
+import { REQUIRED_SCOPES_KEY } from '../../identity/infrastructure/decorators/require-scopes.decorator.js';
 import { buildOpenApiDocument } from './openapi.js';
 
 type Ctor = new (...args: never[]) => unknown;
@@ -42,7 +42,9 @@ function integratorRoutes(): Route[] {
     .flatMap((controller) => {
       const base = String(Reflect.getMetadata(PATH_METADATA, controller));
       return Object.getOwnPropertyNames(controller.prototype)
-        .map((name) => (controller.prototype as Record<string, unknown>)[name])
+        .map(
+          (name) => Object.getOwnPropertyDescriptor(controller.prototype, name)?.value as unknown,
+        )
         .filter(
           (handler): handler is () => unknown =>
             typeof handler === 'function' && Reflect.hasMetadata(METHOD_METADATA, handler),
@@ -64,14 +66,18 @@ function integratorRoutes(): Route[] {
 }
 
 const spec = buildOpenApiDocument();
+interface Operation {
+  operationId: string;
+  security: unknown;
+  responses: Record<string, unknown>;
+  'x-required-scopes'?: string[];
+}
 const operations = Object.entries(spec.paths).flatMap(([path, item]) =>
-  Object.entries(item as Record<string, { 'x-required-scopes'?: string[] }>).map(
-    ([method, operation]) => ({
-      key: `${method.toUpperCase()} ${path}`,
-      scopes: operation['x-required-scopes'] ?? [],
-      operation: operation as Record<string, unknown>,
-    }),
-  ),
+  Object.entries(item as Record<string, Operation>).map(([method, operation]) => ({
+    key: `${method.toUpperCase()} ${path}`,
+    scopes: operation['x-required-scopes'] ?? [],
+    operation,
+  })),
 );
 
 describe('OpenAPI document', () => {
@@ -92,14 +98,17 @@ describe('OpenAPI document', () => {
 
   it('is a structurally valid OpenAPI 3.1 document', () => {
     expect(spec.openapi).toBe('3.1.0');
-    expect(spec.components.securitySchemes.apiKey).toMatchObject({ type: 'http', scheme: 'bearer' });
+    expect(spec.components.securitySchemes.apiKey).toMatchObject({
+      type: 'http',
+      scheme: 'bearer',
+    });
     const ids = operations.map((o) => o.operation.operationId);
     expect(new Set(ids).size).toBe(ids.length);
     const json = JSON.stringify(spec);
     for (const [, ref] of json.matchAll(/"\$ref":"#\/components\/([^"]+)"/g)) {
       const [section, name] = ref.split('/');
       expect(
-        (spec.components as unknown as Record<string, Record<string, unknown>>)[section]?.[name],
+        (spec.components as unknown as Record<string, Record<string, unknown>>)[section][name],
         ref,
       ).toBeDefined();
     }
@@ -119,7 +128,7 @@ describe('OpenAPI document', () => {
   });
 
   it('matches the checked-in docs/api/openapi.json', () => {
-    const file = new URL('../../../../../docs/api/openapi.json', import.meta.url);
+    const file = new URL('../../../../../../docs/api/openapi.json', import.meta.url);
     expect(
       JSON.parse(readFileSync(file, 'utf8')),
       'regenerate: pnpm --filter @sifen/api openapi',

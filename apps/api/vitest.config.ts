@@ -37,6 +37,8 @@ export default defineConfig({
         // tests. Its argv parsing (args.ts) and dispatch (ops.ts's
         // exported runOpsCommand) are unit-tested directly.
         'src/cli/ops.ts',
+        // Prints the OpenAPI document; the document itself is tested in openapi.spec.ts.
+        'src/cli/openapi.ts',
         // BullMQ/ioredis adapters and the worker process entrypoint: covered by the Redis
         // integration specs (CI job `worker-redis`), which skip without REDIS_URL.
         'src/worker/queue.ts',

@@ -20,6 +20,8 @@ import { FakeSifenGateway, sifenScenarios } from '@sifen/sifen-gateway';
 import { RecoverLoteByCdc, type LoteRecoveryOutcome } from '../application/recover-lote-by-cdc.js';
 import {
   createDrizzleLoteRecoveryStore,
+  RECOVERY_AFTER_RESEND_HOLD,
+  RECOVERY_ATTEMPTS_EXHAUSTED_HOLD,
   RECOVERY_UNRESOLVED_HOLD,
 } from './drizzle-lote-recovery-store.js';
 
@@ -138,6 +140,31 @@ describe('DrizzleLoteRecoveryStore', () => {
     withTenantTransaction(handle.db, tenantId, (tx) =>
       tx.select().from(documents).where(eq(documents.cdc, cdc)),
     ).then((rows) => rows[0]);
+  /**
+   * Makes a document "already resent once", the way the guard lets it happen: queued again through
+   * the door with an old stamp (before its lote existed, so that lote still owns it), then sent again.
+   */
+  async function markResent(cdc?: string) {
+    const rows = await withTenantTransaction(handle.db, tenantId, (tx) =>
+      tx.select().from(documents),
+    );
+    for (const row of rows.filter((r) => cdc === undefined || r.cdc === cdc)) {
+      await withTenantTransaction(handle.db, tenantId, async (tx) => {
+        await tx
+          .update(documents)
+          .set({
+            status: 'queued',
+            resentAt: new Date('2026-01-01T00:00:00Z'),
+            transmissionAttempts: row.transmissionAttempts + 1,
+          })
+          .where(eq(documents.id, row.id));
+        if (row.status === 'submitted') {
+          await tx.update(documents).set({ status: 'submitted' }).where(eq(documents.id, row.id));
+        }
+      });
+    }
+  }
+
   const approval = (cdc: string) => ({
     cdc,
     status: 'approved' as const,
@@ -482,7 +509,7 @@ describe('DrizzleLoteRecoveryStore', () => {
     const AFTER_WINDOW = new Date(SENT_AT.getTime() + 48 * 3_600_000);
     // Documents already resent once: a second 0420 past the window holds them (it never resends twice).
     beforeEach(async () => {
-      await handle.db.execute(sql`update documents set resent_at = '2026-01-01T00:00:00Z'`);
+      await markResent();
     });
     const setAttempts = (cdc: string, attempts: number) =>
       withTenantTransaction(handle.db, tenantId, (tx) =>
@@ -503,7 +530,7 @@ describe('DrizzleLoteRecoveryStore', () => {
         action: 'document.hold_placed',
         entityType: 'document',
         before: { transmissionHold: null },
-        after: { transmissionHold: RECOVERY_UNRESOLVED_HOLD },
+        after: { transmissionHold: RECOVERY_AFTER_RESEND_HOLD },
       });
       expect(audits[0].entityId).toBe((await readDoc(CDC_B)).id);
     });
@@ -587,12 +614,12 @@ describe('DrizzleLoteRecoveryStore', () => {
         guard,
       );
       expect(await readDoc(CDC_B)).toMatchObject({
-        transmissionHold: RECOVERY_UNRESOLVED_HOLD,
+        transmissionHold: RECOVERY_AFTER_RESEND_HOLD,
         status: 'submitted',
       });
-      expect(RECOVERY_UNRESOLVED_HOLD).toBe('recovery:0420-unresolved');
+      expect(RECOVERY_AFTER_RESEND_HOLD).toBe('recovery:0420-after-resend');
       expect(warnings).toHaveLength(1);
-      expect(warnings[0]).toContain(RECOVERY_UNRESOLVED_HOLD);
+      expect(warnings[0]).toContain(RECOVERY_AFTER_RESEND_HOLD);
     });
 
     it('does not hold at 47 h 59 min 59.999 s since the send, and holds at exactly 48 h', async () => {
@@ -612,7 +639,7 @@ describe('DrizzleLoteRecoveryStore', () => {
           recoveredAt: AFTER_WINDOW,
         },
       );
-      expect((await readDoc(CDC_B)).transmissionHold).toBe(RECOVERY_UNRESOLVED_HOLD);
+      expect((await readDoc(CDC_B)).transmissionHold).toBe(RECOVERY_AFTER_RESEND_HOLD);
     });
 
     it('never touches transmission_attempts: that counter belongs to the 0301 backoff', async () => {
@@ -635,7 +662,7 @@ describe('DrizzleLoteRecoveryStore', () => {
       );
       expect(await readDoc(CDC_B)).toMatchObject({
         transmissionAttempts: 4,
-        transmissionHold: RECOVERY_UNRESOLVED_HOLD,
+        transmissionHold: RECOVERY_AFTER_RESEND_HOLD,
       });
       expect((await readDoc(CDC_A)).transmissionAttempts).toBe(0);
     });
@@ -660,7 +687,7 @@ describe('DrizzleLoteRecoveryStore', () => {
       );
       expect(await readLote()).toMatchObject({ status: 'processed' });
       expect((await readLote()).lastPollMessage).toBe(
-        `held for an operator (${RECOVERY_UNRESOLVED_HOLD})`,
+        `held for an operator (${RECOVERY_AFTER_RESEND_HOLD})`,
       );
       expect((await storeFor(tenantId).load(loteId))?.cdcs).toEqual([]);
     });
@@ -675,11 +702,11 @@ describe('DrizzleLoteRecoveryStore', () => {
         guard,
       );
       expect((await readLote()).lastPollMessage).toBe(
-        `0364: tarde | held for an operator (${RECOVERY_UNRESOLVED_HOLD})`,
+        `0364: tarde | held for an operator (${RECOVERY_AFTER_RESEND_HOLD})`,
       );
 
       const second = await seedLote('recovery', 'submitted', [CDC_C], SENT_AT);
-      await handle.db.execute(sql`update documents set resent_at = '2026-01-01T00:00:00Z'`);
+      await markResent();
       await handle.db.execute(
         sql`update lotes set last_poll_message = 'recovery: 1 document(s) still unresolved by CDC query' where id = ${second}`,
       );
@@ -689,7 +716,7 @@ describe('DrizzleLoteRecoveryStore', () => {
         { ...guard, expectedLastPolledAt: null },
       );
       expect((await readLoteById(second)).lastPollMessage).toBe(
-        `held for an operator (${RECOVERY_UNRESOLVED_HOLD})`,
+        `held for an operator (${RECOVERY_AFTER_RESEND_HOLD})`,
       );
     });
 
@@ -705,7 +732,7 @@ describe('DrizzleLoteRecoveryStore', () => {
         },
         guard,
       );
-      expect((await readDoc(CDC_A)).transmissionHold).toBe(RECOVERY_UNRESOLVED_HOLD);
+      expect((await readDoc(CDC_A)).transmissionHold).toBe(RECOVERY_AFTER_RESEND_HOLD);
       expect((await readDoc(CDC_B)).transmissionHold).toBeNull();
       expect((await readLote()).status).toBe('recovery');
       expect((await storeFor(tenantId).load(loteId))?.cdcs).toEqual([CDC_B]);
@@ -727,7 +754,7 @@ describe('DrizzleLoteRecoveryStore', () => {
       expect((await readLoteById(unknown)).status).toBe('unknown');
     });
 
-    it('holds once 48 h passed since the send attempt', async () => {
+    it('resends once 48 h passed since the send attempt', async () => {
       const unknown = await seedLote('unknown', 'queued', [CDC_C], SENT_AT);
       await handle.db.execute(
         sql`update lotes set send_attempted_at = ${new Date(RECOVERED_AT.getTime() - 48 * 3_600_000)} where id = ${unknown}`,
@@ -737,12 +764,15 @@ describe('DrizzleLoteRecoveryStore', () => {
         { resolutions: [], unresolved: [absent(CDC_C)] },
         unknownGuard,
       );
-      expect((await readDoc(CDC_C)).transmissionHold).toBe(RECOVERY_UNRESOLVED_HOLD);
+      expect(await readDoc(CDC_C)).toMatchObject({
+        transmissionHold: null,
+        transmissionAttempts: 1,
+      });
+      expect((await readDoc(CDC_C)).resentAt).not.toBeNull();
     });
 
     it('holds a queued document of a legacy unknown lote (no send attempt instant), from its creation', async () => {
       const unknown = await seedLote('unknown', 'queued', [CDC_C], SENT_AT);
-      await handle.db.execute(sql`update documents set resent_at = '2026-01-01T00:00:00Z'`);
       await storeFor(tenantId).record(
         unknown,
         { resolutions: [], unresolved: [absent(CDC_C)] },
@@ -837,7 +867,7 @@ describe('DrizzleLoteRecoveryStore', () => {
 
   describe('a failing alert', () => {
     it('cannot fail the record after the commit: the hold stays and record still returns true', async () => {
-      await handle.db.execute(sql`update documents set resent_at = '2026-01-01T00:00:00Z'`);
+      await markResent();
       const failing = createDrizzleLoteRecoveryStore({
         db: handle.db,
         tenantId,
@@ -856,7 +886,7 @@ describe('DrizzleLoteRecoveryStore', () => {
         guard,
       );
       expect(applied).toBe(true);
-      expect((await readDoc(CDC_B)).transmissionHold).toBe(RECOVERY_UNRESOLVED_HOLD);
+      expect((await readDoc(CDC_B)).transmissionHold).toBe(RECOVERY_AFTER_RESEND_HOLD);
     });
   });
 
@@ -944,9 +974,7 @@ describe('DrizzleLoteRecoveryStore', () => {
     });
 
     it('holds, never resends, a document that was already resent once', async () => {
-      await handle.db.execute(
-        sql`update documents set resent_at = '2026-01-01T00:00:00Z' where cdc = ${CDC_B}`,
-      );
+      await markResent(CDC_B);
       await storeFor(tenantId).record(
         loteId,
         { resolutions: [], unresolved: [absent(CDC_B)] },
@@ -954,8 +982,8 @@ describe('DrizzleLoteRecoveryStore', () => {
       );
       expect(await readDoc(CDC_B)).toMatchObject({
         status: 'submitted',
-        transmissionHold: RECOVERY_UNRESOLVED_HOLD,
-        transmissionAttempts: 0,
+        transmissionHold: RECOVERY_AFTER_RESEND_HOLD,
+        transmissionAttempts: 1,
       });
     });
 
@@ -971,7 +999,7 @@ describe('DrizzleLoteRecoveryStore', () => {
       expect(await readDoc(CDC_B)).toMatchObject({
         status: 'submitted',
         transmissionAttempts: 4,
-        transmissionHold: RECOVERY_UNRESOLVED_HOLD,
+        transmissionHold: RECOVERY_ATTEMPTS_EXHAUSTED_HOLD,
       });
     });
 

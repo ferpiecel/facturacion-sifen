@@ -42,7 +42,7 @@ Never commit real certificates; tests use `apps/api/test/support/test-pki.ts`.
         from `open`, the transmission pipeline already holds the document as `signing:CertificateNotFoundError`).
 - [x] **S2 — `feat/hu-e3-02-certificate-audit`, audited certificate access:** `certificate.added`/`certificate.replaced` audit in
       `CertificateVault.add` and `certificate.accessed` (fingerprint only, actor = signing flow) in `open`.
-- [ ] **S3 — LRU + TTL cache** in front of `open` (short TTL, bounded size, zeroize on eviction and on
+- [x] **S3 — `feat/hu-e3-02-certificate-cache`, LRU + TTL cache** in front of `open` (short TTL, bounded size, zeroize on eviction and on
       revoke; revoke must invalidate or the TTL bounds the exposure, to be decided with S2 evidence).
 - [ ] **S4 (separate story) — cloud KMS adapter** behind `KeyManagementService`.
 
@@ -86,4 +86,21 @@ and `document:release-holds`.
   before decrypting. The failure is a plain error (not in the deterministic-signing set), so the
   transmission cycle does not park the document: it is retried next cycle.
 - Audit payload keys avoid `certificate*` names (the redactor masks them): `previousId`, not `certificateId`.
+
+## S3 decisions
+
+- `CachedCertificateVault` wraps `open` (the worker wires it); the audit stays inside the vault's decrypt,
+  so only misses are audited. Defaults: TTL 5 min, 64 entries (env `CERTIFICATE_CACHE_TTL_MS` 1 s..15 min,
+  `CERTIFICATE_CACHE_MAX_ENTRIES` 1..1000). A worker signs for a bounded set of (tenant, env) pairs, each
+  entry is a few KiB, and 5 min keeps plaintext residency short (ADR-0009) while collapsing a cycle's
+  per-document decrypts into one.
+- Staleness across processes (CLI revoke vs worker): every hit re-checks the stored status with one indexed
+  read (`currentFingerprint`: active, in validity window, same fingerprint; no KMS, no audit). Revoke,
+  replace and expiry therefore block the next signing, matching the immediate-block decision; the TTL is
+  not a staleness bound. Rejected: TTL-only (up to 5 min of signing with a revoked key), cross-process
+  pub/sub (new infrastructure).
+- Callers get copies (`SignDocument` zeroizes its buffer); the cache zeroizes its own on
+  eviction/expiry/invalidate/clear. The password is a JS string: not wipeable, bounded by the entry life.
+- No logging in the cache; failed opens are never cached. No single-flight (the tenant run lock already
+  serializes a tenant's cycle).
 

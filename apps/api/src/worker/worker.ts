@@ -2,6 +2,7 @@ import { FakeSifenGateway } from '@sifen/sifen-gateway';
 import { assertNonPrivilegedSession, createNodePostgresDatabase } from '@sifen/db';
 import { readBoundedFile } from '../cli/bounded-file.js';
 import { createCertificateVault, createCscVault } from '../cli/ops.js';
+import { CachedCertificateVault } from '../modules/certificates/infrastructure/cached-certificate-vault.js';
 import { TRANSMISSION_WORKER_ACTOR } from '../modules/transmission/infrastructure/transmission-audit-actor.js';
 import {
   createCertificateSource,
@@ -78,7 +79,10 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
       gateway,
       certificates: createCertificateSource({
         db: appHandle.db,
-        vault: createCertificateVault(env, readBoundedFile),
+        vault: new CachedCertificateVault(createCertificateVault(env, readBoundedFile), {
+          ttlMs: config.certificateCacheTtlMs,
+          maxEntries: config.certificateCacheMaxEntries,
+        }),
         actor: TRANSMISSION_WORKER_ACTOR,
       }),
       cscs: createCscSource({ db: appHandle.db, vault: createCscVault(env) }),

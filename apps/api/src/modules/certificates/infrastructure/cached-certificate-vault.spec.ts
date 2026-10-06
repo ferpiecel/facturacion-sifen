@@ -132,7 +132,7 @@ describe('CachedCertificateVault', () => {
     expect(isZero(returned[1])).toBe(true);
     state.fingerprint = 'fp-2';
     await cache.open(DB, 't1', 'test', ACCESS);
-    expect(state.opens).toBe(3);
+    expect(state.opens).toBe(4);
   });
 
   it('never caches a failed open and passes its error through', async () => {

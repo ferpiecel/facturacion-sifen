@@ -237,6 +237,37 @@ export class CertificateVault {
   }
 
   /**
+   * The tenant's active certificate fingerprint when it is within its validity window, else null.
+   * Reads only the public columns: no decrypt, no audit. The cache re-checks it on every hit, so a
+   * revoke or replace made by another process takes effect on the next signing.
+   */
+  async currentFingerprint(
+    db: Database,
+    tenantId: string,
+    environment: Environment,
+  ): Promise<string | null> {
+    const now = (this.options.now ?? (() => new Date()))();
+    const rows = await withTenantTransaction(db, tenantId, (tx) =>
+      tx
+        .select({
+          fingerprint: tenantCertificates.fingerprint,
+          notBefore: tenantCertificates.notBefore,
+          notAfter: tenantCertificates.notAfter,
+        })
+        .from(tenantCertificates)
+        .where(
+          and(
+            eq(tenantCertificates.tenantId, tenantId),
+            eq(tenantCertificates.environment, environment),
+            eq(tenantCertificates.status, 'active'),
+          ),
+        ),
+    );
+    const row = rows.at(0);
+    return row && now >= row.notBefore && now <= row.notAfter ? row.fingerprint : null;
+  }
+
+  /**
    * Decrypts the tenant's active certificate in memory; the caller owns the returned buffer and
    * should zeroize it. Never logged, never persisted.
    *

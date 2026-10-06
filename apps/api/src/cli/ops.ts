@@ -126,7 +126,9 @@ export async function runOpsCommand(
         role: command.role,
         password: command.password,
       });
-      return `${result.created ? 'user created' : 'user added to tenant'}: ${result.userId} (${command.role})`;
+      return result.created
+        ? `user created: ${result.userId} (${command.role})`
+        : `user added to tenant: ${result.userId} (${command.role}); the account already existed, so --name and any password were ignored`;
     }
     case 'fiscal:set': {
       const result = await setFiscalProfile(db, {
@@ -249,34 +251,51 @@ export function formatOpsError(error: unknown): string {
   return error.message.startsWith('Failed query') ? 'database query failed' : error.message;
 }
 
+/** Longest secret read from stdin: the policy caps a password at 128 characters, a CSC is 32. */
+export const MAX_STDIN_SECRET_LENGTH = 4096;
+
+async function readSecret(readStdin: () => Promise<string>): Promise<string> {
+  const value = (await readStdin()).replace(/\r?\n$/, '');
+  if (value.length > MAX_STDIN_SECRET_LENGTH) {
+    throw new OpsArgError(
+      `stdin secret is larger than ${String(MAX_STDIN_SECRET_LENGTH)} characters (value hidden)`,
+    );
+  }
+  return value;
+}
+
 /**
  * `--csc -` reads the CSC from stdin so it never lands in shell history or `ps`. For
- * `certificate:add` the `.p12` password may only come that way: `--password -` is mandatory.
+ * `certificate:add` and `user:create` the password may only come that way: `--password -`. The value
+ * goes back as ONE `--flag=value` token, so a secret that starts with a dash is not read as an option.
  */
-async function resolveStdinSecrets(
+export async function resolveStdinSecrets(
   argv: string[],
   readStdin: () => Promise<string>,
 ): Promise<string[]> {
-  if (argv[0] === 'certificate:add' || argv[0] === 'user:create') {
+  const command = argv[0];
+  if (command === 'certificate:add' || command === 'user:create') {
+    const occurrences = argv.filter((arg) => arg === '--password' || arg.startsWith('--password='));
     const index = argv.indexOf('--password');
     if (
-      argv.some((arg) => arg.startsWith('--password=')) ||
+      occurrences.length > 1 ||
+      occurrences.some((arg) => arg !== '--password') ||
       (index >= 0 && argv[index + 1] !== '-')
     ) {
       throw new OpsArgError(
-        '--password must be "-": the password is read from stdin, never from argv (value hidden)',
+        '--password must be given once, as "-": the password is read from stdin, never from argv (value hidden)',
       );
     }
     if (index < 0) return argv;
-    const value = (await readStdin()).replace(/\r?\n$/, '');
-    return argv.map((arg, position) => (position === index + 1 ? value : arg));
+    const value = await readSecret(readStdin);
+    return [...argv.slice(0, index), `--password=${value}`, ...argv.slice(index + 2)];
   }
   const index = argv.indexOf('--csc');
-  if (argv[0] !== 'csc:add' || argv[index + 1] !== '-') {
+  if (command !== 'csc:add' || argv[index + 1] !== '-') {
     return argv;
   }
-  const value = (await readStdin()).replace(/\r?\n$/, '');
-  return argv.map((arg, position) => (position === index + 1 ? value : arg));
+  const value = await readSecret(readStdin);
+  return [...argv.slice(0, index), `--csc=${value}`, ...argv.slice(index + 2)];
 }
 
 export interface CliIo {
@@ -321,8 +340,15 @@ export async function runCli(io: CliIo): Promise<number> {
 // vitest.config.ts, not by unit tests.
 async function readProcessStdin(): Promise<string> {
   const chunks: Buffer[] = [];
+  let bytes = 0;
   for await (const chunk of process.stdin) {
-    chunks.push(Buffer.from(chunk as Uint8Array));
+    const buffer = Buffer.from(chunk as Uint8Array);
+    bytes += buffer.length;
+    // Stop reading long before memory matters; readSecret rejects anything past the character limit.
+    if (bytes > MAX_STDIN_SECRET_LENGTH * 4) {
+      throw new OpsArgError('stdin secret is too large (value hidden)');
+    }
+    chunks.push(buffer);
   }
   return Buffer.concat(chunks).toString('utf8');
 }

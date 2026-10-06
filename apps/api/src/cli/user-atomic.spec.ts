@@ -90,7 +90,7 @@ describe('createPortalUser is atomic and safe to retry (HU-E1-07)', () => {
     await createPortalUser(handle.db, { ...input(b, 'multi@example.com'), password: undefined });
 
     const [row] = await handle.db.select().from(auditLog).where(eq(auditLog.tenantId, b));
-    expect(row?.after).toEqual({
+    expect(row.after).toEqual({
       email: 'multi@example.com',
       role: 'owner',
       userExisted: true,

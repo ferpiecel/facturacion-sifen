@@ -58,14 +58,12 @@ function setup(opts: Options = {}) {
   });
   const sessions = {
     issue: vi.fn().mockResolvedValue(pending),
-    authenticatePending: vi
-      .fn()
-      .mockResolvedValue({
-        sessionId: 'pending-1',
-        userId: 'u-1',
-        activeTenantId: null,
-        mfaVerified: false,
-      }),
+    authenticatePending: vi.fn().mockResolvedValue({
+      sessionId: 'pending-1',
+      userId: 'u-1',
+      activeTenantId: null,
+      mfaVerified: false,
+    }),
     promote: vi.fn().mockResolvedValue(opts.promoted === undefined ? full : opts.promoted),
     memberships: vi.fn().mockResolvedValue([{ tenantId: 't-a', tenantName: 'A', role: 'admin' }]),
     logout: vi.fn().mockResolvedValue(undefined),

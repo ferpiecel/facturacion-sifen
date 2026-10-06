@@ -16,14 +16,16 @@ import type { IssuedSession, SessionService } from './session.service.js';
 import { VerifyPasswordUseCase } from './verify-password.use-case.js';
 
 /**
- * Throttle bounds. NIST SP 800-63B allows up to 100 consecutive failures; we are stricter because the
- * password is checked with Argon2id (a failed attempt is expensive for us) and every account has a second
- * factor: 5 failures in 15 minutes lock that account (or, for the second factor, that user) for 15 minutes,
- * which keeps an online guess below ~480 a day per account. 20 per IP absorbs a shared office address
- * without letting one address spray many accounts. Counters are keyed by hash, so unknown emails lock too.
+ * Throttle bounds, counted per ATTEMPT and reserved atomically BEFORE the secret is checked (a check-then-count
+ * pair lets a concurrent burst through). NIST SP 800-63B allows up to 100 consecutive failures; we are stricter
+ * because the password is checked with Argon2id (an attempt is expensive for us) and every account has a second
+ * factor: 5 attempts in 15 minutes lock that account (or, for the second factor, that user) for 15 minutes,
+ * which keeps an online guess below ~480 a day per account. The IP limit counts every attempt, successful or
+ * not (a success never refunds it), so it is 60 to absorb a shared office address without letting one address
+ * spray many accounts. Counters are keyed by a peppered hash, so unknown emails lock too.
  */
 export const ACCOUNT_LIMIT: ThrottleLimit = { max: 5, windowSeconds: 900, lockSeconds: 900 };
-export const IP_LIMIT: ThrottleLimit = { max: 20, windowSeconds: 900, lockSeconds: 900 };
+export const IP_LIMIT: ThrottleLimit = { max: 60, windowSeconds: 900, lockSeconds: 900 };
 export const MFA_LIMIT: ThrottleLimit = { max: 5, windowSeconds: 900, lockSeconds: 900 };
 
 export interface LoginDeps {
@@ -67,11 +69,11 @@ export class LoginService {
 
   async start(input: { email: string; password: string; ip?: string }): Promise<StartResult> {
     const subject = `account:${normalizeEmail(input.email) ?? input.email.trim().toLowerCase()}`;
-    const ipSubject = input.ip === undefined ? null : `ip:${input.ip}`;
-    const locked =
-      (await this.deps.throttle.isLocked(subject)) ||
-      (ipSubject !== null && (await this.deps.throttle.isLocked(ipSubject)));
-    if (locked) {
+    // Reserve first: an attempt that is not granted never reaches the (expensive) real password check.
+    const accountAllowed = await this.deps.throttle.reserve(subject, ACCOUNT_LIMIT);
+    const ipAllowed =
+      input.ip === undefined || (await this.deps.throttle.reserve(`ip:${input.ip}`, IP_LIMIT));
+    if (!accountAllowed || !ipAllowed) {
       const oversized = passwordLength(input.password) > MAX_PASSWORD_LENGTH;
       await this.deps.verifier.verify(
         oversized ? '' : normalizePassword(input.password),
@@ -82,14 +84,7 @@ export class LoginService {
     }
     const verified = await this.verifyPassword.execute(input.email, input.password);
     if (!verified) {
-      const accountLocked = await this.deps.throttle.recordFailure(subject, ACCOUNT_LIMIT);
-      if (ipSubject !== null) await this.deps.throttle.recordFailure(ipSubject, IP_LIMIT);
-      await this.deps.events.record({
-        event: 'login.password_failed',
-        userId: null,
-        subject,
-        detail: { locked: accountLocked },
-      });
+      await this.deps.events.record({ event: 'login.password_failed', userId: null, subject });
       return { status: 'invalid' };
     }
     await this.deps.throttle.clear(subject);
@@ -104,7 +99,7 @@ export class LoginService {
   private async pendingUser(
     pendingToken: string,
   ): Promise<{ userId: string; sessionId: string } | null> {
-    const record = await this.deps.sessions.authenticate(pendingToken);
+    const record = await this.deps.sessions.authenticatePending(pendingToken);
     return record && !record.mfaVerified
       ? { userId: record.userId, sessionId: record.sessionId }
       : null;
@@ -116,12 +111,30 @@ export class LoginService {
     return this.deps.enroll.execute({ userId: pending.userId, email: input.account });
   }
 
+  /**
+   * Reserves a second-factor attempt for the pending user before any code is checked. When the limit is hit
+   * the pending session is revoked (the user must log in again) and the attempt is refused unchecked.
+   */
+  private async reserveMfaAttempt(pending: {
+    userId: string;
+    sessionId: string;
+  }): Promise<boolean> {
+    if (await this.deps.throttle.reserve(`mfa:${pending.userId}`, MFA_LIMIT)) return true;
+    await this.deps.sessions.logout(pending.sessionId);
+    await this.deps.events.record({
+      event: 'login.mfa_locked',
+      userId: pending.userId,
+      subject: `mfa:${pending.userId}`,
+    });
+    return false;
+  }
+
   async completeEnrollment(input: {
     pendingToken: string;
     code: string;
   }): Promise<(LoggedIn & { recoveryCodes: string[] }) | null> {
     const pending = await this.pendingUser(input.pendingToken);
-    if (!pending) return null;
+    if (!pending || !(await this.reserveMfaAttempt(pending))) return null;
     const tenants = await this.deps.sessions.memberships(pending.userId);
     const confirmed = await this.deps.confirm.execute({
       userId: pending.userId,
@@ -130,15 +143,14 @@ export class LoginService {
       nowMs: this.now(),
     });
     if (!confirmed) return null;
+    await this.deps.throttle.clear(`mfa:${pending.userId}`);
     const done = await this.finish(pending, tenants);
     return done && { ...done, recoveryCodes: confirmed.recoveryCodes };
   }
 
   async verifyMfa(input: { pendingToken: string; code: string }): Promise<LoggedIn | null> {
     const pending = await this.pendingUser(input.pendingToken);
-    if (!pending) return null;
-    const subject = `mfa:${pending.userId}`;
-    if (await this.deps.throttle.isLocked(subject)) return null;
+    if (!pending || !(await this.reserveMfaAttempt(pending))) return null;
     const tenants = await this.deps.sessions.memberships(pending.userId);
     const ok = await this.deps.verifyMfa.execute({
       userId: pending.userId,
@@ -147,27 +159,27 @@ export class LoginService {
       nowMs: this.now(),
     });
     if (!ok) {
-      const nowLocked = await this.deps.throttle.recordFailure(subject, MFA_LIMIT);
       await this.deps.events.record({
         event: 'login.mfa_failed',
         userId: pending.userId,
-        subject,
-        detail: { locked: nowLocked },
+        subject: `mfa:${pending.userId}`,
       });
       return null;
     }
-    await this.deps.throttle.clear(subject);
+    await this.deps.throttle.clear(`mfa:${pending.userId}`);
     return this.finish(pending, tenants);
   }
 
-  /** Swaps the pending session for a fresh verified one and records the success. */
+  /**
+   * Swaps the pending session for a verified one in ONE atomic step that only succeeds while the pending
+   * session is still live (a revoke-all or a reset in between yields no session), then records the success.
+   */
   private async finish(
     pending: { userId: string; sessionId: string },
     tenants: TenantMembership[],
   ): Promise<LoggedIn | null> {
-    const session = await this.deps.sessions.issue(pending.userId, { mfaVerified: true });
+    const session = await this.deps.sessions.promote(pending.sessionId);
     if (!session) return null;
-    await this.deps.sessions.logout(pending.sessionId);
     await this.deps.events.record({
       event: 'login.succeeded',
       userId: pending.userId,

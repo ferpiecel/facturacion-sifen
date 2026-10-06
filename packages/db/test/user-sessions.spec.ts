@@ -242,19 +242,19 @@ describe('user_sessions and its resolver functions', () => {
       const go = async (id: string | null, tag: string) =>
         (
           await call<{ id: string | null }>(
-            sql`select promote_user_session(${id}, ${h(tag)}, ${h(tag === 'x' ? 'y' : 'z')}, ${FUTURE().toISOString()}, ${FUTURE().toISOString()}, ${ABSOLUTE().toISOString()}) as id`,
+            sql`select promote_user_session(${id}, ${h(tag)}, ${h('f')}, ${FUTURE().toISOString()}, ${FUTURE().toISOString()}, ${ABSOLUTE().toISOString()}) as id`,
           )
         )[0].id;
       const pending = await create('a', 'b', { mfa: false });
-      expect(await go(pending, 'c')).not.toBeNull();
-      expect(await go(pending, 'e')).toBeNull();
-      const revoked = await create('f', 'g', { mfa: false });
+      expect(await go(pending, '1')).not.toBeNull();
+      expect(await go(pending, '2')).toBeNull();
+      const revoked = await create('7', '8', { mfa: false });
       await call(sql`select revoke_user_sessions(${ana})`);
-      expect(await go(revoked, 'i')).toBeNull();
-      const verified = await create('j', 'k', { mfa: true });
-      expect(await go(verified, 'm')).toBeNull();
-      const expired = await create('n', 'o', { mfa: false, access: PAST(), refresh: PAST() });
-      expect(await go(expired, 'q')).toBeNull();
+      expect(await go(revoked, '3')).toBeNull();
+      const verified = await create('9', '0', { mfa: true });
+      expect(await go(verified, '4')).toBeNull();
+      const expired = await create('e', 'd', { mfa: false, access: PAST(), refresh: PAST() });
+      expect(await go(expired, '5')).toBeNull();
     });
 
     it('lets only one of two concurrent promotions of the same pending session win', async () => {

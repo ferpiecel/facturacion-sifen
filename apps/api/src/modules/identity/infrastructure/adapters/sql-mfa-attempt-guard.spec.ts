@@ -34,7 +34,7 @@ describe('SqlMfaAttemptGuard (migration 0041)', () => {
       .insert(users)
       .values({ email: `g${String(counter)}@example.com`, passwordHash: HASH, displayName: 'G' })
       .returning({ id: users.id });
-    const id = (row as { id: string }).id;
+    const id = row.id;
     await handle.db.insert(userMfa).values({ userId: id, sealed: SEALED });
     return id;
   }

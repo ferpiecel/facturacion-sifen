@@ -8,6 +8,7 @@ import { DUMMY_HASH } from './authenticate-api-key.use-case.js';
 import type { ConfirmMfaUseCase, EnrollMfaUseCase, VerifyMfaUseCase } from './mfa.use-cases.js';
 import type { AuthEventLog } from './ports/auth-event-log.port.js';
 import type { LoginThrottle, ThrottleLimit } from './ports/login-throttle.port.js';
+import type { MfaAttemptGuard } from './ports/mfa-attempt-guard.port.js';
 import type { MfaStore } from './ports/mfa.ports.js';
 import type { SecretVerifier } from './ports/secret-verifier.port.js';
 import type { TenantMembership } from './ports/session-store.port.js';
@@ -28,6 +29,15 @@ export const ACCOUNT_LIMIT: ThrottleLimit = { max: 5, windowSeconds: 900, lockSe
 export const IP_LIMIT: ThrottleLimit = { max: 60, windowSeconds: 900, lockSeconds: 900 };
 export const MFA_LIMIT: ThrottleLimit = { max: 5, windowSeconds: 900, lockSeconds: 900 };
 
+/**
+ * Consecutive second-factor failures per user before the user is locked until an MFA reset. The 5-per-15-minutes
+ * window above still allows ~480 TOTP guesses a day to someone who knows the password (about 0.14 % a day, 40 %
+ * a year at ~3 valid codes in 10^6); only a count that time does not reset bounds that. NIST SP 800-63B caps
+ * consecutive failures at 100, and a 6-digit code is far weaker than a password, so the cap is 20: a person who
+ * mistypes (or a drifting clock) has room, a guesser gets 20 tries (~0.006 %) and then needs an operator.
+ */
+export const MFA_CONSECUTIVE_FAILURE_CAP = 20;
+
 export interface LoginDeps {
   credentials: UserCredentialLookup;
   verifier: SecretVerifier;
@@ -38,6 +48,7 @@ export interface LoginDeps {
   enroll: EnrollMfaUseCase;
   confirm: ConfirmMfaUseCase;
   verifyMfa: VerifyMfaUseCase;
+  mfaGuard: MfaAttemptGuard;
   now?: () => number;
 }
 
@@ -119,10 +130,13 @@ export class LoginService {
     userId: string;
     sessionId: string;
   }): Promise<boolean> {
-    if (await this.deps.throttle.reserve(`mfa:${pending.userId}`, MFA_LIMIT)) return true;
+    const withinWindow = await this.deps.throttle.reserve(`mfa:${pending.userId}`, MFA_LIMIT);
+    // A window refusal never reaches the code check, so it does not consume the consecutive cap.
+    const withinCap = withinWindow && (await this.deps.mfaGuard.reserve(pending.userId));
+    if (withinCap) return true;
     await this.deps.sessions.logout(pending.sessionId);
     await this.deps.events.record({
-      event: 'login.mfa_locked',
+      event: withinWindow ? 'login.mfa_cap_reached' : 'login.mfa_locked',
       userId: pending.userId,
       subject: `mfa:${pending.userId}`,
     });
@@ -144,6 +158,7 @@ export class LoginService {
     });
     if (!confirmed) return null;
     await this.deps.throttle.clear(`mfa:${pending.userId}`);
+    await this.deps.mfaGuard.succeeded(pending.userId);
     const done = await this.finish(pending, tenants);
     return done && { ...done, recoveryCodes: confirmed.recoveryCodes };
   }
@@ -167,6 +182,7 @@ export class LoginService {
       return null;
     }
     await this.deps.throttle.clear(`mfa:${pending.userId}`);
+    await this.deps.mfaGuard.succeeded(pending.userId);
     return this.finish(pending, tenants);
   }
 

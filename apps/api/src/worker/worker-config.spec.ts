@@ -26,7 +26,29 @@ describe('loadWorkerConfig', () => {
       cycleIntervalMs: 60_000,
       concurrency: 4,
       lockTtlMs: 300_000,
+      certificateCacheTtlMs: 300_000,
+      certificateCacheMaxEntries: 64,
     });
+  });
+
+  it('reads and bounds the certificate cache settings (HU-E3-02)', () => {
+    expect(
+      loadWorkerConfig({
+        ...base,
+        CERTIFICATE_CACHE_TTL_MS: '60000',
+        CERTIFICATE_CACHE_MAX_ENTRIES: '8',
+      }),
+    ).toMatchObject({ certificateCacheTtlMs: 60_000, certificateCacheMaxEntries: 8 });
+    for (const [name, value] of [
+      ['CERTIFICATE_CACHE_TTL_MS', '999'],
+      ['CERTIFICATE_CACHE_TTL_MS', '900001'],
+      ['CERTIFICATE_CACHE_MAX_ENTRIES', '0'],
+      ['CERTIFICATE_CACHE_MAX_ENTRIES', '1001'],
+    ] as const) {
+      expect(() => loadWorkerConfig({ ...base, [name]: value })).toThrow(
+        new WorkerConfigError(`${name} is out of range`),
+      );
+    }
   });
 
   it('reads the tunables and bounds them', () => {

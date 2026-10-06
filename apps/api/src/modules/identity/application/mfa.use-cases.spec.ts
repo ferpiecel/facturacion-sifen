@@ -19,6 +19,7 @@ import type {
   SessionRevoker,
 } from './ports/mfa.ports.js';
 
+const TENANTS = ['t-a'];
 const NOW = Date.UTC(2026, 9, 6, 12, 0, 0);
 
 /** Seals by tagging with the user id: enough to prove the use cases bind the secret to the account. */
@@ -48,9 +49,11 @@ class MemoryStore implements MfaStore {
     this.rows.set(userId, { sealed, confirmedAt: null, lastUsedStep: null, recoveryHashes: [] });
     return Promise.resolve();
   }
-  confirm(userId: string, step: number, recoveryHashes: string[]) {
+  confirm(userId: string, step: number, recoveryHashes: string[], expectedSealed: SealedSecret) {
     const row = this.rows.get(userId);
     if (!row || row.confirmedAt) return Promise.resolve(false);
+    if (JSON.stringify(row.sealed) !== JSON.stringify(expectedSealed))
+      return Promise.resolve(false);
     this.rows.set(userId, {
       ...row,
       confirmedAt: new Date(NOW),
@@ -109,6 +112,7 @@ async function enrolled(userId = 'user-1') {
   const confirmed = await new ConfirmMfaUseCase(ctx.store, ctx.sealer, ctx.audit).execute({
     userId,
     code: totpAt(secret, NOW),
+    tenantIds: TENANTS,
     nowMs: NOW,
   });
   return { ...ctx, started, secret, recoveryCodes: confirmed?.recoveryCodes ?? [] };
@@ -154,7 +158,12 @@ describe('ConfirmMfaUseCase', () => {
     expect(row?.recoveryHashes).toEqual(recoveryCodes.map(hashRecoveryCode));
     expect(JSON.stringify(row)).not.toContain(recoveryCodes[0]);
     expect(events).toEqual([
-      { action: 'mfa.enrolled', actor: { type: 'user', id: 'user-1' }, targetUserId: 'user-1' },
+      {
+        action: 'mfa.enrolled',
+        actor: { type: 'user', id: 'user-1' },
+        targetUserId: 'user-1',
+        tenantIds: TENANTS,
+      },
     ]);
   });
 
@@ -162,14 +171,14 @@ describe('ConfirmMfaUseCase', () => {
     const ctx = setup();
     const confirm = new ConfirmMfaUseCase(ctx.store, ctx.sealer, ctx.audit);
     await expect(
-      confirm.execute({ userId: 'user-1', code: '000000', nowMs: NOW }),
+      confirm.execute({ userId: 'user-1', code: '000000', tenantIds: TENANTS, nowMs: NOW }),
     ).resolves.toBeNull();
     await new EnrollMfaUseCase(ctx.store, ctx.sealer, 'Acme').execute({
       userId: 'user-1',
       email: 'a@example.com',
     });
     await expect(
-      confirm.execute({ userId: 'user-1', code: '000000', nowMs: NOW }),
+      confirm.execute({ userId: 'user-1', code: '000000', tenantIds: TENANTS, nowMs: NOW }),
     ).resolves.toBeNull();
     expect((await ctx.store.find('user-1'))?.confirmedAt).toBeNull();
     expect(ctx.events).toEqual([]);
@@ -181,12 +190,12 @@ describe('VerifyMfaUseCase', () => {
     const { store, sealer, audit, secret } = await enrolled();
     const verify = new VerifyMfaUseCase(store, sealer, audit);
     const code = totpAt(secret, NOW + 30_000);
-    await expect(verify.execute({ userId: 'user-1', code, nowMs: NOW + 30_000 })).resolves.toBe(
-      true,
-    );
-    await expect(verify.execute({ userId: 'user-1', code, nowMs: NOW + 30_000 })).resolves.toBe(
-      false,
-    );
+    await expect(
+      verify.execute({ userId: 'user-1', code, tenantIds: TENANTS, nowMs: NOW + 30_000 }),
+    ).resolves.toBe(true);
+    await expect(
+      verify.execute({ userId: 'user-1', code, tenantIds: TENANTS, nowMs: NOW + 30_000 }),
+    ).resolves.toBe(false);
   });
 
   it('refuses the code used to confirm enrolment (its step is already spent)', async () => {
@@ -195,6 +204,7 @@ describe('VerifyMfaUseCase', () => {
       new VerifyMfaUseCase(store, sealer, audit).execute({
         userId: 'user-1',
         code: totpAt(secret, NOW),
+        tenantIds: TENANTS,
         nowMs: NOW,
       }),
     ).resolves.toBe(false);
@@ -204,23 +214,28 @@ describe('VerifyMfaUseCase', () => {
     const { store, sealer, audit } = await enrolled();
     const verify = new VerifyMfaUseCase(store, sealer, audit);
     await expect(
-      verify.execute({ userId: 'user-1', code: '000000', nowMs: NOW + 30_000 }),
+      verify.execute({ userId: 'user-1', code: '000000', tenantIds: TENANTS, nowMs: NOW + 30_000 }),
     ).resolves.toBe(false);
-    await expect(verify.execute({ userId: 'nobody', code: '123456', nowMs: NOW })).resolves.toBe(
-      false,
-    );
+    await expect(
+      verify.execute({ userId: 'nobody', code: '123456', tenantIds: TENANTS, nowMs: NOW }),
+    ).resolves.toBe(false);
   });
 
   it('accepts each recovery code once, audited, in any spelling', async () => {
     const { store, sealer, audit, recoveryCodes, events } = await enrolled();
     const verify = new VerifyMfaUseCase(store, sealer, audit);
     const code = recoveryCodes[2].toUpperCase().replaceAll('-', ' ');
-    await expect(verify.execute({ userId: 'user-1', code, nowMs: NOW })).resolves.toBe(true);
-    await expect(verify.execute({ userId: 'user-1', code, nowMs: NOW })).resolves.toBe(false);
+    await expect(
+      verify.execute({ userId: 'user-1', code, tenantIds: TENANTS, nowMs: NOW }),
+    ).resolves.toBe(true);
+    await expect(
+      verify.execute({ userId: 'user-1', code, tenantIds: TENANTS, nowMs: NOW }),
+    ).resolves.toBe(false);
     expect((await store.find('user-1'))?.recoveryHashes).toHaveLength(9);
     expect(events.at(-1)).toMatchObject({
       action: 'mfa.recovery_code_used',
       targetUserId: 'user-1',
+      tenantIds: TENANTS,
     });
   });
 
@@ -233,6 +248,7 @@ describe('VerifyMfaUseCase', () => {
       new VerifyMfaUseCase(store, sealer, audit).execute({
         userId: 'user-2',
         code: totpAt(secret, NOW),
+        tenantIds: TENANTS,
         nowMs: NOW,
       }),
     ).resolves.toBe(false);
@@ -240,48 +256,120 @@ describe('VerifyMfaUseCase', () => {
   });
 });
 
-describe('ResetMfaUseCase (PROVISIONAL rules: owner/admin reset others, only the operator resets an owner)', () => {
+describe('ConfirmMfaUseCase race with a concurrent Enroll', () => {
+  it('does not confirm a secret other than the one the code proved', async () => {
+    const ctx = setup();
+    const enroll = new EnrollMfaUseCase(ctx.store, ctx.sealer, 'Acme');
+    await enroll.execute({ userId: 'user-1', email: 'a@example.com' });
+    const secret = Buffer.from((await ctx.store.find('user-1'))?.sealed.ciphertext ?? '', 'base64');
+    const realConfirm = ctx.store.confirm.bind(ctx.store);
+    // A second Enroll replaces the pending secret between verification and confirmation.
+    vi.spyOn(ctx.store, 'confirm').mockImplementation(async (...args) => {
+      await enroll.execute({ userId: 'user-1', email: 'a@example.com' });
+      return realConfirm(...args);
+    });
+    const result = await new ConfirmMfaUseCase(ctx.store, ctx.sealer, ctx.audit).execute({
+      userId: 'user-1',
+      code: totpAt(secret, NOW),
+      tenantIds: TENANTS,
+      nowMs: NOW,
+    });
+    expect(result).toBeNull();
+    expect((await ctx.store.find('user-1'))?.confirmedAt).toBeNull();
+    expect(ctx.events).toEqual([]);
+  });
+});
+
+describe('ResetMfaUseCase (PROVISIONAL: MFA is global, so the decision looks at ALL the target memberships)', () => {
   const reset = (ctx: ReturnType<typeof setup>) =>
     new ResetMfaUseCase(ctx.store, ctx.sessions, ctx.audit);
-  const target = (role: 'owner' | 'admin' | 'emisor' | 'lector') => ({ userId: 'user-1', role });
+  type Role = 'owner' | 'admin' | 'emisor' | 'lector';
+  const target = (...memberships: [string, Role][]) => ({
+    userId: 'user-1',
+    memberships: memberships.map(([tenantId, role]) => ({ tenantId, role })),
+  });
+  const user = (userId: string, role: Role, tenantId = 't-a') =>
+    ({ kind: 'user', userId, tenantId, role }) as const;
 
   it.each([
-    [{ kind: 'user', userId: 'boss', role: 'owner' }, 'lector'],
-    [{ kind: 'user', userId: 'boss', role: 'owner' }, 'admin'],
-    [{ kind: 'user', userId: 'adm', role: 'admin' }, 'emisor'],
-    [{ kind: 'operator' }, 'owner'],
-  ] as const)(
-    'lets %j reset a %s: removes MFA, revokes the sessions and audits',
-    async (actor, role) => {
-      const ctx = await enrolled();
-      await reset(ctx).execute({ actor, target: target(role) });
-      expect(await ctx.store.find('user-1')).toBeNull();
-      expect(ctx.revoked).toEqual(['user-1']);
-      expect(ctx.events.at(-1)).toMatchObject({
-        action: 'mfa.reset',
-        actor:
-          actor.kind === 'operator'
-            ? { type: 'operator', id: 'ops-cli' }
-            : { type: 'user', id: actor.userId },
-        targetUserId: 'user-1',
-      });
-    },
-  );
+    ['owner resets a lector', user('boss', 'owner'), target(['t-a', 'lector'])],
+    ['owner resets an admin', user('boss', 'owner'), target(['t-a', 'admin'])],
+    ['admin resets an emisor', user('adm', 'admin'), target(['t-a', 'emisor'])],
+    [
+      'admin resets a user who is lector in other tenants too',
+      user('adm', 'admin'),
+      target(['t-a', 'emisor'], ['t-b', 'lector']),
+    ],
+    ['the operator resets an owner', { kind: 'operator' } as const, target(['t-b', 'owner'])],
+  ])('%s: audits, revokes the sessions and removes MFA', async (_name, actor, who) => {
+    const ctx = await enrolled();
+    await reset(ctx).execute({ actor, target: who });
+    expect(await ctx.store.find('user-1')).toBeNull();
+    expect(ctx.revoked).toEqual(['user-1']);
+    expect(ctx.events.at(-1)).toMatchObject({
+      action: 'mfa.reset',
+      actor:
+        actor.kind === 'operator'
+          ? { type: 'operator', id: 'ops-cli' }
+          : { type: 'user', id: actor.userId },
+      targetUserId: 'user-1',
+      tenantIds: who.memberships.map((m) => m.tenantId),
+    });
+  });
 
   it.each([
-    [{ kind: 'user', userId: 'adm', role: 'admin' }, 'owner'],
-    [{ kind: 'user', userId: 'boss', role: 'owner' }, 'owner'],
-    [{ kind: 'user', userId: 'em', role: 'emisor' }, 'lector'],
-    [{ kind: 'user', userId: 'rd', role: 'lector' }, 'lector'],
-    [{ kind: 'user', userId: 'user-1', role: 'owner' }, 'owner'],
-  ] as const)('refuses %j resetting a %s, changing nothing', async (actor, role) => {
+    ['an admin cannot reset an owner', user('adm', 'admin'), target(['t-a', 'owner'])],
+    ['an owner cannot reset another owner', user('boss', 'owner'), target(['t-a', 'owner'])],
+    [
+      'an admin of A cannot reset a user who is emisor in A but owner in B',
+      user('adm', 'admin'),
+      target(['t-a', 'emisor'], ['t-b', 'owner']),
+    ],
+    [
+      'an admin cannot reset a user outside their tenant',
+      user('adm', 'admin'),
+      target(['t-b', 'lector']),
+    ],
+    ['an emisor cannot reset', user('em', 'emisor'), target(['t-a', 'lector'])],
+    ['a lector cannot reset', user('rd', 'lector'), target(['t-a', 'lector'])],
+    ['nobody resets themselves', user('user-1', 'owner'), target(['t-a', 'lector'])],
+    ['a target with no memberships needs the operator', user('boss', 'owner'), target()],
+  ])('%s, changing nothing', async (_name, actor, who) => {
     const ctx = await enrolled();
     const events = ctx.events.length;
-    await expect(reset(ctx).execute({ actor, target: target(role) })).rejects.toBeInstanceOf(
+    await expect(reset(ctx).execute({ actor, target: who })).rejects.toBeInstanceOf(
       MfaResetForbiddenError,
     );
     expect(await ctx.store.find('user-1')).not.toBeNull();
     expect(ctx.revoked).toEqual([]);
     expect(ctx.events).toHaveLength(events);
+  });
+
+  describe('failure order (not atomic across the three steps; every partial failure stays safe)', () => {
+    const actor = user('boss', 'owner');
+    const who = target(['t-a', 'lector']);
+
+    it('changes nothing when the audit fails (it is written first)', async () => {
+      const ctx = await enrolled();
+      vi.spyOn(ctx.audit, 'record').mockRejectedValue(new Error('audit down'));
+      await expect(reset(ctx).execute({ actor, target: who })).rejects.toThrow('audit down');
+      expect(await ctx.store.find('user-1')).not.toBeNull();
+      expect(ctx.revoked).toEqual([]);
+    });
+
+    it('keeps MFA in place when revoking the sessions fails, so the reset can be retried', async () => {
+      const ctx = await enrolled();
+      vi.spyOn(ctx.sessions, 'revokeAllForUser').mockRejectedValue(new Error('revoke down'));
+      await expect(reset(ctx).execute({ actor, target: who })).rejects.toThrow('revoke down');
+      expect(await ctx.store.find('user-1')).not.toBeNull();
+    });
+
+    it('is idempotent: running it again after a failed removal completes it', async () => {
+      const ctx = await enrolled();
+      vi.spyOn(ctx.store, 'remove').mockRejectedValueOnce(new Error('db down'));
+      await expect(reset(ctx).execute({ actor, target: who })).rejects.toThrow('db down');
+      await reset(ctx).execute({ actor, target: who });
+      expect(await ctx.store.find('user-1')).toBeNull();
+    });
   });
 });

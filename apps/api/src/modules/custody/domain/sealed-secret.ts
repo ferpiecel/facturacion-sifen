@@ -1,5 +1,5 @@
-/** What a sealed secret protects (ADR-0009): a tenant's CSC, its `.p12` or a webhook signing secret. */
-export type SecretKind = 'csc' | 'certificate' | 'webhook';
+/** What a sealed secret protects (ADR-0009): a tenant's CSC, its `.p12` a webhook signing secret or a portal user's TOTP secret. */
+export type SecretKind = 'csc' | 'certificate' | 'webhook' | 'mfa';
 
 /**
  * Identity a ciphertext is cryptographically bound to (AES-GCM AAD). Opening

@@ -19,7 +19,7 @@ describe('recovery codes', () => {
 
   it('hashes to a 64-character hex digest, never the code itself', () => {
     const [code] = generateRecoveryCodes();
-    const hash = hashRecoveryCode(code as string);
+    const hash = hashRecoveryCode(code);
     expect(hash).toMatch(/^[0-9a-f]{64}$/);
     expect(hash).not.toContain(code);
   });
@@ -32,7 +32,7 @@ describe('recovery codes', () => {
   it('finds the index of a stored hash and nothing for an unknown code', () => {
     const codes = generateRecoveryCodes();
     const hashes = codes.map(hashRecoveryCode);
-    expect(findRecoveryCode(codes[3] as string, hashes)).toBe(hashes[3]);
+    expect(findRecoveryCode(codes[3], hashes)).toBe(hashes[3]);
     expect(findRecoveryCode('aaaa-aaaa-aaaa-aaaa', hashes)).toBeNull();
     expect(findRecoveryCode('not a code', hashes)).toBeNull();
   });

@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { buildCdc } from '../../emission/domain/cdc.js';
 import { MAX_LOTE_DOCUMENTS, MAX_LOTE_MESSAGE_BYTES } from '../domain/lote-builder.js';
-import { LoteAssembler, type LoteAssemblyStore, type ReadyDocument } from './assemble-lotes.js';
+import {
+  LoteAssembler,
+  type LoteAssemblyStore,
+  type ReadyDocument,
+  type ResendCheck,
+  type ResendVerdict,
+} from './assemble-lotes.js';
 
 const cdcOf = (n: number, documentType = '01', rucBase = '44444401', rucDv = 7): string =>
   buildCdc({
@@ -196,5 +202,90 @@ describe('LoteAssembler', () => {
     };
     await new LoteAssembler({ store, measureMessage: small }).assemble();
     expect(asked).toEqual([docs.map((d) => d.cdc)]);
+  });
+
+  describe('resent documents (HU-E6-04)', () => {
+    const resent = (n: number): ReadyDocument => ({ ...doc(n), resent: true });
+    const setupResend = (
+      ready: readonly ReadyDocument[],
+      verdict: (document: ReadyDocument) => ResendVerdict | Promise<ResendVerdict>,
+      maxResendChecks?: number,
+    ) => {
+      const store = new InMemoryAssemblyStore(ready);
+      const checked: string[] = [];
+      const resendCheck: ResendCheck = {
+        verify: async (document) => {
+          checked.push(document.documentId);
+          return verdict(document);
+        },
+      };
+      return {
+        store,
+        checked,
+        assembler: new LoteAssembler({
+          store,
+          measureMessage: small,
+          resendCheck,
+          maxResendChecks,
+        }),
+      };
+    };
+
+    it('verifies only the resent documents, and sends those SIFEN still does not hold', async () => {
+      const normal = doc(1);
+      const again = resent(2);
+      const { assembler, store, checked } = setupResend([normal, again], () => 'send');
+      const result = await assembler.assemble();
+      expect(checked).toEqual([again.documentId]);
+      expect(store.created[0].documentIds).toEqual([normal.documentId, again.documentId]);
+      expect(result.skipped).toEqual([]);
+    });
+
+    it('keeps a document SIFEN approved in the meantime out of every lote (0422 race)', async () => {
+      const normal = doc(1);
+      const raced = resent(2);
+      const { assembler, store } = setupResend([normal, raced], () => 'approved');
+      const result = await assembler.assemble();
+      expect(store.created.flatMap((c) => c.documentIds)).toEqual([normal.documentId]);
+      expect(result.skipped).toEqual([{ cdc: raced.cdc, reason: 'resend-already-approved' }]);
+    });
+
+    it('keeps a document it could not verify out of the lote, for the next run', async () => {
+      const unsure = resent(2);
+      const { assembler, store } = setupResend([doc(1), unsure], () => 'wait');
+      const result = await assembler.assemble();
+      expect(store.created.flatMap((c) => c.documentIds)).not.toContain(unsure.documentId);
+      expect(result.skipped).toEqual([{ cdc: unsure.cdc, reason: 'resend-unverified' }]);
+    });
+
+    it('treats a throwing check as unverified and still assembles the rest', async () => {
+      const unsure = resent(2);
+      const { assembler, store } = setupResend([doc(1), unsure], () => {
+        throw new Error('db down');
+      });
+      const result = await assembler.assemble();
+      expect(store.created).toHaveLength(1);
+      expect(result.skipped).toEqual([{ cdc: unsure.cdc, reason: 'resend-unverified' }]);
+    });
+
+    it('verifies at most maxResendChecks per run (default 20) and leaves the rest unverified', async () => {
+      const many = Array.from({ length: 4 }, (_, i) => resent(i + 1));
+      const { assembler, checked, store } = setupResend(many, () => 'send', 2);
+      const result = await assembler.assemble();
+      expect(checked).toHaveLength(2);
+      expect(store.created.flatMap((c) => c.documentIds)).toHaveLength(2);
+      expect(result.skipped.map((s) => s.reason)).toEqual([
+        'resend-unverified',
+        'resend-unverified',
+      ]);
+    });
+
+    it('never sends a resent document when no check is configured', async () => {
+      const store = new InMemoryAssemblyStore([doc(1), resent(2)]);
+      const assembler = new LoteAssembler({ store, measureMessage: small });
+      const result = await assembler.assemble();
+      expect(store.created.flatMap((c) => c.documentIds)).toHaveLength(1);
+      expect(result.skipped).toHaveLength(1);
+    });
   });
 });

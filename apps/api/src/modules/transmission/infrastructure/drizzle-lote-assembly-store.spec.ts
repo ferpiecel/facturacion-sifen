@@ -122,8 +122,8 @@ describe('DrizzleLoteAssemblyStore', () => {
       await addDocument('submitted');
       await addDocument('cancelled');
       expect(await storeFor(tenantId).readyDocuments()).toEqual([
-        { documentId: queued.id, cdc: queued.cdc, xml: '<rDE>q</rDE>' },
-        { documentId: signed.id, cdc: signed.cdc, xml: '<rDE>s</rDE>' },
+        { documentId: queued.id, cdc: queued.cdc, xml: '<rDE>q</rDE>', resent: false },
+        { documentId: signed.id, cdc: signed.cdc, xml: '<rDE>s</rDE>', resent: false },
       ]);
     });
 
@@ -138,6 +138,20 @@ describe('DrizzleLoteAssemblyStore', () => {
       expect(await ids()).toEqual([]);
       await set({ transmissionHold: null });
       expect(await ids()).toEqual([doc.id]);
+    });
+
+    it('flags the documents the recovery queued again (resent_at), and only those', async () => {
+      const plain = await addDocument('queued');
+      const again = await addDocument('queued');
+      await handle.db
+        .update(documents)
+        .set({ resentAt: new Date('2026-10-05T12:00:00Z') })
+        .where(eq(documents.id, again.id));
+      const rows = await storeFor(tenantId).readyDocuments();
+      expect(rows.map((r) => [r.documentId, r.resent])).toEqual([
+        [plain.id, false],
+        [again.id, true],
+      ]);
     });
 
     it('leaves out documents that are held or still backing off, and takes them once due', async () => {

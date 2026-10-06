@@ -465,4 +465,50 @@ describe('CertificateVault', () => {
       expect(open).not.toHaveBeenCalled();
     });
   });
+
+  describe('currentFingerprint (cache revalidation, HU-E3-02)', () => {
+    it('returns the active, valid fingerprint without decrypting or auditing', async () => {
+      const { db, vault, a } = await setup();
+      const stored = await vault.add(db, {
+        tenantId: a,
+        environment: 'test',
+        p12: issue().p12,
+        password: PASSWORD,
+      });
+      const before = (await db.select().from(auditLog)).length;
+
+      expect(await vault.currentFingerprint(db, a, 'test')).toBe(stored.fingerprint);
+      expect(await vault.currentFingerprint(db, a, 'production')).toBeNull();
+      expect((await db.select().from(auditLog)).length).toBe(before);
+    });
+
+    it('returns null once revoked, replaced-away or outside the validity window', async () => {
+      const { db, vault, cipher, a } = await setup();
+      const first = await vault.add(db, {
+        tenantId: a,
+        environment: 'test',
+        p12: issue().p12,
+        password: PASSWORD,
+      });
+      const second = await vault.add(db, {
+        tenantId: a,
+        environment: 'test',
+        p12: issue().p12,
+        password: PASSWORD,
+        replace: true,
+      });
+      expect(await vault.currentFingerprint(db, a, 'test')).toBe(second.fingerprint);
+      expect(second.fingerprint).not.toBe(first.fingerprint);
+      const later = new CertificateVault(cipher, {
+        trustedPscRoots: [new X509Certificate(psc.pem)],
+        now: () => new Date(Date.now() + 400 * 86_400_000),
+      });
+      expect(await later.currentFingerprint(db, a, 'test')).toBeNull();
+      await db
+        .update(tenantCertificates)
+        .set({ status: 'revoked', revokedAt: new Date() })
+        .where(eq(tenantCertificates.id, second.id));
+      expect(await vault.currentFingerprint(db, a, 'test')).toBeNull();
+    });
+  });
 });

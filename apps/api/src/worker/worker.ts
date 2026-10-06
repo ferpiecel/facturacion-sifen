@@ -2,6 +2,7 @@ import { FakeSifenGateway } from '@sifen/sifen-gateway';
 import { assertNonPrivilegedSession, createNodePostgresDatabase } from '@sifen/db';
 import { readBoundedFile } from '../cli/bounded-file.js';
 import { createCertificateVault, createCscVault } from '../cli/ops.js';
+import { CachedCertificateVault } from '../modules/certificates/infrastructure/cached-certificate-vault.js';
 import { TRANSMISSION_WORKER_ACTOR } from '../modules/transmission/infrastructure/transmission-audit-actor.js';
 import {
   createCertificateSource,
@@ -71,6 +72,13 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
   const queue = createTransmissionQueue(connection, logger);
   const webhookQueue = createWebhookDeliveryQueue(connection, logger);
 
+  const certificateCache = new CachedCertificateVault(
+    createCertificateVault(env, readBoundedFile),
+    {
+      ttlMs: config.certificateCacheTtlMs,
+      maxEntries: config.certificateCacheMaxEntries,
+    },
+  );
   const processor = new TransmissionCycleProcessor({
     lock: createRedisTenantRunLock(connection, { ttlMs: config.lockTtlMs }),
     createCycle: createTenantCycleFactory({
@@ -78,7 +86,7 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
       gateway,
       certificates: createCertificateSource({
         db: appHandle.db,
-        vault: createCertificateVault(env, readBoundedFile),
+        vault: certificateCache,
         actor: TRANSMISSION_WORKER_ACTOR,
       }),
       cscs: createCscSource({ db: appHandle.db, vault: createCscVault(env) }),
@@ -131,6 +139,11 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
     const closeAll = async () => {
       const steps = [
         () => running.stop(),
+        // After the cycles stopped: zeroize every cached certificate and cancel the sweep timer.
+        () => {
+          certificateCache.clear();
+          return Promise.resolve();
+        },
         () => Promise.all([queue.close(), webhookQueue.close()]),
         () => connection.quit(),
         () => Promise.all([appHandle.close(), platformHandle.close()]),

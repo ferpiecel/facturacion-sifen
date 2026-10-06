@@ -17,6 +17,7 @@ import {
   releaseDocumentHold,
   releaseDocumentHolds,
   revokeApiKey,
+  revokeCertificate,
   setEstablishmentContact,
   setFiscalProfile,
   setTenantEnvironment,
@@ -193,6 +194,18 @@ export async function runOpsCommand(
       } finally {
         p12.fill(0);
       }
+    }
+    case 'certificate:revoke': {
+      const result = await revokeCertificate(db, {
+        tenantId: command.tenantId,
+        id: command.id,
+        fingerprint: command.fingerprint,
+        environment: command.environment,
+      });
+      const facts = `tenant ${command.tenantId} (${result.environment}, id ${result.id}, fingerprint ${result.fingerprint})`;
+      return result.revoked
+        ? `certificate revoked: ${facts}`
+        : `certificate already revoked: ${facts}`;
     }
     case 'csc:add': {
       if (!vault) {

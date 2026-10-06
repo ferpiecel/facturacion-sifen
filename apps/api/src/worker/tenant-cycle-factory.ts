@@ -73,6 +73,7 @@ export function createTenantCycleFactory({
         store: createDrizzleLoteAssemblyStore({ db, tenantId, now }),
         measureMessage: measureLoteMessage,
         logger,
+        now,
         resendCheck: new ResendPreflight({
           gateway,
           store: createDrizzleResendPreflightStore({ db, tenantId, now }),

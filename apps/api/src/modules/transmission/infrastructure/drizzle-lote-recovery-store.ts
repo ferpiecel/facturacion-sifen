@@ -9,10 +9,11 @@ import { DEFAULT_MAX_TRANSMISSION_ATTEMPTS } from './transmission-limits.js';
 import { TRANSMISSION_WORKER_ACTOR } from './transmission-audit-actor.js';
 
 /**
- * Hold codes (released with `document:release-hold`, which clears the hold only: an operator release of a
- * `recovery:0420-unresolved` document, never resent, now lets the next 0420 resend it automatically):
+ * Hold codes (released with `document:release-hold`, which clears the hold only):
  * - `recovery:0420-unresolved`: 0420 past the window, but the send instant is unknown (a lote that
- *   predates `send_attempted_at`), so it is never resent;
+ *   predates `send_attempted_at`), so it is never resent: released, the next 0420 holds it again. Only a
+ *   hold of this code inherited from a lote that does have `sent_at` (placed before the resend existed)
+ *   resends on the next 0420 after a release;
  * - `recovery:0420-after-resend`: 0420 again for a document already resent once;
  * - `recovery:attempts-exhausted`: the shared 0301 attempt cap leaves no room for a resend.
  */
@@ -26,6 +27,8 @@ export const RECOVERY_ATTEMPTS_EXHAUSTED_HOLD = 'recovery:attempts-exhausted';
  * yet" and nothing is done. There is no per-document counter: `transmission_attempts` belongs to the
  * 0301 backoff (it only caps the resend), and the time rule is enough.
  */
+/** Queries about one CDC stay at least 10 minutes apart, so the pre-send check waits this long. */
+const RESEND_CHECK_DELAY_MS = 10 * 60 * 1000;
 const HOLD_AFTER_MS = 48 * 60 * 60 * 1000;
 
 export interface DrizzleLoteRecoveryStoreOptions {
@@ -300,6 +303,8 @@ async function holdOrResend(
         status: 'queued',
         resentAt: sql`now()`,
         transmissionAttempts: attempts,
+        // The pre-send check is a query too: at least 10 minutes after this one (Guía 2024).
+        nextTransmissionAt: new Date(at.getTime() + RESEND_CHECK_DELAY_MS),
         updatedAt: at,
       })
       .where(eq(documents.id, doc.id));

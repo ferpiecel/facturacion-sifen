@@ -89,7 +89,8 @@ Out: synchronous emission (HU-E6-05), the 72 h deadline watch, portal UI.
 | 16 | `feat/hu-e6-04-resend-send-attempt` | T9-B | `claim` stamps `send_attempted_at`; the 48 h window counts from it |
 | 17 | `feat/hu-e6-04-resend-queue` | T9-B | Recovery queues once instead of holding: cap, audit, latest-lote rule, distinct hold codes, no resend without a send instant |
 | 18 | `feat/hu-e6-04-resend-e2e` | T9-B | End-to-end proofs (same-CDC resend, 0422 race, unreachable SIFEN, lote pending for days) and docs |
-| 19 | Pending | T6 | Docs and roadmap |
+| 19 | `feat/hu-e6-04-resend-hardening` | T9-B | Migration 0036 (`send_attempted_at` write-once), audited pre-check hold, injected clock, paced requeue, extended e2e, debt |
+| 20 | Pending | T6 | Docs and roadmap |
 
 ## Decisions of PRs 6 and 7
 
@@ -159,6 +160,25 @@ Out: synchronous emission (HU-E6-05), the 72 h deadline watch, portal UI.
 | Hold codes: `recovery:0420-after-resend`, `recovery:attempts-exhausted` and `recovery:0420-unresolved` (no send instant) | The operator sees why |
 | The assembly queries (`readyDocuments`, `cdcsInProcess`, `createLote`) ignore a lote that carries a document queued again after the lote existed (`resent_at` > lote `created_at`), like `recoverableInLote` does for recovery | A resent document is not blocked by the old lote when that lote stays `recovery` for its other documents. They do not need the latest-lote half of `recoverableInLote`: a newer lote carrying the document still blocks it |
 
+### Hardening of the resend chain (PR 19, from the re-review)
+
+| Fix | Rationale |
+|---|---|
+| `lotes.send_attempted_at` is write-once in `lotes_guard` (migration 0036, down script restores the 0032 guard) | Moving it would reopen the blocker: the 48 h window counts from it |
+| `holdResend` (pre-check hold `resend:precheck-unresolved`) writes `document.hold_placed` as system / transmission-worker in the same transaction | Same as every other hold |
+| The cycle factory injects `now` into `LoteAssembler` | The pre-check pacing and the 6 h hold follow the cycle clock, as the fake-clock specs assume |
+| A requeued document gets `next_transmission_at = recovery query + 10 min` | The pre-send check is a SIFEN query about the same CDC: Guía 2024 keeps queries 10 minutes apart. The e2e proves the check does not ask 8 minutes after the recovery's query |
+| JSDoc of the recovery store: a released `recovery:0420-unresolved` hold of a lote without send instant is held again, only holds inherited from a lote with `sent_at` resend | The code now means "no send instant" |
+
+### Debt left by the resend chain (not implemented)
+
+- The 6 h pre-check hold counts from `resent_at`, not from the first `wait` of the check. A document that sat in the queue for a while before its first check gets less than 6 h of tries. It needs the first-wait instant stored (a new column); not small, so left as debt.
+- A `submitted` document held after a resend (`recovery:0420-after-resend`) has no operator path to resend it: `document:release-hold` only clears the hold and it is queried again.
+- A held `queued` document of an unknown lote that became `processed`, once released, is assembled and sent without the pre-send check (behavior since PR 8: only `resent_at` documents are checked).
+- A late `record('sent')` of a lote swept to `unknown` ignores `stillCarries`: if the document has already been queued again by the recovery it can still be marked `submitted` by the late record.
+- The guard's EXISTS looks at any lote of the document in recovery, unknown or processed, not the latest one: a released document assembled in a newer lote that is still sending could be stamped by a writer that ignores `recoverableInLote` (the application never does).
+- The guard does not enforce that `resent_at` is `now()` (database clock): the ordering with lote creation relies on the only writer, `holdOrResend`.
+
 **Deploy behavior change.** Releasing (`document:release-hold`) a document already held as `recovery:0420-unresolved` before this change now makes its next post-window 0420 resend it automatically (once), where before it was only queried again. Documents of lotes without a send instant keep holding.
 
 ### Debt left by PRs 8 and 9 (not implemented)
@@ -195,4 +215,4 @@ Route: one writer, inline per task. Strict TDD: each PR has a RED commit (failin
 
 Review fixes applied after PRs #156 to #160 (log counts, DE Id match, recovery transitions); the findings above are recorded as debt, not implemented.
 
-PRs 1 to 16 implemented and verified locally (tsc, lint, depcruise, vitest --coverage at each branch tip). Pending: T6.
+PRs 1 to 19 implemented and verified locally (tsc, lint, depcruise, vitest --coverage at each branch tip). Pending: T6.

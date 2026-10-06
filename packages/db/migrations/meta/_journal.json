@@ -253,6 +253,13 @@
       "when": 1791246891897,
       "tag": "0035_lotes_send_attempted_at",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1791258374723,
+      "tag": "0036_lotes_send_attempted_write_once",
+      "breakpoints": true
     }
   ]
 }

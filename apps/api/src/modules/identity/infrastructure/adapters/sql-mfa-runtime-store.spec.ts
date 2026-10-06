@@ -10,7 +10,10 @@ import {
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { SealedSecret } from '../../../custody/domain/sealed-secret.js';
+import { SessionService } from '../../application/session.service.js';
+import { hashSessionToken } from '../../domain/session-token.js';
 import { SqlMfaRuntimeStore } from './sql-mfa-runtime-store.js';
+import { SqlSessionStore } from './sql-session-store.js';
 import { TenantMfaAuditLog } from './tenant-mfa-audit-log.js';
 
 const SEALED: SealedSecret = {
@@ -28,11 +31,11 @@ describe('SqlMfaRuntimeStore and TenantMfaAuditLog (HU-E1-07 login runtime)', ()
   let handle: DatabaseHandle;
   let store: SqlMfaRuntimeStore;
   let userId: string;
+  let pendingHash: string;
 
   beforeAll(async () => {
     handle = createPgliteDatabase();
     await handle.migrate();
-    store = new SqlMfaRuntimeStore(handle.db);
     const [row] = await handle.db
       .insert(users)
       .values({ email: 'r@example.com', passwordHash: HASH, displayName: 'R' })
@@ -42,6 +45,13 @@ describe('SqlMfaRuntimeStore and TenantMfaAuditLog (HU-E1-07 login runtime)', ()
     await handle.db
       .update(userMfa)
       .set({ confirmedAt: new Date(), lastUsedStep: 10, recoveryHashes: [hex('a'), hex('b')] });
+    const pending = await new SessionService(new SqlSessionStore(handle.db), {
+      accessTtlSeconds: 300,
+      refreshTtlSeconds: 600,
+      absoluteTtlSeconds: 1200,
+    }).issue(userId, { mfaVerified: false });
+    pendingHash = hashSessionToken(pending?.accessToken ?? '');
+    store = new SqlMfaRuntimeStore(handle.db, pendingHash);
   });
 
   afterAll(async () => {
@@ -55,7 +65,13 @@ describe('SqlMfaRuntimeStore and TenantMfaAuditLog (HU-E1-07 login runtime)', ()
       recoveryHashes: [hex('a'), hex('b')],
     });
     expect((await store.find(userId))?.confirmedAt).toBeInstanceOf(Date);
-    expect(await store.find('00000000-0000-4000-8000-000000000000')).toBeNull();
+    expect(
+      await new SqlMfaRuntimeStore(handle.db, hashSessionToken('nope')).find(userId),
+    ).toBeNull();
+    // The userId argument is ignored: the store only ever reads the pending session's own user.
+    expect(await store.find('00000000-0000-4000-8000-000000000000')).toMatchObject({
+      lastUsedStep: 10,
+    });
   });
 
   it('advances the step forward only and consumes a recovery code once', async () => {
@@ -63,6 +79,13 @@ describe('SqlMfaRuntimeStore and TenantMfaAuditLog (HU-E1-07 login runtime)', ()
     expect(await store.advanceStep(userId, 11)).toBe(false);
     expect(await store.consumeRecoveryCode(userId, hex('a'))).toBe(true);
     expect(await store.consumeRecoveryCode(userId, hex('a'))).toBe(false);
+  });
+
+  it('a store bound to no live pending session cannot spend a step or a code', async () => {
+    const stranger = new SqlMfaRuntimeStore(handle.db, hashSessionToken('nope'));
+    expect(await stranger.advanceStep(userId, 999)).toBe(false);
+    expect(await stranger.consumeRecoveryCode(userId, hex('b'))).toBe(false);
+    expect(pendingHash).toHaveLength(64);
   });
 
   it('does not support enrolment writes at runtime (enrolment is not available yet)', async () => {

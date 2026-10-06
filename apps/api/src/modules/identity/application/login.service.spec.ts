@@ -21,56 +21,66 @@ const full: IssuedSession = {
   refreshToken: 'f-refresh',
 };
 
-function setup(
-  opts: {
-    user?: typeof USER | null;
-    passwordOk?: boolean;
-    confirmedMfa?: boolean;
-    locked?: string[];
-    mfaOk?: boolean;
-  } = {},
-) {
+interface Options {
+  user?: typeof USER | null;
+  passwordOk?: boolean;
+  confirmedMfa?: boolean;
+  locked?: string[];
+  mfaOk?: boolean;
+  promoted?: IssuedSession | null;
+}
+
+function setup(opts: Options = {}) {
   const locked = new Set(opts.locked ?? []);
-  const failures: [string, ThrottleLimit][] = [];
+  const counts = new Map<string, number>();
+  const reservations: [string, ThrottleLimit][] = [];
+  const order: string[] = [];
   const events: AuthEvent[] = [];
+  /** Synchronous counter, like the SQL upsert: atomic per call, so concurrency in the tests is meaningful. */
+  const reserve = vi.fn<LoginThrottle['reserve']>().mockImplementation((subject, limit) => {
+    order.push(`reserve:${subject}`);
+    reservations.push([subject, limit]);
+    const n = (counts.get(subject) ?? 0) + 1;
+    counts.set(subject, n);
+    return Promise.resolve(!locked.has(subject) && n <= limit.max);
+  });
   const clear = vi.fn<LoginThrottle['clear']>().mockResolvedValue(undefined);
-  const throttle: LoginThrottle = {
-    isLocked: (s) => Promise.resolve(locked.has(s)),
-    recordFailure: (s, l) => {
-      failures.push([s, l]);
-      return Promise.resolve(false);
-    },
-    clear,
-  };
+  const throttle: LoginThrottle = { reserve, clear };
   const log: AuthEventLog = {
     record: (e) => {
       events.push(e);
       return Promise.resolve();
     },
   };
-  const verify = vi.fn<SecretVerifier['verify']>().mockResolvedValue(opts.passwordOk ?? true);
+  const verify = vi.fn<SecretVerifier['verify']>().mockImplementation(() => {
+    order.push('verify');
+    return Promise.resolve(opts.passwordOk ?? true);
+  });
   const sessions = {
-    issue: vi
+    issue: vi.fn().mockResolvedValue(pending),
+    authenticatePending: vi
       .fn()
-      .mockImplementation((_u: string, o: { mfaVerified: boolean }) =>
-        Promise.resolve(o.mfaVerified ? full : pending),
-      ),
-    authenticate: vi.fn().mockResolvedValue({
-      sessionId: 'pending-1',
-      userId: 'u-1',
-      activeTenantId: null,
-      mfaVerified: false,
-    }),
+      .mockResolvedValue({
+        sessionId: 'pending-1',
+        userId: 'u-1',
+        activeTenantId: null,
+        mfaVerified: false,
+      }),
+    promote: vi.fn().mockResolvedValue(opts.promoted === undefined ? full : opts.promoted),
     memberships: vi.fn().mockResolvedValue([{ tenantId: 't-a', tenantName: 'A', role: 'admin' }]),
     logout: vi.fn().mockResolvedValue(undefined),
   };
+  const mfaVerify = vi.fn().mockImplementation(() => {
+    order.push('mfa');
+    return Promise.resolve(opts.mfaOk ?? true);
+  });
   const mfa = {
     find: vi
       .fn()
       .mockResolvedValue(opts.confirmedMfa === false ? null : { confirmedAt: new Date() }),
     enroll: vi.fn().mockResolvedValue({ otpauthUri: 'otpauth://x', secretBase32: 'ABC' }),
     confirm: vi.fn().mockResolvedValue({ recoveryCodes: ['aaaa-bbbb-cccc-dddd'] }),
-    verify: vi.fn().mockResolvedValue(opts.mfaOk ?? true),
+    verify: mfaVerify,
   };
   const service = new LoginService({
     credentials: { findByEmail: () => Promise.resolve(opts.user === undefined ? USER : opts.user) },
@@ -84,7 +94,7 @@ function setup(
     verifyMfa: { execute: mfa.verify } as never,
     now: () => 1_000,
   });
-  return { service, verify, clear, failures, events, sessions, mfa };
+  return { service, verify, clear, reservations, order, events, sessions, mfa };
 }
 
 describe('LoginService.start (password step)', () => {
@@ -115,37 +125,48 @@ describe('LoginService.start (password step)', () => {
       { user: { ...USER, disabled: true }, passwordOk: true },
     ]) {
       const { service, sessions } = setup(opts);
-      const result = await service.start({ email: 'a@example.com', password: 'pw' });
-      expect(result).toEqual({ status: 'invalid' });
+      expect(await service.start({ email: 'a@example.com', password: 'pw' })).toEqual({
+        status: 'invalid',
+      });
       expect(sessions.issue).not.toHaveBeenCalled();
     }
   });
 
-  it('counts a failure against the account and the IP, with the documented limits, and audits it', async () => {
-    const { service, failures, events } = setup({ passwordOk: false });
+  it('RESERVES the attempt on the account and the IP before verifying the password', async () => {
+    const { service, reservations, order, events } = setup({ passwordOk: false });
     await service.start({ email: 'Ana@Example.com', password: 'bad', ip: '203.0.113.9' });
-    expect(failures).toEqual([
+    expect(reservations).toEqual([
       ['account:ana@example.com', ACCOUNT_LIMIT],
       ['ip:203.0.113.9', IP_LIMIT],
     ]);
+    expect(order.indexOf('verify')).toBeGreaterThan(order.indexOf('reserve:ip:203.0.113.9'));
     expect(events).toEqual([
-      expect.objectContaining({
-        event: 'login.password_failed',
-        userId: null,
-        subject: 'account:ana@example.com',
-      }),
+      expect.objectContaining({ event: 'login.password_failed', userId: null }),
     ]);
     expect(ACCOUNT_LIMIT).toEqual({ max: 5, windowSeconds: 900, lockSeconds: 900 });
-    expect(IP_LIMIT.max).toBe(20);
+    expect(IP_LIMIT.max).toBe(60);
+  });
+
+  it('lets at most ACCOUNT_LIMIT.max of a concurrent burst reach the real password check', async () => {
+    const { service, verify } = setup({ passwordOk: false });
+    await Promise.all(
+      Array.from({ length: 40 }, () =>
+        service.start({ email: 'ana@example.com', password: 'bad' }),
+      ),
+    );
+    const real = verify.mock.calls.filter(([, hash]) => hash === 'real-hash');
+    expect(real).toHaveLength(ACCOUNT_LIMIT.max);
   });
 
   it.each([['account:ana@example.com'], ['ip:203.0.113.9']])(
-    'refuses while %s is locked, still spending one verification, even with the right password',
+    'refuses while %s is locked, still spending one dummy verification, even with the right password',
     async (subject) => {
       const { service, verify, sessions, events } = setup({ locked: [subject] });
       expect(
         await service.start({ email: 'ana@example.com', password: 'right', ip: '203.0.113.9' }),
-      ).toEqual({ status: 'invalid' });
+      ).toEqual({
+        status: 'invalid',
+      });
       expect(verify).toHaveBeenCalledOnce();
       expect(verify).toHaveBeenCalledWith('right', DUMMY_HASH);
       expect(sessions.issue).not.toHaveBeenCalled();
@@ -167,50 +188,70 @@ describe('LoginService.start (password step)', () => {
 });
 
 describe('LoginService MFA steps', () => {
-  it('verifies the code and swaps the pending session for a fresh verified one (no fixation)', async () => {
+  it('verifies the code and PROMOTES the pending session to a fresh verified one (no fixation)', async () => {
     const { service, sessions, events, clear } = setup();
     expect(await service.verifyMfa({ pendingToken: 'p-access', code: '123456' })).toEqual({
       session: full,
       tenants: [{ tenantId: 't-a', tenantName: 'A', role: 'admin' }],
     });
-    expect(sessions.issue).toHaveBeenCalledWith('u-1', { mfaVerified: true });
-    expect(sessions.logout).toHaveBeenCalledWith('pending-1');
+    expect(sessions.promote).toHaveBeenCalledWith('pending-1');
     expect(events.map((e) => e.event)).toEqual(['login.succeeded']);
     expect(clear).toHaveBeenCalledWith('mfa:u-1');
   });
 
-  it('refuses a wrong code, counts it against the user and audits it, leaving the pending session', async () => {
-    const { service, failures, events, sessions } = setup({ mfaOk: false });
+  it('reserves the MFA attempt BEFORE checking the code', async () => {
+    const { service, reservations, order } = setup();
+    await service.verifyMfa({ pendingToken: 'p-access', code: '123456' });
+    expect(reservations).toEqual([['mfa:u-1', MFA_LIMIT]]);
+    expect(order).toEqual(['reserve:mfa:u-1', 'mfa']);
+  });
+
+  it('lets at most MFA_LIMIT.max of a concurrent burst of codes be checked', async () => {
+    const { service, mfa } = setup({ mfaOk: false });
+    await Promise.all(
+      Array.from({ length: 5000 }, (_, i) =>
+        service.verifyMfa({ pendingToken: 'p-access', code: String(i).padStart(6, '0') }),
+      ),
+    );
+    expect(mfa.verify).toHaveBeenCalledTimes(MFA_LIMIT.max);
+  });
+
+  it('revokes the pending session when the lock trips and never checks the code', async () => {
+    const { service, mfa, sessions } = setup({ locked: ['mfa:u-1'] });
+    expect(await service.verifyMfa({ pendingToken: 'p-access', code: '123456' })).toBeNull();
+    expect(mfa.verify).not.toHaveBeenCalled();
+    expect(sessions.logout).toHaveBeenCalledWith('pending-1');
+  });
+
+  it('refuses a wrong code and audits it, leaving the pending session until the lock trips', async () => {
+    const { service, events, sessions } = setup({ mfaOk: false });
     expect(await service.verifyMfa({ pendingToken: 'p-access', code: '000000' })).toBeNull();
-    expect(failures).toEqual([['mfa:u-1', MFA_LIMIT]]);
     expect(events.map((e) => e.event)).toEqual(['login.mfa_failed']);
+    expect(sessions.promote).not.toHaveBeenCalled();
     expect(sessions.logout).not.toHaveBeenCalled();
   });
 
-  it('refuses while the user is locked out of the second factor, without checking the code', async () => {
-    const { service, mfa } = setup({ locked: ['mfa:u-1'] });
+  it('issues no session when the pending one was revoked after the code was accepted', async () => {
+    const { service, events } = setup({ promoted: null });
     expect(await service.verifyMfa({ pendingToken: 'p-access', code: '123456' })).toBeNull();
-    expect(mfa.verify).not.toHaveBeenCalled();
+    expect(events.map((e) => e.event)).not.toContain('login.succeeded');
   });
 
   it('accepts only a pending session: no token, an unknown token or an already verified one', async () => {
     const { service, sessions } = setup();
-    sessions.authenticate.mockResolvedValueOnce(null);
+    sessions.authenticatePending.mockResolvedValueOnce(null);
     expect(await service.verifyMfa({ pendingToken: 'nope', code: '123456' })).toBeNull();
-    sessions.authenticate.mockResolvedValueOnce({
-      sessionId: 's',
-      userId: 'u-1',
-      activeTenantId: null,
-      mfaVerified: true,
-    });
-    expect(await service.verifyMfa({ pendingToken: 'full', code: '123456' })).toBeNull();
+    expect(sessions.authenticatePending).toHaveBeenCalledWith('nope');
   });
 
   it('enrols from the pending session and, once the first code is confirmed, returns recovery codes and a verified session', async () => {
     const { service, mfa, sessions } = setup({ confirmedMfa: false });
     expect(
       await service.beginEnrollment({ pendingToken: 'p-access', account: 'ana@example.com' }),
-    ).toEqual({ otpauthUri: 'otpauth://x', secretBase32: 'ABC' });
+    ).toEqual({
+      otpauthUri: 'otpauth://x',
+      secretBase32: 'ABC',
+    });
     expect(mfa.enroll).toHaveBeenCalledWith({ userId: 'u-1', email: 'ana@example.com' });
     const done = await service.completeEnrollment({ pendingToken: 'p-access', code: '123456' });
     expect(done).toMatchObject({ recoveryCodes: ['aaaa-bbbb-cccc-dddd'], session: full });
@@ -220,7 +261,7 @@ describe('LoginService MFA steps', () => {
       tenantIds: ['t-a'],
       nowMs: 1_000,
     });
-    expect(sessions.logout).toHaveBeenCalledWith('pending-1');
+    expect(sessions.promote).toHaveBeenCalledWith('pending-1');
   });
 
   it('does not confirm enrolment with a wrong code', async () => {
@@ -229,5 +270,14 @@ describe('LoginService MFA steps', () => {
     expect(
       await service.completeEnrollment({ pendingToken: 'p-access', code: '000000' }),
     ).toBeNull();
+  });
+
+  it('throttles the confirmation code like the second factor', async () => {
+    const { service, mfa, sessions } = setup({ confirmedMfa: false, locked: ['mfa:u-1'] });
+    expect(
+      await service.completeEnrollment({ pendingToken: 'p-access', code: '123456' }),
+    ).toBeNull();
+    expect(mfa.confirm).not.toHaveBeenCalled();
+    expect(sessions.logout).toHaveBeenCalledWith('pending-1');
   });
 });

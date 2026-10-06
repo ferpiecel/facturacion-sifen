@@ -11,6 +11,10 @@ export interface WorkerConfig {
   readonly concurrency: number;
   /** How long a tenant's run lock lives if the process dies mid-cycle. */
   readonly lockTtlMs: number;
+  /** How long an opened certificate stays in the worker's memory (ADR-0009: short TTL). */
+  readonly certificateCacheTtlMs: number;
+  /** Most (tenant, environment) certificates held in memory at once. */
+  readonly certificateCacheMaxEntries: number;
 }
 
 function integer(
@@ -47,5 +51,7 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv): WorkerConfig {
     cycleIntervalMs: integer(env, 'TRANSMISSION_CYCLE_INTERVAL_MS', 60_000, 5_000, 3_600_000),
     concurrency: integer(env, 'WORKER_CONCURRENCY', 4, 1, 32),
     lockTtlMs: integer(env, 'TENANT_RUN_LOCK_TTL_MS', 300_000, 10_000, 3_600_000),
+    certificateCacheTtlMs: integer(env, 'CERTIFICATE_CACHE_TTL_MS', 300_000, 1_000, 900_000),
+    certificateCacheMaxEntries: integer(env, 'CERTIFICATE_CACHE_MAX_ENTRIES', 64, 1, 1_000),
   };
 }

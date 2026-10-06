@@ -72,6 +72,7 @@ export class ConfirmMfaUseCase {
   async execute(input: {
     userId: string;
     code: string;
+    tenantIds: string[];
     nowMs: number;
   }): Promise<{ recoveryCodes: string[] } | null> {
     const record = await this.store.find(input.userId);
@@ -82,15 +83,17 @@ export class ConfirmMfaUseCase {
       const check = verifyTotp(secret, input.code, input.nowMs);
       if (!check.ok) return null;
       const recoveryCodes = generateRecoveryCodes();
-      if (
-        !(await this.store.confirm(input.userId, check.step, recoveryCodes.map(hashRecoveryCode)))
-      ) {
+      // Conditional on the secret the code was checked against: a concurrent Enroll that replaced it
+      // makes this confirm fail instead of activating a secret nobody proved.
+      const hashes = recoveryCodes.map(hashRecoveryCode);
+      if (!(await this.store.confirm(input.userId, check.step, hashes, record.sealed))) {
         return null;
       }
       await this.audit.record({
         action: 'mfa.enrolled',
         actor: { type: 'user', id: input.userId },
         targetUserId: input.userId,
+        tenantIds: input.tenantIds,
       });
       return { recoveryCodes };
     } finally {
@@ -107,11 +110,16 @@ export class VerifyMfaUseCase {
     private readonly audit: MfaAuditLog,
   ) {}
 
-  async execute(input: { userId: string; code: string; nowMs: number }): Promise<boolean> {
+  async execute(input: {
+    userId: string;
+    code: string;
+    tenantIds: string[];
+    nowMs: number;
+  }): Promise<boolean> {
     const record = await this.store.find(input.userId);
     if (!record?.confirmedAt) return false;
     if (!/^\d{6}$/.test(input.code)) {
-      return this.useRecoveryCode(input.userId, input.code, record.recoveryHashes);
+      return this.useRecoveryCode(input.userId, input.code, record.recoveryHashes, input.tenantIds);
     }
     const secret = await openSecret(this.sealer, record.sealed, input.userId);
     if (!secret) return false;
@@ -123,25 +131,46 @@ export class VerifyMfaUseCase {
     }
   }
 
-  private async useRecoveryCode(userId: string, code: string, hashes: string[]): Promise<boolean> {
+  private async useRecoveryCode(
+    userId: string,
+    code: string,
+    hashes: string[],
+    tenantIds: string[],
+  ): Promise<boolean> {
     const hash = findRecoveryCode(code, hashes);
     if (hash === null || !(await this.store.consumeRecoveryCode(userId, hash))) return false;
     await this.audit.record({
       action: 'mfa.recovery_code_used',
       actor: { type: 'user', id: userId },
       targetUserId: userId,
+      tenantIds,
     });
     return true;
   }
 }
 
 export type MfaResetActor =
-  { kind: 'operator' } | { kind: 'user'; userId: string; role: PortalRole };
+  | { kind: 'operator' }
+  /** The tenant the actor is acting in and their role there. */
+  | { kind: 'user'; userId: string; tenantId: string; role: PortalRole };
+
+export interface MfaResetTarget {
+  userId: string;
+  /** EVERY membership of the target: MFA is global, so the decision must see all of them. */
+  memberships: { tenantId: string; role: PortalRole }[];
+}
 
 /**
- * PROVISIONAL rules (product owner has not answered): an owner or admin resets another user's MFA, only
- * the operator resets an owner's, nobody resets their own through this path. The reset removes the
- * enrolment (the user enrols again at next login), ends every session and is audited.
+ * PROVISIONAL rules (product owner has not answered). MFA is global per user, so a reset affects every
+ * tenant the user belongs to. A non-operator may reset only when: the actor is owner or admin of the
+ * tenant they act in, the target is a member of that tenant, the target is an owner in NO tenant, and the
+ * target is not the actor. Anything else (an owner target, a target outside the tenant) needs the operator.
+ *
+ * Not atomic across its three steps, ordered so that every partial failure is safe and retryable:
+ * (1) audit the authorized reset in each affected tenant (a failure changes nothing); (2) revoke every
+ * session (a failure leaves MFA in place); (3) remove the enrolment, after which the user enrols again at
+ * next login. Each step is idempotent, so running the reset again completes it; the audit may then hold
+ * the event more than once, which records the retry rather than hiding it.
  */
 export class ResetMfaUseCase {
   constructor(
@@ -150,19 +179,15 @@ export class ResetMfaUseCase {
     private readonly audit: MfaAuditLog,
   ) {}
 
-  async execute(input: {
-    actor: MfaResetActor;
-    target: { userId: string; role: PortalRole };
-  }): Promise<void> {
+  async execute(input: { actor: MfaResetActor; target: MfaResetTarget }): Promise<void> {
     const { actor, target } = input;
     const allowed =
       actor.kind === 'operator' ||
       (actor.userId !== target.userId &&
         (actor.role === 'owner' || actor.role === 'admin') &&
-        target.role !== 'owner');
+        target.memberships.some((m) => m.tenantId === actor.tenantId) &&
+        target.memberships.every((m) => m.role !== 'owner'));
     if (!allowed) throw new MfaResetForbiddenError();
-    await this.store.remove(target.userId);
-    await this.sessions.revokeAllForUser(target.userId);
     await this.audit.record({
       action: 'mfa.reset',
       actor:
@@ -170,6 +195,9 @@ export class ResetMfaUseCase {
           ? { type: 'operator', id: 'ops-cli' }
           : { type: 'user', id: actor.userId },
       targetUserId: target.userId,
+      tenantIds: target.memberships.map((m) => m.tenantId),
     });
+    await this.sessions.revokeAllForUser(target.userId);
+    await this.store.remove(target.userId);
   }
 }

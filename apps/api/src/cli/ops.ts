@@ -22,6 +22,7 @@ import {
   setFiscalProfile,
   setTenantEnvironment,
 } from './commands.js';
+import { createPortalUser } from './user-commands.js';
 
 /**
  * Builds the CSC vault with the same KMS rules as the API (ADR-0009): fails
@@ -116,6 +117,16 @@ export async function runOpsCommand(
     case 'apikey:revoke': {
       await revokeApiKey(db, command.keyId);
       return `api key revoked: ${command.keyId}`;
+    }
+    case 'user:create': {
+      const result = await createPortalUser(db, {
+        tenantId: command.tenantId,
+        email: command.email,
+        displayName: command.displayName,
+        role: command.role,
+        password: command.password,
+      });
+      return `${result.created ? 'user created' : 'user added to tenant'}: ${result.userId} (${command.role})`;
     }
     case 'fiscal:set': {
       const result = await setFiscalProfile(db, {
@@ -246,14 +257,14 @@ async function resolveStdinSecrets(
   argv: string[],
   readStdin: () => Promise<string>,
 ): Promise<string[]> {
-  if (argv[0] === 'certificate:add') {
+  if (argv[0] === 'certificate:add' || argv[0] === 'user:create') {
     const index = argv.indexOf('--password');
     if (
       argv.some((arg) => arg.startsWith('--password=')) ||
       (index >= 0 && argv[index + 1] !== '-')
     ) {
       throw new OpsArgError(
-        '--password must be "-": the .p12 password is read from stdin, never from argv (value hidden)',
+        '--password must be "-": the password is read from stdin, never from argv (value hidden)',
       );
     }
     if (index < 0) return argv;

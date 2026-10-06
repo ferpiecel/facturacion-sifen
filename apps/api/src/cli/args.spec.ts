@@ -693,6 +693,6 @@ describe('parseOpsArgs user:create (HU-E1-07)', () => {
 
   it('rejects an unknown role and a missing flag', () => {
     expect(() => parseOpsArgs([...base.slice(0, -1), 'root'])).toThrow(OpsArgError);
-    expect(() => parseOpsArgs(base.slice(0, 7))).toThrow(/missing required --name/);
+    expect(() => parseOpsArgs(base.slice(0, 7))).toThrow(/missing required --role/);
   });
 });

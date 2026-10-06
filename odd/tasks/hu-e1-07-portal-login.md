@@ -50,6 +50,8 @@ Unblocks HU-E12-01/02 (portal list and detail) and is the `user` actor of the au
   and `--role`; an existing email is reused (its password is untouched), so an accountant joins a second tenant.
 - D9 TOTP secret AAD: kind `mfa`, tenant slot `platform`, label = user id (a user belongs to no single tenant).
 - D10 Recovery codes: 16 base32 chars (80 bits), SHA-256 (fast hash is fine for 80 random bits; passwords use Argon2id).
+- D11 Pre-auth access goes through SECURITY DEFINER functions owned by `session_resolver` (0039, 0040); `app_user` has no table grants.
+- D12 Sessions: one row per token generation, family id for reuse detection; two concurrent refreshes with one token leave one winner and revoke the family.
 - D6 Email stored lower-case (CHECK), unique.
 
 ## Product questions (answers needed; defaults proposed)
@@ -57,7 +59,7 @@ Unblocks HU-E12-01/02 (portal list and detail) and is the `user` actor of the au
 PROVISIONAL defaults, applied until the product owner answers (none is built yet; all affect S3 onwards):
 
 1. MFA mandatory for every role, enrolled at first login.
-2. Session: 8 h absolute, 30 min idle, no re-MFA while it lives.
+2. DECIDED by the PO (no longer provisional): access token 5 min, refresh token 10 min, sliding while the user keeps refreshing; an idle user has the refresh window as grace, then 401 and back to login. ABSOLUTE cap from login, also decided by the PO: 12 h in production, 20 min in development and test; a refresh never extends past it. Same values in every environment except that cap; each overridable by `SESSION_ACCESS_TTL_SECONDS` / `SESSION_REFRESH_TTL_SECONDS` / `SESSION_ABSOLUTE_TTL_SECONDS` (bounds, fail-fast at startup); an unknown `NODE_ENV` gets the production values. No JWT (D2).
 3. 10 one-time recovery codes at enrolment; owner/admin reset another user's MFA, the operator resets an owner's; audited, ends sessions.
 4. Role matrix: in the MVP all roles read documents and download XML/KuDE; only owner/admin manage users and roles, only owner manages owners.
 5. Partners do not log in to this portal in HU-E1-07 (separate principal in HU-E1-06, metadata only, ADR-0014).
@@ -92,7 +94,20 @@ no SSO in MVP (RF-24), roles list (PRD A4).
   - Security review fixes: reset is tenant-scoped over ALL target memberships (RED e9ce598, GREEN 360d7d0: audit first, revoke sessions, remove MFA last; events carry `tenantIds`; confirm conditional on the verified secret); `user_mfa` guard holes closed (RED 71bc873, GREEN c689013: NULL step, shrink-only recovery hashes, NULL hash elements).
   - Still PROVISIONAL and not wired: enrol-at-first-login enforcement comes with S4 (login), the wiring of audit to
     `recordAudit` and the CLI/endpoint for reset comes with S4/S5.
-- [ ] S4 Sessions + login/MFA use cases + lockout/rate limit + audit events; resolver role migration 0039.
+- [x] S4 sessions, login, tenant selection (Q2 and the absolute cap DECIDED; Q1 MFA-mandatory still PROVISIONAL), four stacked branches:
+  - S4a `feat/hu-e1-07-sessions` (on S3c): migration 0039 `user_sessions` (SHA-256 token hashes, family id, `absolute_expires_at`,
+    FORCE RLS, no app_user grant) and SECURITY DEFINER functions owned by the narrow `session_resolver` role: create, resolve,
+    rotate (conditional UPDATE; reuse of an old refresh revokes the family; clamps expiries to the cap), revoke, revoke all for user,
+    list memberships, set active tenant. RED d0f7c2c / 6731312 / 3c-series, GREEN 5c66a28 / 771797f.
+  - S4b `feat/hu-e1-07-session-service`: `loadSessionConfig` (fail fast), opaque tokens, `SessionStore` port, `SessionService`
+    (also the real `SessionRevoker` for the MFA reset) and `SqlSessionStore`. RED 1e2149f, GREEN f6fec6b.
+  - S4c `feat/hu-e1-07-login-db`: migration 0040 `auth_throttle`, append-only `auth_events` (D4), `resolve_user_credentials`, and the
+    SQL adapters. RED 3ccbdaf / 1276cc6, GREEN 2a335b9 / 796463f.
+  - S4d `feat/hu-e1-07-login`: `LoginService`: password opens a PENDING session, enrolment forced if no MFA, second factor swaps it
+    for a fresh verified session; generic failures; throttle account 5/15 min, IP 20/15 min, MFA 5/15 min (15 min locks; rationale in
+    code); events to `auth_events`. RED f66ed11, GREEN see tip.
+  - Not wired: the Nest module/DI, HTTP and cookies (S5), the MfaStore still on the operator connection (needs its own resolver
+    functions), login success audit into `audit_log` once a tenant is selected (S5), reset CLI/endpoint.
 - [ ] S5 API/BFF endpoints (`/auth/*`), cookie, CSRF, active-tenant selection and switch; ADR for D1-D4.
 - [ ] S6 Portal UI in `apps/web`: login, MFA, tenant picker, role-aware guard.
 

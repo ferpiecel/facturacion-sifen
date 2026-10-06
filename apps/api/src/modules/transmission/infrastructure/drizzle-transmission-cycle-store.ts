@@ -9,6 +9,7 @@ import {
   withTenantTransaction,
   type Database,
 } from '@sifen/db';
+import { recoverableInLote } from './recoverable-in-lote.js';
 import type { PendingLote, TransmissionCycleStore } from '../application/transmission-cycle.js';
 
 /** Same spacing as the lote poll: CDC queries are at least 10 minutes apart (Guía 2024). */
@@ -154,6 +155,7 @@ export function createDrizzleTransmissionCycleStore({
                       AND ${documents.id} = ${loteDocuments.documentId}
                     WHERE ${loteDocuments.loteId} = ${lotes.id} AND ${documents.status} = 'submitted'
                       AND ${documents.transmissionHold} IS NULL
+                      AND ${recoverableInLote(sql`${lotes.id}`)}
                   )`,
                 ),
               ),

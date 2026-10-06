@@ -31,14 +31,14 @@ Never commit real certificates; tests use `apps/api/test/support/test-pki.ts`.
 
 ## Slices
 
-- [ ] **S1 — `feat/hu-e3-02-certificate-revoke`: `certificate:revoke` (this branch).**
-  - [ ] T1.1 `parseOpsArgs`: `certificate:revoke --tenant T (--id U | --fingerprint F) [--env E]`.
-  - [ ] T1.2 `revokeCertificate` handler: tenant-scoped, idempotent (already revoked: no change, no new
+- [x] **S1 — `feat/hu-e3-02-certificate-revoke`: `certificate:revoke` (this branch).**
+  - [x] T1.1 `parseOpsArgs`: `certificate:revoke --tenant T (--id U | --fingerprint F) [--env E]`.
+  - [x] T1.2 `revokeCertificate` handler: tenant-scoped, idempotent (already revoked: no change, no new
         audit row, original `revoked_at` kept), unknown or other-tenant target is an error, fingerprint
         present in both environments requires `--env`, sealed blob never touched, audit
         `certificate.revoked` in the same transaction.
-  - [ ] T1.3 `runOpsCommand`/`runCli` wiring (no KMS key or vault needed) and README "Operación".
-  - [ ] T1.4 Signing refuses a revoked certificate: covered by a regression test (`CertificateNotFoundError`
+  - [x] T1.3 `runOpsCommand`/`runCli` wiring (no KMS key or vault needed) and README "Operación".
+  - [x] T1.4 Signing refuses a revoked certificate: covered by a regression test (`CertificateNotFoundError`
         from `open`, the transmission pipeline already holds the document as `signing:CertificateNotFoundError`).
 - [ ] **S2 — audited certificate access:** `certificate.added`/`certificate.replaced` audit in
       `CertificateVault.add` and `certificate.accessed` (fingerprint only, actor = signing flow) in `open`.
@@ -67,4 +67,4 @@ Whether that is the desired immediate effect, or a grace period is wanted, is a 
 
 ## Progress
 
-- Slice commits are recorded here as they land.
+- S1: RED 0a60b7d (6 failing specs: unknown subcommand), GREEN in the next commit. No migration needed.

@@ -81,7 +81,9 @@ describe('certificate:revoke', () => {
       // No master key, no PSC roots: revoking needs neither, so the CLI must not ask for them.
       env: { OPS_DATABASE_URL: 'x' },
       readStdin: () => Promise.reject(new Error('revoke never reads stdin')),
-      readFile: () => Promise.reject(new Error('revoke never reads files')),
+      readFile: () => {
+        throw new Error('revoke never reads files');
+      },
       out: (text) => out.push(text),
       err: (text) => err.push(text),
       openDb: () => ({ db, close: () => Promise.resolve() }),
@@ -164,6 +166,9 @@ describe('certificate:revoke', () => {
     expect(
       await db.select().from(auditLog).where(eq(auditLog.action, 'certificate.revoked')),
     ).toEqual([]);
+    const malformed = await revoke(db, ['--tenant', 'not-a-uuid', '--id', stored.id]);
+    expect(malformed.code).toBe(1);
+    expect(malformed.err).toContain('tenant not found');
     const unknown = await revoke(db, ['--tenant', a, '--fingerprint', 'f'.repeat(64)]);
     expect(unknown.code).toBe(1);
     expect(unknown.err).toContain('not found');
@@ -198,11 +203,12 @@ describe('certificate:revoke', () => {
 
   describe('arguments', () => {
     const tenant = '3f1f6f0e-6d0a-4f43-9d6e-5a1c2b3d4e5f';
+    const certId = '9b2f6f0e-6d0a-4f43-9d6e-5a1c2b3d4e5a';
     it('requires a tenant and exactly one of --id or --fingerprint', () => {
-      expect(parseOpsArgs(['certificate:revoke', '--tenant', tenant, '--id', 'abc'])).toEqual({
+      expect(parseOpsArgs(['certificate:revoke', '--tenant', tenant, '--id', certId])).toEqual({
         kind: 'certificate:revoke',
         tenantId: tenant,
-        id: 'abc',
+        id: certId,
         fingerprint: undefined,
         environment: undefined,
       });
@@ -218,9 +224,9 @@ describe('certificate:revoke', () => {
         ]),
       ).toMatchObject({ fingerprint: 'f'.repeat(64), environment: 'test' });
       for (const argv of [
-        ['--id', 'abc'],
+        ['--id', certId],
         ['--tenant', tenant],
-        ['--tenant', tenant, '--id', 'abc', '--fingerprint', 'f'.repeat(64)],
+        ['--tenant', tenant, '--id', certId, '--fingerprint', 'f'.repeat(64)],
       ]) {
         expect(() => parseOpsArgs(['certificate:revoke', ...argv])).toThrow(OpsArgError);
       }

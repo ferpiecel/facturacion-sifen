@@ -62,7 +62,7 @@ Out: synchronous emission (HU-E6-05), the 72 h deadline watch, portal UI.
 - [x] T5b Preserve the original hand-over reason (0364, 0360, window elapsed) instead of overwriting `last_poll_message` on each recovery pass.
 - [x] T7 (done in PR 10, `recovery-cap-audit`) Cap the CDC queries per run and per lote, and check the abort signal between sequential queries, so a large lote cannot hold the tenant lock or outlive its lease.
 - [x] T8 (done in PR 8, `recovery-hold`) Escalate a CDC that answers 0420 forever: hold or alert the document after a bound (age since send or attempts) instead of re-querying every 10 minutes indefinitely.
-- [~] T9 Resend after 0420 past the window (option B in progress: PR 12 guard and column, PR 13 requeue, PR 14 preflight). Decision (tech lead): C first (hold + alert, done as T8 in PR 8), then B (one audited `submitted -> queued` transition) in a later PR. B is not implemented.
+- [x] T9 Resend after 0420 past the window: C first (hold + alert, T8, PR 8), then B (one audited `submitted -> queued` transition, PRs 12 to 20). Review fixes of the chain are in PRs 14, 16 and 17.
 - [x] T10 A send that finishes after the stale sweep is still recorded (`sending` or `unknown` accepted), so its protocol is not lost (PR 9).
 - [x] T11 The stale sweep is bounded (`batch.sweep`, default 100, oldest first, strictly before the cutoff) (PR 9).
 - [ ] T6 Docs: roadmap checkbox, plan notes, PR descriptions.
@@ -82,10 +82,14 @@ Out: synchronous emission (HU-E6-05), the 72 h deadline watch, portal UI.
 | 9 | `feat/hu-e6-04-recovery-late-record` | T10, T11 | Late send record accepted on `unknown`; bounded sweep; mixed 0422/0420 and rollback tests |
 | 10 | `feat/hu-e6-04-recovery-cap-audit` | T7 | Per-run cap and abort of CDC queries, safe alert |
 | 11 | `feat/hu-e6-04-recovery-hold-audit` | T8 | `system` audit actor (migration 0033) and the hold audit row |
-| 12 | `feat/hu-e6-04-audited-resend` | T9-B | Migration 0034: `documents.resent_at` and the one audited `submitted -> queued` door in the guard |
-| 13 | Pending | T9-B | Recovery requeues once (instead of holding), cap, audit, lote settles |
-| 14 | Pending | T9-B | Pre-send verification (0422 race) in the assembler, cycle wiring, end-to-end |
-| 15 | Pending | T6 | Docs and roadmap |
+| 12 | `feat/hu-e6-04-audited-resend` | T9-B | Migration 0034 (`documents.resent_at`, audited `submitted -> queued` door, `resent_at` only set by the resend) and 0035 (`lotes.send_attempted_at`) |
+| 13 | `feat/hu-e6-04-resend-check` | T9-B | `ResendPreflight` and the assembler's `resendCheck` (0422 race), `resent` flag in `readyDocuments` |
+| 14 | `feat/hu-e6-04-resend-precheck-fixes` | T9-B | Pre-send check paced (10 min), held after 6 h (`resend:precheck-unresolved`), abortable; assembly queries ignore the lote a document left |
+| 15 | `feat/hu-e6-04-resend-preflight-store` | T9-B | Store that approves a document SIFEN found before it is sent: row lock, audit, factory wiring |
+| 16 | `feat/hu-e6-04-resend-send-attempt` | T9-B | `claim` stamps `send_attempted_at`; the 48 h window counts from it |
+| 17 | `feat/hu-e6-04-resend-queue` | T9-B | Recovery queues once instead of holding: cap, audit, latest-lote rule, distinct hold codes, no resend without a send instant |
+| 18 | `feat/hu-e6-04-resend-e2e` | T9-B | End-to-end proofs (same-CDC resend, 0422 race, unreachable SIFEN, lote pending for days) and docs |
+| 19 | Pending | T6 | Docs and roadmap |
 
 ## Decisions of PRs 6 and 7
 
@@ -141,7 +145,21 @@ Out: synchronous emission (HU-E6-05), the 72 h deadline watch, portal UI.
 | Cap: a document is requeued only while `transmission_attempts + 1` stays below the existing cap (5, `DEFAULT_MAX_TRANSMISSION_ATTEMPTS`), else it is held | The 0301 cap still applies to the shared counter |
 | Audit `document.resend_queued` as `system` / `transmission-worker`, in the same transaction | Every resend is traceable |
 | Pre-send verification: a resent document is queried by CDC again right before it is put in a lote; 0422 approves it instead, anything but a clean 0420 postpones it | A late approval inside SIFEN is the one way a resend could duplicate a CDC. Check-then-act inside a cycle run leaves seconds, not a cycle interval |
-| The recover step runs before assembly, so a requeued document is assembled and sent in the same run | Shrinks the window between the 0420 and the send |
+| A document the recovery queued again is owned by no lote while it waits and by the newer lote once it carries it (`recoverableInLote`: latest lote by creation, and `resent_at` after the lote's creation means waiting; both clocks are the database's) | The old lote must not keep asking about, or deciding for, a document that moved on; one document can sit in several lotes and lotes cannot lose members |
+| The recover step keeps its place after polling: the requeued document is assembled by the next run, and the pre-send check, not run order, is what protects it | Reordering would delay the first query of an unanswered send for no safety gain |
+
+### Review fixes of the resend chain
+
+| Fix | Rationale |
+|---|---|
+| The 48 h window counts from `lotes.send_attempted_at`, stamped when the lote is claimed (`pending -> sending`), then `sent_at`, then (hold only) the lote creation; the same instant rules the hold and the resend. A lote with no real send instant (legacy rows) never resends: it holds as `recovery:0420-unresolved` | Blocker: a lote pending for days and then sent with a timeout has `sent_at` NULL, so counting from creation resent a CDC SIFEN might still be processing (Guía: the same CDC in two lotes). The e2e "pending for days" proves it |
+| `resent_at` may only be set by the resend: rejected on INSERT, and on UPDATE only while a `submitted` or already `queued` document ends `queued` with attempts +1, not held, and a lote that is recovery, unknown or processed. (Narrower than "only submitted -> queued": the document of an unanswered send is already queued and must be stamped too) | Nothing else can mark a document as resent |
+| The pre-send check is paced: a document it cannot verify gets `next_transmission_at` +10 min, is held as `resend:precheck-unresolved` (with a warning) after 6 h from `resent_at` (36 tries), and the run signal stops the verification between queries | No stranded document, no starvation of the 20-per-run cap. 6 h is far longer than a passing SIFEN outage |
+| `approveFound` first locks the document row (FOR UPDATE) in a statement of its own, then checks for lotes in process (fresh snapshot), and writes `document.approved_on_resend_check` (system / transmission-worker). `createLote` already locks its documents FOR UPDATE and re-checks their status | An approved document can never sit in a pending lote: a single UPDATE ... WHERE NOT EXISTS would decide on an old snapshot |
+| Hold codes: `recovery:0420-after-resend`, `recovery:attempts-exhausted` and `recovery:0420-unresolved` (no send instant) | The operator sees why |
+| The assembly queries (`readyDocuments`, `cdcsInProcess`, `createLote`) ignore a lote that carries a document queued again after the lote existed (`resent_at` > lote `created_at`), like `recoverableInLote` does for recovery | A resent document is not blocked by the old lote when that lote stays `recovery` for its other documents. They do not need the latest-lote half of `recoverableInLote`: a newer lote carrying the document still blocks it |
+
+**Deploy behavior change.** Releasing (`document:release-hold`) a document already held as `recovery:0420-unresolved` before this change now makes its next post-window 0420 resend it automatically (once), where before it was only queried again. Documents of lotes without a send instant keep holding.
 
 ### Debt left by PRs 8 and 9 (not implemented)
 
@@ -177,4 +195,4 @@ Route: one writer, inline per task. Strict TDD: each PR has a RED commit (failin
 
 Review fixes applied after PRs #156 to #160 (log counts, DE Id match, recovery transitions); the findings above are recorded as debt, not implemented.
 
-PRs 1 to 9 implemented and verified locally (tsc, lint, depcruise, vitest --coverage at each branch tip). Pending: T6, T9-B.
+PRs 1 to 16 implemented and verified locally (tsc, lint, depcruise, vitest --coverage at each branch tip). Pending: T6.

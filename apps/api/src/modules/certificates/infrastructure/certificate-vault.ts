@@ -1,12 +1,15 @@
 import { createHash, type X509Certificate } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import {
   tenantCertificates,
   tenantFiscalProfiles,
   tenants,
   withTenantTransaction,
   type Database,
+  type TenantTx,
 } from '@sifen/db';
+import type { AuditEntry, RecordAudit } from '../../audit/application/ports/record-audit.port.js';
+import { recordAudit as defaultRecordAudit } from '../../audit/infrastructure/record-audit.js';
 import type { EnvelopeCipher } from '../../custody/application/envelope-cipher.js';
 import type { SealedSecret, SecretContext } from '../../custody/domain/sealed-secret.js';
 import { createRuc, formatRuc } from '../../fiscal-config/domain/ruc.js';
@@ -17,6 +20,17 @@ import {
 import { inspectPkcs12 } from './pkcs12-inspector.js';
 
 const CERTIFICATE_VERSION = 1;
+
+type AuditActor = AuditEntry['actor'];
+
+/** The operator CLI is the only writer of certificates today. */
+const OPERATOR_ACTOR: AuditActor = { type: 'operator', id: 'ops-cli' };
+
+/** Who decrypts a certificate and why; recorded in `certificate.accessed` (ADR-0009). */
+export interface CertificateAccess {
+  readonly actor: AuditActor;
+  readonly purpose: string;
+}
 
 type Environment = 'test' | 'production';
 
@@ -70,6 +84,8 @@ export interface AddCertificateParams {
   readonly password: string;
   /** Revokes the current active certificate in the same transaction instead of refusing. */
   readonly replace?: boolean;
+  /** Audit actor of the upload; defaults to the operator CLI. */
+  readonly actor?: AuditActor;
 }
 
 export interface StoredCertificate {
@@ -90,6 +106,8 @@ export interface OpenedCertificate {
 export interface CertificateVaultOptions {
   readonly trustedPscRoots: readonly X509Certificate[];
   readonly now?: () => Date;
+  /** Audit writer, injectable for tests; defaults to `recordAudit` (needs the tenant transaction context). */
+  readonly recordAudit?: RecordAudit<TenantTx>;
 }
 
 /**
@@ -120,7 +138,14 @@ export class CertificateVault {
    * @throws ActiveCertificateExistsError unless `replace` is set.
    */
   async add(db: Database, params: AddCertificateParams): Promise<StoredCertificate> {
-    const { tenantId, environment, p12, password, replace = false } = params;
+    const {
+      tenantId,
+      environment,
+      p12,
+      password,
+      replace = false,
+      actor = OPERATOR_ACTOR,
+    } = params;
     const tenant = (
       await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.id, tenantId))
     ).at(0);
@@ -159,9 +184,15 @@ export class CertificateVault {
       notBefore: inspection.notBefore,
       notAfter: inspection.notAfter,
     };
+    const audit = this.options.recordAudit ?? defaultRecordAudit;
     return db.transaction(async (tx) => {
+      // The audit rows commit or roll back with the write; recordAudit reads the tenant from here.
+      await tx.execute(sql`select set_config('app.current_tenant', ${tenantId}, true)`);
       const active = await tx
-        .select({ id: tenantCertificates.id })
+        .select({
+          id: tenantCertificates.id,
+          fingerprint: tenantCertificates.fingerprint,
+        })
         .from(tenantCertificates)
         .where(
           and(
@@ -170,33 +201,97 @@ export class CertificateVault {
             eq(tenantCertificates.status, 'active'),
           ),
         );
-      if (active.length > 0) {
+      const previous = active.at(0);
+      if (previous) {
         if (!replace) throw new ActiveCertificateExistsError(environment);
         await tx
           .update(tenantCertificates)
           .set({ status: 'revoked', revokedAt: new Date() })
-          .where(eq(tenantCertificates.id, active[0].id));
+          .where(eq(tenantCertificates.id, previous.id));
+        await audit(tx, {
+          actor,
+          action: 'certificate.revoked',
+          entity: { type: 'certificate', id: previous.id },
+          before: { status: 'active' },
+          after: { status: 'revoked', environment, fingerprint: previous.fingerprint },
+        });
       }
       const [row] = await tx
         .insert(tenantCertificates)
         .values({ tenantId, environment, sealed, ...stored })
         .returning({ id: tenantCertificates.id });
+      await audit(tx, {
+        actor,
+        action: previous ? 'certificate.replaced' : 'certificate.added',
+        entity: { type: 'certificate', id: row.id },
+        before: previous ? { previousId: previous.id, fingerprint: previous.fingerprint } : null,
+        after: {
+          environment,
+          fingerprint,
+          subjectRuc: stored.subjectRuc,
+          status: 'active',
+        },
+      });
       return { id: row.id, ...stored };
     });
+  }
+
+  /**
+   * The tenant's active certificate fingerprint when it is within its validity window, else null.
+   * Reads only the public columns: no decrypt, no audit. The cache re-checks it on every hit, so a
+   * revoke or replace made by another process takes effect on the next signing.
+   */
+  async currentFingerprint(
+    db: Database,
+    tenantId: string,
+    environment: Environment,
+  ): Promise<string | null> {
+    const now = (this.options.now ?? (() => new Date()))();
+    const rows = await withTenantTransaction(db, tenantId, (tx) =>
+      tx
+        .select({
+          fingerprint: tenantCertificates.fingerprint,
+          notBefore: tenantCertificates.notBefore,
+          notAfter: tenantCertificates.notAfter,
+        })
+        .from(tenantCertificates)
+        .where(
+          and(
+            eq(tenantCertificates.tenantId, tenantId),
+            eq(tenantCertificates.environment, environment),
+            eq(tenantCertificates.status, 'active'),
+          ),
+        ),
+    );
+    const row = rows.at(0);
+    return row && now >= row.notBefore && now <= row.notAfter ? row.fingerprint : null;
   }
 
   /**
    * Decrypts the tenant's active certificate in memory; the caller owns the returned buffer and
    * should zeroize it. Never logged, never persisted.
    *
+   * Every decrypt is audited (`certificate.accessed`, fingerprint and purpose only) in the same tenant
+   * transaction that reads the row, and committed BEFORE the key is touched: fail closed, since
+   * ADR-0009 requires every key access to be audited, so a failing audit means no decrypt. A
+   * cache (S3) must wrap this method so only decrypts, not cache hits, are audited.
+   *
    * @throws CertificateNotFoundError when there is no active certificate.
    * @throws CertificateValidityError when it is expired or not yet valid at `now`.
    * @throws SecretDecryptionError when the stored blob does not match its row identity.
    */
-  async open(db: Database, tenantId: string, environment: Environment): Promise<OpenedCertificate> {
-    const rows = await withTenantTransaction(db, tenantId, (tx) =>
-      tx
+  async open(
+    db: Database,
+    tenantId: string,
+    environment: Environment,
+    access: CertificateAccess,
+  ): Promise<OpenedCertificate> {
+    const audit = this.options.recordAudit ?? defaultRecordAudit;
+    const now = (this.options.now ?? (() => new Date()))();
+    const row = await withTenantTransaction(db, tenantId, async (tx) => {
+      const rows = await tx
         .select({
+          id: tenantCertificates.id,
           sealed: tenantCertificates.sealed,
           fingerprint: tenantCertificates.fingerprint,
           notBefore: tenantCertificates.notBefore,
@@ -210,13 +305,20 @@ export class CertificateVault {
             eq(tenantCertificates.environment, environment),
             eq(tenantCertificates.status, 'active'),
           ),
-        ),
-    );
-    const row = rows.at(0);
-    if (!row) throw new CertificateNotFoundError(environment);
-    const now = (this.options.now ?? (() => new Date()))();
-    if (now > row.notAfter) throw new CertificateValidityError('expired');
-    if (now < row.notBefore) throw new CertificateValidityError('not-yet-valid');
+        );
+      const found = rows.at(0);
+      if (!found) throw new CertificateNotFoundError(environment);
+      if (now > found.notAfter) throw new CertificateValidityError('expired');
+      if (now < found.notBefore) throw new CertificateValidityError('not-yet-valid');
+      await audit(tx, {
+        actor: access.actor,
+        action: 'certificate.accessed',
+        entity: { type: 'certificate', id: found.id },
+        before: null,
+        after: { environment, fingerprint: found.fingerprint, purpose: access.purpose },
+      });
+      return found;
+    });
     const plaintext = await this.cipher.open(
       row.sealed as SealedSecret,
       this.context(tenantId, environment, row.fingerprint),

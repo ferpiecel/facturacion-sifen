@@ -1,8 +1,9 @@
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import {
   apiKeys,
   documents,
   partners,
+  tenantCertificates,
   tenantEstablishments,
   tenantExpeditionPoints,
   tenantFiscalEconomicActivities,
@@ -12,6 +13,7 @@ import {
   withTenantTransaction,
   type Database,
   type TenantTx,
+  isValidTenantId,
 } from '@sifen/db';
 import { recordAudit } from '../modules/audit/infrastructure/record-audit.js';
 import type { TenantEnvironment } from '../modules/fiscal-config/domain/document-environment.js';
@@ -498,4 +500,83 @@ async function clearHold(
       after: { transmissionHold: null },
     });
   }
+}
+
+export interface RevokeCertificateParams {
+  tenantId: string;
+  /** Exactly one of `id` / `fingerprint`. */
+  id?: string;
+  fingerprint?: string;
+  /** Needed only when the fingerprint exists in both environments. */
+  environment?: 'test' | 'production';
+}
+
+export interface RevokeCertificateResult {
+  id: string;
+  environment: 'test' | 'production';
+  fingerprint: string;
+  /** False when it was already revoked: nothing changed and nothing was audited. */
+  revoked: boolean;
+}
+
+/**
+ * Operator CLI handler (HU-E3-02): revokes one tenant certificate by id or fingerprint. Revocation
+ * only flips `status`/`revoked_at` (the table guard forbids anything else): the sealed blob stays,
+ * so documents signed with it remain verifiable. Idempotent (an already revoked certificate is
+ * reported, never re-stamped or re-audited); a certificate of another tenant is "not found".
+ * Runs on the operator connection (the signing role cannot write), binding the tenant so the
+ * audit row lands in the tenant's log in the same transaction.
+ */
+export async function revokeCertificate(
+  db: Database,
+  { tenantId, id, fingerprint, environment }: RevokeCertificateParams,
+): Promise<RevokeCertificateResult> {
+  if (!isValidTenantId(tenantId)) {
+    throw new Error(`tenant not found: ${String(tenantId)}`);
+  }
+  const target = id !== undefined ? eq(tenantCertificates.id, id) : undefined;
+  const byFingerprint =
+    fingerprint !== undefined ? eq(tenantCertificates.fingerprint, fingerprint) : undefined;
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select set_config('app.current_tenant', ${tenantId}, true)`);
+    const rows = await tx
+      .select({
+        id: tenantCertificates.id,
+        environment: tenantCertificates.environment,
+        fingerprint: tenantCertificates.fingerprint,
+        status: tenantCertificates.status,
+      })
+      .from(tenantCertificates)
+      .where(
+        and(
+          eq(tenantCertificates.tenantId, tenantId),
+          target ?? byFingerprint,
+          environment === undefined ? undefined : eq(tenantCertificates.environment, environment),
+        ),
+      )
+      .for('update');
+    if (rows.length > 1) {
+      throw new Error('fingerprint exists in several environments; pass --env');
+    }
+    const row = rows.at(0);
+    if (!row) {
+      throw new Error(`certificate not found for tenant ${tenantId}`);
+    }
+    const result = { id: row.id, environment: row.environment, fingerprint: row.fingerprint };
+    if (row.status === 'revoked') {
+      return { ...result, revoked: false };
+    }
+    await tx
+      .update(tenantCertificates)
+      .set({ status: 'revoked', revokedAt: new Date() })
+      .where(and(eq(tenantCertificates.tenantId, tenantId), eq(tenantCertificates.id, row.id)));
+    await recordAudit(tx, {
+      actor: OPERATOR,
+      action: 'certificate.revoked',
+      entity: { type: 'certificate', id: row.id },
+      before: { status: 'active' },
+      after: { status: 'revoked', environment: row.environment, fingerprint: row.fingerprint },
+    });
+    return { ...result, revoked: true };
+  });
 }

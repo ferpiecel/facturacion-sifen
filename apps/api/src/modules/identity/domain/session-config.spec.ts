@@ -39,6 +39,12 @@ describe('loadSessionConfig (PO decision: 5 min access, 10 min refresh, absolute
     ['SESSION_ABSOLUTE_TTL_SECONDS', '604801'],
     ['SESSION_ACCESS_TTL_SECONDS', 'abc'],
     ['SESSION_ACCESS_TTL_SECONDS', '12.5'],
+    ['SESSION_ACCESS_TTL_SECONDS', '1e3'],
+    ['SESSION_ABSOLUTE_TTL_SECONDS', '0x12c'],
+    ['SESSION_REFRESH_TTL_SECONDS', ' 300 '],
+    ['SESSION_REFRESH_TTL_SECONDS', '300.0'],
+    ['SESSION_REFRESH_TTL_SECONDS', '+300'],
+    ['SESSION_REFRESH_TTL_SECONDS', '0b101'],
   ])('fails fast on %s=%s without echoing the value', (name, value) => {
     const load = () => loadSessionConfig({ NODE_ENV: 'production', [name]: value });
     expect(load).toThrow(SessionConfigError);

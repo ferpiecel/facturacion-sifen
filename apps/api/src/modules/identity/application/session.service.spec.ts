@@ -25,10 +25,42 @@ function setup(overrides: Partial<SessionStore> = {}) {
       .fn<SessionStore['listMemberships']>()
       .mockResolvedValue([{ tenantId: 't-a', tenantName: 'A', role: 'admin' }]),
     setActiveTenant: vi.fn<SessionStore['setActiveTenant']>().mockResolvedValue(true),
+    promote: vi.fn<SessionStore['promote']>().mockResolvedValue('s-2'),
   };
   const store: SessionStore = { ...mocks, ...overrides };
   return { store: mocks, service: new SessionService(store, CONFIG, () => NOW) };
 }
+
+describe('SessionService authenticate (verified only) and authenticatePending', () => {
+  const pendingRecord = { ...RECORD, mfaVerified: false };
+
+  it('refuses a pending session on the default path, so a guard cannot let a password-only user in', async () => {
+    const { service } = setup({ resolve: vi.fn().mockResolvedValue(pendingRecord) });
+    await expect(service.authenticate('t')).resolves.toBeNull();
+  });
+
+  it('authenticatePending accepts only pending sessions', async () => {
+    const pending = setup({ resolve: vi.fn().mockResolvedValue(pendingRecord) });
+    await expect(pending.service.authenticatePending('t')).resolves.toEqual(pendingRecord);
+    const verified = setup();
+    await expect(verified.service.authenticatePending('t')).resolves.toBeNull();
+    await expect(verified.service.authenticatePending('')).resolves.toBeNull();
+  });
+
+  it('promote swaps a pending session for a verified one built from fresh tokens and a new cap', async () => {
+    const { service, store } = setup({ promote: vi.fn().mockResolvedValue('s-2') });
+    const issued = await service.promote('s-1');
+    expect(issued).toMatchObject({ sessionId: 's-2' });
+    const call = store.promote.mock.calls[0];
+    expect(call?.[0]).toBe('s-1');
+    expect(call?.[1]).toMatchObject({ absoluteExpiresAt: new Date(NOW + 1_200_000) });
+  });
+
+  it('promote returns null when the pending session is no longer live', async () => {
+    const { service } = setup({ promote: vi.fn().mockResolvedValue(null) });
+    await expect(service.promote('s-1')).resolves.toBeNull();
+  });
+});
 
 describe('SessionService', () => {
   it('issues an opaque pair, storing only the hashes and the absolute cap computed at login', async () => {

@@ -64,9 +64,9 @@ no SSO in MVP (RF-24), roles list (PRD A4).
   - Checks: `@sifen/db` tsc, lint, `vitest run --coverage`.
 - [x] S2 `feat/hu-e1-07-password` (stacked on S1) — password domain and use cases in `apps/api/.../identity`: password
       policy, `PasswordHasher` port (Argon2 adapter, pinned `ARGON2_PARAMS`), `VerifyPasswordUseCase` (dummy hash),
-      `CreateUserUseCase`. RED 48342f3, GREEN follows. Verified: api tsc, lint, depcruise, 1587 tests, coverage 97.6% funcs.
-- [ ] S2b `feat/hu-e1-07-user-cli` (stacked on S2) — operator CLI `user:create` (`--password -` from stdin), creates or
-      reuses the user, adds the membership, audits as `operator` in the tenant. Split out to stay <= 400 lines.
+      `CreateUserUseCase`. RED 48342f3, GREEN 3b-series commits on the branch; S2b RED 39d4d85. Verified: api tsc, lint, depcruise, 1587 tests, coverage 97.6% funcs.
+- [x] S2b `feat/hu-e1-07-user-cli` (stacked on S2) — operator CLI `user:create` (`--password -` from stdin), creates or
+      reuses the user, adds the membership, audits as `operator` in the tenant. Split out to stay <= 400 lines. Verified: api tsc, lint, depcruise, 1604 tests, coverage 97.6% funcs.
 - [ ] S3 TOTP: domain (RFC 6238, replay guard), sealed secret column + migration 0038, enrol/verify use cases, recovery codes.
 - [ ] S4 Sessions + login/MFA use cases + lockout/rate limit + audit events; resolver role migration 0039.
 - [ ] S5 API/BFF endpoints (`/auth/*`), cookie, CSRF, active-tenant selection and switch; ADR for D1-D4.

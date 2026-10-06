@@ -215,7 +215,7 @@ describe('auth hardening', () => {
 
     describe('a caller cannot act on a user it holds no live pending session of', () => {
       it.each([
-        ['an unknown hash', async () => h('9')],
+        ['an unknown hash', () => Promise.resolve(h('9'))],
         [
           'a verified (non-pending) session',
           async (ctx: { create: (a: string, b: string, m: boolean) => Promise<string | null> }) => {

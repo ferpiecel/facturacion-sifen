@@ -21,6 +21,8 @@ import type { TenantEnvironment } from '../modules/fiscal-config/domain/document
 import { InvalidCscError, parseCsc } from '../modules/custody/domain/csc.js';
 import type { ApiKeyEnvironment } from '../modules/identity/domain/api-key.js';
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** Invalid argv or missing environment for the operator CLI (backlog HU-E1-05). */
 export class OpsArgError extends Error {}
 
@@ -63,6 +65,15 @@ export type OpsCommand =
       /** Read from stdin by the CLI (`--password -`), never from argv. */
       password: string;
       replace: boolean;
+    }
+  | {
+      kind: 'certificate:revoke';
+      tenantId: string;
+      /** Exactly one of `id` / `fingerprint` is set. */
+      id: string | undefined;
+      fingerprint: string | undefined;
+      /** Narrows a fingerprint that exists in both environments. */
+      environment: TenantEnvironment | undefined;
     };
 
 /**
@@ -452,6 +463,36 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
         p12Path: requireOption(values.p12, 'p12'),
         password: requireOption(values.password, 'password'),
         replace: values.replace === true,
+      };
+    }
+    case 'certificate:revoke': {
+      const { values } = parseStrict({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          id: { type: 'string' },
+          fingerprint: { type: 'string' },
+          env: { type: 'string' },
+        },
+      });
+      if ((values.id === undefined) === (values.fingerprint === undefined)) {
+        throw new OpsArgError('pass exactly one of --id or --fingerprint');
+      }
+      if (values.id !== undefined && !UUID_PATTERN.test(values.id)) {
+        throw new OpsArgError('--id must be a certificate uuid');
+      }
+      const fingerprint = values.fingerprint?.toLowerCase();
+      if (fingerprint !== undefined && !/^[0-9a-f]{64}$/.test(fingerprint)) {
+        throw new OpsArgError(
+          '--fingerprint must be 64 hex characters (sha-256 of the certificate)',
+        );
+      }
+      return {
+        kind: 'certificate:revoke',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        id: values.id,
+        fingerprint,
+        environment: values.env === undefined ? undefined : parseTenantEnvironment(values.env),
       };
     }
     default:

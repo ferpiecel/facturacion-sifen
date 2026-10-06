@@ -1,6 +1,10 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { Logger } from '@nestjs/common';
-import type { DataKey, KeyManagementService } from '../../application/ports/key-management.port.js';
+import {
+  KeyUnwrapError,
+  type DataKey,
+  type KeyManagementService,
+} from '../../application/ports/key-management.port.js';
 import { decodeCanonicalBase64 } from '../../domain/sealed-secret.js';
 
 const ALGORITHM = 'aes-256-gcm';
@@ -11,14 +15,6 @@ const TAG_BYTES = 16;
 const LOCAL_KEY_ID = 'local:v1';
 /** The only NODE_ENV values allowed to run without a configured master key. */
 const THROWAWAY_KEY_ENVS: ReadonlySet<string | undefined> = new Set(['development', 'test']);
-
-/** A wrapped data key could not be unwrapped. Carries no key material. */
-export class KeyUnwrapError extends Error {
-  constructor() {
-    super('data key could not be unwrapped');
-    this.name = 'KeyUnwrapError';
-  }
-}
 
 /**
  * {@link KeyManagementService} backed by an in-process master key (ADR-0009).

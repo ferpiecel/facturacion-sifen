@@ -267,6 +267,13 @@
       "when": 1791262943596,
       "tag": "0037_portal_users",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1791288169654,
+      "tag": "0038_user_mfa",
+      "breakpoints": true
     }
   ]
 }

@@ -31,6 +31,7 @@ export {
   tenantRequestSequences,
   tenants,
   tenantTimbrados,
+  userMfa,
   users,
   WEBHOOK_DELIVERY_STATUSES,
   WEBHOOK_EVENT_TYPES,

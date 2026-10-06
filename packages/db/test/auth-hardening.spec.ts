@@ -122,7 +122,7 @@ describe('auth hardening', () => {
         db,
         sql`select sessions_valid_after as v from users`,
       );
-      expect(row.v.getTime()).toBeGreaterThan(0);
+      expect(new Date(row.v).getTime()).toBeGreaterThan(0);
     });
 
     it('leaves no live verified session when revoke-all races a promotion', async () => {

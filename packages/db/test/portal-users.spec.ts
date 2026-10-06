@@ -61,6 +61,7 @@ describe('users and tenant_memberships', () => {
         'email',
         'id',
         'password_hash',
+        'sessions_valid_after',
         'updated_at',
       ].sort(),
     );

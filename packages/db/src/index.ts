@@ -9,6 +9,8 @@ export {
   apiKeys,
   auditActorType,
   auditLog,
+  authEvents,
+  authThrottle,
   DOCUMENT_STATUSES,
   documents,
   fiscalTaxpayerType,

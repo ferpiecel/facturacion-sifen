@@ -107,10 +107,13 @@ describe('auth throttle, auth events and credential lookup', () => {
     );
     await call(sql`select record_auth_event(null, ${KEY}, 'login.password_failed', '{}'::jsonb)`);
     const rows = await db.select().from(authEvents);
-    expect(rows.map((r) => [r.userId, r.event]).sort()).toEqual([
-      [ana, 'login.succeeded'],
-      [null, 'login.password_failed'],
-    ]);
+    expect(rows.map((r) => [r.userId, r.event])).toEqual(
+      expect.arrayContaining([
+        [ana, 'login.succeeded'],
+        [null, 'login.password_failed'],
+      ]),
+    );
+    expect(rows).toHaveLength(2);
     await expect(db.update(authEvents).set({ event: 'x' })).rejects.toThrow();
     await expect(db.delete(authEvents)).rejects.toThrow();
   });

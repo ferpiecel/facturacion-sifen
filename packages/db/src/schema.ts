@@ -228,6 +228,39 @@ export const userSessions = pgTable(
 );
 
 /**
+ * Failed-attempt counters (HU-E1-07 S4). `key` is the SHA-256 of what is being throttled (an email, an IP
+ * or a user), so unknown emails are throttled exactly like real ones and nothing identifying is stored.
+ * Written only through the `auth_throttle_*` functions of migration 0040.
+ */
+export const authThrottle = pgTable(
+  'auth_throttle',
+  {
+    key: text('key').primaryKey(),
+    failures: integer('failures').notNull().default(0),
+    windowStartedAt: timestamp('window_started_at', { withTimezone: true }).notNull().defaultNow(),
+    lockedUntil: timestamp('locked_until', { withTimezone: true }),
+  },
+  (table) => [check('auth_throttle_key_sha256', sql`${table.key} ~ '^[0-9a-f]{64}$'`)],
+);
+
+/**
+ * Append-only trail of authentication events that happen before a tenant is active (D4): failed logins,
+ * lockouts, MFA steps. `audit_log` is per tenant, so these live here; once a tenant is active its events
+ * go to `audit_log`. UPDATE, DELETE and TRUNCATE are rejected by a trigger (migration 0040).
+ */
+export const authEvents = pgTable('auth_events', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+  userId: uuid('user_id').references(() => users.id),
+  /** SHA-256 of the email or IP involved when there is no (known) user. */
+  subjectHash: text('subject_hash'),
+  event: varchar('event', { length: 64 }).notNull(),
+  detail: jsonb('detail')
+    .notNull()
+    .default(sql`'{}'::jsonb`),
+});
+
+/**
  * Which tenants a user belongs to and with which role (HU-E1-07). Tenant-scoped
  * under the standard `tenant_isolation` policy. A membership is never moved to
  * another tenant or user; only its role changes.

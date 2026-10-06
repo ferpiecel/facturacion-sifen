@@ -15,8 +15,16 @@ export interface MfaStore {
   find(userId: string): Promise<MfaRecord | null>;
   /** Creates or replaces an UNCONFIRMED enrolment. */
   savePending(userId: string, sealed: SealedSecret): Promise<void>;
-  /** Confirms a pending enrolment; false when there is none or it is already confirmed. */
-  confirm(userId: string, step: number, recoveryHashes: string[]): Promise<boolean>;
+  /**
+   * Confirms a pending enrolment; false when there is none, it is already confirmed, or its secret is no
+   * longer `expectedSealed` (a concurrent enrolment replaced the one the code was checked against).
+   */
+  confirm(
+    userId: string,
+    step: number,
+    recoveryHashes: string[],
+    expectedSealed: SealedSecret,
+  ): Promise<boolean>;
   /** Records `step` only if it is newer than the stored one; false means a replay or a lost race. */
   advanceStep(userId: string, step: number): Promise<boolean>;
   /** Removes one recovery hash; false when it was not there (already used or a lost race). */
@@ -42,6 +50,11 @@ export interface MfaAuditEvent {
   action: 'mfa.enrolled' | 'mfa.recovery_code_used' | 'mfa.reset';
   actor: { type: 'user' | 'operator'; id: string };
   targetUserId: string;
+  /**
+   * Tenants whose audit log receives the event (`audit_log` is per tenant, MFA is per user): the user's
+   * memberships for their own events, every membership of the target for a reset.
+   */
+  tenantIds: string[];
 }
 
 /** Writes the audit trail of MFA events (never codes or secrets). */

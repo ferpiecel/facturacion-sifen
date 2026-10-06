@@ -658,3 +658,41 @@ describe('parseOpsArgs establishment contact (HU-E6-02)', () => {
     );
   });
 });
+
+describe('parseOpsArgs user:create (HU-E1-07)', () => {
+  const base = [
+    'user:create',
+    '--tenant',
+    '4f6c1e0a-5b6d-4c1e-8f6a-0a1b2c3d4e5f',
+    '--email',
+    'Ana@Example.com',
+    '--name',
+    'Ana Pérez',
+    '--role',
+    'emisor',
+  ];
+
+  it('parses a new user with its password', () => {
+    expect(parseOpsArgs([...base, '--password', 'a secret'])).toEqual({
+      kind: 'user:create',
+      tenantId: '4f6c1e0a-5b6d-4c1e-8f6a-0a1b2c3d4e5f',
+      email: 'Ana@Example.com',
+      displayName: 'Ana Pérez',
+      role: 'emisor',
+      password: 'a secret',
+    });
+  });
+
+  it('leaves the password undefined when it is omitted (existing user)', () => {
+    expect(parseOpsArgs(base)).toMatchObject({ kind: 'user:create', password: undefined });
+  });
+
+  it.each(['owner', 'admin', 'emisor', 'lector'])('accepts the role %s', (role) => {
+    expect(parseOpsArgs([...base.slice(0, -1), role])).toMatchObject({ role });
+  });
+
+  it('rejects an unknown role and a missing flag', () => {
+    expect(() => parseOpsArgs([...base.slice(0, -1), 'root'])).toThrow(OpsArgError);
+    expect(() => parseOpsArgs(base.slice(0, 7))).toThrow(/missing required --role/);
+  });
+});

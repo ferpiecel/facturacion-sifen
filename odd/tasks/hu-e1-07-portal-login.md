@@ -52,7 +52,17 @@ Unblocks HU-E12-01/02 (portal list and detail) and is the `user` actor of the au
 
 ## Product questions (answers needed; defaults proposed)
 
-See the final report; defaults apply until answered. Settled by docs: invitation-only provisioning (PRD step 9, line 83),
+PROVISIONAL defaults, applied until the product owner answers (none is built yet; all affect S3 onwards):
+
+1. MFA mandatory for every role, enrolled at first login.
+2. Session: 8 h absolute, 30 min idle, no re-MFA while it lives.
+3. 10 one-time recovery codes at enrolment; owner/admin reset another user's MFA, the operator resets an owner's; audited, ends sessions.
+4. Role matrix: in the MVP all roles read documents and download XML/KuDE; only owner/admin manage users and roles, only owner manages owners.
+5. Partners do not log in to this portal in HU-E1-07 (separate principal in HU-E1-06, metadata only, ADR-0014).
+6. Forgotten password: email link, revokes sessions, MFA still required.
+7. Active tenant: remember the last one; switching needs no re-MFA.
+
+Not asked (settled by docs): invitation-only provisioning (PRD step 9, line 83),
 no SSO in MVP (RF-24), roles list (PRD A4).
 
 ## Slices
@@ -64,9 +74,9 @@ no SSO in MVP (RF-24), roles list (PRD A4).
   - Checks: `@sifen/db` tsc, lint, `vitest run --coverage`.
 - [x] S2 `feat/hu-e1-07-password` (stacked on S1) — password domain and use cases in `apps/api/.../identity`: password
       policy, `PasswordHasher` port (Argon2 adapter, pinned `ARGON2_PARAMS`), `VerifyPasswordUseCase` (dummy hash),
-      `CreateUserUseCase`. RED 48342f3, GREEN follows. Verified: api tsc, lint, depcruise, 1587 tests, coverage 97.6% funcs.
-- [ ] S2b `feat/hu-e1-07-user-cli` (stacked on S2) — operator CLI `user:create` (`--password -` from stdin), creates or
-      reuses the user, adds the membership, audits as `operator` in the tenant. Split out to stay <= 400 lines.
+      `CreateUserUseCase`. RED 48342f3, GREEN 2224f84 (+ 77eb58e); S2b RED 39d4d85, GREEN 6b56848. Verified: api tsc, lint, depcruise, 1587 tests, coverage 97.6% funcs.
+- [x] S2b `feat/hu-e1-07-user-cli` (stacked on S2) — operator CLI `user:create` (`--password -` from stdin), creates or
+      reuses the user, adds the membership, audits as `operator` in the tenant. Split out to stay <= 400 lines. Verified: api tsc, lint, depcruise, 1604 tests, coverage 97.6% funcs.
 - [ ] S3 TOTP: domain (RFC 6238, replay guard), sealed secret column + migration 0038, enrol/verify use cases, recovery codes.
 - [ ] S4 Sessions + login/MFA use cases + lockout/rate limit + audit events; resolver role migration 0039.
 - [ ] S5 API/BFF endpoints (`/auth/*`), cookie, CSRF, active-tenant selection and switch; ADR for D1-D4.
@@ -75,4 +85,5 @@ no SSO in MVP (RF-24), roles list (PRD A4).
 ## Progress
 
 - Route: explore delegated none (map done inline over 8 reads); writer inline (single writer, one DB slice).
+- S2/S2b done (branches `feat/hu-e1-07-password`, `feat/hu-e1-07-user-cli`, not pushed). Next: S3 once product questions 1 and 3 are answered.
 - S1 done: RED b1f5929 (9 failing), GREEN with migration 0037; @sifen/db tsc, lint, coverage and postgres-driver tests green; api tsc + depcruise green. Next: S2 (password domain), independent of the TOTP and session questions.

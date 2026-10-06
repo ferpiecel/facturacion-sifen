@@ -20,6 +20,7 @@ import { createTimbrado, type Timbrado } from '../modules/fiscal-config/domain/t
 import type { TenantEnvironment } from '../modules/fiscal-config/domain/document-environment.js';
 import { InvalidCscError, parseCsc } from '../modules/custody/domain/csc.js';
 import type { ApiKeyEnvironment } from '../modules/identity/domain/api-key.js';
+import { isPortalRole, type PortalRole } from '../modules/identity/domain/portal-role.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -37,6 +38,15 @@ export type OpsCommand =
       label: string | undefined;
     }
   | { kind: 'apikey:revoke'; keyId: string }
+  | {
+      kind: 'user:create';
+      tenantId: string;
+      email: string;
+      displayName: string;
+      role: PortalRole;
+      /** Read from stdin by the CLI (`--password -`), never from argv; omitted for an existing user. */
+      password: string | undefined;
+    }
   | { kind: 'fiscal:set'; tenantId: string; profile: FiscalProfile }
   | { kind: 'establishment:add'; tenantId: string; establishment: Establishment }
   | {
@@ -225,6 +235,30 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
     case 'apikey:revoke': {
       const { values } = parseStrict({ args: rest, options: { 'key-id': { type: 'string' } } });
       return { kind: 'apikey:revoke', keyId: requireOption(values['key-id'], 'key-id') };
+    }
+    case 'user:create': {
+      const { values } = parseStrict({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          email: { type: 'string' },
+          name: { type: 'string' },
+          role: { type: 'string' },
+          password: { type: 'string' },
+        },
+      });
+      const role = requireOption(values.role, 'role');
+      if (!isPortalRole(role)) {
+        throw new OpsArgError('--role must be owner, admin, emisor or lector');
+      }
+      return {
+        kind: 'user:create',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        email: requireOption(values.email, 'email'),
+        displayName: requireOption(values.name, 'name'),
+        role,
+        password: values.password,
+      };
     }
     case 'fiscal:set': {
       const { values } = parseStrict({

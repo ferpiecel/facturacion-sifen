@@ -15,6 +15,7 @@ import {
   tenantProbe,
   tenants,
   tenantTimbrados,
+  authEvents,
   userMfa,
   userSessions,
   users,
@@ -62,6 +63,10 @@ describe('schema foreign key targets', () => {
   it('tenant_memberships references tenants and users; users has no foreign keys', () => {
     expectForeignKeyTargets(tenantMemberships, ['tenants', 'users']);
     expectForeignKeyTargets(users, []);
+  });
+
+  it('auth_events.user_id references users', () => {
+    expectForeignKeyTargets(authEvents, ['users']);
   });
 
   it('user_sessions references users and tenants', () => {

@@ -148,7 +148,13 @@ describe('DrizzleLoteRecoveryStore', () => {
     const rows = await withTenantTransaction(handle.db, tenantId, (tx) =>
       tx.select().from(documents),
     );
-    for (const row of rows.filter((r) => cdc === undefined || r.cdc === cdc)) {
+    const waiting = rows.filter(
+      (r) =>
+        ['queued', 'submitted'].includes(r.status) &&
+        r.transmissionHold === null &&
+        r.resentAt === null,
+    );
+    for (const row of waiting.filter((r) => cdc === undefined || r.cdc === cdc)) {
       await withTenantTransaction(handle.db, tenantId, async (tx) => {
         await tx
           .update(documents)
@@ -664,7 +670,8 @@ describe('DrizzleLoteRecoveryStore', () => {
         transmissionAttempts: 4,
         transmissionHold: RECOVERY_AFTER_RESEND_HOLD,
       });
-      expect((await readDoc(CDC_A)).transmissionAttempts).toBe(0);
+      // A was only marked resent once (attempt 1): the hold of B did not touch it.
+      expect((await readDoc(CDC_A)).transmissionAttempts).toBe(1);
     });
 
     it('ignores failures and odd answers: they are not 0420 and never hold', async () => {
@@ -715,8 +722,9 @@ describe('DrizzleLoteRecoveryStore', () => {
         { resolutions: [], unresolved: [absent(CDC_C)] },
         { ...guard, expectedLastPolledAt: null },
       );
+      // That lote has no send instant (legacy): its document is held, never resent.
       expect((await readLoteById(second)).lastPollMessage).toBe(
-        `held for an operator (${RECOVERY_AFTER_RESEND_HOLD})`,
+        `held for an operator (${RECOVERY_UNRESOLVED_HOLD})`,
       );
     });
 
@@ -962,6 +970,9 @@ describe('DrizzleLoteRecoveryStore', () => {
 
     it('stamps a queued document of an unknown lote and leaves its lote', async () => {
       const unknown = await seedLote('unknown', 'queued', [CDC_C], SENT_AT);
+      await handle.db.execute(
+        sql`update lotes set send_attempted_at = ${SENT_AT} where id = ${unknown}`,
+      );
       await storeFor(tenantId).record(
         unknown,
         { resolutions: [], unresolved: [absent(CDC_C)] },

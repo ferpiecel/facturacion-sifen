@@ -105,7 +105,7 @@ no SSO in MVP (RF-24), roles list (PRD A4).
     SQL adapters. RED 3ccbdaf / 1276cc6, GREEN 2a335b9 / 796463f.
   - S4d `feat/hu-e1-07-login`: `LoginService`: password opens a PENDING session, enrolment forced if no MFA, second factor swaps it
     for a fresh verified session; generic failures; throttle account 5/15 min, IP 20/15 min, MFA 5/15 min (15 min locks; rationale in
-    code); events to `auth_events`. RED f66ed11, GREEN see tip.
+    code); events to `auth_events`. RED f66ed11, GREEN 688a669.
   - Not wired: the Nest module/DI, HTTP and cookies (S5), the MfaStore still on the operator connection (needs its own resolver
     functions), login success audit into `audit_log` once a tenant is selected (S5), reset CLI/endpoint.
 - [ ] S5 API/BFF endpoints (`/auth/*`), cookie, CSRF, active-tenant selection and switch; ADR for D1-D4.

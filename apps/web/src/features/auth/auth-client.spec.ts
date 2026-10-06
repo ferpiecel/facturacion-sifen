@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createAuthClient } from './auth-client';
+import { createAuthClient, type FetchLike } from './auth-client';
 
 type Reply = { status: number; body?: unknown };
 
 function stub(...replies: Reply[]) {
   const queue = [...replies];
-  const fetchImpl = vi.fn((_url: string, _init?: RequestInit) => {
+  const fetchImpl = vi.fn<FetchLike>(() => {
     const next = queue.shift();
     if (!next) throw new Error('unexpected request');
     const payload = next.body === undefined ? null : JSON.stringify(next.body);
@@ -44,7 +44,7 @@ describe('auth client', () => {
   });
 
   it('reports unavailable when the network fails', async () => {
-    const fetchImpl = vi.fn(() => Promise.reject(new TypeError('offline')));
+    const fetchImpl = vi.fn<FetchLike>(() => Promise.reject(new TypeError('offline')));
     const client = createAuthClient({ fetchImpl });
     await expect(client.login('a@b.py', 'x')).resolves.toEqual({ kind: 'unavailable' });
   });
@@ -132,7 +132,9 @@ describe('auth client', () => {
     await expect(client.logout()).resolves.toBeUndefined();
     expect(fetchImpl.mock.calls[0]?.[0]).toBe('/api/auth/logout');
 
-    const failing = createAuthClient({ fetchImpl: vi.fn(() => Promise.reject(new Error('x'))) });
+    const failing = createAuthClient({
+      fetchImpl: vi.fn<FetchLike>(() => Promise.reject(new Error('x'))),
+    });
     await expect(failing.logout()).resolves.toBeUndefined();
   });
 });

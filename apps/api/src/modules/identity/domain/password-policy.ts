@@ -21,41 +21,11 @@ export interface PasswordContext {
   email?: string;
 }
 
-const COMMON_BASES = new Set([
-  'password',
-  'passw0rd',
-  'contrasena',
-  'contraseña',
-  'qwerty',
-  'qwertyuiop',
-  'letmein',
-  'welcome',
-  'admin',
-  'administrator',
-  'iloveyou',
-  'monkey',
-  'dragon',
-  'football',
-  'baseball',
-  'master',
-  'login',
-  'abc',
-  'trustno',
-  'sunshine',
-  'princess',
-  'shadow',
-  'superman',
-  'batman',
-  'freedom',
-  'whatever',
-  'changeme',
-  'secret',
-  'hello',
-  'asuncion',
-  'paraguay',
-  'guarani',
-  'password123',
-]);
+const COMMON_BASES = new Set(
+  'password passw0rd contrasena contraseña qwerty qwertyuiop letmein welcome admin administrator iloveyou monkey dragon football baseball master login abc trustno sunshine princess shadow superman batman freedom whatever changeme secret hello asuncion paraguay guarani password123'.split(
+    ' ',
+  ),
+);
 
 /** Runs of these are "sequences": any substring of them, forwards or backwards, is predictable. */
 const SEQUENCES = [

@@ -37,7 +37,7 @@ describe('SqlMfaRuntimeStore and TenantMfaAuditLog (HU-E1-07 login runtime)', ()
       .insert(users)
       .values({ email: 'r@example.com', passwordHash: HASH, displayName: 'R' })
       .returning({ id: users.id });
-    userId = (row as { id: string }).id;
+    userId = row.id;
     await handle.db.insert(userMfa).values({ userId, sealed: SEALED });
     await handle.db
       .update(userMfa)

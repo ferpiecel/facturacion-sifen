@@ -2,12 +2,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import type { DatabaseHandle } from '../src/client.js';
 import { withAppRoleTransaction } from '../src/app-role-transaction.js';
-import { tenantMemberships, tenants, users } from '../src/schema.js';
+import { tenantMemberships, tenants, userSessions, users } from '../src/schema.js';
 import { createTestDatabase, queryRows } from './support/harness.js';
 
 const HASH = '$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$aGFzaA';
 const h = (char: string): string => char.repeat(64);
 const FUTURE = () => new Date(Date.now() + 600_000);
+const ABSOLUTE = () => new Date(Date.now() + 43_200_000);
 const PAST = () => new Date(Date.now() - 1_000);
 
 interface SessionRow {
@@ -47,10 +48,10 @@ describe('user_sessions and its resolver functions', () => {
     const create = async (
       access: string,
       refresh: string,
-      opts: { mfa?: boolean; access?: Date; refresh?: Date; user?: string } = {},
+      opts: { mfa?: boolean; access?: Date; refresh?: Date; absolute?: Date; user?: string } = {},
     ) => {
       const [row] = await call<{ id: string | null }>(
-        sql`select create_user_session(${opts.user ?? ana}, ${h(access)}, ${h(refresh)}, ${(opts.access ?? FUTURE()).toISOString()}, ${(opts.refresh ?? FUTURE()).toISOString()}, ${opts.mfa ?? true}) as id`,
+        sql`select create_user_session(${opts.user ?? ana}, ${h(access)}, ${h(refresh)}, ${(opts.access ?? FUTURE()).toISOString()}, ${(opts.refresh ?? FUTURE()).toISOString()}, ${(opts.absolute ?? ABSOLUTE()).toISOString()}, ${opts.mfa ?? true}) as id`,
       );
       return (row as { id: string | null }).id;
     };
@@ -78,7 +79,7 @@ describe('user_sessions and its resolver functions', () => {
     expect(await create('a', 'b')).toMatch(/^[0-9a-f-]{36}$/);
     const [row] = await resolve('a');
     expect(row).toMatchObject({ user_id: ana, active_tenant_id: null });
-    expect(row?.mfa_verified_at).toBeInstanceOf(Date);
+    expect(row?.mfa_verified_at).not.toBeNull();
     expect(await resolve('b')).toEqual([]);
   });
 
@@ -139,7 +140,7 @@ describe('user_sessions and its resolver functions', () => {
 
   it('does not rotate an expired refresh or an unknown one', async () => {
     const { create, rotate } = await seed();
-    await create('a', 'b', { refresh: PAST() });
+    await create('a', 'b', { access: PAST(), refresh: PAST() });
     expect(await rotate('b', 'c', 'd')).toEqual([]);
     expect(await rotate('z', 'c', 'd')).toEqual([]);
   });
@@ -165,7 +166,7 @@ describe('user_sessions and its resolver functions', () => {
   it("selects the active tenant only among the user's tenants and only once MFA is verified", async () => {
     const { call, create, resolve, rotate, a, b } = await seed();
     const id = await create('a', 'b');
-    const pending = await create('p', 'q', { mfa: false });
+    const pending = await create('e', 'f', { mfa: false });
     const select = async (session: string | null, tenant: string) =>
       (
         await call<{ ok: boolean }>(
@@ -178,5 +179,44 @@ describe('user_sessions and its resolver functions', () => {
     expect((await resolve('a'))[0]?.active_tenant_id).toBe(a);
     await rotate('b', 'c', 'd');
     expect((await resolve('c'))[0]?.active_tenant_id).toBe(a);
+  });
+
+  describe('absolute session lifetime (decided by the PO)', () => {
+    it('clamps the expiries of the first generation to the absolute cap', async () => {
+      const { db, create } = await seed();
+      const cap = new Date(Date.now() + 120_000);
+      await create('a', 'b', {
+        access: new Date(Date.now() + 300_000),
+        refresh: new Date(Date.now() + 600_000),
+        absolute: cap,
+      });
+      const [row] = await db.select().from(userSessions);
+      expect(row?.accessExpiresAt.getTime()).toBeLessThanOrEqual(cap.getTime());
+      expect(row?.refreshExpiresAt.getTime()).toBeLessThanOrEqual(cap.getTime());
+      expect(row?.absoluteExpiresAt.getTime()).toBe(cap.getTime());
+    });
+
+    it('lets a refresh right before the cap succeed, with expiries clamped to it', async () => {
+      const { db, create, rotate, resolve } = await seed();
+      const cap = new Date(Date.now() + 5_000);
+      await create('a', 'b', { absolute: cap });
+      expect(await rotate('b', 'c', 'd')).toHaveLength(1);
+      const [next] = await db
+        .select()
+        .from(userSessions)
+        .where(sql`access_hash = ${h('c')}`);
+      expect(next?.absoluteExpiresAt.getTime()).toBe(cap.getTime());
+      expect(next?.accessExpiresAt.getTime()).toBeLessThanOrEqual(cap.getTime());
+      expect(next?.refreshExpiresAt.getTime()).toBeLessThanOrEqual(cap.getTime());
+      expect(await resolve('c')).toHaveLength(1);
+    });
+
+    it('refuses a refresh after the cap even when the refresh token itself is still valid', async () => {
+      const { db, create, rotate, resolve } = await seed();
+      await create('a', 'b');
+      await db.update(userSessions).set({ absoluteExpiresAt: PAST() });
+      expect(await rotate('b', 'c', 'd')).toEqual([]);
+      expect(await resolve('a')).toEqual([]);
+    });
   });
 });

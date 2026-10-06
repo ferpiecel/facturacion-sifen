@@ -59,17 +59,15 @@ describe('SqlMfaRuntimeStore and TenantMfaAuditLog (HU-E1-07 login runtime)', ()
   });
 
   it('finds the enrolment, and null for a user without one', async () => {
-    expect(await store.find(userId)).toMatchObject({
+    expect(await store.find()).toMatchObject({
       sealed: SEALED,
       lastUsedStep: 10,
       recoveryHashes: [hex('a'), hex('b')],
     });
-    expect((await store.find(userId))?.confirmedAt).toBeInstanceOf(Date);
-    expect(
-      await new SqlMfaRuntimeStore(handle.db, hashSessionToken('nope')).find(userId),
-    ).toBeNull();
+    expect((await store.find())?.confirmedAt).toBeInstanceOf(Date);
+    expect(await new SqlMfaRuntimeStore(handle.db, hashSessionToken('nope')).find()).toBeNull();
     // The userId argument is ignored: the store only ever reads the pending session's own user.
-    expect(await store.find('00000000-0000-4000-8000-000000000000')).toMatchObject({
+    expect(await store.find()).toMatchObject({
       lastUsedStep: 10,
     });
   });

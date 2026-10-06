@@ -153,6 +153,37 @@ export const users = pgTable(
 );
 
 /**
+ * TOTP enrolment of a portal user (HU-E1-07): at most one per user. The secret exists only as an
+ * `EnvelopeCipher` blob (`sealed`, AAD bound to the user). `last_used_step` is the replay guard;
+ * `recovery_hashes` holds the SHA-256 of each unused one-time recovery code (at most 10). Like `users`
+ * it is global: FORCE RLS, no `app_user` grant, only the operator role and the resolver of a later slice.
+ */
+export const userMfa = pgTable(
+  'user_mfa',
+  {
+    userId: uuid('user_id')
+      .primaryKey()
+      .references(() => users.id),
+    sealed: jsonb('sealed').notNull(),
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+    lastUsedStep: bigint('last_used_step', { mode: 'number' }),
+    recoveryHashes: text('recovery_hashes')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check('user_mfa_recovery_hashes_valid', sql`user_mfa_hashes_valid(${table.recoveryHashes})`),
+    check(
+      'user_mfa_step_needs_confirmation',
+      sql`${table.lastUsedStep} IS NULL OR ${table.confirmedAt} IS NOT NULL`,
+    ),
+  ],
+);
+
+/**
  * Which tenants a user belongs to and with which role (HU-E1-07). Tenant-scoped
  * under the standard `tenant_isolation` policy. A membership is never moved to
  * another tenant or user; only its role changes.

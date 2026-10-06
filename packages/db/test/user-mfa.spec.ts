@@ -47,7 +47,7 @@ describe('user_mfa', () => {
         ])
         .returning()
     ).map((row) => row.id);
-    return { db, ana: ana as string, bob: bob as string };
+    return { db, ana: ana, bob: bob };
   }
 
   it('keeps the TOTP secret only inside sealed, with no clear-text column', async () => {
@@ -88,13 +88,11 @@ describe('user_mfa', () => {
     ).toContain('user_mfa_recovery_hashes_valid');
     expect(
       await causeOf(
-        db
-          .insert(userMfa)
-          .values({
-            userId: ana,
-            sealed: SEALED,
-            recoveryHashes: Array(11).fill(CODE_HASH) as string[],
-          }),
+        db.insert(userMfa).values({
+          userId: ana,
+          sealed: SEALED,
+          recoveryHashes: Array(11).fill(CODE_HASH) as string[],
+        }),
       ),
     ).toContain('user_mfa_recovery_hashes_valid');
     expect(

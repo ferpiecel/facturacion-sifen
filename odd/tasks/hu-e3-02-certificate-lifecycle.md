@@ -114,3 +114,16 @@ and `document:release-holds`.
   audit hash chain without bound.
 - Guards added: `add`/`replace` audit atomicity (a failed audit rolls back the certificate and keeps the old
   one active) and the access audit staying committed when the decrypt later fails.
+
+### S3b review fix: transient KMS failures are not decryption failures
+
+- `EnvelopeCipher.open` used a catch-all that turned any `unwrapDataKey` failure into
+  `SecretDecryptionError`; with S3b that would have parked every document of every tenant during a KMS
+  outage. The KMS port now signals "permanent" with `KeyUnwrapError` (unknown key id, bad wrap; the local
+  adapter already threw it, the class moved to the port) and everything else is `KeyServiceUnavailableError`
+  (transient, not in `DETERMINISTIC_SIGNING_ERRORS`, so the cycle retries). Unknown rejection types default
+  to transient: a wrongly retried document is cheap, a wrongly parked tenant is not. No cause or message is
+  carried over.
+- Residual: during an outage each attempt still commits one `certificate.accessed` row (audit precedes the
+  decrypt), bounded by the cycle interval and documents per cycle. Park reason does not distinguish
+  certificate from CSC (not done).

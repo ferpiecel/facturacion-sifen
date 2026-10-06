@@ -1,5 +1,6 @@
 import { X509Certificate } from 'node:crypto';
 import {
+  auditLog,
   createPgliteDatabase,
   tenantCertificates,
   tenantFiscalProfiles,
@@ -7,7 +8,7 @@ import {
   type DatabaseHandle,
 } from '@sifen/db';
 import { and, eq, sql } from 'drizzle-orm';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   createTestAuthority,
   issueTestPkcs12,
@@ -31,6 +32,10 @@ beforeAll(() => {
 });
 
 const PASSWORD = 'p12-secret-password';
+const ACCESS = {
+  actor: { type: 'system', id: 'transmission-worker' },
+  purpose: 'signing',
+} as const;
 
 /** Spec: HU-E3-01 (slice 2). Tenant `.p12` custody: validate, seal, store, open in memory only. */
 describe('CertificateVault', () => {
@@ -110,7 +115,7 @@ describe('CertificateVault', () => {
       password: PASSWORD,
     });
 
-    const opened = await vault.open(db, a, 'test');
+    const opened = await vault.open(db, a, 'test', ACCESS);
 
     expect(Buffer.compare(opened.p12, p12)).toBe(0);
     expect(opened.password).toBe(PASSWORD);
@@ -199,7 +204,7 @@ describe('CertificateVault', () => {
     expect(rows.find((r) => r.fingerprint === replaced.fingerprint)).toMatchObject({
       status: 'active',
     });
-    expect((await vault.open(db, a, 'test')).fingerprint).toBe(replaced.fingerprint);
+    expect((await vault.open(db, a, 'test', ACCESS)).fingerprint).toBe(replaced.fingerprint);
     // The other environment is independent.
     await vault.add(db, {
       tenantId: a,
@@ -211,16 +216,16 @@ describe('CertificateVault', () => {
 
   it('does not open a certificate that is missing, revoked or of another tenant', async () => {
     const { db, vault, a, b } = await setup();
-    await expect(vault.open(db, a, 'test')).rejects.toThrow(CertificateNotFoundError);
+    await expect(vault.open(db, a, 'test', ACCESS)).rejects.toThrow(CertificateNotFoundError);
     const { p12 } = issue();
     await vault.add(db, { tenantId: a, environment: 'test', p12, password: PASSWORD });
-    await expect(vault.open(db, b, 'test')).rejects.toThrow(CertificateNotFoundError);
-    await expect(vault.open(db, a, 'production')).rejects.toThrow(CertificateNotFoundError);
+    await expect(vault.open(db, b, 'test', ACCESS)).rejects.toThrow(CertificateNotFoundError);
+    await expect(vault.open(db, a, 'production', ACCESS)).rejects.toThrow(CertificateNotFoundError);
     await db
       .update(tenantCertificates)
       .set({ status: 'revoked', revokedAt: new Date() })
       .where(eq(tenantCertificates.tenantId, a));
-    await expect(vault.open(db, a, 'test')).rejects.toThrow(CertificateNotFoundError);
+    await expect(vault.open(db, a, 'test', ACCESS)).rejects.toThrow(CertificateNotFoundError);
   });
 
   it('refuses to open a certificate outside its validity window at the clock time', async () => {
@@ -235,16 +240,16 @@ describe('CertificateVault', () => {
       });
 
     const expired = await at(400 * day)
-      .open(db, a, 'test')
+      .open(db, a, 'test', ACCESS)
       .catch((e: unknown) => e);
     expect(expired).toBeInstanceOf(CertificateValidityError);
     expect((expired as CertificateValidityError).reason).toBe('expired');
     const early = await at(-5 * day)
-      .open(db, a, 'test')
+      .open(db, a, 'test', ACCESS)
       .catch((e: unknown) => e);
     expect(early).toBeInstanceOf(CertificateValidityError);
     expect((early as CertificateValidityError).reason).toBe('not-yet-valid');
-    expect((await at(0).open(db, a, 'test')).password).toBe(PASSWORD);
+    expect((await at(0).open(db, a, 'test', ACCESS)).password).toBe(PASSWORD);
   });
 
   it("does not open a blob moved to another tenant's row (AAD)", async () => {
@@ -264,7 +269,7 @@ describe('CertificateVault', () => {
       .update(tenantCertificates)
       .set({ sealed: rowA.sealed })
       .where(and(eq(tenantCertificates.tenantId, b), eq(tenantCertificates.environment, 'test')));
-    await expect(vault.open(db, b, 'test')).rejects.toThrow(SecretDecryptionError);
+    await expect(vault.open(db, b, 'test', ACCESS)).rejects.toThrow(SecretDecryptionError);
   });
 
   describe('sealed blob identity (AAD)', () => {
@@ -302,7 +307,7 @@ describe('CertificateVault', () => {
       const production = rows.find((r) => r.environment === 'production');
       if (!test || !production) throw new Error('seed failed');
       await swapSealed(db, production, test);
-      await expect(vault.open(db, a, 'test')).rejects.toThrow(SecretDecryptionError);
+      await expect(vault.open(db, a, 'test', ACCESS)).rejects.toThrow(SecretDecryptionError);
     });
 
     it('does not open a blob moved under another fingerprint of the same tenant', async () => {
@@ -325,7 +330,139 @@ describe('CertificateVault', () => {
       const revoked = rows.find((r) => r.status === 'revoked');
       if (!active || !revoked) throw new Error('seed failed');
       await swapSealed(db, revoked, active);
-      await expect(vault.open(db, a, 'test')).rejects.toThrow(SecretDecryptionError);
+      await expect(vault.open(db, a, 'test', ACCESS)).rejects.toThrow(SecretDecryptionError);
+    });
+  });
+
+  describe('audit (HU-E3-02)', () => {
+    const audits = (db: DatabaseHandle['db']) => db.select().from(auditLog).orderBy(auditLog.seq);
+
+    it('audits the first upload as certificate.added inside the write, without secrets', async () => {
+      const { db, vault, a } = await setup();
+      const { p12 } = issue();
+      const stored = await vault.add(db, {
+        tenantId: a,
+        environment: 'test',
+        p12,
+        password: PASSWORD,
+      });
+
+      const rows = await audits(db);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        tenantId: a,
+        actorType: 'operator',
+        actorId: 'ops-cli',
+        action: 'certificate.added',
+        entityType: 'certificate',
+        entityId: stored.id,
+        before: null,
+        after: {
+          environment: 'test',
+          fingerprint: stored.fingerprint,
+          subjectRuc: '80000005-6',
+          status: 'active',
+        },
+      });
+      expect(JSON.stringify(rows)).not.toContain(PASSWORD);
+      expect(JSON.stringify(rows)).not.toContain(p12.toString('base64'));
+    });
+
+    it('audits a replacement as certificate.replaced plus certificate.revoked for the old one', async () => {
+      const { db, vault, a } = await setup();
+      const first = await vault.add(db, {
+        tenantId: a,
+        environment: 'test',
+        p12: issue().p12,
+        password: PASSWORD,
+      });
+      const second = await vault.add(db, {
+        tenantId: a,
+        environment: 'test',
+        p12: issue().p12,
+        password: PASSWORD,
+        replace: true,
+      });
+
+      const rows = (await audits(db)).filter(
+        (r) => r.entityId !== first.id || r.action !== 'certificate.added',
+      );
+      expect(rows.map((r) => `${r.action}:${r.entityId}`).sort()).toEqual(
+        [`certificate.replaced:${second.id}`, `certificate.revoked:${first.id}`].sort(),
+      );
+      const replaced = rows.find((r) => r.action === 'certificate.replaced');
+      expect(replaced).toMatchObject({
+        before: { certificateId: first.id, fingerprint: first.fingerprint },
+        after: { fingerprint: second.fingerprint, environment: 'test' },
+      });
+      expect(rows.find((r) => r.action === 'certificate.revoked')).toMatchObject({
+        before: { status: 'active' },
+        after: { status: 'revoked', environment: 'test', fingerprint: first.fingerprint },
+      });
+    });
+
+    it('writes nothing when the upload is refused', async () => {
+      const { db, vault, a } = await setup();
+      await expect(
+        vault.add(db, {
+          tenantId: a,
+          environment: 'test',
+          p12: issue('RUC80000006-4').p12,
+          password: PASSWORD,
+        }),
+      ).rejects.toThrow(CertificateRejectedError);
+      expect(await audits(db)).toEqual([]);
+    });
+
+    it('audits each decrypt as certificate.accessed with actor and purpose, fingerprint only', async () => {
+      const { db, vault, a } = await setup();
+      const stored = await vault.add(db, {
+        tenantId: a,
+        environment: 'test',
+        p12: issue().p12,
+        password: PASSWORD,
+      });
+
+      await vault.open(db, a, 'test', ACCESS);
+
+      const accessed = (await audits(db)).filter((r) => r.action === 'certificate.accessed');
+      expect(accessed).toHaveLength(1);
+      expect(accessed[0]).toMatchObject({
+        tenantId: a,
+        actorType: 'system',
+        actorId: 'transmission-worker',
+        entityType: 'certificate',
+        entityId: stored.id,
+        after: { environment: 'test', fingerprint: stored.fingerprint, purpose: 'signing' },
+      });
+      expect(JSON.stringify(accessed)).not.toContain(PASSWORD);
+    });
+
+    it('audits nothing when there is no usable certificate to access', async () => {
+      const { db, vault, a } = await setup();
+      await expect(vault.open(db, a, 'test', ACCESS)).rejects.toThrow(CertificateNotFoundError);
+      expect(await audits(db)).toEqual([]);
+    });
+
+    it('fails closed: when the access cannot be audited nothing is decrypted', async () => {
+      const { db, cipher, a } = await setup();
+      const seeder = new CertificateVault(cipher, {
+        trustedPscRoots: [new X509Certificate(psc.pem)],
+      });
+      await seeder.add(db, {
+        tenantId: a,
+        environment: 'test',
+        p12: issue().p12,
+        password: PASSWORD,
+      });
+      const open = vi.spyOn(cipher, 'open');
+      const vault = new CertificateVault(cipher, {
+        trustedPscRoots: [new X509Certificate(psc.pem)],
+        recordAudit: () => Promise.reject(new Error('audit down')),
+      });
+
+      await expect(vault.open(db, a, 'test', ACCESS)).rejects.toThrow('audit down');
+      expect(open).not.toHaveBeenCalled();
     });
   });
 });

@@ -184,6 +184,50 @@ export const userMfa = pgTable(
 );
 
 /**
+ * One generation of a portal session's token pair (HU-E1-07 S4). Tokens are opaque random values; only
+ * their SHA-256 is stored. A refresh marks the row `rotated_at` and inserts the next generation in the
+ * same `family_id`; presenting an already rotated refresh revokes the family. `mfa_verified_at` is null
+ * for the pending session that exists between the password and the second factor. Global like `users`:
+ * FORCE RLS, no `app_user` grant; every access goes through the SECURITY DEFINER functions of migration
+ * 0039, owned by the narrow `session_resolver` role.
+ */
+export const userSessions = pgTable(
+  'user_sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    familyId: uuid('family_id').notNull(),
+    accessHash: text('access_hash').notNull(),
+    refreshHash: text('refresh_hash').notNull(),
+    accessExpiresAt: timestamp('access_expires_at', { withTimezone: true }).notNull(),
+    refreshExpiresAt: timestamp('refresh_expires_at', { withTimezone: true }).notNull(),
+    /** Hard cap set at login and inherited by every generation: a refresh never extends past it. */
+    absoluteExpiresAt: timestamp('absolute_expires_at', { withTimezone: true }).notNull(),
+    activeTenantId: uuid('active_tenant_id').references(() => tenants.id),
+    mfaVerifiedAt: timestamp('mfa_verified_at', { withTimezone: true }),
+    rotatedAt: timestamp('rotated_at', { withTimezone: true }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('user_sessions_access_hash_key').on(table.accessHash),
+    unique('user_sessions_refresh_hash_key').on(table.refreshHash),
+    index('user_sessions_user_id_idx').on(table.userId),
+    index('user_sessions_family_id_idx').on(table.familyId),
+    check(
+      'user_sessions_hashes_sha256',
+      sql`${table.accessHash} ~ '^[0-9a-f]{64}$' AND ${table.refreshHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      'user_sessions_refresh_outlives_access',
+      sql`${table.refreshExpiresAt} >= ${table.accessExpiresAt}`,
+    ),
+  ],
+);
+
+/**
  * Which tenants a user belongs to and with which role (HU-E1-07). Tenant-scoped
  * under the standard `tenant_isolation` policy. A membership is never moved to
  * another tenant or user; only its role changes.

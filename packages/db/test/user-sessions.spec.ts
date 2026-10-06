@@ -53,7 +53,7 @@ describe('user_sessions and its resolver functions', () => {
       const [row] = await call<{ id: string | null }>(
         sql`select create_user_session(${opts.user ?? ana}, ${h(access)}, ${h(refresh)}, ${(opts.access ?? FUTURE()).toISOString()}, ${(opts.refresh ?? FUTURE()).toISOString()}, ${(opts.absolute ?? ABSOLUTE()).toISOString()}, ${opts.mfa ?? true}) as id`,
       );
-      return (row as { id: string | null }).id;
+      return row.id;
     };
     const resolve = (access: string) =>
       call<SessionRow>(sql`select * from resolve_user_session(${h(access)})`);
@@ -79,7 +79,7 @@ describe('user_sessions and its resolver functions', () => {
     expect(await create('a', 'b')).toMatch(/^[0-9a-f-]{36}$/);
     const [row] = await resolve('a');
     expect(row).toMatchObject({ user_id: ana, active_tenant_id: null });
-    expect(row?.mfa_verified_at).not.toBeNull();
+    expect(row.mfa_verified_at).not.toBeNull();
     expect(await resolve('b')).toEqual([]);
   });
 
@@ -108,7 +108,7 @@ describe('user_sessions and its resolver functions', () => {
     const { create, resolve, rotate } = await seed();
     await create('a', 'b', { mfa: false });
     const [row] = await resolve('a');
-    expect(row?.mfa_verified_at).toBeNull();
+    expect(row.mfa_verified_at).toBeNull();
     expect(await rotate('b', 'c', 'd')).toEqual([]);
   });
 
@@ -150,7 +150,7 @@ describe('user_sessions and its resolver functions', () => {
     await create('a', 'b');
     await create('c', 'd');
     const [row] = await call<{ n: number }>(sql`select revoke_user_sessions(${ana}) as n`);
-    expect(row?.n).toBe(2);
+    expect(row.n).toBe(2);
     expect(await resolve('a')).toEqual([]);
     expect(await resolve('c')).toEqual([]);
   });
@@ -191,9 +191,9 @@ describe('user_sessions and its resolver functions', () => {
         absolute: cap,
       });
       const [row] = await db.select().from(userSessions);
-      expect(row?.accessExpiresAt.getTime()).toBeLessThanOrEqual(cap.getTime());
-      expect(row?.refreshExpiresAt.getTime()).toBeLessThanOrEqual(cap.getTime());
-      expect(row?.absoluteExpiresAt.getTime()).toBe(cap.getTime());
+      expect(row.accessExpiresAt.getTime()).toBeLessThanOrEqual(cap.getTime());
+      expect(row.refreshExpiresAt.getTime()).toBeLessThanOrEqual(cap.getTime());
+      expect(row.absoluteExpiresAt.getTime()).toBe(cap.getTime());
     });
 
     it('lets a refresh right before the cap succeed, with expiries clamped to it', async () => {
@@ -205,9 +205,9 @@ describe('user_sessions and its resolver functions', () => {
         .select()
         .from(userSessions)
         .where(sql`access_hash = ${h('c')}`);
-      expect(next?.absoluteExpiresAt.getTime()).toBe(cap.getTime());
-      expect(next?.accessExpiresAt.getTime()).toBeLessThanOrEqual(cap.getTime());
-      expect(next?.refreshExpiresAt.getTime()).toBeLessThanOrEqual(cap.getTime());
+      expect(next.absoluteExpiresAt.getTime()).toBe(cap.getTime());
+      expect(next.accessExpiresAt.getTime()).toBeLessThanOrEqual(cap.getTime());
+      expect(next.refreshExpiresAt.getTime()).toBeLessThanOrEqual(cap.getTime());
       expect(await resolve('c')).toHaveLength(1);
     });
 

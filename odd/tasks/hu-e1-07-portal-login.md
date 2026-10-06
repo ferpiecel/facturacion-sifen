@@ -109,7 +109,14 @@ no SSO in MVP (RF-24), roles list (PRD A4).
   - Security review fixes (RED/GREEN on each branch, merged forward): atomic attempt reservation `auth_throttle_reserve` before verifying (concurrency tests: 25 DB attempts, 40 password and 5000 MFA attempts reach the real check at most max times), `AUTH_SUBJECT_PEPPER` HMAC of stored subjects (required outside development/test), `promote_user_session` for an atomic pending-to-verified swap, `authenticate` verified-only plus `authenticatePending`, strict decimal TTL parsing. IP limit now counts attempts (60/15 min). Open product risk for the PO: enrolment takeover by whoever knows the password of a user without MFA.
   - Not wired: the Nest module/DI, HTTP and cookies (S5), the MfaStore still on the operator connection (needs its own resolver
     functions), login success audit into `audit_log` once a tenant is selected (S5), reset CLI/endpoint.
-- [ ] S5 API/BFF endpoints (`/auth/*`), cookie, CSRF, active-tenant selection and switch; ADR for D1-D4.
+- [x] S4+ hardening and S5 core (no enrolment), stacked: `feat/hu-e1-07-auth-hardening` (0041: `users.sessions_valid_after` closes the
+  revoke-all vs promote race without row locks, promote clamped to the pending cap, throttle lock outlives its window, per-user
+  consecutive MFA failure cap 20 reset only by a success, lock until MFA reset) -> `mfa-cap` (guard + LoginService) -> `mfa-runtime`
+  (0042 mfa_* functions, `SqlMfaRuntimeStore`, `TenantMfaAuditLog`) -> `http-core` (config, `__Host-` Strict cookies, exact-Origin CSRF,
+  client IP via trusted proxy hops only, IPv6 /64) -> `http-session` (verified-only guard re-reading membership per request) -> `http`
+  (`/auth` login, mfa, refresh, logout, me, tenants, select-tenant; e2e). No enrolment endpoint: PO has not decided how a new user
+  activates MFA; a user without MFA gets 403 and no cookie. Refresh cookie cannot be path-scoped (`__Host-` forces Path=/).
+- [ ] S5 (rest) enrolment endpoint (blocked on the PO), reset endpoint/CLI, ADR for D1-D4. Original S5 line: API/BFF endpoints (`/auth/*`), cookie, CSRF, active-tenant selection and switch; ADR for D1-D4.
 - [ ] S6 Portal UI in `apps/web`: login, MFA, tenant picker, role-aware guard.
 
 ## Progress

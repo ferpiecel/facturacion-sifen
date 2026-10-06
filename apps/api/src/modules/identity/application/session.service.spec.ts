@@ -48,12 +48,12 @@ describe('SessionService authenticate (verified only) and authenticatePending', 
   });
 
   it('promote swaps a pending session for a verified one built from fresh tokens and a new cap', async () => {
-    const { service, store } = setup({ promote: vi.fn().mockResolvedValue('s-2') });
+    const { service, store } = setup();
     const issued = await service.promote('s-1');
     expect(issued).toMatchObject({ sessionId: 's-2' });
     const call = store.promote.mock.calls[0];
-    expect(call?.[0]).toBe('s-1');
-    expect(call?.[1]).toMatchObject({ absoluteExpiresAt: new Date(NOW + 1_200_000) });
+    expect(call[0]).toBe('s-1');
+    expect(call[1]).toMatchObject({ absoluteExpiresAt: new Date(NOW + 1_200_000) });
   });
 
   it('promote returns null when the pending session is no longer live', async () => {

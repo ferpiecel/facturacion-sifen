@@ -49,7 +49,7 @@ describe('loadSessionConfig (PO decision: 5 min access, 10 min refresh, absolute
     const load = () => loadSessionConfig({ NODE_ENV: 'production', [name]: value });
     expect(load).toThrow(SessionConfigError);
     expect(load).toThrow(name);
-    expect(load).not.toThrow(new RegExp(value.replace('.', '\\.') + '$'));
+    expect(load).not.toThrow(new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'));
   });
 
   it('requires access <= refresh <= absolute', () => {

@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import { withAppRoleTransaction, type Database } from '@sifen/db';
 import type {
   NewSession,
+  PromotedSession,
   SessionRecord,
   SessionStore,
   TenantMembership,
@@ -68,6 +69,15 @@ export class SqlSessionStore implements SessionStore {
       )
     ).at(0);
     return row ? toRecord(row) : null;
+  }
+
+  async promote(pendingSessionId: string, next: PromotedSession): Promise<string | null> {
+    const row = (
+      await this.rows<{ id: string | null }>(
+        sql`select promote_user_session(${pendingSessionId}, ${next.accessHash}, ${next.refreshHash}, ${next.accessExpiresAt.toISOString()}, ${next.refreshExpiresAt.toISOString()}, ${next.absoluteExpiresAt.toISOString()}) as id`,
+      )
+    ).at(0);
+    return row?.id ?? null;
   }
 
   async revoke(sessionId: string): Promise<void> {

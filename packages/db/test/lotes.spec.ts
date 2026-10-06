@@ -233,6 +233,15 @@ describe('lotes', () => {
     expect(updated.status).toBe(to);
   });
 
+  it('records the instant of the send attempt, empty until then (HU-E6-04)', async () => {
+    const { db, a, lote } = await seed();
+    const [row] = await db.insert(lotes).values(lote(a)).returning();
+    expect(row.sendAttemptedAt).toBeNull();
+    const at = new Date('2026-10-05T12:00:00Z');
+    const [sending] = await update(db, a, row.id, { status: 'sending', sendAttemptedAt: at });
+    expect(sending.sendAttemptedAt).toEqual(at);
+  });
+
   it('allows updating other columns without changing the status', async () => {
     const { db, a, lote } = await seed();
     const [row] = await db

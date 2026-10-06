@@ -3,6 +3,8 @@ import { eq } from 'drizzle-orm';
 import type { DatabaseHandle } from '../src/client.js';
 import {
   documents,
+  loteDocuments,
+  lotes,
   tenantEstablishments,
   tenantExpeditionPoints,
   tenants,
@@ -304,6 +306,168 @@ describe('documents', () => {
       });
       expect(row.sifenMessages).toEqual(messages);
     });
+  });
+
+  describe('audited resend after 0420 (HU-E6-04)', () => {
+    /** A submitted document linked to a lote in `loteStatus` (or to none). */
+    async function seedResend(
+      loteStatus: string | null,
+      overrides: Partial<typeof documents.$inferInsert> = {},
+    ) {
+      const { db, a, setupA, doc } = await seed();
+      const [row] = await db
+        .insert(documents)
+        .values(doc(a, setupA, { status: 'submitted', ...overrides }))
+        .returning();
+      if (loteStatus !== null) {
+        const [lote] = await db
+          .insert(lotes)
+          .values({ tenantId: a, environment: 'test', documentType: 1, status: loteStatus })
+          .returning();
+        await db.insert(loteDocuments).values({ tenantId: a, loteId: lote.id, documentId: row.id });
+      }
+      const requeue = (set: Partial<typeof documents.$inferInsert> = {}) =>
+        withTenantTransaction(db, a, (tx) =>
+          tx
+            .update(documents)
+            .set({
+              status: 'queued',
+              resentAt: new Date('2026-10-05T12:00:00Z'),
+              transmissionAttempts: 1,
+              ...set,
+            })
+            .where(eq(documents.cdc, CDC_A))
+            .returning(),
+        );
+      return { db, a, row, requeue };
+    }
+
+    it('starts without a resend instant', async () => {
+      const { row } = await seedResend(null);
+      expect(row.resentAt).toBeNull();
+    });
+
+    it.each(['recovery', 'unknown', 'processed'])(
+      'allows submitted -> queued, stamped and counted, when the lote is %s',
+      async (loteStatus) => {
+        const { requeue } = await seedResend(loteStatus);
+        const [updated] = await requeue();
+        expect(updated).toMatchObject({ status: 'queued', transmissionAttempts: 1 });
+        expect(updated.resentAt).toEqual(new Date('2026-10-05T12:00:00Z'));
+      },
+    );
+
+    it.each(['pending', 'sending', 'sent', 'rejected'])(
+      'rejects submitted -> queued while the lote is still %s: SIFEN may be working on it',
+      async (loteStatus) => {
+        const { requeue } = await seedResend(loteStatus);
+        expect(await causeOf(requeue())).toContain('invalid status transition');
+      },
+    );
+
+    it('rejects submitted -> queued for a document that belongs to no lote', async () => {
+      const { requeue } = await seedResend(null);
+      expect(await causeOf(requeue())).toContain('invalid status transition');
+    });
+
+    it('rejects submitted -> queued without the resend stamp, or without counting the attempt', async () => {
+      const { requeue } = await seedResend('recovery');
+      expect(await causeOf(requeue({ resentAt: null }))).toContain('invalid status transition');
+      expect(await causeOf(requeue({ transmissionAttempts: 0 }))).toContain(
+        'invalid status transition',
+      );
+      expect(await causeOf(requeue({ transmissionAttempts: 2 }))).toContain(
+        'invalid status transition',
+      );
+    });
+
+    it('rejects submitted -> queued for a held document', async () => {
+      const { requeue } = await seedResend('recovery', {
+        transmissionHold: 'recovery:0420-unresolved',
+      });
+      expect(await causeOf(requeue())).toContain('invalid status transition');
+    });
+
+    it('rejects a second resend: the stamp is write-once', async () => {
+      const { db, a, requeue } = await seedResend('recovery');
+      await requeue();
+      await withTenantTransaction(db, a, (tx) =>
+        tx.update(documents).set({ status: 'submitted' }).where(eq(documents.cdc, CDC_A)),
+      );
+      expect(
+        await causeOf(
+          requeue({ resentAt: new Date('2026-10-06T12:00:00Z'), transmissionAttempts: 2 }),
+        ),
+      ).toContain('resent_at');
+    });
+
+    it('lets a queued document of an unanswered lote be stamped once, counted, without a status move', async () => {
+      const { db, a } = await seedResend('unknown', { status: 'queued' });
+      const stamp = (set: Partial<typeof documents.$inferInsert>) =>
+        withTenantTransaction(db, a, (tx) =>
+          tx.update(documents).set(set).where(eq(documents.cdc, CDC_A)).returning(),
+        );
+      const stamped = new Date('2026-10-05T12:00:00Z');
+      const [row] = await stamp({ resentAt: stamped, transmissionAttempts: 1 });
+      expect(row).toMatchObject({ status: 'queued', transmissionAttempts: 1 });
+      expect(row.resentAt).toEqual(stamped);
+      expect(await causeOf(stamp({ resentAt: null }))).toContain('resent_at');
+      expect(await causeOf(stamp({ resentAt: new Date('2026-10-06T12:00:00Z') }))).toContain(
+        'resent_at',
+      );
+    });
+
+    it('rejects stamping a queued document without the same conditions as the door', async () => {
+      const noLote = await seedResend(null, { status: 'queued' });
+      expect(
+        await causeOf(
+          withTenantTransaction(noLote.db, noLote.a, (tx) =>
+            tx
+              .update(documents)
+              .set({ resentAt: new Date(), transmissionAttempts: 1 })
+              .where(eq(documents.cdc, CDC_A)),
+          ),
+        ),
+      ).toContain('resent_at');
+    });
+
+    it('rejects resent_at on INSERT: only the recovery sets it, by queueing a document again', async () => {
+      const { db, a, setupA, doc } = await seed();
+      expect(
+        await causeOf(
+          db
+            .insert(documents)
+            .values(
+              doc(a, setupA, { status: 'queued', resentAt: new Date('2026-10-05T12:00:00Z') }),
+            ),
+        ),
+      ).toContain('resent_at');
+    });
+
+    it.each(['accepted', 'signed', 'submitted', 'approved', 'rejected'])(
+      'rejects stamping resent_at on a %s document that is not being queued again',
+      async (status) => {
+        const { db, a } = await seedResend('processed', { status });
+        expect(
+          await causeOf(
+            withTenantTransaction(db, a, (tx) =>
+              tx
+                .update(documents)
+                .set({ resentAt: new Date('2026-10-05T12:00:00Z'), transmissionAttempts: 1 })
+                .where(eq(documents.cdc, CDC_A)),
+            ),
+          ),
+        ).toContain('resent_at');
+      },
+    );
+
+    it.each([['approved'], ['approved_with_observations'], ['rejected'], ['cancelled']])(
+      'never re-queues a %s document, stamp or not',
+      async (status) => {
+        const { requeue } = await seedResend('processed', { status });
+        expect(await causeOf(requeue())).toMatch(/invalid status transition|resent_at/);
+      },
+    );
   });
 
   it('rejects an environment that differs from the tenant environment on insert', async () => {

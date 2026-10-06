@@ -1,0 +1,98 @@
+import { describe, expect, it, vi } from 'vitest';
+import { hashSessionToken } from '../domain/session-token.js';
+import type { SessionRecord, SessionStore } from './ports/session-store.port.js';
+import { SessionService } from './session.service.js';
+
+const CONFIG = { accessTtlSeconds: 300, refreshTtlSeconds: 600, absoluteTtlSeconds: 1_200 };
+const NOW = Date.UTC(2026, 9, 6, 12, 0, 0);
+const RECORD: SessionRecord = {
+  sessionId: 's-1',
+  userId: 'u-1',
+  activeTenantId: null,
+  mfaVerified: true,
+  accessExpiresAt: new Date(NOW + 300_000),
+  refreshExpiresAt: new Date(NOW + 600_000),
+};
+
+function setup(overrides: Partial<SessionStore> = {}) {
+  const store: SessionStore = {
+    create: vi.fn().mockResolvedValue('s-1'),
+    resolve: vi.fn().mockResolvedValue(RECORD),
+    rotate: vi.fn().mockResolvedValue(RECORD),
+    revoke: vi.fn().mockResolvedValue(undefined),
+    revokeAllForUser: vi.fn().mockResolvedValue(2),
+    listMemberships: vi
+      .fn()
+      .mockResolvedValue([{ tenantId: 't-a', tenantName: 'A', role: 'admin' }]),
+    setActiveTenant: vi.fn().mockResolvedValue(true),
+    ...overrides,
+  };
+  return { store, service: new SessionService(store, CONFIG, () => NOW) };
+}
+
+describe('SessionService', () => {
+  it('issues an opaque pair, storing only the hashes and the absolute cap computed at login', async () => {
+    const { service, store } = setup();
+    const issued = await service.issue('u-1', { mfaVerified: false });
+    expect(issued).toMatchObject({ sessionId: 's-1' });
+    const call = vi.mocked(store.create).mock.calls[0]?.[0];
+    expect(call).toMatchObject({
+      userId: 'u-1',
+      mfaVerified: false,
+      accessHash: hashSessionToken(issued?.accessToken ?? ''),
+      refreshHash: hashSessionToken(issued?.refreshToken ?? ''),
+      accessExpiresAt: new Date(NOW + 300_000),
+      refreshExpiresAt: new Date(NOW + 600_000),
+      absoluteExpiresAt: new Date(NOW + 1_200_000),
+    });
+    expect(JSON.stringify(call)).not.toContain(issued?.accessToken);
+  });
+
+  it('issues nothing for a disabled or unknown user', async () => {
+    const { service } = setup({ create: vi.fn().mockResolvedValue(null) });
+    await expect(service.issue('u-1', { mfaVerified: true })).resolves.toBeNull();
+  });
+
+  it('authenticates by the hash of the access token and refuses an empty token', async () => {
+    const { service, store } = setup();
+    await expect(service.authenticate('some-token')).resolves.toEqual(RECORD);
+    expect(store.resolve).toHaveBeenCalledWith(hashSessionToken('some-token'));
+    await expect(service.authenticate('')).resolves.toBeNull();
+  });
+
+  it('refreshes into a new pair with sliding expiries (the store clamps them to the cap)', async () => {
+    const { service, store } = setup();
+    const next = await service.refresh('old-refresh');
+    expect(next?.accessToken).not.toBe(next?.refreshToken);
+    expect(store.rotate).toHaveBeenCalledWith(
+      hashSessionToken('old-refresh'),
+      hashSessionToken(next?.accessToken ?? ''),
+      hashSessionToken(next?.refreshToken ?? ''),
+      new Date(NOW + 300_000),
+      new Date(NOW + 600_000),
+    );
+    expect(next).toMatchObject({
+      sessionId: 's-1',
+      accessExpiresAt: RECORD.accessExpiresAt,
+      refreshExpiresAt: RECORD.refreshExpiresAt,
+    });
+  });
+
+  it('returns null (the 401 path) when the store refuses the refresh', async () => {
+    const { service } = setup({ rotate: vi.fn().mockResolvedValue(null) });
+    await expect(service.refresh('stale')).resolves.toBeNull();
+    await expect(service.refresh('')).resolves.toBeNull();
+  });
+
+  it('implements the SessionRevoker port, selects tenants and lists memberships', async () => {
+    const { service, store } = setup();
+    await service.revokeAllForUser('u-1');
+    expect(store.revokeAllForUser).toHaveBeenCalledWith('u-1');
+    await expect(service.selectTenant('s-1', 't-a')).resolves.toBe(true);
+    await expect(service.memberships('u-1')).resolves.toEqual([
+      { tenantId: 't-a', tenantName: 'A', role: 'admin' },
+    ]);
+    await service.logout('s-1');
+    expect(store.revoke).toHaveBeenCalledWith('s-1');
+  });
+});

@@ -8,7 +8,7 @@ import {
   type DatabaseHandle,
 } from '@sifen/db';
 import { eq } from 'drizzle-orm';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   createTestAuthority,
   issueTestPkcs12,
@@ -154,6 +154,51 @@ describe('CachedCertificateVault', () => {
     expect(isZero(returned[1])).toBe(false);
     cache.clear();
     expect(isZero(returned[1])).toBe(true);
+  });
+
+  describe('expiry does not depend on the same tenant coming back', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('sweeps every expired entry on any open, not only the one being asked for', async () => {
+      const { vault, returned } = backend();
+      let now = 1_000;
+      const cache = new CachedCertificateVault(vault, { ttlMs: 10_000, now: () => now });
+      await cache.open(DB, 'idle', 'test', ACCESS);
+      now += 5_000;
+      await cache.open(DB, 'busy', 'test', ACCESS);
+      now += 6_000; // idle is past its TTL, busy is not
+      await cache.open(DB, 'busy', 'test', ACCESS);
+
+      expect(isZero(returned[0])).toBe(true);
+      expect(isZero(returned[1])).toBe(false);
+    });
+
+    it('zeroizes an idle entry once the TTL passes even if nobody opens anything, then stops its timer', async () => {
+      vi.useFakeTimers();
+      const { vault, returned } = backend();
+      const cache = new CachedCertificateVault(vault, { ttlMs: 10_000, sweepIntervalMs: 1_000 });
+      await cache.open(DB, 't1', 'test', ACCESS);
+      expect(vi.getTimerCount()).toBe(1);
+
+      await vi.advanceTimersByTimeAsync(9_000);
+      expect(isZero(returned[0])).toBe(false);
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      expect(isZero(returned[0])).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('clear() cancels the sweep timer', async () => {
+      vi.useFakeTimers();
+      const { vault } = backend();
+      const cache = new CachedCertificateVault(vault, { sweepIntervalMs: 1_000 });
+      await cache.open(DB, 't1', 'test', ACCESS);
+      expect(vi.getTimerCount()).toBe(1);
+      cache.clear();
+      expect(vi.getTimerCount()).toBe(0);
+    });
   });
 
   describe('with the real vault', () => {

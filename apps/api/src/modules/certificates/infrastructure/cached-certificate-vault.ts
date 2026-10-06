@@ -31,6 +31,8 @@ export interface CertificateCacheOptions {
   readonly ttlMs?: number;
   readonly maxEntries?: number;
   readonly now?: () => number;
+  /** How often an idle cache sweeps expired entries (default: the TTL, at most 30 s). */
+  readonly sweepIntervalMs?: number;
 }
 
 interface Entry {
@@ -48,6 +50,13 @@ interface Entry {
  * - Callers receive copies (`SignDocument` zeroizes what it gets); the cache zeroizes its own
  *   buffer when it evicts, expires, invalidates or clears. The password is a JS string and cannot
  *   be wiped; it only lives as long as its entry.
+ * - Expired entries are zeroized on every `open` (any tenant) and by an unref'd timer that runs only
+ *   while the cache holds entries, so plaintext does not outlive its TTL by more than the sweep
+ *   interval (30 s at most) even on an idle worker. `clear()` stops the timer.
+ * - Inherent TOCTOU: the status check and the signing are not one atomic step, so a revoke that
+ *   lands between them still lets that one in-flight signing finish with the key it already holds;
+ *   the next signing is blocked. The same window exists without a cache between reading the
+ *   certificate and using it.
  * - Nothing is logged and failed opens are never cached.
  */
 export class CachedCertificateVault {
@@ -55,6 +64,8 @@ export class CachedCertificateVault {
   private readonly ttlMs: number;
   private readonly maxEntries: number;
   private readonly now: () => number;
+  private readonly sweepIntervalMs: number;
+  private timer: NodeJS.Timeout | undefined;
 
   constructor(
     private readonly backend: CertificateBackend,
@@ -63,6 +74,7 @@ export class CachedCertificateVault {
     this.ttlMs = options.ttlMs ?? DEFAULT_CERTIFICATE_CACHE_TTL_MS;
     this.maxEntries = options.maxEntries ?? DEFAULT_CERTIFICATE_CACHE_MAX_ENTRIES;
     this.now = options.now ?? Date.now;
+    this.sweepIntervalMs = options.sweepIntervalMs ?? Math.min(this.ttlMs, 30_000);
   }
 
   async open(
@@ -71,6 +83,7 @@ export class CachedCertificateVault {
     environment: Environment,
     access: CertificateAccess,
   ): Promise<OpenedCertificate> {
+    this.sweep();
     const key = `${tenantId}:${environment}`;
     const hit = this.entries.get(key);
     if (hit) {
@@ -88,6 +101,7 @@ export class CachedCertificateVault {
     const opened = await this.backend.open(db, tenantId, environment, access);
     this.drop(key);
     this.entries.set(key, { certificate: opened, expiresAt: this.now() + this.ttlMs });
+    this.ensureTimer();
     while (this.entries.size > this.maxEntries) {
       const oldest = this.entries.keys().next().value;
       if (oldest === undefined) break;
@@ -101,9 +115,32 @@ export class CachedCertificateVault {
     this.drop(`${tenantId}:${environment}`);
   }
 
-  /** Drops and zeroizes everything (shutdown). */
+  /** Drops and zeroizes everything and stops the sweep timer (shutdown). */
   clear(): void {
     for (const key of [...this.entries.keys()]) this.drop(key);
+    this.stopTimer();
+  }
+
+  /** Zeroizes every entry past its TTL. Cheap: the cache is bounded by `maxEntries`. */
+  sweep(): void {
+    const now = this.now();
+    for (const [key, entry] of [...this.entries]) {
+      if (now >= entry.expiresAt) this.drop(key);
+    }
+    if (this.entries.size === 0) this.stopTimer();
+  }
+
+  private ensureTimer(): void {
+    if (this.timer) return;
+    this.timer = setInterval(() => {
+      this.sweep();
+    }, this.sweepIntervalMs);
+    this.timer.unref();
+  }
+
+  private stopTimer(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = undefined;
   }
 
   private drop(key: string): void {

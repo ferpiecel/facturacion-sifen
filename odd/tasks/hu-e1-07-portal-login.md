@@ -89,7 +89,7 @@ no SSO in MVP (RF-24), roles list (PRD A4).
     lines (tests are 60%); split at PR time if the 400-line rule is applied strictly (reset into its own PR).
   - S3c `feat/hu-e1-07-mfa-store`: migration 0038 `user_mfa` (sealed secret, step, hashed codes, FORCE RLS, no app_user grant,
     guard trigger, down script) and `DrizzleMfaStore` (conditional UPDATEs). RED 633d731 / a89bdb3, GREEN 97b124d / this tip.
-  - Security review fixes: reset is tenant-scoped over ALL target memberships (RED e9ce598, GREEN 360d7d0: audit first, revoke sessions, remove MFA last; events carry `tenantIds`; confirm conditional on the verified secret); `user_mfa` guard holes closed (RED 71bc873, GREEN see tip: NULL step, shrink-only recovery hashes, NULL hash elements).
+  - Security review fixes: reset is tenant-scoped over ALL target memberships (RED e9ce598, GREEN 360d7d0: audit first, revoke sessions, remove MFA last; events carry `tenantIds`; confirm conditional on the verified secret); `user_mfa` guard holes closed (RED 71bc873, GREEN c689013: NULL step, shrink-only recovery hashes, NULL hash elements).
   - Still PROVISIONAL and not wired: enrol-at-first-login enforcement comes with S4 (login), the wiring of audit to
     `recordAudit` and the CLI/endpoint for reset comes with S4/S5.
 - [ ] S4 Sessions + login/MFA use cases + lockout/rate limit + audit events; resolver role migration 0039.

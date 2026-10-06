@@ -92,10 +92,11 @@ $$;
 --> statement-breakpoint
 -- The live session of an access token: not rotated, not revoked, not expired, user not disabled.
 CREATE FUNCTION public.resolve_user_session(p_access_hash text)
-RETURNS TABLE (id uuid, user_id uuid, active_tenant_id uuid, mfa_verified_at timestamptz)
+RETURNS TABLE (id uuid, user_id uuid, active_tenant_id uuid, mfa_verified_at timestamptz,
+  access_expires_at timestamptz, refresh_expires_at timestamptz)
 LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog, pg_temp
 AS $$
-  SELECT s.id, s.user_id, s.active_tenant_id, s.mfa_verified_at
+  SELECT s.id, s.user_id, s.active_tenant_id, s.mfa_verified_at, s.access_expires_at, s.refresh_expires_at
   FROM public.user_sessions AS s
   WHERE s.access_hash = p_access_hash AND s.rotated_at IS NULL AND s.revoked_at IS NULL
     AND s.access_expires_at > pg_catalog.now() AND s.absolute_expires_at > pg_catalog.now()
@@ -110,7 +111,8 @@ $$;
 CREATE FUNCTION public.rotate_user_session(
   p_old_refresh_hash text, p_new_access_hash text, p_new_refresh_hash text,
   p_access_expires timestamptz, p_refresh_expires timestamptz)
-RETURNS TABLE (id uuid, user_id uuid, active_tenant_id uuid, mfa_verified_at timestamptz)
+RETURNS TABLE (id uuid, user_id uuid, active_tenant_id uuid, mfa_verified_at timestamptz,
+  access_expires_at timestamptz, refresh_expires_at timestamptz)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, pg_temp
 AS $$
 DECLARE
@@ -137,7 +139,8 @@ BEGIN
             LEAST(p_access_expires, old_row.absolute_expires_at),
             LEAST(p_refresh_expires, old_row.absolute_expires_at),
             old_row.absolute_expires_at, old_row.active_tenant_id, old_row.mfa_verified_at)
-    RETURNING n.id, n.user_id, n.active_tenant_id, n.mfa_verified_at;
+    RETURNING n.id, n.user_id, n.active_tenant_id, n.mfa_verified_at, n.access_expires_at,
+              n.refresh_expires_at;
 END;
 $$;
 --> statement-breakpoint

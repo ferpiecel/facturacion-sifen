@@ -14,6 +14,10 @@ import { createTenant, setFiscalProfile } from './commands.js';
 import { createCertificateVault, runCli } from './ops.js';
 
 const PASSWORD = 'p12-super-secret';
+const ACCESS = {
+  actor: { type: 'system', id: 'transmission-worker' },
+  purpose: 'signing',
+} as const;
 const MASTER_KEY = Buffer.alloc(32, 7).toString('base64');
 const ROOTS_PATH = '/etc/sifen/psc.pem';
 
@@ -119,7 +123,7 @@ describe('certificate:revoke', () => {
       entityId: stored.id,
     });
     expect(JSON.stringify(audits[0]) + result.out + result.err).not.toContain(PASSWORD);
-    await expect(vault.open(db, a, 'test')).rejects.toThrow(CertificateNotFoundError);
+    await expect(vault.open(db, a, 'test', ACCESS)).rejects.toThrow(CertificateNotFoundError);
   });
 
   it('revokes by fingerprint', async () => {
@@ -199,6 +203,46 @@ describe('certificate:revoke', () => {
       { environment: 'production', status: 'revoked' },
       { environment: 'test', status: 'active' },
     ]);
+  });
+
+  it('writes one audit row with the before/after states when revokes race', async () => {
+    const { db, a, stored } = await seed();
+
+    const results = await Promise.all([
+      revoke(db, ['--tenant', a, '--id', stored.id]),
+      revoke(db, ['--tenant', a, '--id', stored.id]),
+    ]);
+
+    expect(results.map((r) => r.code)).toEqual([0, 0]);
+    const audits = await db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, 'certificate.revoked'));
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      actorId: 'ops-cli',
+      before: { status: 'active' },
+      after: { status: 'revoked', environment: 'test', fingerprint: stored.fingerprint },
+    });
+  });
+
+  it('accepts an uppercase uuid and fingerprint end to end', async () => {
+    const { db, vault, a, p12, stored } = await seed();
+    await vault.add(db, { tenantId: a, environment: 'production', p12, password: PASSWORD });
+
+    const byId = await revoke(db, ['--tenant', a, '--id', stored.id.toUpperCase()]);
+    expect(byId.code).toBe(0);
+    expect(byId.out).toContain('certificate revoked');
+    const byFingerprint = await revoke(db, [
+      '--tenant',
+      a,
+      '--fingerprint',
+      stored.fingerprint.toUpperCase(),
+      '--env',
+      'production',
+    ]);
+    expect(byFingerprint.code).toBe(0);
+    expect(byFingerprint.out).toContain('certificate revoked');
   });
 
   describe('arguments', () => {

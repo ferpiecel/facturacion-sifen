@@ -401,23 +401,71 @@ describe('documents', () => {
       ).toContain('resent_at');
     });
 
-    it('lets a queued document of an unanswered lote be stamped once, without a status move', async () => {
-      const { db, a } = await seedResend(null, { status: 'queued' });
-      const stamp = (resentAt: Date | null) =>
+    it('lets a queued document of an unanswered lote be stamped once, counted, without a status move', async () => {
+      const { db, a } = await seedResend('unknown', { status: 'queued' });
+      const stamp = (set: Partial<typeof documents.$inferInsert>) =>
         withTenantTransaction(db, a, (tx) =>
-          tx.update(documents).set({ resentAt }).where(eq(documents.cdc, CDC_A)).returning(),
+          tx.update(documents).set(set).where(eq(documents.cdc, CDC_A)).returning(),
         );
-      const [stamped] = await stamp(new Date('2026-10-05T12:00:00Z'));
-      expect(stamped.resentAt).toEqual(new Date('2026-10-05T12:00:00Z'));
-      expect(await causeOf(stamp(null))).toContain('resent_at');
-      expect(await causeOf(stamp(new Date('2026-10-06T12:00:00Z')))).toContain('resent_at');
+      const stamped = new Date('2026-10-05T12:00:00Z');
+      const [row] = await stamp({ resentAt: stamped, transmissionAttempts: 1 });
+      expect(row).toMatchObject({ status: 'queued', transmissionAttempts: 1 });
+      expect(row.resentAt).toEqual(stamped);
+      expect(await causeOf(stamp({ resentAt: null }))).toContain('resent_at');
+      expect(await causeOf(stamp({ resentAt: new Date('2026-10-06T12:00:00Z') }))).toContain(
+        'resent_at',
+      );
     });
+
+    it('rejects stamping a queued document without the same conditions as the door', async () => {
+      const noLote = await seedResend(null, { status: 'queued' });
+      expect(
+        await causeOf(
+          withTenantTransaction(noLote.db, noLote.a, (tx) =>
+            tx
+              .update(documents)
+              .set({ resentAt: new Date(), transmissionAttempts: 1 })
+              .where(eq(documents.cdc, CDC_A)),
+          ),
+        ),
+      ).toContain('resent_at');
+    });
+
+    it('rejects resent_at on INSERT: only the recovery sets it, by queueing a document again', async () => {
+      const { db, a, setupA, doc } = await seed();
+      expect(
+        await causeOf(
+          db
+            .insert(documents)
+            .values(
+              doc(a, setupA, { status: 'queued', resentAt: new Date('2026-10-05T12:00:00Z') }),
+            ),
+        ),
+      ).toContain('resent_at');
+    });
+
+    it.each(['accepted', 'signed', 'submitted', 'approved', 'rejected'])(
+      'rejects stamping resent_at on a %s document that is not being queued again',
+      async (status) => {
+        const { db, a } = await seedResend('processed', { status });
+        expect(
+          await causeOf(
+            withTenantTransaction(db, a, (tx) =>
+              tx
+                .update(documents)
+                .set({ resentAt: new Date('2026-10-05T12:00:00Z'), transmissionAttempts: 1 })
+                .where(eq(documents.cdc, CDC_A)),
+            ),
+          ),
+        ).toContain('resent_at');
+      },
+    );
 
     it.each([['approved'], ['approved_with_observations'], ['rejected'], ['cancelled']])(
       'never re-queues a %s document, stamp or not',
       async (status) => {
         const { requeue } = await seedResend('processed', { status });
-        expect(await causeOf(requeue())).toContain('invalid status transition');
+        expect(await causeOf(requeue())).toMatch(/invalid status transition|resent_at/);
       },
     );
   });

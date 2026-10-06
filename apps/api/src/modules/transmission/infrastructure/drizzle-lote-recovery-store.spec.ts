@@ -711,7 +711,36 @@ describe('DrizzleLoteRecoveryStore', () => {
       expect((await storeFor(tenantId).load(loteId))?.cdcs).toEqual([CDC_B]);
     });
 
-    it('holds a queued document of an unknown lote, measured from the lote creation', async () => {
+    it('counts the 48 h from the send attempt, not from the lote creation (pending for days, then sent)', async () => {
+      // Created 100 h before the pass, claimed (send attempted, timed out) only 1 h before it.
+      const created = new Date(RECOVERED_AT.getTime() - 100 * 3_600_000);
+      const unknown = await seedLote('unknown', 'queued', [CDC_C], created);
+      await handle.db.execute(
+        sql`update lotes set send_attempted_at = ${new Date(RECOVERED_AT.getTime() - 3_600_000)} where id = ${unknown}`,
+      );
+      await storeFor(tenantId).record(
+        unknown,
+        { resolutions: [], unresolved: [absent(CDC_C)] },
+        unknownGuard,
+      );
+      expect((await readDoc(CDC_C)).transmissionHold).toBeNull();
+      expect((await readLoteById(unknown)).status).toBe('unknown');
+    });
+
+    it('holds once 48 h passed since the send attempt', async () => {
+      const unknown = await seedLote('unknown', 'queued', [CDC_C], SENT_AT);
+      await handle.db.execute(
+        sql`update lotes set send_attempted_at = ${new Date(RECOVERED_AT.getTime() - 48 * 3_600_000)} where id = ${unknown}`,
+      );
+      await storeFor(tenantId).record(
+        unknown,
+        { resolutions: [], unresolved: [absent(CDC_C)] },
+        unknownGuard,
+      );
+      expect((await readDoc(CDC_C)).transmissionHold).toBe(RECOVERY_UNRESOLVED_HOLD);
+    });
+
+    it('holds a queued document of a legacy unknown lote (no send attempt instant), from its creation', async () => {
       const unknown = await seedLote('unknown', 'queued', [CDC_C], SENT_AT);
       await handle.db.execute(sql`update documents set resent_at = '2026-01-01T00:00:00Z'`);
       await storeFor(tenantId).record(

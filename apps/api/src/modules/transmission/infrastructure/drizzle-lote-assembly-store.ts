@@ -22,6 +22,13 @@ const READY_STATUSES = ['signed', 'queued'];
 /** SIFEN may hold the CDCs of these lotes (ADR-0007, plan 8.1); `rejected` and `processed` are finished. */
 export const IN_PROCESS_LOTE_STATUSES = ['pending', 'sending', 'sent', 'unknown', 'recovery'];
 
+/**
+ * A lote in process only carries a document that was not queued again after the lote existed: the
+ * recovery's resend (`resent_at`) leaves the older lote behind (it may stay `recovery` for its other
+ * documents) and only a newer lote carries the document from then on.
+ */
+export const stillCarries = sql`NOT (${documents.resentAt} IS NOT NULL AND ${documents.resentAt} > ${lotes.createdAt})`;
+
 /** `LoteAssemblyStore` over `documents`, `lotes` and `lote_documents`, run as app_user inside the tenant's transaction. */
 export function createDrizzleLoteAssemblyStore({
   db,
@@ -68,6 +75,7 @@ export function createDrizzleLoteAssemblyStore({
                     and(
                       eq(loteDocuments.documentId, documents.id),
                       inArray(lotes.status, IN_PROCESS_LOTE_STATUSES),
+                      stillCarries,
                     ),
                   ),
               ),
@@ -80,7 +88,26 @@ export function createDrizzleLoteAssemblyStore({
         ...row,
         xml: row.xml ?? '',
         resent: resentAt !== null,
+        ...(resentAt ? { resentAt } : {}),
       }));
+    },
+
+    async deferDocument(documentId, until) {
+      await withTenantTransaction(db, tenantId, (tx) =>
+        tx
+          .update(documents)
+          .set({ nextTransmissionAt: until, updatedAt: now() })
+          .where(waitingToBeResent(tenantId, documentId)),
+      );
+    },
+
+    async holdResend(documentId, reason) {
+      await withTenantTransaction(db, tenantId, (tx) =>
+        tx
+          .update(documents)
+          .set({ transmissionHold: reason, updatedAt: now() })
+          .where(waitingToBeResent(tenantId, documentId)),
+      );
     },
 
     async cdcsInProcess(cdcs) {
@@ -101,7 +128,11 @@ export function createDrizzleLoteAssemblyStore({
             and(eq(lotes.tenantId, loteDocuments.tenantId), eq(lotes.id, loteDocuments.loteId)),
           )
           .where(
-            and(inArray(documents.cdc, cdcs), inArray(lotes.status, IN_PROCESS_LOTE_STATUSES)),
+            and(
+              inArray(documents.cdc, cdcs),
+              inArray(lotes.status, IN_PROCESS_LOTE_STATUSES),
+              stillCarries,
+            ),
           ),
       );
       return new Set(rows.map((row) => row.cdc));
@@ -144,10 +175,18 @@ export function createDrizzleLoteAssemblyStore({
             lotes,
             and(eq(lotes.tenantId, loteDocuments.tenantId), eq(lotes.id, loteDocuments.loteId)),
           )
+          .innerJoin(
+            documents,
+            and(
+              eq(documents.tenantId, loteDocuments.tenantId),
+              eq(documents.id, loteDocuments.documentId),
+            ),
+          )
           .where(
             and(
               inArray(loteDocuments.documentId, documentIds),
               inArray(lotes.status, IN_PROCESS_LOTE_STATUSES),
+              stillCarries,
             ),
           )
           .limit(1);
@@ -174,4 +213,15 @@ export function createDrizzleLoteAssemblyStore({
       });
     },
   };
+}
+
+/** A queued, resent, unheld document of the tenant: the only kind the pre-send check may postpone or hold. */
+function waitingToBeResent(tenantId: string, documentId: string) {
+  return and(
+    eq(documents.tenantId, tenantId),
+    eq(documents.id, documentId),
+    eq(documents.status, 'queued'),
+    isNotNull(documents.resentAt),
+    isNull(documents.transmissionHold),
+  );
 }

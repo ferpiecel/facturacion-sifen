@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/pglite';
 import {
+  auditLog,
   createPgliteDatabase,
   documents,
   loteDocuments,
@@ -78,8 +80,10 @@ describe('DrizzleResendPreflightStore', () => {
       now: () => new Date('2026-10-05T13:00:00Z'),
     });
 
+  /** A document the recovery queued again: carried by a closed lote, stamped, attempt counted. */
   async function addDocument(overrides: Partial<typeof documents.$inferInsert> = {}) {
     counter += 1;
+    const { resentAt, ...rest } = overrides;
     const [row] = await handle.db
       .insert(documents)
       .values({
@@ -91,13 +95,25 @@ describe('DrizzleResendPreflightStore', () => {
         cdc: CDC,
         securityCode: '123456789',
         status: 'queued',
-        resentAt: new Date('2026-10-05T12:00:00Z'),
         issuedAt: new Date('2026-01-01T12:00:00Z'),
         totalAmount: '110000',
         payload: {},
-        ...overrides,
+        ...rest,
       })
       .returning();
+    if (resentAt !== null && row.status === 'queued') {
+      const [closed] = await handle.db
+        .insert(lotes)
+        .values({ tenantId, environment: 'test', documentType: 1, status: 'processed' })
+        .returning();
+      await handle.db
+        .insert(loteDocuments)
+        .values({ tenantId, loteId: closed.id, documentId: row.id });
+      await handle.db
+        .update(documents)
+        .set({ resentAt: resentAt ?? new Date(), transmissionAttempts: 1 })
+        .where(eq(documents.id, row.id));
+    }
     return row;
   }
   const readDoc = () =>
@@ -155,5 +171,61 @@ describe('DrizzleResendPreflightStore', () => {
     const doc = await addDocument();
     expect(await storeFor(otherTenantId).approveFound(doc.id, RESOLUTION)).toBe(false);
     expect((await readDoc()).status).toBe('queued');
+  });
+
+  it('audits the approval as the system actor, in the same transaction', async () => {
+    const doc = await addDocument();
+    await storeFor(tenantId).approveFound(doc.id, RESOLUTION);
+    const audits = await handle.db.select().from(auditLog);
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      actorType: 'system',
+      actorId: 'transmission-worker',
+      action: 'document.approved_on_resend_check',
+      entityId: doc.id,
+      before: { status: 'queued' },
+      after: { status: 'approved' },
+    });
+  });
+
+  it('writes no audit row when it refuses', async () => {
+    const doc = await addDocument({ resentAt: null });
+    await storeFor(tenantId).approveFound(doc.id, RESOLUTION);
+    expect(await handle.db.select().from(auditLog)).toEqual([]);
+  });
+
+  it('approves a document waiting for its resend although the older lote it left is still recovery', async () => {
+    const doc = await addDocument({ resentAt: null });
+    const [old] = await handle.db
+      .insert(lotes)
+      .values({ tenantId, environment: 'test', documentType: 1, status: 'recovery' })
+      .returning();
+    await handle.db.insert(loteDocuments).values({ tenantId, loteId: old.id, documentId: doc.id });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await handle.db.execute(
+      sql`update documents set resent_at = now(), transmission_attempts = 1 where id = ${doc.id}`,
+    );
+    expect(await storeFor(tenantId).approveFound(doc.id, RESOLUTION)).toBe(true);
+  });
+
+  it('locks the document row before it decides, so a lote being assembled cannot slip past', async () => {
+    // createLote locks its documents FOR UPDATE; approveFound must wait on that lock in a statement
+    // of its own and only then look for lotes in process (a later snapshot sees the new lote).
+    const doc = await addDocument();
+    const statements: string[] = [];
+    const logged = drizzle((handle.db as unknown as { $client: never }).$client, {
+      logger: { logQuery: (query) => statements.push(query) },
+    });
+    const spied = createDrizzleResendPreflightStore({
+      db: logged as unknown as typeof handle.db,
+      tenantId,
+    });
+    expect(await spied.approveFound(doc.id, RESOLUTION)).toBe(true);
+    const lockAt = statements.findIndex((q) => /^select .* for update/i.test(q));
+    const firstUpdate = statements.findIndex((q) => /^update "documents"/i.test(q));
+    const lotesCheck = statements.findIndex((q) => /"lote_documents"/i.test(q));
+    expect(lockAt).toBeGreaterThan(-1);
+    expect(lockAt).toBeLessThan(lotesCheck);
+    expect(lotesCheck).toBeLessThan(firstUpdate);
   });
 });

@@ -125,6 +125,31 @@ describe('DrizzleLoteDispatchStore', () => {
     expect(await store.claim(loteId)).toBe(false);
   });
 
+  it('stamps the instant of the send attempt when the lote is claimed, once', async () => {
+    const store = storeFor(tenantId);
+    expect((await readLote()).sendAttemptedAt).toBeNull();
+    await store.claim(loteId);
+    expect((await readLote()).sendAttemptedAt).toEqual(NOW);
+    const later = createDrizzleLoteDispatchStore({
+      db: handle.db,
+      tenantId,
+      now: () => new Date(NOW.getTime() + 3_600_000),
+    });
+    expect(await later.claim(loteId)).toBe(false);
+    expect((await readLote()).sendAttemptedAt).toEqual(NOW);
+  });
+
+  it('keeps the send attempt instant whatever the outcome', async () => {
+    const store = storeFor(tenantId);
+    await store.claim(loteId);
+    await store.record(loteId, { status: 'unknown', reason: 'timed out' });
+    expect(await readLote()).toMatchObject({
+      status: 'unknown',
+      sendAttemptedAt: NOW,
+      sentAt: null,
+    });
+  });
+
   it('lets only one of two concurrent claims win', async () => {
     const store = storeFor(tenantId);
     const results = await Promise.all([store.claim(loteId), store.claim(loteId)]);

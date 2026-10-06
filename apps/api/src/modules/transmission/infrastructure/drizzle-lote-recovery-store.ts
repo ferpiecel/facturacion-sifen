@@ -75,6 +75,7 @@ export function createDrizzleLoteRecoveryStore({
           await tx
             .select({
               message: lotes.lastPollMessage,
+              sendAttemptedAt: lotes.sendAttemptedAt,
               sentAt: lotes.sentAt,
               createdAt: lotes.createdAt,
             })
@@ -113,7 +114,10 @@ export function createDrizzleLoteRecoveryStore({
           outcome.unresolved.filter((entry) => !entry.skipped).map((entry) => entry.cdc),
           guard.recoveredAt,
         );
-        const heldSince = current.sentAt ?? current.createdAt;
+        // The window counts from when the send was attempted: a lote may wait pending for days, and
+        // SIFEN starts processing only when it is sent. Lotes that predate the stamp fall back to
+        // `sent_at`, then (an unanswered send of that time) to their creation.
+        const heldSince = current.sendAttemptedAt ?? current.sentAt ?? current.createdAt;
         const eligible = guard.recoveredAt.getTime() - heldSince.getTime() >= HOLD_AFTER_MS;
         const held: string[] = [];
         const resent: Resent[] = [];

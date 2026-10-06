@@ -1,5 +1,9 @@
 import { normalizeEmail } from '../domain/email.js';
-import { validatePassword, type PasswordIssue } from '../domain/password-policy.js';
+import {
+  normalizePassword,
+  validatePassword,
+  type PasswordIssue,
+} from '../domain/password-policy.js';
 import type { PasswordHasher } from './ports/password-hasher.port.js';
 
 export type UserIssue = PasswordIssue | 'invalid_email' | 'invalid_display_name';
@@ -42,6 +46,10 @@ export class CreateUserUseCase {
     if (issues.length > 0 || !email) {
       throw new InvalidUserError(issues);
     }
-    return { email, displayName, passwordHash: await this.hasher.hash(input.password) };
+    return {
+      email,
+      displayName,
+      passwordHash: await this.hasher.hash(normalizePassword(input.password)),
+    };
   }
 }

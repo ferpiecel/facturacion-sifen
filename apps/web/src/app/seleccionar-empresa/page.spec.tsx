@@ -8,6 +8,8 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), replace: 
 describe('tenant picker page', () => {
   it('has one h1', () => {
     render(<TenantPage />);
-    expect(screen.getByRole('heading', { level: 1, name: 'Elegí una empresa' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { level: 1, name: 'Elegí una empresa' }),
+    ).toBeInTheDocument();
   });
 });

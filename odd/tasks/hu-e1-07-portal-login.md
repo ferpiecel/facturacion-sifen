@@ -129,7 +129,13 @@ no SSO in MVP (RF-24), roles list (PRD A4).
   reviews: refused-attempt lock timing across windows end to end, `SessionGuard` with a real DB, tenant audit failure paths, retention of
   `auth_throttle`/`auth_events`, concurrency of refresh over HTTP.
 - [ ] S5 (rest) enrolment endpoint (blocked on the PO), reset endpoint/CLI, ADR for D1-D4. Original S5 line: API/BFF endpoints (`/auth/*`), cookie, CSRF, active-tenant selection and switch; ADR for D1-D4.
-- [ ] S6 Portal UI in `apps/web`: login, MFA, tenant picker, role-aware guard.
+- [x] S6 Portal UI in `apps/web`, stacked: `feat/hu-e12-portal-login-ui` (auth client + same-origin proxy), `-login-screens`, `-mfa-screen`,
+  `-session-gate` (route guard, tenant picker, logout). Decisions: (a) the browser calls the API through a same-origin Next rewrite
+  (`/api/auth/*` -> `API_INTERNAL_URL`), because `__Host-` cookies are host-bound, the CSRF check needs `Origin == PORTAL_ORIGIN` and the API has
+  no CORS: no backend change; (b) Stitch ("Portal Facturación SIFEN") has no login, MFA or tenant-picker screen, so the screens reuse the portal
+  tokens (deviation, for the PO); (c) guard = `proxy.ts` cookie-presence redirect + client `SessionGate` (`/auth/me`, one refresh) as the authority.
+  Gaps: the API answers 401 (not 429) when throttled, so the portal's throttled state only shows if the API starts sending 429; no enrolment UI
+  (blocked on the PO); the panel shell still shows the sample user/tenant name; role-aware UI waits for real role-gated features.
 
 ## Progress
 

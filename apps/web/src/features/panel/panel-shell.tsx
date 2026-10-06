@@ -3,7 +3,6 @@ import {
   Building2,
   ChevronsUpDown,
   LayoutDashboard,
-  LogOut,
   ReceiptText,
   Search,
   Store,
@@ -18,6 +17,7 @@ import {
   EnvironmentBanner,
   type Environment,
 } from '../../design-system/components/environment-banner';
+import { LogoutButton } from '../auth/logout-button';
 import { SAMPLE_TENANT, SAMPLE_USER } from './sample-data';
 
 const NAV = [
@@ -109,13 +109,7 @@ function Sidebar({ activePath }: { activePath: string }) {
               </span>
             </div>
           </div>
-          <button
-            type="button"
-            aria-label="Cerrar sesión"
-            className="p-1 text-outline transition-colors hover:text-error"
-          >
-            <LogOut aria-hidden="true" className="size-[18px]" />
-          </button>
+          <LogoutButton />
         </div>
       </div>
     </aside>

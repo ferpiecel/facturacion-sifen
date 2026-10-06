@@ -6,7 +6,8 @@ import type { AuthClient, MeResult } from './auth-client';
 import { SessionGate } from './session-gate';
 
 const replace = vi.fn();
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: replace, replace }) }));
+const router = { push: replace, replace };
+vi.mock('next/navigation', () => ({ useRouter: () => router }));
 
 function setup(...results: MeResult[]) {
   const queue = [...results];
@@ -38,13 +39,17 @@ describe('SessionGate', () => {
 
   it('sends an unauthenticated user to the login', async () => {
     setup({ kind: 'unauthenticated' });
-    await waitFor(() => expect(replace).toHaveBeenCalledWith('/login'));
+    await waitFor(() => {
+      expect(replace).toHaveBeenCalledWith('/login');
+    });
     expect(screen.queryByText('Contenido protegido')).not.toBeInTheDocument();
   });
 
   it('sends a user without an active tenant to the picker', async () => {
     setup({ kind: 'ok', session: { userId: 'u', activeTenant: null } });
-    await waitFor(() => expect(replace).toHaveBeenCalledWith('/seleccionar-empresa'));
+    await waitFor(() => {
+      expect(replace).toHaveBeenCalledWith('/seleccionar-empresa');
+    });
     expect(screen.queryByText('Contenido protegido')).not.toBeInTheDocument();
   });
 

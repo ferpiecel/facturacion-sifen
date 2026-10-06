@@ -6,7 +6,8 @@ import type { AuthClient, SelectTenantResult, TenantsResult } from './auth-clien
 import { TenantPicker } from './tenant-picker';
 
 const replace = vi.fn();
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: replace, replace }) }));
+const router = { push: replace, replace };
+vi.mock('next/navigation', () => ({ useRouter: () => router }));
 
 const A = { tenantId: 't1', tenantName: 'Acme S.A.', role: 'owner' };
 const B = { tenantId: 't2', tenantName: 'Beta SRL', role: 'lector' };
@@ -36,13 +37,19 @@ describe('TenantPicker', () => {
     const client = setup({ kind: 'ok', tenants: [A, B] });
     await userEvent.setup().click(await screen.findByRole('button', { name: /Beta SRL/ }));
     expect(client.selectTenant).toHaveBeenCalledWith('t2');
-    await waitFor(() => expect(replace).toHaveBeenCalledWith('/'));
+    await waitFor(() => {
+      expect(replace).toHaveBeenCalledWith('/');
+    });
   });
 
   it('skips the picker for a single tenant', async () => {
     const client = setup({ kind: 'ok', tenants: [A] });
-    await waitFor(() => expect(client.selectTenant).toHaveBeenCalledWith('t1'));
-    await waitFor(() => expect(replace).toHaveBeenCalledWith('/'));
+    await waitFor(() => {
+      expect(client.selectTenant).toHaveBeenCalledWith('t1');
+    });
+    await waitFor(() => {
+      expect(replace).toHaveBeenCalledWith('/');
+    });
   });
 
   it('explains that an account without tenants needs an administrator', async () => {
@@ -52,7 +59,9 @@ describe('TenantPicker', () => {
 
   it('sends an expired session to the login', async () => {
     setup({ kind: 'unauthenticated' });
-    await waitFor(() => expect(replace).toHaveBeenCalledWith('/login'));
+    await waitFor(() => {
+      expect(replace).toHaveBeenCalledWith('/login');
+    });
   });
 
   it('announces a tenant that can no longer be used and stays on the picker', async () => {
@@ -70,6 +79,8 @@ describe('TenantPicker', () => {
   it('sends an expired session to the login when selecting', async () => {
     setup({ kind: 'ok', tenants: [A, B] }, { kind: 'unauthenticated' });
     await userEvent.setup().click(await screen.findByRole('button', { name: /Acme/ }));
-    await waitFor(() => expect(replace).toHaveBeenCalledWith('/login'));
+    await waitFor(() => {
+      expect(replace).toHaveBeenCalledWith('/login');
+    });
   });
 });

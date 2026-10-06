@@ -42,7 +42,7 @@ describe('SQL login support adapters (HU-E1-07 S4)', () => {
     const log = new SqlAuthEventLog(handle.db);
     await log.record({
       event: 'login.succeeded',
-      userId: user?.id ?? null,
+      userId: user.id,
       subject: 'evt@example.com',
     });
     await log.record({
@@ -54,15 +54,12 @@ describe('SQL login support adapters (HU-E1-07 S4)', () => {
     const rows = await handle.db.select().from(authEvents);
     expect(rows.map((r) => r.event).sort()).toEqual(['login.password_failed', 'login.succeeded']);
     expect(JSON.stringify(rows)).not.toContain('example.com');
-    expect(rows.find((r) => r.event === 'login.succeeded')?.userId).toBe(user?.id);
+    expect(rows.find((r) => r.event === 'login.succeeded')?.userId).toBe(user.id);
     expect(rows.find((r) => r.event === 'login.password_failed')?.detail).toEqual({
       step: 'password',
     });
     expect(
-      await handle.db
-        .select()
-        .from(authEvents)
-        .where(eq(authEvents.userId, user?.id ?? '')),
+      await handle.db.select().from(authEvents).where(eq(authEvents.userId, user.id)),
     ).toHaveLength(1);
   });
 
@@ -73,14 +70,11 @@ describe('SQL login support adapters (HU-E1-07 S4)', () => {
       .values({ email: 'cred@example.com', passwordHash: HASH, displayName: 'C' })
       .returning({ id: users.id });
     expect(await lookup.findByEmail('cred@example.com')).toEqual({
-      userId: user?.id,
+      userId: user.id,
       passwordHash: HASH,
       disabled: false,
     });
-    await handle.db
-      .update(users)
-      .set({ disabledAt: new Date() })
-      .where(eq(users.id, user?.id ?? ''));
+    await handle.db.update(users).set({ disabledAt: new Date() }).where(eq(users.id, user.id));
     expect((await lookup.findByEmail('cred@example.com'))?.disabled).toBe(true);
     expect(await lookup.findByEmail('nobody@example.com')).toBeNull();
   });

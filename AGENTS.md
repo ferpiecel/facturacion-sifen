@@ -55,6 +55,7 @@ Invariantes. Si un cambio no puede respetarlas, se frena y se consulta.
 - Todo acceso a datos de un tenant pasa por `withTenantTransaction` (`packages/db/src/tenant-transaction.ts`), que fija `app.current_tenant` con `set_config` parametrizado. En la API lo usa el singleton `TenantTransactionRunner`; en el worker, `TenantAwareProcessor`. Sin contexto de tenant la consulta falla; nunca cae a un rol privilegiado.
 - El `tenant_id` se valida como UUID con `assertValidTenantId` (`packages/db/src/tenant-id.ts`) antes de construir SQL. Nunca se interpola.
 - La resolución de API key previa al tenant usa `withAppRoleTransaction` y las funciones `SECURITY DEFINER` `resolve_api_key` y `touch_api_key_last_used`, no lecturas directas. `platform_admin` es solo para jobs cross-tenant auditados.
+- Lecturas por partner: `withPartnerTransaction` (`packages/db/src/partner-transaction.ts`) valida el UUID, fija `app.current_partner` y ejecuta `SET LOCAL ROLE partner_viewer`, rol `NOLOGIN` y `NOBYPASSRLS` con `SELECT` solo sobre columnas operativas de los tenants del partner (migración `0044_partner_status.sql`). Autorizar al usuario para ese partner es responsabilidad del llamador.
 - Límite conocido (ADR-0016, adenda): nada impide a código dentro de `fn` volver a llamar `set_config`. Ningún código de dominio debe hacerlo.
 - La suite de aislamiento (`packages/db/test/isolation.spec.ts`) es gate de release. Las pruebas de escape de rol solo corren en el job `db-postgres`.
 
@@ -79,6 +80,7 @@ Invariantes. Si un cambio no puede respetarlas, se frena y se consulta.
 - `SessionGuard` relee las membresías en cada request: un rol cambiado o una membresía removida aplican de inmediato (`session.guard.ts`).
 - Contraseñas con Argon2id con parámetros fijados (`domain/argon2-params.ts`); el HMAC de emails e IP del límite de intentos usa `AUTH_SUBJECT_PEPPER`.
 - IP de cliente: `AUTH_TRUST_PROXY_HOPS=0` por defecto, es decir socket y `X-Forwarded-For` ignorado; nunca se confía en una cabecera cruda (`bootstrap/http.ts`, `client-ip.ts`). Detalle en [`docs/configuracion.md`](docs/configuracion.md).
+- Portal (`apps/web`): proxy de mismo origen de `/api/auth/*` hacia la API (`next.config.ts`, `src/security/api-proxy.ts`), de modo que las cookies `__Host-` queden en el host del portal y el `Origin` coincida con `PORTAL_ORIGIN`; solo se expone `/auth/*`. `src/security/client-address.ts` fija `X-Forwarded-For` a la dirección del socket salvo `PORTAL_TRUSTED_UPSTREAM_PROXY=true`. `src/proxy.ts` redirige a `/login` si no hay cookie de sesión; solo comprueba presencia, la autoridad es la API.
 
 **Webhooks salientes** ([ADR-0011](docs/adr/0011-api-asincrona-202-webhooks-idempotencia.md), [`docs/integracion/webhooks.md`](docs/integracion/webhooks.md))
 

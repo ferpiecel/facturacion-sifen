@@ -17,6 +17,7 @@ export {
   LOTE_STATUSES,
   loteDocuments,
   lotes,
+  partnerMemberships,
   partners,
   portalRole,
   TENANT_TABLES,
@@ -48,6 +49,7 @@ export {
 } from './errors.js';
 export { assertValidTenantId, isValidTenantId } from './tenant-id.js';
 export { withTenantTransaction, type TenantTx } from './tenant-transaction.js';
+export { withPartnerTransaction, type PartnerTx } from './partner-transaction.js';
 export { withAppRoleTransaction, type AppRoleTx } from './app-role-transaction.js';
 export { assertNonPrivilegedSession } from './session-guard.js';
 export { TenantAwareProcessor, type TenantJob } from './tenant-aware-processor.js';

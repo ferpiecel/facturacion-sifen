@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ClsModule } from 'nestjs-cls';
+import { ApiDocsModule } from './modules/api-docs/api-docs.module.js';
 import { CustodyModule } from './modules/custody/custody.module.js';
 import { DatabaseModule } from './modules/database/database.module.js';
 import { EmissionModule } from './modules/emission/emission.module.js';
@@ -16,6 +17,7 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module.js';
     IdentityModule,
     PortalAuthModule,
     HealthModule,
+    ApiDocsModule,
     EmissionModule,
     WebhooksModule,
   ],

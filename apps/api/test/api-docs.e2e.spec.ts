@@ -4,8 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { buildOpenApiDocument } from '../src/modules/api-docs/infrastructure/openapi.js';
 
-async function boot(env: Record<string, string>) {
-  vi.stubEnv('NODE_ENV', env.NODE_ENV ?? '');
+async function boot(env: { NODE_ENV: string; API_DOCS_ENABLED?: string }) {
+  vi.stubEnv('NODE_ENV', env.NODE_ENV);
   vi.stubEnv('API_DOCS_ENABLED', env.API_DOCS_ENABLED ?? '');
   // Production refuses to boot without these; they are irrelevant to the docs routes.
   vi.stubEnv('SIFEN_ENVIRONMENT', 'test');

@@ -19,7 +19,10 @@ describe('isApiDocsEnabled', () => {
     expect(isApiDocsEnabled({ API_DOCS_ENABLED: 'true' })).toBe(true);
   });
 
-  it.each(['false', '1', 'TRUE', 'yes', ''])('ignores API_DOCS_ENABLED=%j in production', (flag) => {
-    expect(isApiDocsEnabled({ NODE_ENV: 'production', API_DOCS_ENABLED: flag })).toBe(false);
-  });
+  it.each(['false', '1', 'TRUE', 'yes', ''])(
+    'ignores API_DOCS_ENABLED=%j in production',
+    (flag) => {
+      expect(isApiDocsEnabled({ NODE_ENV: 'production', API_DOCS_ENABLED: flag })).toBe(false);
+    },
+  );
 });

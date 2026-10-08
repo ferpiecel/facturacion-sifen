@@ -4,7 +4,8 @@
  * CSRF check sees the portal origin. Tokens never reach JavaScript.
  *
  * A 401 on a session route triggers ONE `/auth/refresh` (shared by concurrent calls) and one retry of the original
- * request; if either fails the answer is `unauthenticated` and the caller sends the user to the login screen.
+ * request; if the refresh is refused (401/403) or the retry is still 401 the answer is `unauthenticated`; a transient
+ * refresh failure (429, 5xx, network) answers `unavailable` and keeps the session.
  */
 export interface Tenant {
   tenantId: string;
@@ -70,8 +71,13 @@ export function createAuthClient({
 
   const refresh = (): Promise<boolean> => {
     refreshing ??= send('/refresh', 'POST')
-      .then((response) => response.ok)
-      .catch(() => false)
+      .then((response) => {
+        if (response.ok) return true;
+        // Only 401/403 mean the session is gone. 429, 5xx or a network error are transient: reject so the caller
+        // answers `unavailable` and keeps the user signed in.
+        if (response.status === 401 || response.status === 403) return false;
+        throw new Error(`refresh unavailable (${String(response.status)})`);
+      })
       .finally(() => {
         refreshing = null;
       });

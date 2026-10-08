@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { AuthClient, SelectTenantResult, TenantsResult } from './auth-client';
+import type { AuthClient, MeResult, SelectTenantResult, TenantsResult } from './auth-client';
 import { TenantPicker } from './tenant-picker';
 
 const replace = vi.fn();
@@ -12,10 +12,26 @@ vi.mock('next/navigation', () => ({ useRouter: () => router }));
 const A = { tenantId: 't1', tenantName: 'Acme S.A.', role: 'owner' };
 const B = { tenantId: 't2', tenantName: 'Beta SRL', role: 'lector' };
 
-function setup(tenants: TenantsResult, select: SelectTenantResult = { kind: 'ok' }) {
+const ACTIVE: MeResult = {
+  kind: 'ok',
+  session: { userId: 'u', activeTenant: { tenantId: 't1', role: 'owner' } },
+};
+const NO_TENANT: MeResult = { kind: 'ok', session: { userId: 'u', activeTenant: null } };
+
+function setup(
+  tenants: TenantsResult,
+  select: SelectTenantResult = { kind: 'ok' },
+  ...me: MeResult[]
+) {
+  const meQueue = me.length > 0 ? [...me] : [ACTIVE];
   const client = {
     tenants: vi.fn(() => Promise.resolve(tenants)),
     selectTenant: vi.fn(() => Promise.resolve(select)),
+    me: vi.fn(() =>
+      Promise.resolve(
+        meQueue.length > 1 ? (meQueue.shift() as MeResult) : (meQueue[0] as MeResult),
+      ),
+    ),
   } as unknown as AuthClient;
   render(<TenantPicker client={client} />);
   return client;
@@ -82,5 +98,32 @@ describe('TenantPicker', () => {
     await waitFor(() => {
       expect(replace).toHaveBeenCalledWith('/login');
     });
+  });
+
+  it('retries the selection once when the session still has no active tenant, then enters', async () => {
+    const client = setup({ kind: 'ok', tenants: [A, B] }, { kind: 'ok' }, NO_TENANT, ACTIVE);
+    await userEvent.setup().click(await screen.findByRole('button', { name: /Acme/ }));
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('/'));
+    expect(client.selectTenant).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops after one retry instead of bouncing between the panel and the picker', async () => {
+    const client = setup({ kind: 'ok', tenants: [A, B] }, { kind: 'ok' }, NO_TENANT);
+    await userEvent.setup().click(await screen.findByRole('button', { name: /Acme/ }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('No pudimos activar la empresa');
+    expect(client.selectTenant).toHaveBeenCalledTimes(2);
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it('sends a session lost while confirming to the login', async () => {
+    setup({ kind: 'ok', tenants: [A, B] }, { kind: 'ok' }, { kind: 'unauthenticated' });
+    await userEvent.setup().click(await screen.findByRole('button', { name: /Acme/ }));
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('/login'));
+  });
+
+  it('enters the panel when the confirmation is unavailable; the gate has its own retry', async () => {
+    setup({ kind: 'ok', tenants: [A, B] }, { kind: 'ok' }, { kind: 'unavailable' });
+    await userEvent.setup().click(await screen.findByRole('button', { name: /Acme/ }));
+    await waitFor(() => expect(replace).toHaveBeenCalledWith('/'));
   });
 });

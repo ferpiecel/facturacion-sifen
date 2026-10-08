@@ -129,7 +129,19 @@ no SSO in MVP (RF-24), roles list (PRD A4).
   reviews: refused-attempt lock timing across windows end to end, `SessionGuard` with a real DB, tenant audit failure paths, retention of
   `auth_throttle`/`auth_events`, concurrency of refresh over HTTP.
 - [ ] S5 (rest) enrolment endpoint (blocked on the PO), reset endpoint/CLI, ADR for D1-D4. Original S5 line: API/BFF endpoints (`/auth/*`), cookie, CSRF, active-tenant selection and switch; ADR for D1-D4.
-- [ ] S6 Portal UI in `apps/web`: login, MFA, tenant picker, role-aware guard.
+- [x] S6 Portal UI in `apps/web`, stacked: `feat/hu-e12-portal-login-ui` (auth client + same-origin proxy), `-login-screens`, `-mfa-screen`,
+  `-session-gate` (route guard, tenant picker, logout). Decisions: (a) the browser calls the API through a same-origin Next rewrite
+  (`/api/auth/*` -> `API_INTERNAL_URL`), because `__Host-` cookies are host-bound, the CSRF check needs `Origin == PORTAL_ORIGIN` and the API has
+  no CORS: no backend change; (b) Stitch ("Portal Facturación SIFEN") has no login, MFA or tenant-picker screen, so the screens reuse the portal
+  tokens (deviation, for the PO); (c) guard = `proxy.ts` cookie-presence redirect + client `SessionGate` (`/auth/me`, one refresh) as the authority.
+  Gaps: the API answers 401 (not 429) when throttled, so the portal's throttled state only shows if the API starts sending 429; no enrolment UI
+  (blocked on the PO); the panel shell still shows the sample user/tenant name; role-aware UI waits for real role-gated features.
+  Client address: Next fills `X-Forwarded-For` only when absent and its rewrite forwards headers untouched, and middleware runs after that fill, so
+  `instrumentation.ts` pins the header to the socket address on the Node `request` event (kept as is with `PORTAL_TRUSTED_UPSTREAM_PROXY=true`);
+  hop rules are in the README. Debt: (1) `API_INTERNAL_URL` is baked in at `next build` (rewrites are evaluated at build), so changing it in a
+  running container has no effect; use a route handler if runtime configuration is needed. (2) `SessionGate` is only a UX gate: once server-rendered
+  or server-fetched data is real (HU-E12-01), it must be gated on the server (API session check), never by the client gate or the cookie-presence proxy.
+  (3) The pin relies on patching `http.Server` in `instrumentation.ts`; re-verify it on every Next upgrade (end-to-end check with `next start` and a spoofed header).
 
 ## Progress
 

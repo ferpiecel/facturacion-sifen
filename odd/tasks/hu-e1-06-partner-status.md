@@ -12,6 +12,6 @@
 
 ## Tasks
 
-- [ ] T1 (PR 1, db) migration 0044, `withPartnerTransaction`, isolation tests (partner vs foreign tenant)
-- [ ] T2 (PR 2, api) `GET /partners/:partnerId/tenants/status`
-- [ ] T3 `pnpm check` + db Postgres suite
+- [x] T1 (PR 1, db) migration 0044, `withPartnerTransaction`, isolation tests (partner vs foreign tenant)
+- [x] T2 (PR 2, api) `GET /partners/:partnerId/tenants/status`
+- [x] T3 `pnpm check` + db Postgres suite

@@ -309,6 +309,13 @@
       "when": 1791311894601,
       "tag": "0043_session_family",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1791457342680,
+      "tag": "0044_partner_status",
+      "breakpoints": true
     }
   ]
 }

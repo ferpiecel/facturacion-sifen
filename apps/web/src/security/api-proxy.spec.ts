@@ -16,7 +16,7 @@ describe('apiRewrites', () => {
   });
 
   it('defaults to a local API', () => {
-    expect(apiRewrites(undefined)[0]?.destination).toBe('http://localhost:3001/auth/:path*');
+    expect(apiRewrites(undefined)[0]?.destination).toBe('http://localhost:3000/auth/:path*');
   });
 
   it('refuses a URL that is not http(s)', () => {

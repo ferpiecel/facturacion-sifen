@@ -1,3 +1,4 @@
 * text=auto eol=lf
 *.pdf binary
 packages/sifen-xsd/vendor/*.xsd -text
+docs/api/openapi.json linguist-generated=true

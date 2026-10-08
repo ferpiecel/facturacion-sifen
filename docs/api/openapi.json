@@ -1,0 +1,1441 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Facturacion SIFEN API",
+    "version": "1.0.0",
+    "description": "Electronic invoicing for Paraguay (SIFEN). Authenticate with an API key: `Authorization: Bearer sk_live_...`. Errors use `{ statusCode, message, errors? }`. Webhook payloads and signatures are described in docs/integracion/webhooks.md."
+  },
+  "paths": {
+    "/v1/documents": {
+      "post": {
+        "operationId": "createDocument",
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Accept an invoice (FE) for emission",
+        "description": "Returns 202 once the document is persisted with its CDC; signing and transmission to SIFEN are asynchronous. Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-required-scopes": [
+          "documents:write"
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "1 to 255 printable ASCII characters, no spaces",
+            "schema": {
+              "type": "string",
+              "pattern": "^[!-~]{1,255}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDocumentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or malformed Idempotency-Key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency-Key reused with another body, or numbering exhausted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed (shape or fiscal rules)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Transient numbering collision; retry the request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "getDocumentByCdc",
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Look a document up by CDC",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-required-scopes": [
+          "documents:read"
+        ],
+        "parameters": [
+          {
+            "name": "cdc",
+            "in": "query",
+            "required": true,
+            "description": "CDC, 44 digits",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{44}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "cdc missing or not 44 digits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (also returned for another tenant`s resource)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/documents/{id}": {
+      "get": {
+        "operationId": "getDocument",
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Get a document by id",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-required-scopes": [
+          "documents:read"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Document id (UUID)",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "id is not a UUID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (also returned for another tenant`s resource)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/documents/{id}/kude": {
+      "get": {
+        "operationId": "downloadKude",
+        "tags": [
+          "Documents"
+        ],
+        "summary": "Download the KuDE (PDF), available once the document is signed",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-required-scopes": [
+          "documents:read"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Document id (UUID)",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The KuDE",
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "id is not a UUID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (also returned for another tenant`s resource)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The document is not signed yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The KuDE could not be generated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks/endpoints": {
+      "post": {
+        "operationId": "createWebhookEndpoint",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Register a webhook endpoint; the secret is shown only here and on rotation",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-required-scopes": [
+          "webhooks:write"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookEndpointCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpointWithSecret"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationProblem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listWebhookEndpoints",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "List webhook endpoints",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-required-scopes": [
+          "webhooks:read"
+        ],
+        "responses": {
+          "200": {
+            "description": "Endpoints",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/WebhookEndpoint"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks/endpoints/{id}": {
+      "patch": {
+        "operationId": "updateWebhookEndpoint",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Update the url, events or active flag of an endpoint",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-required-scopes": [
+          "webhooks:write"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Endpoint id (UUID)",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookEndpointUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpoint"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (also returned for another tenant`s resource)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks/endpoints/{id}/rotate-secret": {
+      "post": {
+        "operationId": "rotateWebhookSecret",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Rotate the signing secret; the previous one stays valid for a grace period",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-required-scopes": [
+          "webhooks:write"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Endpoint id (UUID)",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rotated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpointWithSecret"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (also returned for another tenant`s resource)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A rotation is already in progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks/deliveries": {
+      "get": {
+        "operationId": "listWebhookDeliveries",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Delivery history (no payloads), newest first, cursor paginated",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-required-scopes": [
+          "webhooks:read"
+        ],
+        "parameters": [
+          {
+            "name": "endpoint_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "failed",
+                "delivered",
+                "dead"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The `next_cursor` of the previous page",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of deliveries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDeliveryPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid filter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/webhooks/deliveries/{id}/replay": {
+      "post": {
+        "operationId": "replayWebhookDelivery",
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Replay a dead delivery",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-required-scopes": [
+          "webhooks:write"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Delivery id (UUID)",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The delivery, queued again",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDelivery"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (also returned for another tenant`s resource)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The delivery is not dead, or its endpoint is inactive",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "apiKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "API key. Each route needs the scope named in `x-required-scopes` (`documents:read`, `documents:write`, `webhooks:read`, `webhooks:write`)."
+      }
+    },
+    "schemas": {
+      "Problem": {
+        "type": "object",
+        "required": [
+          "statusCode",
+          "message"
+        ],
+        "properties": {
+          "statusCode": {
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "ValidationProblem": {
+        "type": "object",
+        "required": [
+          "statusCode",
+          "message",
+          "errors"
+        ],
+        "properties": {
+          "statusCode": {
+            "type": "integer",
+            "const": 422
+          },
+          "message": {
+            "type": "string"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "field",
+                "message"
+              ],
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "rule": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "CreateDocumentRequest": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "establishment": {
+            "type": "string",
+            "pattern": "^\\d{3}$"
+          },
+          "expeditionPoint": {
+            "type": "string",
+            "pattern": "^\\d{3}$"
+          },
+          "operationType": {
+            "type": "string",
+            "enum": [
+              "B2B",
+              "B2C",
+              "B2G",
+              "B2F"
+            ]
+          },
+          "receiver": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "named"
+                  },
+                  "ruc": {
+                    "type": "string"
+                  },
+                  "isPublicEntity": {
+                    "default": false,
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 255
+                  },
+                  "address": {
+                    "type": "string",
+                    "maxLength": 255
+                  },
+                  "houseNumber": {
+                    "type": "string",
+                    "pattern": "^\\d{1,6}$"
+                  },
+                  "districtCode": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9999
+                  },
+                  "districtDescription": {
+                    "type": "string",
+                    "maxLength": 30
+                  },
+                  "cityCode": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 99999
+                  },
+                  "cityDescription": {
+                    "type": "string",
+                    "maxLength": 30
+                  }
+                },
+                "required": [
+                  "kind",
+                  "ruc",
+                  "name",
+                  "address",
+                  "houseNumber",
+                  "districtCode",
+                  "districtDescription",
+                  "cityCode",
+                  "cityDescription"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "unnamed"
+                  },
+                  "ruc": {
+                    "not": {}
+                  },
+                  "name": {
+                    "not": {}
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              }
+            ]
+          },
+          "items": {
+            "maxItems": 999,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "maxLength": 50
+                },
+                "description": {
+                  "type": "string",
+                  "maxLength": 2000
+                },
+                "unitCode": {
+                  "type": "number"
+                },
+                "quantity": {
+                  "type": "number"
+                },
+                "unitPrice": {
+                  "type": "number"
+                },
+                "vatRate": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "code",
+                "description",
+                "unitCode",
+                "quantity",
+                "unitPrice",
+                "vatRate"
+              ]
+            }
+          },
+          "roundingPyg": {
+            "default": 0,
+            "type": "number"
+          },
+          "location": {
+            "type": "object",
+            "properties": {
+              "departmentCode": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "departmentCode"
+            ]
+          },
+          "currency": {
+            "default": "PYG",
+            "type": "string",
+            "const": "PYG"
+          }
+        },
+        "required": [
+          "establishment",
+          "expeditionPoint",
+          "operationType",
+          "receiver",
+          "items",
+          "location"
+        ]
+      },
+      "DocumentAccepted": {
+        "type": "object",
+        "required": [
+          "document_id",
+          "cdc"
+        ],
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cdc": {
+            "type": "string",
+            "pattern": "^[0-9]{44}$"
+          }
+        }
+      },
+      "Document": {
+        "type": "object",
+        "required": [
+          "document_id",
+          "cdc",
+          "number",
+          "status",
+          "environment",
+          "issued_at",
+          "totals"
+        ],
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "cdc": {
+            "type": "string",
+            "pattern": "^[0-9]{44}$"
+          },
+          "number": {
+            "type": "string",
+            "examples": [
+              "001-002-0000007"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "signed",
+              "queued",
+              "submitted",
+              "approved",
+              "approved_with_observations",
+              "rejected",
+              "corrected",
+              "number_voided",
+              "cancelled"
+            ]
+          },
+          "environment": {
+            "type": "string",
+            "enum": [
+              "test",
+              "production"
+            ]
+          },
+          "issued_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "totals": {
+            "type": "object",
+            "required": [
+              "amount",
+              "currency"
+            ],
+            "properties": {
+              "amount": {
+                "type": "string",
+                "examples": [
+                  "110000"
+                ]
+              },
+              "currency": {
+                "type": "string"
+              }
+            }
+          },
+          "receiver": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "ruc": {
+                "type": "string"
+              }
+            }
+          },
+          "sifen": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "SIFEN answer; null until transmission stores it",
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          },
+          "urls": {
+            "type": "object",
+            "properties": {
+              "xml": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "kude": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "WebhookEndpointCreate": {
+        "type": "object",
+        "required": [
+          "url",
+          "events"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Public https URL"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "document.created",
+                "document.signed",
+                "document.submitted",
+                "document.approved",
+                "document.approved_with_observations",
+                "document.rejected",
+                "document.cancelled",
+                "document.number_voided",
+                "document.transmission_deadline_warning",
+                "document.notification.delivered",
+                "document.notification.failed"
+              ]
+            }
+          }
+        }
+      },
+      "WebhookEndpointUpdate": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "document.created",
+                "document.signed",
+                "document.submitted",
+                "document.approved",
+                "document.approved_with_observations",
+                "document.rejected",
+                "document.cancelled",
+                "document.number_voided",
+                "document.transmission_deadline_warning",
+                "document.notification.delivered",
+                "document.notification.failed"
+              ]
+            }
+          },
+          "active": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WebhookEndpoint": {
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "events",
+          "active",
+          "secret_version",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "url": {
+            "type": "string"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "secret_version": {
+            "type": "integer"
+          },
+          "previous_secret_expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WebhookEndpointWithSecret": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/WebhookEndpoint"
+          },
+          {
+            "type": "object",
+            "required": [
+              "secret"
+            ],
+            "properties": {
+              "secret": {
+                "type": "string",
+                "description": "Shown only once"
+              }
+            }
+          }
+        ]
+      },
+      "WebhookDelivery": {
+        "type": "object",
+        "required": [
+          "id",
+          "endpoint_id",
+          "event_id",
+          "event_type",
+          "status",
+          "attempt_count",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "endpoint_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "event_id": {
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "failed",
+              "delivered",
+              "dead"
+            ]
+          },
+          "attempt_count": {
+            "type": "integer"
+          },
+          "last_status_code": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "next_attempt_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "delivered_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "WebhookDeliveryPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookDelivery"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

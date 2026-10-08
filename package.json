@@ -4,10 +4,11 @@
   "private": true,
   "packageManager": "pnpm@12.5.1",
   "engines": {
-    "node": ">=22.22.0 <23"
+    "node": ">=22.22.2 <23"
   },
   "scripts": {
     "build": "turbo run build",
+    "build:api": "turbo run build --filter=@sifen/api...",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",

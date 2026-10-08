@@ -70,3 +70,35 @@ test('summarize falls back to the log tail when turbo reports no failed task', (
   assert.equal(out[0], 'verify FAIL turbo');
   assert.deepEqual(out.slice(1), ['boom', 'bad things']);
 });
+
+test('summarize drops passing-test lines so the failure is not buried', () => {
+  const log = [
+    '@sifen/api:test:  ✓ src/a.spec.ts (10 tests) 23ms',
+    '@sifen/api:test:      ✓ takes a document through 3829ms',
+    '@sifen/api:test:      ↓ skipped case',
+    '@sifen/api:test:  FAIL  src/b.spec.ts > deliberate failure',
+    '@sifen/api:test: AssertionError: expected 1 to be 2',
+    'Failed:    @sifen/api#test',
+  ].join('\n');
+  const out = summarize({ log, exitCode: 1, durationMs: 1, packages: [] }).split('\n');
+  assert.deepEqual(out.slice(1), [
+    '@sifen/api:test:  FAIL  src/b.spec.ts > deliberate failure',
+    '@sifen/api:test: AssertionError: expected 1 to be 2',
+  ]);
+});
+
+test('summarize drops app logs and stack frames, keeping the failing assertion', () => {
+  const log = [
+    '@sifen/api:test: [Nest] 22 - 10/08/2026 LOG [InstanceLoader] AppModule initialized',
+    '@sifen/api:test: [Nest] 22 - 10/08/2026 ERROR [Guard] unexpected error',
+    '@sifen/api:test:     at file:///node_modules/vitest/dist/index.js:1:1',
+    '@sifen/api:test:  ❯ src/b.spec.ts (13 tests | 1 failed) 9ms',
+    '@sifen/api:test:    × deliberate failure 4ms',
+    'Failed:    @sifen/api#test',
+  ].join('\n');
+  const out = summarize({ log, exitCode: 1, durationMs: 1, packages: [] }).split('\n');
+  assert.deepEqual(out.slice(1), [
+    '@sifen/api:test:  ❯ src/b.spec.ts (13 tests | 1 failed) 9ms',
+    '@sifen/api:test:    × deliberate failure 4ms',
+  ]);
+});

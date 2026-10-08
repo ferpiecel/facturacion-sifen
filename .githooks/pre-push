@@ -2,4 +2,4 @@
 # Runs the CI quality gates on the affected packages before every push.
 # Skip it in an emergency with: git push --no-verify
 cd "$(git rev-parse --show-toplevel)" || exit 1
-exec pnpm verify
+exec pnpm --loglevel silent verify

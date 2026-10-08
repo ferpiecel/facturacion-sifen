@@ -2,7 +2,15 @@
 export const MAX_FAILURE_LINES = 40;
 
 // Lines that never help to diagnose a failure.
-const NOISE = [/^\S+: \$ /, /\[ELIFECYCLE\]/, /: cache (miss|hit)/, /^\S+:\s*$/];
+const NOISE = [
+  /: \[Nest\] /,
+  /^\S+:\s+at /,
+  / [✓↓] /,
+  /^\S+: \$ /,
+  /\[ELIFECYCLE\]/,
+  /: cache (miss|hit)/,
+  /^\S+:\s*$/,
+];
 
 // eslint-disable-next-line no-control-regex
 const stripAnsi = (text) => text.replace(/\u001b\[[0-9;]*m/g, '');

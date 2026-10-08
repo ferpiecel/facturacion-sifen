@@ -10,14 +10,20 @@ Fase 0 (fundaciones y PoC). Ya están el monorepo con CI (HU-E0-01), la API de r
 
 ## Desarrollo local
 
-Requisitos: Node.js 22 y pnpm 12.5.1 (`corepack enable` con corepack ≥ 0.36). Si el corepack de tu Node es más viejo, usá `npx pnpm@12.5.1`.
+Requisitos: Node.js >=22.22.2 <23 (hay `.nvmrc`; con 22.22.0 `pnpm install` falla por `ERR_PNPM_UNSUPPORTED_ENGINE`) y pnpm 12.5.1 (`corepack enable` con corepack ≥ 0.36). Si el corepack de tu Node es más viejo, usá `npx pnpm@12.5.1`.
 
 ```bash
 pnpm install
 pnpm check            # lint, typecheck, depcruise y tests
 docker compose up -d  # PostgreSQL 16 y Redis 7
-pnpm --filter @sifen/api build && pnpm --filter @sifen/api start
+pnpm build:api        # turbo run build --filter=@sifen/api...: compila también los paquetes de los que depende (p. ej. @sifen/db)
+pnpm --filter @sifen/api start:dev   # NODE_ENV=development y PORTAL_ORIGIN=http://localhost:3001
+# Documentación de la API de integradores: http://localhost:3000/docs (spec: /docs/openapi.json)
 ```
+
+`start:dev` fija `NODE_ENV=development` y `PORTAL_ORIGIN=http://localhost:3001`. `pnpm --filter @sifen/api start` a secas se comporta como producción y no arranca sin `PORTAL_ORIGIN` (fail fast intencional). `/health` responde 200.
+
+`/docs` (visor Redoc, carga el script desde un CDN fijado con SRI) y `/docs/openapi.json` no requieren API key, pero solo responden con `NODE_ENV` `development` o `test`, o con `API_DOCS_ENABLED=true`; en cualquier otro caso devuelven `404`.
 
 ### Portal web
 
@@ -56,6 +62,7 @@ Todas tienen un valor por defecto, así que el entorno local funciona sin un arc
 | `SESSION_ACCESS_TTL_SECONDS` | `300` | `apps/api` | Vida del token de acceso del portal (30 a 3600). Decidido por el producto: 5 minutos. |
 | `SESSION_REFRESH_TTL_SECONDS` | `600` | `apps/api` | Vida deslizante del token de refresco (60 a 86400). Decidido por el producto: 10 minutos; un usuario ocioso más tiempo que esto vuelve al login. |
 | `SESSION_ABSOLUTE_TTL_SECONDS` | `43200` (`1200` con `NODE_ENV` `development` o `test`) | `apps/api` | Tope absoluto desde el login (300 a 604800): ni el refresco lo supera. Decidido por el producto: 12 h en producción y 20 min en desarrollo y test. |
+| `API_DOCS_ENABLED` | *(sin valor)* | `apps/api` | `true` publica `/docs` y `/docs/openapi.json` (documentación OpenAPI de la API de integradores, sin API key) aunque `NODE_ENV` no sea `development` o `test`; pensado para staging. Cualquier otro valor se ignora. Sin la variable, en producción o con `NODE_ENV` sin definir, ambas rutas responden `404`. |
 | `NODE_ENV` | *(sin valor)* | `apps/api` | Estándar de Node. En `production` exige `SIFEN_ENVIRONMENT` explícita. Además, solo con `development` o `test` la API puede arrancar sin `KMS_LOCAL_MASTER_KEY`; con cualquier otro valor (o sin valor) la exige. Para desarrollo local, exportá `NODE_ENV=development` o definí la clave. |
 
 ## Operación

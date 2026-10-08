@@ -22,9 +22,18 @@ export interface PortalSession {
 }
 
 export type Failure = { kind: 'invalid' } | { kind: 'throttled' } | { kind: 'unavailable' };
-export type LoginResult = { kind: 'mfa_required' } | Failure;
+export type LoginResult = { kind: 'mfa_required' } | { kind: 'mfa_enrollment_required' } | Failure;
 export type MfaResult =
   { kind: 'ok'; activeTenant: ActiveTenant | null; tenants: Tenant[] } | Failure;
+export type EnrollResult = { kind: 'ok'; otpauthUri: string; secret: string } | Failure;
+export type ConfirmEnrollmentResult =
+  | {
+      kind: 'ok';
+      recoveryCodes: string[];
+      activeTenant: ActiveTenant | null;
+      tenants: Tenant[];
+    }
+  | Failure;
 export type MeResult =
   { kind: 'ok'; session: PortalSession } | { kind: 'unauthenticated' } | Failure;
 export type TenantsResult =
@@ -35,6 +44,8 @@ export type SelectTenantResult =
 export interface AuthClient {
   login: (email: string, password: string) => Promise<LoginResult>;
   verifyMfa: (code: string) => Promise<MfaResult>;
+  enrollMfa: () => Promise<EnrollResult>;
+  confirmMfaEnrollment: (code: string) => Promise<ConfirmEnrollmentResult>;
   me: () => Promise<MeResult>;
   tenants: () => Promise<TenantsResult>;
   selectTenant: (tenantId: string) => Promise<SelectTenantResult>;
@@ -106,7 +117,11 @@ export function createAuthClient({
       guarded<LoginResult>(
         async () => {
           const response = await send('/login', 'POST', { email, password });
-          return response.ok ? { kind: 'mfa_required' } : failure(response.status);
+          if (!response.ok) return failure(response.status);
+          const data = (await response.json()) as { status?: string };
+          return data.status === 'mfa_enrollment_required'
+            ? { kind: 'mfa_enrollment_required' }
+            : { kind: 'mfa_required' };
         },
         { kind: 'unavailable' },
       ),
@@ -121,6 +136,32 @@ export function createAuthClient({
             tenants: Tenant[];
           };
           return { kind: 'ok', activeTenant: data.activeTenant, tenants: data.tenants };
+        },
+        { kind: 'unavailable' },
+      ),
+
+    enrollMfa: () =>
+      guarded<EnrollResult>(
+        async () => {
+          const response = await send('/mfa/enroll', 'POST');
+          if (!response.ok) return failure(response.status);
+          const data = (await response.json()) as { otpauthUri: string; secret: string };
+          return { kind: 'ok', otpauthUri: data.otpauthUri, secret: data.secret };
+        },
+        { kind: 'unavailable' },
+      ),
+
+    confirmMfaEnrollment: (code) =>
+      guarded<ConfirmEnrollmentResult>(
+        async () => {
+          const response = await send('/mfa/confirm', 'POST', { code });
+          if (!response.ok) return failure(response.status);
+          const data = (await response.json()) as {
+            recoveryCodes: string[];
+            activeTenant: ActiveTenant | null;
+            tenants: Tenant[];
+          };
+          return { kind: 'ok', ...data };
         },
         { kind: 'unavailable' },
       ),

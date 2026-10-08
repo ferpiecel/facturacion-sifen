@@ -30,6 +30,10 @@ export function LoginForm({ client = authClient }: { client?: AuthClient }) {
       router.push('/login/mfa');
       return;
     }
+    if (result.kind === 'mfa_enrollment_required') {
+      router.push('/login/mfa/enrolar');
+      return;
+    }
     setPending(false);
     setError(failureMessage(result, 'Correo o contraseña incorrectos.'));
     email.current?.focus();

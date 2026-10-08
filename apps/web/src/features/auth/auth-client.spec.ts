@@ -164,4 +164,51 @@ describe('auth client', () => {
     const client = createAuthClient({ fetchImpl: stub({ status: 401 }, { status: 503 }) });
     await expect(client.selectTenant('t1')).resolves.toEqual({ kind: 'unavailable' });
   });
+
+  it('tells the portal that the user must enrol MFA', async () => {
+    const client = createAuthClient({
+      fetchImpl: stub({ status: 200, body: { status: 'mfa_enrollment_required' } }),
+    });
+    await expect(client.login('a@b.py', 'x')).resolves.toEqual({ kind: 'mfa_enrollment_required' });
+  });
+
+  it('starts enrolment and returns the otpauth URI and the secret', async () => {
+    const fetchImpl = stub({
+      status: 200,
+      body: { otpauthUri: 'otpauth://totp/x?secret=ABC', secret: 'ABC' },
+    });
+    const client = createAuthClient({ fetchImpl });
+    await expect(client.enrollMfa()).resolves.toEqual({
+      kind: 'ok',
+      otpauthUri: 'otpauth://totp/x?secret=ABC',
+      secret: 'ABC',
+    });
+  });
+
+  it('confirms enrolment and returns the recovery codes with the tenants', async () => {
+    const fetchImpl = stub({
+      status: 200,
+      body: { recoveryCodes: ['AAAA'], activeTenant: null, tenants: [TENANT] },
+    });
+    const client = createAuthClient({ fetchImpl });
+    await expect(client.confirmMfaEnrollment('123456')).resolves.toEqual({
+      kind: 'ok',
+      recoveryCodes: ['AAAA'],
+      activeTenant: null,
+      tenants: [TENANT],
+    });
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe('/api/auth/mfa/confirm');
+    expect(fetchImpl.mock.calls[0]?.[1]).toMatchObject({
+      body: JSON.stringify({ code: '123456' }),
+    });
+  });
+
+  it.each([
+    [401, 'invalid'],
+    [429, 'throttled'],
+    [503, 'unavailable'],
+  ])('maps a %i enrolment answer to %s', async (status, kind) => {
+    const client = createAuthClient({ fetchImpl: stub({ status }) });
+    await expect(client.enrollMfa()).resolves.toEqual({ kind });
+  });
 });

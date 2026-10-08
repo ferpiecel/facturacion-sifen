@@ -42,6 +42,14 @@ describe('LoginForm', () => {
     });
   });
 
+  it('goes to the enrolment screen when the user has no MFA yet', async () => {
+    setup({ kind: 'mfa_enrollment_required' });
+    await submit();
+    await waitFor(() => {
+      expect(push).toHaveBeenCalledWith('/login/mfa/enrolar');
+    });
+  });
+
   it('does not call the API with an empty form and says what is missing', async () => {
     const client = setup({ kind: 'mfa_required' });
     await userEvent.setup().click(screen.getByRole('button', { name: 'Ingresar' }));

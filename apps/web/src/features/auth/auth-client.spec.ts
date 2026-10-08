@@ -137,4 +137,31 @@ describe('auth client', () => {
     });
     await expect(failing.logout()).resolves.toBeUndefined();
   });
+  it.each([429, 500, 503])(
+    'keeps the session when the refresh answers %i (transient, not a lost session)',
+    async (status) => {
+      const client = createAuthClient({ fetchImpl: stub({ status: 401 }, { status }) });
+      await expect(client.me()).resolves.toEqual({ kind: 'unavailable' });
+    },
+  );
+
+  it('keeps the session when the refresh fails on the network', async () => {
+    const replies = [new Response(null, { status: 401 })];
+    const fetchImpl = vi.fn<FetchLike>(() => {
+      const next = replies.shift();
+      return next ? Promise.resolve(next) : Promise.reject(new TypeError('offline'));
+    });
+    const client = createAuthClient({ fetchImpl });
+    await expect(client.tenants()).resolves.toEqual({ kind: 'unavailable' });
+  });
+
+  it('treats a refresh 403 as a lost session', async () => {
+    const client = createAuthClient({ fetchImpl: stub({ status: 401 }, { status: 403 }) });
+    await expect(client.me()).resolves.toEqual({ kind: 'unauthenticated' });
+  });
+
+  it('reports unavailable for a select-tenant whose refresh is transient', async () => {
+    const client = createAuthClient({ fetchImpl: stub({ status: 401 }, { status: 503 }) });
+    await expect(client.selectTenant('t1')).resolves.toEqual({ kind: 'unavailable' });
+  });
 });

@@ -33,12 +33,12 @@ export type SelectTenantResult =
   { kind: 'ok' } | { kind: 'forbidden' } | { kind: 'unauthenticated' } | { kind: 'unavailable' };
 
 export interface AuthClient {
-  login(email: string, password: string): Promise<LoginResult>;
-  verifyMfa(code: string): Promise<MfaResult>;
-  me(): Promise<MeResult>;
-  tenants(): Promise<TenantsResult>;
-  selectTenant(tenantId: string): Promise<SelectTenantResult>;
-  logout(): Promise<void>;
+  login: (email: string, password: string) => Promise<LoginResult>;
+  verifyMfa: (code: string) => Promise<MfaResult>;
+  me: () => Promise<MeResult>;
+  tenants: () => Promise<TenantsResult>;
+  selectTenant: (tenantId: string) => Promise<SelectTenantResult>;
+  logout: () => Promise<void>;
 }
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;

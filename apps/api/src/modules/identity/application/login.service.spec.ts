@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { MfaAlreadyEnrolledError } from './mfa.use-cases.js';
 import { hashSessionToken } from '../domain/session-token.js';
 import { DUMMY_HASH } from './authenticate-api-key.use-case.js';
 import {
@@ -95,12 +96,14 @@ function setup(opts: Options = {}) {
     find: vi
       .fn()
       .mockResolvedValue(opts.confirmedMfa === false ? null : { confirmedAt: new Date() }),
+    account: vi.fn().mockResolvedValue('ana@example.com'),
     enroll: vi.fn().mockResolvedValue({ otpauthUri: 'otpauth://x', secretBase32: 'ABC' }),
     confirm: vi.fn().mockResolvedValue({ recoveryCodes: ['aaaa-bbbb-cccc-dddd'] }),
     verify: mfaVerify,
   };
   const mfaFor = vi.fn().mockImplementation(() => ({
     store: { find: mfa.find },
+    account: mfa.account,
     enroll: { execute: mfa.enroll },
     confirm: { execute: mfa.confirm },
     verify: { execute: mfa.verify },
@@ -343,9 +346,7 @@ describe('LoginService MFA steps', () => {
 
   it('enrols from the pending session and, once the first code is confirmed, returns recovery codes and a verified session', async () => {
     const { service, mfa, sessions } = setup({ confirmedMfa: false });
-    expect(
-      await service.beginEnrollment({ pendingToken: 'p-access', account: 'ana@example.com' }),
-    ).toEqual({
+    expect(await service.beginEnrollment({ pendingToken: 'p-access' })).toEqual({
       otpauthUri: 'otpauth://x',
       secretBase32: 'ABC',
     });
@@ -359,6 +360,44 @@ describe('LoginService MFA steps', () => {
       nowMs: 1_000,
     });
     expect(sessions.promote).toHaveBeenCalledWith('pending-1');
+  });
+
+  describe('beginEnrollment', () => {
+    it('audits the start, throttles it per user and uses the account of the pending session', async () => {
+      const { service, events, reservations, mfa } = setup({ confirmedMfa: false });
+      await service.beginEnrollment({ pendingToken: 'p-access' });
+      expect(events.map((e) => e.event)).toEqual(['login.mfa_enrollment_started']);
+      expect(reservations.map(([subject]) => subject)).toContain('enroll:u-1');
+      expect(mfa.account).toHaveBeenCalledOnce();
+    });
+
+    it('refuses without calling the use case when the enrolment throttle is exhausted', async () => {
+      const { service, mfa } = setup({ confirmedMfa: false, locked: ['enroll:u-1'] });
+      expect(await service.beginEnrollment({ pendingToken: 'p-access' })).toBeNull();
+      expect(mfa.enroll).not.toHaveBeenCalled();
+    });
+
+    it('answers null for an already-enrolled user instead of leaking the error', async () => {
+      const { service, mfa, events } = setup();
+      mfa.enroll.mockRejectedValueOnce(new MfaAlreadyEnrolledError());
+      expect(await service.beginEnrollment({ pendingToken: 'p-access' })).toBeNull();
+      expect(events.map((e) => e.event)).toEqual(['login.mfa_enrollment_refused']);
+    });
+
+    it('answers null for anything that is not a live pending session, touching no MFA state', async () => {
+      const { service, sessions, mfa } = setup({ confirmedMfa: false });
+      sessions.authenticatePending.mockResolvedValueOnce(null);
+      expect(await service.beginEnrollment({ pendingToken: 'verified-or-bad' })).toBeNull();
+      expect(mfa.enroll).not.toHaveBeenCalled();
+    });
+
+    it('propagates infrastructure failures instead of masking them as a refusal', async () => {
+      const { service, mfa } = setup({ confirmedMfa: false });
+      mfa.enroll.mockRejectedValueOnce(new Error('db down'));
+      await expect(service.beginEnrollment({ pendingToken: 'p-access' })).rejects.toThrow(
+        'db down',
+      );
+    });
   });
 
   it('does not confirm enrolment with a wrong code', async () => {

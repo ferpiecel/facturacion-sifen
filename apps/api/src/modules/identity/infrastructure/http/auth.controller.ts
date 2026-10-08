@@ -11,7 +11,7 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
-import type { LoginService } from '../../application/login.service.js';
+import type { LoggedIn, LoginService } from '../../application/login.service.js';
 import type { IssuedSession, SessionService } from '../../application/session.service.js';
 import { Public } from '../decorators/public.decorator.js';
 import { COOKIE_NAMES, buildSetCookie, clearCookie, parseCookies } from './auth-cookies.js';
@@ -30,6 +30,7 @@ interface HttpReply {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MFA_CODE = /^(\d{6}|[a-zA-Z2-7 -]{16,23})$/;
+const TOTP_CODE = /^\d{6}$/;
 const ALL_COOKIES = [COOKIE_NAMES.access, COOKIE_NAMES.refresh, COOKIE_NAMES.pending];
 
 const problem = (status: HttpStatus, message: string) =>
@@ -52,8 +53,8 @@ const secondsUntil = (date: Date): number => (date.getTime() - Date.now()) / 100
 /**
  * The portal's `/auth` routes (HU-E1-07 S5). They are `@Public()` for the API-key guard (a browser has no key)
  * and protected by their own: every POST needs the portal Origin ({@link CsrfGuard}) and the session routes need a
- * verified session ({@link SessionGuard}). There is deliberately NO enrolment route: how a new user activates MFA
- * is a pending product decision, so a user without MFA is refused here and the pending session is revoked.
+ * verified session ({@link SessionGuard}). MFA is mandatory and enrolled at first login: a user without it gets a
+ * PENDING session and enrols through `mfa/enroll` + `mfa/confirm`, which only ever act on that pending session's user.
  */
 @Public()
 @Controller('auth')
@@ -103,7 +104,7 @@ export class AuthController {
     @Req() request: HttpRequest,
     @Res({ passthrough: true }) reply: HttpReply,
   ) {
-    const { login, sessions } = this.services();
+    const { login } = this.services();
     const input = asObject(body);
     const result = await login.start({
       email: text(input.email, 320),
@@ -111,12 +112,6 @@ export class AuthController {
       ip: normalizeClientIp(request.ip),
     });
     if (result.status === 'invalid') throw invalid();
-    if (result.status === 'mfa_enrollment_required') {
-      // Indistinguishable from a wrong password (no password oracle): the pending session is revoked, nothing is
-      // set, and `LoginService` has already audited `login.mfa_enrollment_required` server-side.
-      await sessions.logout(result.session.sessionId);
-      throw invalid();
-    }
     this.cookies(reply, [
       buildSetCookie(
         COOKIE_NAMES.pending,
@@ -124,7 +119,42 @@ export class AuthController {
         secondsUntil(result.session.accessExpiresAt),
       ),
     ]);
-    return { status: 'mfa_required' };
+    // Only a correct password gets here; the portal needs to know whether to ask for a code or to enrol.
+    return { status: result.status };
+  }
+
+  @Post('mfa/enroll')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(CsrfGuard)
+  async enroll(@Req() request: HttpRequest, @Res({ passthrough: true }) reply: HttpReply) {
+    const { login } = this.services();
+    const pendingToken = this.cookie(request, COOKIE_NAMES.pending);
+    // No pending session (none, expired, already verified), a user who is already enrolled and a throttled
+    // attempt are all the same 401: enrolment cannot be re-run to take over an account.
+    const started = pendingToken ? await login.beginEnrollment({ pendingToken }) : null;
+    if (!started) throw invalid();
+    reply.header('cache-control', 'no-store');
+    return { otpauthUri: started.otpauthUri, secret: started.secretBase32 };
+  }
+
+  @Post('mfa/confirm')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(CsrfGuard)
+  async confirm(
+    @Body() body: unknown,
+    @Req() request: HttpRequest,
+    @Res({ passthrough: true }) reply: HttpReply,
+  ) {
+    const { login, sessions } = this.services();
+    const code = text(asObject(body).code, 8);
+    if (!TOTP_CODE.test(code)) throw badRequest();
+    const pendingToken = this.cookie(request, COOKIE_NAMES.pending);
+    const done = pendingToken ? await login.completeEnrollment({ pendingToken, code }) : null;
+    if (!done) throw invalid();
+    // One response carries both the session cookies and the recovery codes, which are never retrievable again.
+    this.cookies(reply, this.sessionCookies(done.session));
+    reply.header('cache-control', 'no-store');
+    return { recoveryCodes: done.recoveryCodes, ...(await this.chosenTenant(sessions, done)) };
   }
 
   @Post('mfa')
@@ -142,7 +172,11 @@ export class AuthController {
     const done = pendingToken ? await login.verifyMfa({ pendingToken, code }) : null;
     if (!done) throw invalid();
     this.cookies(reply, this.sessionCookies(done.session));
-    // One tenant: nothing to choose. Several: the user picks (POST /auth/select-tenant).
+    return this.chosenTenant(sessions, done);
+  }
+
+  /** One tenant: nothing to choose. Several: the user picks (POST /auth/select-tenant). */
+  private async chosenTenant(sessions: SessionService, done: LoggedIn) {
     const only = done.tenants.length === 1 ? done.tenants[0] : undefined;
     if (only && (await sessions.selectTenant(done.session.sessionId, only.tenantId))) {
       return { activeTenant: { tenantId: only.tenantId, role: only.role }, tenants: done.tenants };

@@ -6,7 +6,12 @@ import {
   passwordLength,
 } from '../domain/password-policy.js';
 import { DUMMY_HASH } from './authenticate-api-key.use-case.js';
-import type { ConfirmMfaUseCase, EnrollMfaUseCase, VerifyMfaUseCase } from './mfa.use-cases.js';
+import {
+  MfaAlreadyEnrolledError,
+  type ConfirmMfaUseCase,
+  type EnrollMfaUseCase,
+  type VerifyMfaUseCase,
+} from './mfa.use-cases.js';
 import type { AuthEventLog } from './ports/auth-event-log.port.js';
 import type { LoginThrottle, ThrottleLimit } from './ports/login-throttle.port.js';
 import type { MfaAttemptGuard } from './ports/mfa-attempt-guard.port.js';
@@ -29,6 +34,8 @@ import { VerifyPasswordUseCase } from './verify-password.use-case.js';
 export const ACCOUNT_LIMIT: ThrottleLimit = { max: 5, windowSeconds: 900, lockSeconds: 900 };
 export const IP_LIMIT: ThrottleLimit = { max: 60, windowSeconds: 900, lockSeconds: 900 };
 export const MFA_LIMIT: ThrottleLimit = { max: 5, windowSeconds: 900, lockSeconds: 900 };
+/** Starting (or restarting) an enrolment mints a fresh secret, so it is bounded too: 10 per 15 minutes per user. */
+export const ENROLL_LIMIT: ThrottleLimit = { max: 10, windowSeconds: 900, lockSeconds: 900 };
 
 /**
  * Consecutive second-factor failures per user before the user is locked until an MFA reset. The 5-per-15-minutes
@@ -45,6 +52,8 @@ export const MFA_CONSECUTIVE_FAILURE_CAP = 20;
  */
 export interface MfaForPending {
   store: Pick<MfaStore, 'find'>;
+  /** The email of the pending session's user (the authenticator label), or null. */
+  account: () => Promise<string | null>;
   enroll: EnrollMfaUseCase;
   confirm: ConfirmMfaUseCase;
   verify: VerifyMfaUseCase;
@@ -134,13 +143,36 @@ export class LoginService {
       : null;
   }
 
-  async beginEnrollment(input: { pendingToken: string; account: string }) {
+  /**
+   * Starts (or restarts) enrolment for the PENDING session's user. `null` is the one uniform refusal: no live
+   * pending session (including a verified one), an exhausted throttle, or a user who is already enrolled, so
+   * enrolment cannot be re-run to take over an account.
+   */
+  async beginEnrollment(input: { pendingToken: string }) {
     const pending = await this.pendingUser(input.pendingToken);
     if (!pending) return null;
-    return this.deps.mfa(hashSessionToken(input.pendingToken)).enroll.execute({
-      userId: pending.userId,
-      email: input.account,
-    });
+    const subject = `enroll:${pending.userId}`;
+    if (!(await this.deps.throttle.reserve(subject, ENROLL_LIMIT))) return null;
+    const mfa = this.deps.mfa(hashSessionToken(input.pendingToken));
+    const account = await mfa.account();
+    if (!account) return null;
+    try {
+      const started = await mfa.enroll.execute({ userId: pending.userId, email: account });
+      await this.deps.events.record({
+        event: 'login.mfa_enrollment_started',
+        userId: pending.userId,
+        subject,
+      });
+      return started;
+    } catch (error) {
+      if (!(error instanceof MfaAlreadyEnrolledError)) throw error;
+      await this.deps.events.record({
+        event: 'login.mfa_enrollment_refused',
+        userId: pending.userId,
+        subject,
+      });
+      return null;
+    }
   }
 
   /**

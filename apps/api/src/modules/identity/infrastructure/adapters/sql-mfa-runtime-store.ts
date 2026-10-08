@@ -11,14 +11,15 @@ interface MfaRow {
   recovery_hashes: string[];
 }
 
-const enrolmentUnavailable = () => new Error('MFA enrolment is not available yet');
+const unavailable = () => new Error('MFA removal is not available at runtime');
 
 /**
  * The login-time half of `MfaStore` for the runtime connection, BOUND to one pending session (the SHA-256 of
  * its token): the `userId` arguments of the port are ignored and the functions resolve the user from that live
  * pending session, so a caller cannot read or spend another user's MFA state. (`app_user` through the `mfa_*` functions of
- * migration 0042): read the enrolment, spend a TOTP step, spend a recovery code. The enrolment writes need the
- * operator connection today (`DrizzleMfaStore`); the portal has no enrolment endpoint yet, so they refuse.
+ * migration 0042): read the enrolment, spend a TOTP step, spend a recovery code. Enrolment (`savePending`, `confirm`,
+ * `account`) goes through the same pending-bound functions of migration 0045; removing an enrolment (a reset) is an
+ * operator action (`DrizzleMfaStore`) and refuses here.
  */
 export class SqlMfaRuntimeStore implements MfaStore {
   constructor(
@@ -60,7 +61,45 @@ export class SqlMfaRuntimeStore implements MfaStore {
     return row?.ok === true;
   }
 
-  readonly savePending: MfaStore['savePending'] = () => Promise.reject(enrolmentUnavailable());
-  readonly confirm: MfaStore['confirm'] = () => Promise.reject(enrolmentUnavailable());
-  readonly remove: MfaStore['remove'] = () => Promise.reject(enrolmentUnavailable());
+  /** The email of the pending session's user: the label of the authenticator entry. */
+  async account(): Promise<string | null> {
+    const row = (
+      await callFunction<{ account: string | null }>(
+        this.db,
+        sql`select mfa_account(${this.pendingHash}) as account`,
+      )
+    ).at(0);
+    return row?.account ?? null;
+  }
+
+  async savePending(_userId: string, sealed: SealedSecret): Promise<void> {
+    const row = (
+      await callFunction<{ ok: boolean }>(
+        this.db,
+        sql`select mfa_save_pending(${this.pendingHash}, ${JSON.stringify(sealed)}::jsonb) as ok`,
+      )
+    ).at(0);
+    if (row?.ok !== true) throw new Error('MFA is already confirmed for this user');
+  }
+
+  async confirm(
+    _userId: string,
+    step: number,
+    recoveryHashes: string[],
+    expectedSealed: SealedSecret,
+  ): Promise<boolean> {
+    const hashes = sql`array[${sql.join(
+      recoveryHashes.map((h) => sql`${h}`),
+      sql`, `,
+    )}]::text[]`;
+    const row = (
+      await callFunction<{ ok: boolean }>(
+        this.db,
+        sql`select mfa_confirm(${this.pendingHash}, ${step}, ${hashes}, ${JSON.stringify(expectedSealed)}::jsonb) as ok`,
+      )
+    ).at(0);
+    return row?.ok === true;
+  }
+
+  readonly remove: MfaStore['remove'] = () => Promise.reject(unavailable());
 }

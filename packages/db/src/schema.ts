@@ -24,11 +24,9 @@ import {
 
 /**
  * Partners master table (HU-E1-05 / ADR-0014): a partner owns N tenants
- * (`tenants.partner_id`). Partner RLS/visibility is HU-E1-06, not this
- * story — deliberately no `GRANT` to `app_user` (or `platform_admin`) here,
- * so the table stays unreachable from request/job code exactly like before
- * this migration; only the operator's own connection (never `app_login`)
- * reads or writes it for now.
+ * (`tenants.partner_id`). The partner's read-only view of its tenants is HU-E1-06
+ * (`partner_viewer`, migration 0044); this table has no `GRANT` to `app_user` or
+ * `partner_viewer`, so only the operator's own connection reads or writes it.
  */
 export const partners = pgTable('partners', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -289,6 +287,28 @@ export const tenantMemberships = pgTable(
   (table) => [
     unique('tenant_memberships_tenant_id_user_id_key').on(table.tenantId, table.userId),
     index('tenant_memberships_user_id_idx').on(table.userId),
+  ],
+);
+
+/**
+ * Which portal users manage which partner (HU-E1-06, ADR-0014). Global like `users`: FORCE RLS and no
+ * `app_user` grant; membership is checked only through `user_in_partner` (migration 0044).
+ */
+export const partnerMemberships = pgTable(
+  'partner_memberships',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    partnerId: uuid('partner_id')
+      .notNull()
+      .references(() => partners.id),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('partner_memberships_partner_id_user_id_key').on(table.partnerId, table.userId),
+    index('partner_memberships_user_id_idx').on(table.userId),
   ],
 );
 

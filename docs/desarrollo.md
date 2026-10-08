@@ -22,9 +22,11 @@ pnpm --filter @sifen/api start:dev   # API en http://localhost:3000; NODE_ENV=de
 # Documentación de la API de integradores: http://localhost:3000/docs (spec: /docs/openapi.json)
 ```
 
-Así la API arranca sin base de datos: `/health` responde 200 y las rutas protegidas responden `503`. Para usarlas, aplicá las migraciones y arrancá la API con `DATABASE_URL`. Las migraciones corren con el rol dueño (`sifen`) y crean el rol `app_login` sin contraseña, que se define aparte:
+Así la API arranca sin base de datos: `/health` responde 200 y las rutas protegidas responden `503`. Para usarlas, aplicá las migraciones y arrancá la API con `DATABASE_URL`. Las migraciones corren con el rol dueño (`sifen`) y crean el rol `app_login` sin contraseña, que se define aparte.
 
 ## Base de datos y migraciones
+
+Los comandos siguientes aplican las migraciones y fijan la contraseña de `app_login` (solo desarrollo local):
 
 ```bash
 export POSTGRES_URL="postgresql://sifen:sifen@localhost:5432/sifen"   # rol dueño de docker-compose.yml

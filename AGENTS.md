@@ -40,7 +40,7 @@ Reglas, todas con severidad `error` en [`.dependency-cruiser.cjs`](.dependency-c
 - [`apps/api/.dependency-cruiser.cjs`](apps/api/.dependency-cruiser.cjs), `db-confined-to-infrastructure-and-module-wiring`: `@sifen/db`, `drizzle-orm`, `pg` y PGlite solo se importan desde `modules/*/infrastructure/`, `*.module.ts`, `cli/` y `worker/`.
 - `packages/db` y `packages/sifen-gateway` deben seguir libres de frameworks de aplicación (reglas `*-framework-free-local` en su propio `.dependency-cruiser.cjs`).
 - `apps/web`: `design-system/` no importa `features/` ni rutas, y `features/` no importa `app/` ([`apps/web/.dependency-cruiser.cjs`](apps/web/.dependency-cruiser.cjs)).
-- Las reglas se prueban con fixtures en [`apps/api/test/architecture/boundaries.spec.ts`](apps/api/test/architecture/boundaries.spec.ts). Cambiar una regla exige actualizar esa prueba.
+- Solo `domain-app-framework-free`, `domain-no-outer-layers` y `application-no-infrastructure` tienen prueba con fixtures en [`apps/api/test/architecture/boundaries.spec.ts`](apps/api/test/architecture/boundaries.spec.ts); el resto se hace cumplir solo con `pnpm depcruise`.
 
 Convenciones (sin enforcement automático): un puerto por responsabilidad, nombrado `*.port.ts`; los adaptadores llevan el nombre de la tecnología (`sql-*`, `drizzle-*`, `argon2-*`); no se usa `@nestjs/cqrs` (ADR-0003); las dependencias se versionan exactas en `package.json`.
 
@@ -69,7 +69,7 @@ Invariantes. Si un cambio no puede respetarlas, se frena y se consulta.
 **Configuración fail-fast**
 
 - La API no arranca si falta `KMS_LOCAL_MASTER_KEY`, `AUTH_SUBJECT_PEPPER` o `PORTAL_ORIGIN` fuera de `NODE_ENV` exactamente `development` o `test`, ni sin `SIFEN_ENVIRONMENT` con `NODE_ENV=production` (`bootstrap/environment.ts`, `auth-http-config.ts`). Con `DATABASE_URL` inalcanzable tampoco arranca. Ver [`docs/configuracion.md`](docs/configuracion.md).
-- El worker solo acepta `SIFEN_GATEWAY=simulator` con `NODE_ENV` `development` o `test` (`worker/simulator-guard.ts`).
+- El worker solo acepta `SIFEN_GATEWAY=simulator` con `NODE_ENV` `development` o `test` (`worker/worker-gateway.ts`). Además `worker/simulator-guard.ts` omite los tenants en `production` cuando el gateway es el simulador.
 - Un valor por defecto permisivo en producción es un defecto. Las variables nuevas se validan al arrancar y se documentan en `docs/configuracion.md`.
 
 **Autenticación del portal** (`modules/identity/`)
@@ -98,10 +98,10 @@ Invariantes. Si un cambio no puede respetarlas, se frena y se consulta.
 
 - TDD estricto (`strict_tdd: true` en [`openspec/config.yaml`](openspec/config.yaml)): primero la prueba que falla, después el código. Convención del equipo; no la verifica el CI.
 - Runner: Vitest. Los `*.spec.ts` viven junto al código; los e2e, en `apps/*/test/` con `inject()` de Fastify.
-- Gate de cobertura: 85 % en líneas, ramas, funciones y sentencias, por paquete (`thresholds` en cada `vitest.config.ts`; job `coverage` del CI).
+- Gate de cobertura: 85 % en líneas, ramas, funciones y sentencias, por paquete (`thresholds` en cada `vitest.config.ts`; entrada `coverage` de la matriz de `quality-gates`).
 - `packages/db`: PGlite por defecto; el job `db-postgres` corre la misma suite en un testcontainer `postgres:16` con `DB_TEST_DRIVER=postgres` (`pnpm --filter @sifen/db test:postgres`). Lo que depende de roles reales solo se prueba ahí.
 - Pruebas del worker con Redis real: `REDIS_URL=... pnpm --filter @sifen/api exec vitest run src/worker`; sin `REDIS_URL` se omiten y las corre el job `worker-redis`.
-- El CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) exige `format:check`, `lint`, `typecheck`, `depcruise`, `test`, `build`, `verify-vendor`, `coverage`, `db-postgres` y `worker-redis`.
+- El CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) corre el job `quality-gates` (matriz: `format:check`, `lint`, `typecheck`, `depcruise`, `test`, `build`, `verify-vendor`, `coverage`) y los jobs `db-postgres` y `worker-redis`.
 - El test que compara `docs/api/openapi.json` con el código falla si el spec cambia sin regenerarse (`pnpm --filter @sifen/api openapi`).
 
 ## Flujo de trabajo

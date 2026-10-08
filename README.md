@@ -34,6 +34,7 @@ El portal (`pnpm --filter @sifen/web dev`) corre en http://localhost:3001.
 | [`docs/backlog/mvp.md`](docs/backlog/mvp.md) | Historias del MVP |
 | [`docs/adr/`](docs/adr/README.md) | Decisiones de arquitectura |
 | [`docs/plan/plan-desarrollo-v1.1.md`](docs/plan/plan-desarrollo-v1.1.md) | Diseño técnico |
+| [`docs/plan/plan-desarrollo-v1.0.md`](docs/plan/plan-desarrollo-v1.0.md) | Plan original, referencia histórica |
 | [`docs/referencia/`](docs/referencia/README.md) | Normativa y ejemplos oficiales de la DNIT |
 
 ## Verificación

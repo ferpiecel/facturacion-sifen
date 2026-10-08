@@ -41,6 +41,10 @@ Para crear partners, tenants y API keys, ver [Operación](#operación).
 
 `/docs` (visor Redoc, carga el script desde un CDN fijado con SRI) y `/docs/openapi.json` no requieren API key, pero solo responden con `NODE_ENV` `development` o `test`, o con `API_DOCS_ENABLED=true`; en cualquier otro caso devuelven `404`.
 
+### Verificación local
+
+`pnpm verify` corre los quality-gates del CI (format, lint, typecheck, depcruise, test, build, verify-vendor, coverage) solo sobre los paquetes afectados respecto de `origin/main`. Imprime una línea (`verify OK ...`) o `verify FAIL <tarea>` con las líneas que fallan; el log completo queda en `.verify.log`. `pnpm install` activa el hook `.githooks/pre-push`, que lo ejecuta antes de cada push; para saltearlo en una emergencia: `git push --no-verify`. Los jobs con Docker (`db-postgres`, `worker-redis`) siguen solo en CI.
+
 ### Portal web
 
 El portal del cliente vive en `apps/web` (Next.js + Tailwind v4, diseño SifenFlow de Stitch).

@@ -87,5 +87,7 @@ const AUTHENTICATOR_ISSUER = 'Facturación electrónica';
     CsrfGuard,
     SessionGuard,
   ],
+  // The verified-session guard of other portal routes (HU-E1-06) resolves sessions through this service.
+  exports: [SESSION_SERVICE],
 })
 export class PortalAuthModule {}

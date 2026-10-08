@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest';
 
 import { installClientAddressPin, pinClientAddress } from './client-address';
 
-const request = (headers: Record<string, string>, remoteAddress: string | undefined = '203.0.113.9') => ({
+const request = (
+  headers: Record<string, string>,
+  remoteAddress: string | undefined = '203.0.113.9',
+) => ({
   headers: { ...headers },
   socket: { remoteAddress },
 });
@@ -34,7 +37,7 @@ describe('pinClientAddress', () => {
   });
 
   it('removes a spoofed header when the socket address is unknown', () => {
-    const req = request({ 'x-forwarded-for': '6.6.6.6' }, undefined);
+    const req = { headers: { 'x-forwarded-for': '6.6.6.6' }, socket: {} };
     pinClientAddress(req, false);
     expect(req.headers).toEqual({});
   });

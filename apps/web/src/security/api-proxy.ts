@@ -12,7 +12,7 @@ export interface Rewrite {
   destination: string;
 }
 
-const DEFAULT_API_URL = 'http://localhost:3001';
+const DEFAULT_API_URL = 'http://localhost:3000';
 
 export function apiRewrites(apiUrl: string | undefined): Rewrite[] {
   const base = (apiUrl ?? DEFAULT_API_URL).replace(/\/+$/, '');

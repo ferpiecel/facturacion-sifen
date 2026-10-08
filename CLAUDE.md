@@ -1,3 +1,5 @@
+@AGENTS.md
+
 # Reglas del proyecto facturacion-sifen
 
 Instrucciones para cualquier persona o agente que trabaje en este repositorio. Las **reglas de oro** no se negocian; si una tarea no puede cumplirlas, se frena y se consulta.
@@ -78,7 +80,4 @@ El cuerpo sigue la plantilla del repositorio. Cada sección responde una pregunt
 
 ## Documentación de referencia
 
-- Producto: [`docs/prd/prd.md`](docs/prd/prd.md) · Plan: [`docs/roadmap.md`](docs/roadmap.md) · Backlog: [`docs/backlog/mvp.md`](docs/backlog/mvp.md)
-- Decisiones: [`docs/adr/`](docs/adr/README.md) · Diseño técnico: [`docs/plan/plan-desarrollo-v1.1.md`](docs/plan/plan-desarrollo-v1.1.md)
-- Normativa DNIT: [`docs/referencia/dnit/`](docs/referencia/dnit/). Las notas técnicas prevalecen sobre el Manual Técnico ([ADR-0012](docs/adr/0012-precedencia-documentacion-oficial.md)).
-- Cambios SDD: [`openspec/changes/`](openspec/changes/)
+Arquitectura, seguridad, pruebas y mapa de documentos (PRD, roadmap, backlog, ADRs, plan, normativa DNIT): [`AGENTS.md`](AGENTS.md). Cambios SDD: [`openspec/changes/`](openspec/changes/).

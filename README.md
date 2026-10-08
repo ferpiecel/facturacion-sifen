@@ -10,21 +10,43 @@ Fase 0 (fundaciones y PoC). Ya están el monorepo con CI (HU-E0-01), la API de r
 
 ## Desarrollo local
 
-Requisitos: Node.js 22 y pnpm 12.5.1 (`corepack enable` con corepack ≥ 0.36). Si el corepack de tu Node es más viejo, usá `npx pnpm@12.5.1`.
+Requisitos:
+
+- Node.js >=22.22.2 <23 (hay `.nvmrc`; con 22.22.0 `pnpm install` falla por `ERR_PNPM_UNSUPPORTED_ENGINE`).
+- pnpm 12.5.1 (`corepack enable` con corepack ≥ 0.36). Si el corepack de tu Node es más viejo, usá `npx pnpm@12.5.1`.
+- Docker con Compose v2 (Docker Engine, o Docker Desktop con integración WSL). Hace falta para `docker compose up -d` y para los tests con testcontainers de `pnpm check`.
+- git.
 
 ```bash
 pnpm install
-pnpm check            # lint, typecheck, depcruise y tests
+pnpm check            # lint, typecheck, depcruise y tests (los de base de datos usan Docker)
 docker compose up -d  # PostgreSQL 16 y Redis 7
-pnpm --filter @sifen/api build && pnpm --filter @sifen/api start
+pnpm build:api        # turbo run build --filter=@sifen/api...: compila también los paquetes de los que depende (p. ej. @sifen/db)
+pnpm --filter @sifen/api start:dev   # API en http://localhost:3000; NODE_ENV=development y PORTAL_ORIGIN=http://localhost:3001
+# Documentación de la API de integradores: http://localhost:3000/docs (spec: /docs/openapi.json)
 ```
+
+Así la API arranca sin base de datos: `/health` responde 200 y las rutas protegidas responden `503`. Para usarlas, aplicá las migraciones y arrancá la API con `DATABASE_URL`. Las migraciones corren con el rol dueño (`sifen`) y crean el rol `app_login` sin contraseña, que se define aparte:
+
+```bash
+export POSTGRES_URL="postgresql://sifen:sifen@localhost:5432/sifen"   # rol dueño de docker-compose.yml
+DATABASE_URL="$POSTGRES_URL" pnpm --filter @sifen/db exec drizzle-kit migrate
+docker compose exec postgres psql -U sifen -d sifen -c "ALTER ROLE app_login PASSWORD 'app_login'"   # solo desarrollo local
+DATABASE_URL="postgresql://app_login:app_login@localhost:5432/sifen" pnpm --filter @sifen/api start:dev
+```
+
+Para crear partners, tenants y API keys, ver [Operación](#operación).
+
+`start:dev` fija `NODE_ENV=development` y `PORTAL_ORIGIN=http://localhost:3001`. `pnpm --filter @sifen/api start` a secas se comporta como producción y no arranca sin `PORTAL_ORIGIN` (fail fast intencional). `/health` responde 200.
+
+`/docs` (visor Redoc, carga el script desde un CDN fijado con SRI) y `/docs/openapi.json` no requieren API key, pero solo responden con `NODE_ENV` `development` o `test`, o con `API_DOCS_ENABLED=true`; en cualquier otro caso devuelven `404`.
 
 ### Portal web
 
 El portal del cliente vive en `apps/web` (Next.js + Tailwind v4, diseño SifenFlow de Stitch).
 
 ```bash
-pnpm --filter @sifen/web dev     # http://localhost:3000, panel de control con datos de ejemplo
+pnpm --filter @sifen/web dev     # http://localhost:3001, panel de control con datos de ejemplo
 pnpm --filter @sifen/web test    # tests de componentes (Vitest + Testing Library)
 pnpm --filter @sifen/web build   # build de producción (descarga las fuentes de Google)
 ```
@@ -51,11 +73,12 @@ Todas tienen un valor por defecto, así que el entorno local funciona sin un arc
 | `SIFEN_ENVIRONMENT` | `test` (o sin valor si `NODE_ENV≠production`) | `apps/api` | `test` o `production`. Determina si se aceptan API keys `sk_test_...` o `sk_live_...`. Con `NODE_ENV=production`, dejarla sin definir hace que la API **no arranca** (fail closed): un despliegue productivo nunca debe arrancar en silencio con `sk_test_...` como aceptación por defecto. |
 | `KMS_LOCAL_MASTER_KEY` | *(sin valor)* | `apps/api` | Clave maestra del KMS local (ADR-0009): 32 bytes en base64 estándar con relleno, sin espacios ni saltos de línea (`openssl rand -base64 32`). Envuelve las data keys que cifran CSC y certificados con AES-256-GCM. Es obligatoria salvo con `NODE_ENV` exactamente `development` o `test`: sin ella, la API **no arranca**. En esos dos entornos, sin valor se usa una clave aleatoria descartable (con una advertencia en el log): lo cifrado no sobrevive a un reinicio. Producción debe definir una clave real hasta que exista el adaptador de KMS en la nube, que está pendiente. |
 | `AUTH_SUBJECT_PEPPER` | *(sin valor)* | `apps/api` | Secreto (mínimo 32 bytes) con el que se calcula el HMAC-SHA256 de los emails e IP del límite de intentos y de los eventos de autenticación, para que no se puedan revertir por diccionario. Generalo con `openssl rand -base64 48`. Es obligatorio salvo con `NODE_ENV` exactamente `development` o `test` (ahí se usa un valor fijo de desarrollo): sin él, la API **no arranca**. |
-| `PORTAL_ORIGIN` | *(sin valor)* | `apps/api` | Origen del portal (`https://app.ejemplo.com`, sin ruta ni barra final) que puede llamar a las rutas `POST /auth/*`; se compara exacto con la cabecera `Origin` (defensa CSRF). Obligatorio salvo con `development` o `test` (ahí `http://localhost:3000`): sin él, la API **no arranca**. |
+| `PORTAL_ORIGIN` | *(sin valor)* | `apps/api` | Origen del portal (`https://app.ejemplo.com`, sin ruta ni barra final) que puede llamar a las rutas `POST /auth/*`; se compara exacto con la cabecera `Origin` (defensa CSRF). Obligatorio salvo con `development` o `test` (ahí, si no se define, `http://localhost:3000`; `start:dev` la fija en `http://localhost:3001`, el puerto del portal): sin él, la API **no arranca**. |
 | `AUTH_TRUST_PROXY_HOPS` | `0` | `apps/api` | Cantidad de proxies inversos (0 a 3) cuya entrada de `X-Forwarded-For` se acepta para la IP del cliente del límite de intentos. Con `0` se usa la dirección del socket y la cabecera se ignora. Nunca se confía en una cabecera cruda. |
 | `SESSION_ACCESS_TTL_SECONDS` | `300` | `apps/api` | Vida del token de acceso del portal (30 a 3600). Decidido por el producto: 5 minutos. |
 | `SESSION_REFRESH_TTL_SECONDS` | `600` | `apps/api` | Vida deslizante del token de refresco (60 a 86400). Decidido por el producto: 10 minutos; un usuario ocioso más tiempo que esto vuelve al login. |
 | `SESSION_ABSOLUTE_TTL_SECONDS` | `43200` (`1200` con `NODE_ENV` `development` o `test`) | `apps/api` | Tope absoluto desde el login (300 a 604800): ni el refresco lo supera. Decidido por el producto: 12 h en producción y 20 min en desarrollo y test. |
+| `API_DOCS_ENABLED` | *(sin valor)* | `apps/api` | `true` publica `/docs` y `/docs/openapi.json` (documentación OpenAPI de la API de integradores, sin API key) aunque `NODE_ENV` no sea `development` o `test`; pensado para staging. Cualquier otro valor se ignora. Sin la variable, en producción o con `NODE_ENV` sin definir, ambas rutas responden `404`. |
 | `NODE_ENV` | *(sin valor)* | `apps/api` | Estándar de Node. En `production` exige `SIFEN_ENVIRONMENT` explícita. Además, solo con `development` o `test` la API puede arrancar sin `KMS_LOCAL_MASTER_KEY`; con cualquier otro valor (o sin valor) la exige. Para desarrollo local, exportá `NODE_ENV=development` o definí la clave. |
 
 ## Operación

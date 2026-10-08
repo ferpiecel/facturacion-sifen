@@ -11,6 +11,7 @@
     "depcruise": "depcruise --config .dependency-cruiser.cjs src",
     "test": "vitest run",
     "start": "node dist/main.js",
+    "start:dev": "env NODE_ENV=development PORTAL_ORIGIN=http://localhost:3001 node dist/main.js",
     "worker": "node dist/worker/worker.js",
     "ops": "node dist/cli/ops.js",
     "openapi": "tsc -p tsconfig.build.json && node dist/cli/openapi.js",

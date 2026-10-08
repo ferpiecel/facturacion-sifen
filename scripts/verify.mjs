@@ -5,12 +5,14 @@ import { writeFileSync } from 'node:fs';
 import { parsePackages, summarize } from './verify-summary.mjs';
 
 // Mirrors the quality-gates matrix in .github/workflows/ci.yml. db-postgres and worker-redis need Docker/Redis: CI only.
+// `test` is omitted on purpose: every package with tests also defines `coverage`
+// (`vitest run --coverage`), which runs the same suite once. Add `test` back
+// only for a package that has tests but no `coverage` task.
 const TASKS = [
   '//#format:check',
   'lint',
   'typecheck',
   'depcruise',
-  'test',
   'build',
   'verify-vendor',
   'coverage',

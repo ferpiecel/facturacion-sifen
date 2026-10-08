@@ -86,10 +86,62 @@ describe('SqlMfaRuntimeStore and TenantMfaAuditLog (HU-E1-07 login runtime)', ()
     expect(pendingHash).toHaveLength(64);
   });
 
-  it('does not support enrolment writes at runtime (enrolment is not available yet)', async () => {
-    await expect(store.savePending(userId, SEALED)).rejects.toThrow(/not available/);
-    await expect(store.confirm(userId, 1, [], SEALED)).rejects.toThrow(/not available/);
+  it('does not support removing an enrolment at runtime (a reset is an operator action)', async () => {
     await expect(store.remove(userId)).rejects.toThrow(/not available/);
+  });
+
+  describe('enrolment through the pending session', () => {
+    let enrolPending: string;
+    let enrolUser: string;
+    let enrolStore: SqlMfaRuntimeStore;
+    const sealedB: SealedSecret = { ...SEALED, ciphertext: 'BB==' };
+
+    beforeAll(async () => {
+      const [row] = await handle.db
+        .insert(users)
+        .values({ email: 'e@example.com', passwordHash: HASH, displayName: 'E' })
+        .returning({ id: users.id });
+      enrolUser = row.id;
+      const pending = await new SessionService(new SqlSessionStore(handle.db), {
+        accessTtlSeconds: 300,
+        refreshTtlSeconds: 600,
+        absoluteTtlSeconds: 1200,
+      }).issue(enrolUser, { mfaVerified: false });
+      enrolPending = hashSessionToken(pending?.accessToken ?? '');
+      enrolStore = new SqlMfaRuntimeStore(handle.db, enrolPending);
+    });
+
+    it('reads the account email of the pending user, and null for a stranger', async () => {
+      expect(await enrolStore.account()).toBe('e@example.com');
+      expect(
+        await new SqlMfaRuntimeStore(handle.db, hashSessionToken('nope')).account(),
+      ).toBeNull();
+    });
+
+    it('saves a pending secret, replaces it, then confirms only the secret the code was checked against', async () => {
+      await enrolStore.savePending(enrolUser, SEALED);
+      await enrolStore.savePending(enrolUser, sealedB);
+      expect((await enrolStore.find())?.sealed).toEqual(sealedB);
+      expect(await enrolStore.confirm(enrolUser, 5, [hex('c')], SEALED)).toBe(false);
+      expect(await enrolStore.confirm(enrolUser, 5, [hex('c')], sealedB)).toBe(true);
+      expect(await enrolStore.find()).toMatchObject({
+        lastUsedStep: 5,
+        recoveryHashes: [hex('c')],
+      });
+      expect((await enrolStore.find())?.confirmedAt).toBeInstanceOf(Date);
+    });
+
+    it('refuses to replace or re-confirm a confirmed enrolment', async () => {
+      await expect(enrolStore.savePending(enrolUser, SEALED)).rejects.toThrow(/already confirmed/);
+      expect(await enrolStore.confirm(enrolUser, 6, [hex('d')], sealedB)).toBe(false);
+      expect((await enrolStore.find())?.sealed).toEqual(sealedB);
+    });
+
+    it('a store bound to no live pending session writes nothing', async () => {
+      const stranger = new SqlMfaRuntimeStore(handle.db, hashSessionToken('nope'));
+      await expect(stranger.savePending(enrolUser, SEALED)).rejects.toThrow();
+      expect(await stranger.confirm(enrolUser, 1, [], sealedB)).toBe(false);
+    });
   });
 
   it('writes an MFA audit event into each listed tenant as the user actor', async () => {

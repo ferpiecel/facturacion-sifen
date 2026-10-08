@@ -29,7 +29,7 @@ const ORIGIN = 'http://localhost:3000';
 const PASSWORD = 'correct horse battery staple';
 const EMAIL = 'ana@example.com';
 
-describe('portal auth over HTTP (HU-E1-07 S5 core, without enrolment)', () => {
+describe('portal auth over HTTP (HU-E1-07 S5, with MFA enrolment)', () => {
   let handle: DatabaseHandle;
   let app: NestFastifyApplication;
   let secret: Buffer;
@@ -129,7 +129,7 @@ describe('portal auth over HTTP (HU-E1-07 S5 core, without enrolment)', () => {
 
   /** A fresh, in-window code: the replay step is rewound first so each sign-in can use the current one. */
   const nextCode = async () => {
-    await handle.db.update(userMfa).set({ lastUsedStep: 1 });
+    await handle.db.update(userMfa).set({ lastUsedStep: 1 }).where(eq(userMfa.userId, userId));
     return totpAt(secret, Date.now());
   };
 
@@ -266,6 +266,8 @@ describe('portal auth over HTTP (HU-E1-07 S5 core, without enrolment)', () => {
     for (const url of [
       '/auth/login',
       '/auth/mfa',
+      '/auth/mfa/enroll',
+      '/auth/mfa/confirm',
       '/auth/refresh',
       '/auth/logout',
       '/auth/select-tenant',
@@ -303,28 +305,167 @@ describe('portal auth over HTTP (HU-E1-07 S5 core, without enrolment)', () => {
     expect((await c.send('POST', '/auth/mfa', { body: { code: '000000' } })).status).toBe(401);
   });
 
-  it('answers a user without MFA exactly like a wrong password (no password oracle), audits it, and leaves no live session', async () => {
+  const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  function base32Decode(text: string): Buffer {
+    let bits = '';
+    for (const ch of text) bits += B32.indexOf(ch).toString(2).padStart(5, '0');
+    const bytes = bits.match(/.{8}/g) ?? [];
+    return Buffer.from(bytes.map((b) => parseInt(b, 2)));
+  }
+
+  /** A user provisioned without MFA (like `user:create`), a member of one tenant. */
+  async function newUser(email: string) {
     const created = await new CreateUserUseCase(new Argon2SecretHasherAdapter()).execute({
-      email: 'new@example.com',
+      email,
       displayName: 'New',
       password: PASSWORD,
     });
-    const [row] = await handle.db.insert(users).values(created).returning({ id: users.id });
+    const [row] = (await handle.db.insert(users).values(created).returning({ id: users.id })) as [
+      { id: string },
+    ];
+    await handle.db
+      .insert(tenantMemberships)
+      .values({ tenantId: tenantA, userId: row.id, role: 'emisor' });
+    return row.id;
+  }
+
+  async function loginForEnrolment(email: string) {
     const c = client();
-    const noMfa = await c.send('POST', '/auth/login', {
-      body: { email: 'new@example.com', password: PASSWORD },
+    const login = await c.send('POST', '/auth/login', { body: { email, password: PASSWORD } });
+    return { c, login };
+  }
+
+  describe('MFA enrolment at first login', () => {
+    it('login of a user without MFA opens a pending session and asks to enrol', async () => {
+      await newUser('first@example.com');
+      const { c, login } = await loginForEnrolment('first@example.com');
+      expect(login.status).toBe(200);
+      expect(login.body).toEqual({ status: 'mfa_enrollment_required' });
+      expect(c.jar.has(COOKIE_NAMES.pending)).toBe(true);
+      expect((await c.send('GET', '/auth/me')).status).toBe(401); // still not a session
     });
-    const wrong = await c.send('POST', '/auth/login', {
-      body: { email: 'new@example.com', password: 'wrong password entirely' },
+
+    it('enrols, confirms with the first code, returns 10 recovery codes once and promotes the session', async () => {
+      const id = await newUser('flow@example.com');
+      const { c } = await loginForEnrolment('flow@example.com');
+      const enroll = await c.send('POST', '/auth/mfa/enroll');
+      expect(enroll.status).toBe(200);
+      expect(enroll.headers['cache-control']).toBe('no-store');
+      expect(enroll.setCookies).toEqual([]);
+      const uri = enroll.body.otpauthUri as string;
+      expect(uri).toMatch(/^otpauth:\/\/totp\//);
+      expect(uri).toContain('flow%40example.com');
+      expect(enroll.body.secret).toMatch(/^[A-Z2-7]{32}$/);
+      const secretBytes = base32Decode(enroll.body.secret as string);
+
+      expect((await c.send('POST', '/auth/mfa/confirm', { body: { code: '12345' } })).status).toBe(
+        400,
+      );
+      const confirm = await c.send('POST', '/auth/mfa/confirm', {
+        body: { code: totpAt(secretBytes, Date.now()) },
+      });
+      expect(confirm.status).toBe(200);
+      expect(confirm.headers['cache-control']).toBe('no-store');
+      const codes = confirm.body.recoveryCodes as string[];
+      expect(codes).toHaveLength(10);
+      expect(new Set(codes).size).toBe(10);
+      expect(confirm.body.tenants).toEqual([expect.objectContaining({ tenantId: tenantA })]);
+      expect(confirm.body.activeTenant).toMatchObject({ tenantId: tenantA, role: 'emisor' });
+      expect([...c.jar.keys()].sort()).toEqual([COOKIE_NAMES.access, COOKIE_NAMES.refresh].sort());
+      expect((await c.send('GET', '/auth/me')).status).toBe(200);
+
+      const [row] = await handle.db.select().from(userMfa).where(eq(userMfa.userId, id));
+      expect(row.confirmedAt).toBeInstanceOf(Date);
+      expect(row.recoveryHashes).toHaveLength(10);
+      expect(JSON.stringify(row)).not.toContain(codes[0] ?? 'x'); // stored hashed
+      const events = await handle.db.select().from(authEvents).where(eq(authEvents.userId, id));
+      expect(events.map((e) => e.event)).toEqual(
+        expect.arrayContaining(['login.mfa_enrollment_started', 'login.succeeded']),
+      );
+
+      // The codes are shown once: the enrolment cannot be re-run, and the first TOTP step is spent.
+      expect((await c.send('POST', '/auth/mfa/enroll')).status).toBe(401);
+      const again = client();
+      await again.send('POST', '/auth/login', {
+        body: { email: 'flow@example.com', password: PASSWORD },
+      });
+      expect(
+        (await again.send('POST', '/auth/mfa', { body: { code: totpAt(secretBytes, Date.now()) } }))
+          .status,
+      ).toBe(401);
+      expect((await again.send('POST', '/auth/mfa', { body: { code: codes[0] } })).status).toBe(
+        200,
+      );
     });
-    expect(noMfa.status).toBe(401);
-    expect(noMfa.body).toEqual(wrong.body);
-    expect(noMfa.setCookies).toEqual([]);
-    const live = await handle.db.select().from(userSessions).where(eq(userSessions.userId, row.id));
-    expect(live.every((session) => session.revokedAt !== null)).toBe(true);
-    const events = await handle.db.select().from(authEvents).where(eq(authEvents.userId, row.id));
-    expect(events.map((e) => e.event)).toContain('login.mfa_enrollment_required');
-    expect((await c.send('POST', '/auth/mfa', { body: { code: '123456' } })).status).toBe(401);
+
+    it('restarting enrolment replaces the pending secret, and a stale secret cannot confirm', async () => {
+      await newUser('restart@example.com');
+      const { c } = await loginForEnrolment('restart@example.com');
+      const first = await c.send('POST', '/auth/mfa/enroll');
+      const second = await c.send('POST', '/auth/mfa/enroll');
+      expect(second.body.secret).not.toBe(first.body.secret);
+      const stale = await c.send('POST', '/auth/mfa/confirm', {
+        body: { code: totpAt(base32Decode(first.body.secret as string), Date.now()) },
+      });
+      expect(stale.status).toBe(401);
+      const fresh = await c.send('POST', '/auth/mfa/confirm', {
+        body: { code: totpAt(base32Decode(second.body.secret as string), Date.now()) },
+      });
+      expect(fresh.status).toBe(200);
+    });
+
+    it('a wrong confirmation code is a 401 that sets no session, and the attempts are capped', async () => {
+      await newUser('wrong@example.com');
+      const { c } = await loginForEnrolment('wrong@example.com');
+      const enroll = await c.send('POST', '/auth/mfa/enroll');
+      const good = totpAt(base32Decode(enroll.body.secret as string), Date.now());
+      for (let i = 0; i < 5; i += 1) {
+        const bad = await c.send('POST', '/auth/mfa/confirm', { body: { code: '000000' } });
+        expect(bad.status).toBe(401);
+        expect(bad.setCookies).toEqual([]);
+      }
+      // Five failures lock the account and revoke the pending session: even the right code is refused.
+      expect((await c.send('POST', '/auth/mfa/confirm', { body: { code: good } })).status).toBe(
+        401,
+      );
+      expect((await c.send('GET', '/auth/me')).status).toBe(401);
+    });
+
+    it('an already-enrolled user cannot re-run enrolment: uniform 401 and the secret is untouched', async () => {
+      const before = await handle.db.select().from(userMfa).where(eq(userMfa.userId, userId));
+      const c = client();
+      await c.send('POST', '/auth/login', { body: { email: EMAIL, password: PASSWORD } });
+      const enroll = await c.send('POST', '/auth/mfa/enroll');
+      expect(enroll.status).toBe(401);
+      expect(enroll.setCookies).toEqual([]);
+      expect(enroll.body).toEqual((await client().send('POST', '/auth/mfa/enroll')).body);
+      expect(
+        (await c.send('POST', '/auth/mfa/confirm', { body: { code: await nextCode() } })).status,
+      ).toBe(401);
+      const after = await handle.db.select().from(userMfa).where(eq(userMfa.userId, userId));
+      expect(after[0]?.sealed).toEqual(before[0]?.sealed);
+    });
+
+    it('a verified session (access cookie, no pending one) cannot enrol or confirm', async () => {
+      const c = client();
+      await signIn(c);
+      expect(c.jar.has(COOKIE_NAMES.pending)).toBe(false);
+      expect((await c.send('POST', '/auth/mfa/enroll')).status).toBe(401);
+      expect(
+        (await c.send('POST', '/auth/mfa/confirm', { body: { code: await nextCode() } })).status,
+      ).toBe(401);
+      expect((await client().send('POST', '/auth/mfa/enroll')).status).toBe(401);
+    });
+
+    it('enrols only the user of its own pending session, never one named by the caller', async () => {
+      const victim = await newUser('victim@example.com');
+      await newUser('attacker@example.com');
+      const { c } = await loginForEnrolment('attacker@example.com');
+      await c.send('POST', '/auth/mfa/enroll', {
+        body: { userId: victim, email: 'victim@example.com' },
+      });
+      expect(await handle.db.select().from(userMfa).where(eq(userMfa.userId, victim))).toEqual([]);
+    });
   });
 
   it('logs out with only the refresh cookie: the whole family dies, even a replayed access cookie', async () => {

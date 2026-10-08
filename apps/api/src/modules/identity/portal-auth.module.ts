@@ -74,6 +74,7 @@ const AUTHENTICATOR_ISSUER = 'Facturación electrónica';
             const store = new SqlMfaRuntimeStore(db, pendingHash);
             return {
               store,
+              account: () => store.account(),
               enroll: new EnrollMfaUseCase(store, vault, AUTHENTICATOR_ISSUER),
               confirm: new ConfirmMfaUseCase(store, vault, audit),
               verify: new VerifyMfaUseCase(store, vault, audit),

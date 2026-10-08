@@ -24,14 +24,22 @@ export function TenantPicker({ client = authClient }: { client?: AuthClient }) {
   const [tenants, setTenants] = useState<Tenant[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function choose(tenantId: string) {
+  /** Selects and confirms with `/auth/me`; one retry, so a session that stays tenant-less cannot bounce forever. */
+  async function choose(tenantId: string, retry = true): Promise<void> {
     setError(null);
     const result = await client.selectTenant(tenantId);
-    if (result.kind === 'ok') router.replace('/');
-    else if (result.kind === 'unauthenticated') router.replace('/login');
+    if (result.kind === 'unauthenticated') router.replace('/login');
     else if (result.kind === 'forbidden')
       setError('Esa empresa ya no está disponible para tu usuario.');
-    else setError('No pudimos seleccionar la empresa. Intentá de nuevo.');
+    else if (result.kind === 'unavailable')
+      setError('No pudimos seleccionar la empresa. Intentá de nuevo.');
+    else {
+      const me = await client.me();
+      if (me.kind === 'unauthenticated') router.replace('/login');
+      else if (me.kind !== 'ok' || me.session.activeTenant) router.replace('/');
+      else if (retry) await choose(tenantId, false);
+      else setError('No pudimos activar la empresa. Intentá de nuevo.');
+    }
   }
 
   useEffect(() => {

@@ -27,6 +27,8 @@ describe('LogoutButton', () => {
     } as unknown as AuthClient;
     render(<LogoutButton client={client} />);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Cerrar sesión' }));
-    await waitFor(() => expect(replace).toHaveBeenCalledWith('/login'));
+    await waitFor(() => {
+      expect(replace).toHaveBeenCalledWith('/login');
+    });
   });
 });

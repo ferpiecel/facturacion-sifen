@@ -13,9 +13,13 @@ export function LogoutButton({ client = authClient }: { client?: AuthClient }) {
       type="button"
       aria-label="Cerrar sesión"
       onClick={() => {
-        void client.logout().then(() => {
-          router.replace('/login');
-        });
+        // Whatever the request does, the user leaves: the API clears the cookies when it can.
+        void client
+          .logout()
+          .catch(() => undefined)
+          .then(() => {
+            router.replace('/login');
+          });
       }}
       className="p-1 text-outline transition-colors hover:text-error"
     >

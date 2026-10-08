@@ -28,9 +28,7 @@ function setup(
     tenants: vi.fn(() => Promise.resolve(tenants)),
     selectTenant: vi.fn(() => Promise.resolve(select)),
     me: vi.fn(() =>
-      Promise.resolve(
-        meQueue.length > 1 ? (meQueue.shift() as MeResult) : (meQueue[0] as MeResult),
-      ),
+      Promise.resolve(meQueue.length > 1 ? (meQueue.shift() as MeResult) : meQueue[0]),
     ),
   } as unknown as AuthClient;
   render(<TenantPicker client={client} />);
@@ -103,7 +101,9 @@ describe('TenantPicker', () => {
   it('retries the selection once when the session still has no active tenant, then enters', async () => {
     const client = setup({ kind: 'ok', tenants: [A, B] }, { kind: 'ok' }, NO_TENANT, ACTIVE);
     await userEvent.setup().click(await screen.findByRole('button', { name: /Acme/ }));
-    await waitFor(() => expect(replace).toHaveBeenCalledWith('/'));
+    await waitFor(() => {
+      expect(replace).toHaveBeenCalledWith('/');
+    });
     expect(client.selectTenant).toHaveBeenCalledTimes(2);
   });
 
@@ -118,12 +118,16 @@ describe('TenantPicker', () => {
   it('sends a session lost while confirming to the login', async () => {
     setup({ kind: 'ok', tenants: [A, B] }, { kind: 'ok' }, { kind: 'unauthenticated' });
     await userEvent.setup().click(await screen.findByRole('button', { name: /Acme/ }));
-    await waitFor(() => expect(replace).toHaveBeenCalledWith('/login'));
+    await waitFor(() => {
+      expect(replace).toHaveBeenCalledWith('/login');
+    });
   });
 
   it('enters the panel when the confirmation is unavailable; the gate has its own retry', async () => {
     setup({ kind: 'ok', tenants: [A, B] }, { kind: 'ok' }, { kind: 'unavailable' });
     await userEvent.setup().click(await screen.findByRole('button', { name: /Acme/ }));
-    await waitFor(() => expect(replace).toHaveBeenCalledWith('/'));
+    await waitFor(() => {
+      expect(replace).toHaveBeenCalledWith('/');
+    });
   });
 });

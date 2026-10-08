@@ -118,6 +118,8 @@ Invariantes. Si un cambio no puede respetarlas, se frena y se consulta.
 pnpm install
 pnpm check                          # lint, typecheck, depcruise y tests (los de DB usan Docker)
 pnpm format:check                   # Prettier; pnpm format lo aplica
+pnpm verify                         # gates del CI sobre lo afectado vs origin/main; log en .verify.log
+pnpm test:scripts                   # tests de scripts/ (verify)
 pnpm build:api                      # API y paquetes de los que depende
 pnpm --filter @sifen/api start:dev  # API en :3000 (desarrollo)
 pnpm --filter @sifen/web dev        # portal en :3001
@@ -127,7 +129,7 @@ pnpm --filter @sifen/db test:postgres
 pnpm --filter @sifen/api coverage
 ```
 
-Puesta en marcha completa: [`docs/desarrollo.md`](docs/desarrollo.md).
+`pnpm verify` corre los gates del CI sin Docker (`db-postgres` y `worker-redis` siguen solo en CI) y imprime una línea de resumen. El hook `.githooks/pre-push` lo ejecuta antes de cada push (se activa con `pnpm install`); se omite con `git push --no-verify`. Los agentes corren `pnpm verify` antes de pushear y leen solo su resumen, no `.verify.log` completo. Detalle y puesta en marcha: [`docs/desarrollo.md`](docs/desarrollo.md#verificación-local).
 
 ## Dónde encontrar
 

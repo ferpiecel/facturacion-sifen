@@ -15,7 +15,10 @@
     "depcruise": "turbo run depcruise",
     "check": "turbo run lint typecheck depcruise test",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "verify": "node scripts/verify.mjs",
+    "test:scripts": "node --test scripts/*.test.mjs",
+    "prepare": "node scripts/setup-hooks.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

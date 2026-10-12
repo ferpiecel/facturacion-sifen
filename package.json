@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "turbo run build",
+    "dev:seed": "pnpm --filter @sifen/api dev:seed",
     "build:api": "turbo run build --filter=@sifen/api...",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",

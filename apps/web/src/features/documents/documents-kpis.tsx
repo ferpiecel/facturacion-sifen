@@ -154,8 +154,9 @@ function Indicators({ summary: s, days }: { summary: PeriodSummary; days: Period
 /** Period indicators (HU-E12-03) from `GET /portal/summary`; the period is the last 7, 30 or 90 days. */
 export function DocumentsKpis({ client = summaryClient }: { client?: SummaryClient }) {
   const [days, setDays] = useState<PeriodDays>(30);
-  const { state, previous, retry } = useSummary(client, days);
-  const shown = state ?? previous;
+  const { state, retry } = useSummary(client, days);
+  // While a request is in flight nothing from an earlier period or error stays on screen.
+  const shown = state;
   const loading = state === undefined;
 
   return (

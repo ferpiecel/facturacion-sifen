@@ -105,4 +105,34 @@ describe('DocumentsKpis (period summary)', () => {
       expect(replace).toHaveBeenCalledWith('/login');
     });
   });
+
+  it('never shows the previous period numbers under the new period while it loads', async () => {
+    const user = userEvent.setup();
+    const client = fakeSummaryClient();
+    render(<DocumentsKpis client={client} />);
+    await region();
+    client.get.mockReturnValueOnce(new Promise(() => undefined));
+
+    await user.click(screen.getByRole('button', { name: '90 días' }));
+
+    expect(screen.getByRole('status', { name: 'Cargando indicadores' })).toBeInTheDocument();
+    expect(screen.queryByText('120')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Emitidos/)).not.toBeInTheDocument();
+  });
+
+  it('hides a stale error alert while the next request is in flight', async () => {
+    const user = userEvent.setup();
+    const client = fakeSummaryClient({ kind: 'unavailable' });
+    render(<DocumentsKpis client={client} />);
+    await screen.findByRole('alert');
+    client.get.mockReturnValueOnce(new Promise(() => undefined));
+
+    await user.click(screen.getByRole('button', { name: '7 días' }));
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Indicadores del período' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+  });
 });

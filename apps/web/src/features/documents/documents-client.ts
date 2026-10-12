@@ -5,8 +5,7 @@
  * the access token) and retries once; if the session is gone the answer is `unauthenticated` and the screen sends
  * the user back to the login.
  */
-import type { FetchLike } from '../auth/auth-client';
-import { authClient } from '../auth/default-client';
+import { createPortalHttp, type Failure, type PortalHttpOptions } from './portal-http';
 
 export type { FetchLike } from '../auth/auth-client';
 
@@ -65,7 +64,6 @@ export interface DocumentsQuery {
 
 export const DEFAULT_PAGE_SIZE = 20;
 
-type Failure = { kind: 'unauthenticated' } | { kind: 'unavailable' };
 export type ListResult = { kind: 'ok'; page: DocumentsPage } | Failure;
 export type DetailResult =
   { kind: 'ok'; document: DocumentDetail } | { kind: 'not_found' } | Failure;
@@ -87,12 +85,7 @@ export interface DocumentsClient {
   kudeUrl: (id: string) => string;
 }
 
-interface Options {
-  fetchImpl?: FetchLike;
-  baseUrl?: string;
-  /** Recovers an expired session (refresh); `false` means the user must sign in again, a rejection means transient. */
-  ensureSession?: () => Promise<boolean>;
-}
+type Options = PortalHttpOptions & { baseUrl?: string };
 
 const isPage = (data: unknown): data is DocumentsPage =>
   typeof data === 'object' && data !== null && Array.isArray((data as DocumentsPage).items);
@@ -101,41 +94,11 @@ const isDetail = (data: unknown): data is DocumentDetail =>
   typeof data === 'object' && data !== null && Array.isArray((data as DocumentDetail).events);
 
 export function createDocumentsClient({
-  fetchImpl = (url, init) => fetch(url, init),
   baseUrl = '/api/portal/documents',
-  ensureSession = async () => {
-    const result = await authClient.me();
-    if (result.kind === 'ok') return true;
-    // Only a gone session logs out; a transient failure (5xx, 429, network) is a retryable error.
-    if (result.kind === 'unauthenticated') return false;
-    throw new Error('session check unavailable');
-  },
+  ...http
 }: Options = {}): DocumentsClient {
-  const get = (url: string) => fetchImpl(url, { method: 'GET', credentials: 'include' });
+  const { run } = createPortalHttp(http);
   const url = (id: string, suffix = '') => `${baseUrl}/${encodeURIComponent(id)}${suffix}`;
-
-  /** GET with one session recovery on 401; `null` means the session is gone. */
-  async function session(target: string): Promise<Response | null> {
-    const first = await get(target);
-    if (first.status !== 401) return first;
-    if (!(await ensureSession())) return null;
-    const second = await get(target);
-    return second.status === 401 ? null : second;
-  }
-
-  /** Runs a request, mapping a lost session and network errors to the shared failures. */
-  async function run<T>(
-    target: string,
-    handle: (response: Response) => Promise<T>,
-  ): Promise<T | Failure> {
-    try {
-      const response = await session(target);
-      if (!response) return { kind: 'unauthenticated' };
-      return await handle(response);
-    } catch {
-      return { kind: 'unavailable' };
-    }
-  }
 
   return {
     list: (query) => {

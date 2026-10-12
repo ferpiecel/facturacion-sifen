@@ -45,3 +45,10 @@ export function formatXmlDateTime(iso: string): string {
 export function iva10(total: number): number {
   return Math.round(total / 11);
 }
+
+/** `1.428`: thousands separated by dots. */
+export const formatInteger = (value: number): string =>
+  String(value).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+
+/** `83.3%`. */
+export const formatPercent = (value: number): string => `${value.toFixed(1)}%`;

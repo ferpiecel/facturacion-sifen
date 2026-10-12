@@ -59,4 +59,17 @@ describe('summary client', () => {
     expect(await setup(new Error('offline')).client.get({})).toEqual({ kind: 'unavailable' });
     expect(await setup(json({ totals: null })).client.get({})).toEqual({ kind: 'unavailable' });
   });
+
+  it('answers unavailable for a partial summary instead of letting it reach the screen', async () => {
+    const partials = [
+      { ...SUMMARY, totals: { count: 1, otherCurrencyCount: 0 } },
+      { ...SUMMARY, rejected: { count: 1 } },
+      { ...SUMMARY, previous: {} },
+      { ...SUMMARY, pending: { count: 1, overdue: 0, dueSoon: 0 } },
+      { ...SUMMARY, byStatus: [{ status: 'approved', count: 'x' }] },
+    ];
+    for (const body of partials) {
+      expect(await setup(json(body)).client.get({})).toEqual({ kind: 'unavailable' });
+    }
+  });
 });

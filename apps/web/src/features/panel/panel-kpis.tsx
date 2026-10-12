@@ -48,8 +48,7 @@ function Card({
 
 /** Billing, issued, queue and rejected of the last 30 days, from `GET /portal/summary` (HU-E12-03). */
 export function PanelKpis({ client = summaryClient }: { client?: SummaryClient }) {
-  const { state, previous, retry } = useSummary(client, DAYS);
-  const shown = state ?? previous;
+  const { state: shown, retry } = useSummary(client, DAYS);
 
   if (shown?.kind !== 'ok') {
     return (

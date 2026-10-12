@@ -46,13 +46,36 @@ export interface SummaryClient {
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
+const isNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value);
+const isDecimal = (value: unknown): value is string =>
+  typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value));
+const isRow = (row: unknown, key: 'type' | 'status'): boolean =>
+  isObject(row) && isNumber(row.count) && isDecimal(row.amountPyg) && key in row;
+
 const isSummary = (data: unknown): data is PeriodSummary =>
   isObject(data) &&
   isObject(data.totals) &&
+  isNumber(data.totals.count) &&
+  isDecimal(data.totals.amountPyg) &&
+  isNumber(data.totals.otherCurrencyCount) &&
+  Array.isArray(data.byType) &&
+  data.byType.every((row) => isRow(row, 'type')) &&
   Array.isArray(data.byStatus) &&
+  data.byStatus.every((row) => isRow(row, 'status')) &&
   isObject(data.rejected) &&
+  isNumber(data.rejected.count) &&
+  Array.isArray(data.rejected.topCodes) &&
+  data.rejected.topCodes.every(
+    (top) => isObject(top) && typeof top.code === 'string' && isNumber(top.count),
+  ) &&
   isObject(data.pending) &&
-  isObject(data.previous);
+  isNumber(data.pending.count) &&
+  isNumber(data.pending.overdue) &&
+  isNumber(data.pending.dueSoon) &&
+  (data.pending.oldestDeadline === null || typeof data.pending.oldestDeadline === 'string') &&
+  isObject(data.previous) &&
+  isNumber(data.previous.count);
 
 export function createSummaryClient({
   baseUrl = '/api/portal/summary',

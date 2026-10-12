@@ -45,4 +45,20 @@ describe('PanelKpis (panel indicators from the summary API)', () => {
     await user.click(screen.getByRole('button', { name: 'Reintentar' }));
     expect(client.get).toHaveBeenCalledTimes(2);
   });
+
+  it('hides the stale content and error while a retry is in flight, marking the section busy', async () => {
+    const user = userEvent.setup();
+    const client = fakeSummaryClient({ kind: 'unavailable' });
+    render(<PanelKpis client={client} />);
+    await screen.findByRole('alert');
+    client.get.mockReturnValueOnce(new Promise(() => undefined));
+
+    await user.click(screen.getByRole('button', { name: 'Reintentar' }));
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Indicadores' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+  });
 });

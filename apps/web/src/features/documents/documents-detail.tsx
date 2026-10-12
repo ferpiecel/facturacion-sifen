@@ -1,21 +1,34 @@
 'use client';
 
-import { BadgeCheck } from 'lucide-react';
-import { useState, type KeyboardEvent } from 'react';
+import { useCallback, useState, type KeyboardEvent } from 'react';
 
-import { DocumentsEvents } from './documents-events';
-import { DocumentsKude } from './documents-kude';
-import { DocumentsXml } from './documents-xml';
-import type { DocumentRow } from './sample-documents';
+import { StatusBadge } from '../../design-system/components/status-badge';
+import { documentsClient, type DetailResult, type DocumentsClient } from './documents-client';
+import { useRemote } from './use-remote';
 
 const TABS = ['Vista Gráfica KuDE', 'XML Firmado <rDE>', 'Eventos & Trazabilidad'] as const;
 
-const ACTION =
-  'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 font-label-md text-label-md font-semibold shadow-sm';
+const ENVIRONMENTS: Record<string, string> = { test: 'Pruebas', prod: 'Producción' };
+const MESSAGE = 'p-6 text-center font-body-sm text-body-sm text-on-surface-variant';
 
 /** Inspector of the Stitch explorer (right column): signature metadata and KuDE preview. */
-export function DocumentsDetail({ doc }: { doc: DocumentRow | undefined }) {
+export function DocumentsDetail({
+  documentId,
+  client = documentsClient,
+}: {
+  documentId: string | undefined;
+  client?: DocumentsClient;
+}) {
   const [tab, setTab] = useState(0);
+  const load = useCallback(
+    (): Promise<DetailResult | { kind: 'idle' }> =>
+      documentId === undefined
+        ? Promise.resolve({ kind: 'idle' as const })
+        : client.detail(documentId),
+    [client, documentId],
+  );
+  const { state, retry } = useRemote(load);
+  const doc = state?.kind === 'ok' ? state.document : undefined;
 
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     const step = { ArrowRight: 1, ArrowLeft: -1 }[event.key];
@@ -33,24 +46,12 @@ export function DocumentsDetail({ doc }: { doc: DocumentRow | undefined }) {
       {doc ? (
         <>
           <div className="flex flex-col gap-2 bg-surface-container p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span aria-hidden="true" className="size-2.5 rounded-full bg-secondary" />
-                <h2 className="font-headline-md text-headline-md font-bold text-on-surface">{`${doc.kind} ${doc.number}`}</h2>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="rounded bg-surface-container-lowest px-2 py-0.5 font-code-sm text-code-sm font-bold text-primary shadow-sm">
-                  SIFEN v150 OK
-                </span>
-                <BadgeCheck
-                  aria-label="Firma digital válida"
-                  className="size-[18px] text-secondary"
-                />
-              </div>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-headline-md text-headline-md font-bold text-on-surface">{`${doc.type} ${doc.number}`}</h2>
+              <StatusBadge status={doc.status} />
             </div>
-            <div className="flex flex-wrap items-center justify-between pt-1 font-code-sm text-code-sm text-on-surface-variant">
-              <span>Certificado: ACME PARAGUAY S.A.</span>
-              <span className="font-semibold text-secondary">XMLDSig RSA-SHA256</span>
+            <div className="font-code-sm text-code-sm text-on-surface-variant">
+              {`Ambiente: ${ENVIRONMENTS[doc.environment] ?? doc.environment}`}
             </div>
           </div>
           <div
@@ -82,38 +83,30 @@ export function DocumentsDetail({ doc }: { doc: DocumentRow | undefined }) {
             ))}
           </div>
           <div role="tabpanel" id="detail-panel" aria-labelledby={`detail-tab-${String(tab)}`}>
-            {tab === 1 && <DocumentsXml doc={doc} />}
-            {tab === 2 && <DocumentsEvents doc={doc} />}
-            {tab === 0 && (
-              <div className="flex flex-col gap-4 p-4">
-                <div className="flex items-center justify-between rounded-lg bg-surface-container-low p-2.5">
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      className={`${ACTION} bg-surface-container-lowest text-on-surface`}
-                    >
-                      Imprimir PDF
-                    </button>
-                    <button
-                      type="button"
-                      className={`${ACTION} bg-surface-container-lowest text-on-surface`}
-                    >
-                      A4 / Ticket POS
-                    </button>
-                  </div>
-                  <button type="button" className={`${ACTION} bg-secondary text-on-secondary`}>
-                    Enviar por email
-                  </button>
-                </div>
-                <DocumentsKude doc={doc} />
-              </div>
-            )}
+            <p className={MESSAGE}>Disponible en el siguiente cambio.</p>
           </div>
         </>
-      ) : (
-        <p className="p-6 text-center font-body-sm text-body-sm text-on-surface-variant">
-          Selecciona un comprobante aprobado para ver su KuDE.
+      ) : state === undefined && documentId !== undefined ? (
+        <p role="status" className={MESSAGE}>
+          Cargando comprobante…
         </p>
+      ) : state?.kind === 'not_found' ? (
+        <p role="alert" className={MESSAGE}>
+          El comprobante no existe o no pertenece a la empresa activa.
+        </p>
+      ) : state?.kind === 'unavailable' ? (
+        <div role="alert" className={`${MESSAGE} flex flex-col items-center gap-2`}>
+          <span>No pudimos cargar el comprobante. Intentá de nuevo.</span>
+          <button
+            type="button"
+            onClick={retry}
+            className="rounded bg-surface-container px-3 py-1.5 font-label-md text-label-md font-semibold text-primary hover:bg-surface-container-high"
+          >
+            Reintentar
+          </button>
+        </div>
+      ) : (
+        <p className={MESSAGE}>Selecciona un comprobante para ver su detalle.</p>
       )}
     </section>
   );

@@ -145,7 +145,7 @@ export function DocumentsBrowser() {
         />
       </div>
       <div className="xl:col-span-5">
-        <DocumentsDetail doc={current} />
+        <DocumentsDetail documentId={current?.documentId} />
       </div>
     </div>
   );

@@ -9,3 +9,9 @@ export const GET_PORTAL_XML = Symbol('GetPortalXml');
 
 /** Injection token for the `getKude` application function wired to the portal source. */
 export const GET_PORTAL_KUDE = Symbol('GetPortalKude');
+
+/** Injection token for the `getPortalSummary` application function. */
+export const GET_PORTAL_SUMMARY = Symbol('GetPortalSummary');
+
+/** Injection token for the clock (`() => Date`) the summary measures the 72 h window against; tests replace it. */
+export const PORTAL_CLOCK = Symbol('PortalClock');

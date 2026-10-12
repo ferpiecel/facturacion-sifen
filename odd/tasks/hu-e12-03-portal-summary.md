@@ -19,9 +19,9 @@ documents against the 72 h clock, and the previous same-length window count. Ses
 
 ## Tasks
 
-- [ ] T1 Domain: period resolution and validation (default 30 days, max 366, previous window) + unit tests.
-- [ ] T2 Use case + port: assemble contract, 72 h buckets with injected clock + unit tests.
-- [ ] T3 SQL adapter + controller + module wiring + e2e (isolation, buckets, dates, 401/403).
+- [x] T1 Domain: period resolution and validation (default 30 days, max 366, previous window) + unit tests.
+- [x] T2 Use case + port: assemble contract, 72 h buckets with injected clock + unit tests.
+- [x] T3 SQL adapter + controller + module wiring + e2e (isolation, buckets, dates, 401/403).
 - [ ] T4 `pnpm verify`, PR(s).
 
 ## Debt

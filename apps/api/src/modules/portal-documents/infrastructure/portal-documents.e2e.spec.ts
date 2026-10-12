@@ -165,10 +165,15 @@ describe('GET /portal/documents (HU-E12-01)', () => {
     expect((await list('?page=9')).items).toEqual([]);
   });
 
-  it.each(['?type=XX', '?status=bogus', '?from=2026-02-30', '?page=0', '?pageSize=101'])(
-    'answers 400 for %s',
-    async (query) => {
-      expect((await get(query, cookies.owner)).statusCode).toBe(400);
-    },
-  );
+  it.each([
+    '?type=XX',
+    '?status=bogus',
+    '?from=2026-02-30',
+    '?from=2024-13-01',
+    '?to=2026-01-32',
+    '?page=0',
+    '?pageSize=101',
+  ])('answers 400 for %s', async (query) => {
+    expect((await get(query, cookies.owner)).statusCode).toBe(400);
+  });
 });

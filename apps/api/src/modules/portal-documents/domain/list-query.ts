@@ -1,3 +1,4 @@
+import { isCalendarDay } from './calendar-day.js';
 import { isPortalDocumentStatus } from './document-status.js';
 import {
   documentTypeCode,
@@ -38,9 +39,7 @@ function single(raw: Record<string, unknown>, name: string): string | undefined 
 function day(raw: Record<string, unknown>, name: string): string | undefined {
   const value = single(raw, name);
   if (value === undefined) return undefined;
-  const valid =
-    /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(value).toISOString().slice(0, 10) === value;
-  if (!valid) throw new InvalidListQueryError(`${name} must be a YYYY-MM-DD date`);
+  if (!isCalendarDay(value)) throw new InvalidListQueryError(`${name} must be a YYYY-MM-DD date`);
   return value;
 }
 

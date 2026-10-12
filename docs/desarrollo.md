@@ -109,6 +109,7 @@ curl -s -b jar $P/api/portal/documents                                          
 curl -s -b jar $P/api/portal/documents/<id>                # detalle y eventos
 curl -s -b jar $P/api/portal/documents/<id>/xml -o de.xml  # XML firmado
 curl -s -b jar $P/api/portal/documents/<id>/kude -o de.pdf # KuDE (PDF)
+curl -s -b jar "$P/api/portal/summary?from=2026-01-01&to=2026-01-31"   # resumen del período (por defecto, últimos 30 días)
 ```
 
 Para apagar todo: `Ctrl+C` en cada terminal y `docker compose down -v` (el `-v` borra los datos).

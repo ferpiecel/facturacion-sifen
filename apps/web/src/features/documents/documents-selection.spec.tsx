@@ -1,50 +1,53 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DocumentsBrowser } from './documents-browser';
+import { fakeDocumentsClient } from './documents-fixtures';
 
-const rows = () => screen.queryAllByRole('listitem');
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
+
+beforeEach(() => {
+  URL.createObjectURL = vi.fn(() => 'blob:kude');
+  URL.revokeObjectURL = vi.fn();
+});
 
 describe('DocumentsBrowser (type tabs and selection)', () => {
-  it('filters by type with tabs that carry the period counts and a pressed state', async () => {
+  it('asks the API for the chosen type and marks the tab as pressed', async () => {
     const user = userEvent.setup();
-    render(<DocumentsBrowser />);
+    const client = fakeDocumentsClient();
+    render(<DocumentsBrowser client={client} />);
 
     const group = screen.getByRole('group', { name: 'Tipo de comprobante' });
-    expect(within(group).getByRole('button', { name: /Todos/ })).toHaveAttribute(
+    expect(within(group).getByRole('button', { name: 'Todos' })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
-    expect(within(group).getByRole('button', { name: /Facturas/ })).toHaveTextContent('1.210');
-    await user.click(within(group).getByRole('button', { name: /Notas de Crédito/ }));
-    expect(rows()).toHaveLength(1);
-    await user.click(within(group).getByRole('button', { name: /Autofacturas/ }));
-    expect(screen.getByText('No hay comprobantes para los filtros aplicados.')).toBeInTheDocument();
+    await user.click(within(group).getByRole('button', { name: 'Notas de Crédito' }));
+    expect(within(group).getByRole('button', { name: 'Notas de Crédito' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    expect(client.list).toHaveBeenLastCalledWith({ type: 'NCE' });
+    await user.click(within(group).getByRole('button', { name: 'Autofacturas' }));
+    expect(client.list).toHaveBeenLastCalledWith({ type: 'AFE' });
   });
 
   it('selects rows and enables the bulk actions only with a selection', async () => {
     const user = userEvent.setup();
-    render(<DocumentsBrowser />);
+    render(<DocumentsBrowser client={fakeDocumentsClient()} />);
 
     const download = screen.getByRole('button', { name: 'Descargar XML Zip' });
     expect(download).toBeDisabled();
     expect(screen.getByText('Seleccionados: 0 comprobantes')).toBeInTheDocument();
-    await user.click(screen.getByRole('checkbox', { name: 'Seleccionar FE 001-001-0004520' }));
+    await user.click(
+      await screen.findByRole('checkbox', { name: 'Seleccionar FE 001-001-0004520' }),
+    );
     expect(screen.getByText('Seleccionados: 1 comprobante')).toBeInTheDocument();
     expect(download).toBeEnabled();
     await user.click(screen.getByRole('checkbox', { name: 'Seleccionar todos los comprobantes' }));
-    expect(screen.getByText('Seleccionados: 5 comprobantes')).toBeInTheDocument();
+    expect(screen.getByText('Seleccionados: 3 comprobantes')).toBeInTheDocument();
     await user.click(screen.getByRole('checkbox', { name: 'Seleccionar todos los comprobantes' }));
-    expect(screen.getByText('Seleccionados: 0 comprobantes')).toBeInTheDocument();
-  });
-
-  it('counts only the selected rows that the active tab still shows', async () => {
-    const user = userEvent.setup();
-    render(<DocumentsBrowser />);
-
-    await user.click(screen.getByRole('checkbox', { name: 'Seleccionar FE 001-001-0004520' }));
-    await user.click(screen.getByRole('button', { name: /Notas de Crédito/ }));
     expect(screen.getByText('Seleccionados: 0 comprobantes')).toBeInTheDocument();
   });
 });

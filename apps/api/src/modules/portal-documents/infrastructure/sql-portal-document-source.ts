@@ -123,4 +123,23 @@ export class SqlPortalDocumentSource implements PortalDocumentSource {
       return rows.at(0) ?? null;
     });
   }
+
+  findSignedXml(tenantId: string, id: string) {
+    return withTenantTransaction(this.db, tenantId, async (tx) => {
+      const rows = await tx
+        .select({
+          cdc: documents.cdc,
+          number,
+          environment: documents.environment,
+          signedXml: documents.signedXml,
+        })
+        .from(documents)
+        .innerJoin(tenants, onTenant)
+        .innerJoin(tenantExpeditionPoints, onPoint)
+        .innerJoin(tenantEstablishments, onEstablishment)
+        .where(and(eq(documents.tenantId, tenantId), eq(documents.id, id)))
+        .limit(1);
+      return rows.at(0) ?? null;
+    });
+  }
 }

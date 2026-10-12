@@ -26,6 +26,14 @@ export interface PortalDocumentDetailRow extends PortalDocumentRow {
   sifenMessages: unknown;
 }
 
+/** The signed DE of a document; `signedXml` is null until it is signed. */
+export interface PortalSignedXml {
+  cdc: string;
+  number: string;
+  environment: 'test' | 'production';
+  signedXml: string | null;
+}
+
 /** Tenant-scoped reads inside the tenant's RLS transaction; another tenant's data is never visible. */
 export interface PortalDocumentSource {
   list(
@@ -34,4 +42,5 @@ export interface PortalDocumentSource {
   ): Promise<{ rows: PortalDocumentRow[]; total: number }>;
   /** `null` when the id is not a document of the tenant. */
   findById(tenantId: string, id: string): Promise<PortalDocumentDetailRow | null>;
+  findSignedXml(tenantId: string, id: string): Promise<PortalSignedXml | null>;
 }

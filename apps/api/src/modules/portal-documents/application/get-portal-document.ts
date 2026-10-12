@@ -27,3 +27,15 @@ export function createGetPortalDocument(deps: { source: PortalDocumentSource }) 
     };
   };
 }
+
+export type SignedXmlResult = { kind: 'ok'; cdc: string; xml: string } | { kind: 'not-found' };
+
+/** HU-E12-02: the signed XML; absent when the document is not the tenant's or is not signed yet. */
+export function createGetPortalXml(deps: { source: PortalDocumentSource }) {
+  return async (tenantId: string, id: string): Promise<SignedXmlResult> => {
+    const found = await deps.source.findSignedXml(tenantId, id);
+    return found?.signedXml
+      ? { kind: 'ok', cdc: found.cdc, xml: found.signedXml }
+      : { kind: 'not-found' };
+  };
+}

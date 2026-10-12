@@ -1,23 +1,13 @@
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
-import {
-  createPgliteDatabase,
-  tenantMemberships,
-  tenants,
-  users,
-  type DatabaseHandle,
-} from '@sifen/db';
-import { sql } from 'drizzle-orm';
+import { createPgliteDatabase, tenants, type DatabaseHandle } from '@sifen/db';
 import { ClsModule } from 'nestjs-cls';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CustodyModule } from '../../custody/custody.module.js';
 import { DATABASE, DatabaseModule } from '../../database/database.module.js';
-import { generateSessionToken, hashSessionToken } from '../../identity/domain/session-token.js';
-import { COOKIE_NAMES } from '../../identity/infrastructure/http/auth-cookies.js';
+import { portalSessionCookie } from '../../../../test/support/portal-session.js';
 import { seedDocuments } from '../../../../test/support/document-seed.js';
 import { PortalDocumentsModule } from '../portal-documents.module.js';
-
-const HASH = '$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAA';
 
 interface ListBody {
   items: { id: string; number: string; status: string; type: string; hasObservations: boolean }[];
@@ -32,25 +22,6 @@ describe('GET /portal/documents (HU-E12-01)', () => {
   let acme: string;
   const ids: Record<string, string> = {};
   const cookies: Record<string, string> = {};
-
-  async function session(email: string, tenantId: string | null, role?: string) {
-    const [user] = await handle.db
-      .insert(users)
-      .values({ email, passwordHash: HASH, displayName: email })
-      .returning();
-    if (tenantId && role) {
-      await handle.db
-        .insert(tenantMemberships)
-        .values({ tenantId, userId: user.id, role: role as 'owner' });
-    }
-    const token = generateSessionToken();
-    const future = new Date(Date.now() + 3_600_000).toISOString();
-    await handle.db.execute(sql`insert into user_sessions
-      (user_id, family_id, access_hash, refresh_hash, access_expires_at, refresh_expires_at, absolute_expires_at, mfa_verified_at, active_tenant_id)
-      values (${user.id}, gen_random_uuid(), ${hashSessionToken(token)}, ${hashSessionToken(generateSessionToken())},
-        ${future}, ${future}, ${future}, now(), ${tenantId})`);
-    return `${COOKIE_NAMES.access}=${token}`;
-  }
 
   const get = (query: string, cookie?: string) =>
     app.inject({
@@ -106,9 +77,15 @@ describe('GET /portal/documents (HU-E12-01)', () => {
       (r) => r.id,
     );
 
-    cookies.owner = await session('owner@example.com', acme, 'owner');
-    cookies.lector = await session('lector@example.com', acme, 'lector');
-    cookies.noTenant = await session('plain@example.com', null);
+    cookies.owner = await portalSessionCookie(handle.db, 'owner@example.com', {
+      tenantId: acme,
+      role: 'owner',
+    });
+    cookies.lector = await portalSessionCookie(handle.db, 'lector@example.com', {
+      tenantId: acme,
+      role: 'lector',
+    });
+    cookies.noTenant = await portalSessionCookie(handle.db, 'plain@example.com');
   });
 
   afterAll(async () => {

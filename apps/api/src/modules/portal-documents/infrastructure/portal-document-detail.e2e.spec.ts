@@ -1,23 +1,13 @@
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
-import {
-  createPgliteDatabase,
-  tenantMemberships,
-  tenants,
-  users,
-  type DatabaseHandle,
-} from '@sifen/db';
-import { sql } from 'drizzle-orm';
+import { createPgliteDatabase, tenants, type DatabaseHandle } from '@sifen/db';
 import { ClsModule } from 'nestjs-cls';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { portalSessionCookie } from '../../../../test/support/portal-session.js';
 import { seedDocuments } from '../../../../test/support/document-seed.js';
-import { generateSessionToken, hashSessionToken } from '../../identity/domain/session-token.js';
-import { COOKIE_NAMES } from '../../identity/infrastructure/http/auth-cookies.js';
 import { CustodyModule } from '../../custody/custody.module.js';
 import { DATABASE, DatabaseModule } from '../../database/database.module.js';
 import { PortalDocumentsModule } from '../portal-documents.module.js';
-
-const HASH = '$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAA';
 
 describe('GET /portal/documents/:id (HU-E12-02)', () => {
   let handle: DatabaseHandle;
@@ -25,24 +15,6 @@ describe('GET /portal/documents/:id (HU-E12-02)', () => {
   let cookie: string;
   const ids: Record<string, string> = {};
   let cdc: string;
-
-  async function session(email: string, tenantId?: string): Promise<string> {
-    const [user] = await handle.db
-      .insert(users)
-      .values({ email, passwordHash: HASH, displayName: email })
-      .returning();
-    if (tenantId)
-      await handle.db
-        .insert(tenantMemberships)
-        .values({ tenantId, userId: user.id, role: 'lector' });
-    const token = generateSessionToken();
-    const future = new Date(Date.now() + 3_600_000).toISOString();
-    await handle.db.execute(sql`insert into user_sessions
-      (user_id, family_id, access_hash, refresh_hash, access_expires_at, refresh_expires_at, absolute_expires_at, mfa_verified_at, active_tenant_id)
-      values (${user.id}, gen_random_uuid(), ${hashSessionToken(token)}, ${hashSessionToken(generateSessionToken())},
-        ${future}, ${future}, ${future}, now(), ${tenantId ?? null})`);
-    return `${COOKIE_NAMES.access}=${token}`;
-  }
 
   const get = (path: string, withCookie: string | undefined = cookie) =>
     app.inject({
@@ -81,7 +53,10 @@ describe('GET /portal/documents/:id (HU-E12-02)', () => {
     [ids.approved, ids.rejected] = rows.map((r) => r.id);
     cdc = rows[0].cdc;
     [ids.foreign] = (await seedDocuments(handle.db, globex.id, ['approved'])).map((r) => r.id);
-    cookie = await session('lector@example.com', acme.id);
+    cookie = await portalSessionCookie(handle.db, 'lector@example.com', {
+      tenantId: acme.id,
+      role: 'lector',
+    });
   });
 
   afterAll(async () => {

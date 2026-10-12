@@ -4,8 +4,23 @@ import { apiRewrites } from './api-proxy';
 
 describe('apiRewrites', () => {
   it('proxies /api/auth/* to the API /auth/* so cookies stay on the portal host', () => {
-    expect(apiRewrites('http://api.internal:3000')).toEqual([
-      { source: '/api/auth/:path*', destination: 'http://api.internal:3000/auth/:path*' },
+    expect(apiRewrites('http://api.internal:3000')[0]).toEqual({
+      source: '/api/auth/:path*',
+      destination: 'http://api.internal:3000/auth/:path*',
+    });
+  });
+
+  it('proxies /api/portal/* to the API /portal/* (documents explorer)', () => {
+    expect(apiRewrites('http://api.internal:3000')).toContainEqual({
+      source: '/api/portal/:path*',
+      destination: 'http://api.internal:3000/portal/:path*',
+    });
+  });
+
+  it('exposes only the auth and portal routes', () => {
+    expect(apiRewrites('http://api.internal:3000').map(({ source }) => source)).toEqual([
+      '/api/auth/:path*',
+      '/api/portal/:path*',
     ]);
   });
 

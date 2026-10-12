@@ -3,8 +3,9 @@
 # Skip it in an emergency with: git push --no-verify
 cd "$(git rev-parse --show-toplevel)" || exit 1
 
-# Git hooks run with a minimal PATH: load nvm when node is not on it.
-if ! command -v node >/dev/null 2>&1 && [ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]; then
+# Git hooks run with a minimal PATH and the shell's default node, which may be older than the
+# repo's engines range: with nvm installed, always switch to the version pinned in .nvmrc.
+if [ -f .nvmrc ] && [ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]; then
   . "${NVM_DIR:-$HOME/.nvm}/nvm.sh" >/dev/null 2>&1
   nvm use --silent >/dev/null 2>&1
 fi

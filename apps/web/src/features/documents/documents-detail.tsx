@@ -5,6 +5,7 @@ import { useCallback, useState, type KeyboardEvent } from 'react';
 import { StatusBadge } from '../../design-system/components/status-badge';
 import { documentsClient, type DetailResult, type DocumentsClient } from './documents-client';
 import { DocumentsEvents } from './documents-events';
+import { DocumentsKude } from './documents-kude';
 import { DocumentsXml } from './documents-xml';
 import { useRemote } from './use-remote';
 
@@ -85,7 +86,7 @@ export function DocumentsDetail({
             ))}
           </div>
           <div role="tabpanel" id="detail-panel" aria-labelledby={`detail-tab-${String(tab)}`}>
-            {tab === 0 && <p className={MESSAGE}>Disponible en el siguiente cambio.</p>}
+            {tab === 0 && <DocumentsKude document={doc} client={client} />}
             {tab === 1 && <DocumentsXml id={doc.id} client={client} />}
             {tab === 2 && <DocumentsEvents document={doc} />}
           </div>

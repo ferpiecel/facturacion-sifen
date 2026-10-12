@@ -1,11 +1,16 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DocumentsDetail } from './documents-detail';
 import { DETAIL, fakeDocumentsClient, ITEM } from './documents-fixtures';
 
 const panel = () => screen.getByRole('region', { name: 'Detalle del comprobante' });
+beforeEach(() => {
+  URL.createObjectURL = vi.fn(() => 'blob:kude');
+  URL.revokeObjectURL = vi.fn();
+});
+
 async function open(name: RegExp, client = fakeDocumentsClient()) {
   const user = userEvent.setup();
   render(<DocumentsDetail documentId={ITEM.id} client={client} />);
@@ -64,6 +69,39 @@ describe('DocumentsDetail tabs', () => {
       within(panel()).getByText(
         'Plazo de cancelación: hasta 04/10/2026 15:42 (48 h desde la aprobación)',
       ),
+    ).toBeInTheDocument();
+  });
+
+  it('offers the KuDE PDF as a download', async () => {
+    const client = fakeDocumentsClient();
+    render(<DocumentsDetail documentId={ITEM.id} client={client} />);
+
+    const link = await within(panel()).findByRole('link', { name: 'Descargar KuDE (PDF)' });
+    expect(link).toHaveAttribute('href', 'blob:kude');
+    expect(link).toHaveAttribute('download', 'kude-001-001-0004520.pdf');
+    expect(client.kude).toHaveBeenCalledWith(ITEM.id);
+  });
+
+  it('says the KuDE is not available yet on a 501', async () => {
+    const kude = vi.fn(() => Promise.resolve({ kind: 'not_available' as const }));
+    render(<DocumentsDetail documentId={ITEM.id} client={fakeDocumentsClient({ kude })} />);
+
+    expect(await within(panel()).findByText('KuDE no disponible todavía')).toBeInTheDocument();
+    expect(within(panel()).queryByRole('link', { name: /KuDE/ })).not.toBeInTheDocument();
+  });
+
+  it('reports a KuDE that could not be loaded and retries', async () => {
+    const user = userEvent.setup();
+    const kude = vi
+      .fn()
+      .mockResolvedValueOnce({ kind: 'unavailable' })
+      .mockResolvedValueOnce({ kind: 'ok', pdf: new Blob(['%PDF']) });
+    render(<DocumentsDetail documentId={ITEM.id} client={fakeDocumentsClient({ kude })} />);
+
+    expect(await within(panel()).findByText('No pudimos cargar el KuDE.')).toBeInTheDocument();
+    await user.click(within(panel()).getByRole('button', { name: 'Reintentar' }));
+    expect(
+      await within(panel()).findByRole('link', { name: 'Descargar KuDE (PDF)' }),
     ).toBeInTheDocument();
   });
 

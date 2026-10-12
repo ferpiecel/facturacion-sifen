@@ -14,6 +14,8 @@ vi.mock('next/navigation', () => ({ useRouter: () => router }));
 
 beforeEach(() => {
   replace.mockClear();
+  URL.createObjectURL = vi.fn(() => 'blob:kude');
+  URL.revokeObjectURL = vi.fn();
 });
 
 describe('DocumentsDetail', () => {

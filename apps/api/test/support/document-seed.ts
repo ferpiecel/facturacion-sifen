@@ -12,6 +12,8 @@ export async function seedDocuments(
   db: Database,
   tenantId: string,
   statuses: readonly string[],
+  /** Column overrides for the document at that index. */
+  overrides: (index: number) => Partial<typeof documents.$inferInsert> = () => ({}),
 ): Promise<{ id: string; cdc: string; status: string }[]> {
   const [est] = await db
     .insert(tenantEstablishments)
@@ -54,6 +56,7 @@ export async function seedDocuments(
         issuedAt: new Date('2026-01-01T12:00:00Z'),
         totalAmount: '110000',
         payload: { receiver: { name: 'Private Person' } },
+        ...overrides(i),
       })
       .returning();
     rows.push({ id: row.id, cdc, status });

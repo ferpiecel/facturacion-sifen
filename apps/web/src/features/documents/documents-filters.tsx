@@ -1,8 +1,7 @@
-import { CalendarDays, ChevronDown, Search, X } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { ChevronDown, Search, X } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
 
 import { appliedFilters, KIND_OPTIONS, NO_FILTERS, STATUS_OPTIONS, type Filters } from './filters';
-import { ESTABLISHMENTS } from './sample-documents';
 
 const SELECT =
   'cursor-pointer appearance-none rounded-lg bg-surface-container-low px-3 py-2 pr-8 font-body-sm text-body-sm text-on-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-primary';
@@ -43,9 +42,19 @@ interface DocumentsFiltersProps {
   onChange: (patch: Partial<Filters>) => void;
 }
 
-/** Search box, selects and applied-filter chips of the Stitch explorer. */
+const DATE =
+  'rounded-lg bg-surface-container-low px-3 py-2 font-body-sm text-body-sm text-on-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-primary';
+
+/** Search box, selects, date range and applied-filter chips of the Stitch explorer. */
 export function DocumentsFilters({ filters, onChange }: DocumentsFiltersProps) {
   const chips = appliedFilters(filters);
+  // The search text is sent on submit; an outside change (chip, "Limpiar filtros") resets the draft.
+  const [draft, setDraft] = useState(filters.q);
+  const [seen, setSeen] = useState(filters.q);
+  if (seen !== filters.q) {
+    setSeen(filters.q);
+    setDraft(filters.q);
+  }
 
   return (
     <section
@@ -53,25 +62,32 @@ export function DocumentsFilters({ filters, onChange }: DocumentsFiltersProps) {
       className="flex flex-col gap-3 rounded-xl bg-surface-container-lowest p-4 shadow-sm xl:col-span-12"
     >
       <div className="flex flex-col items-stretch gap-3 lg:flex-row lg:items-center">
-        <div className="flex flex-1 items-center gap-2 rounded-lg bg-surface-container-low px-3 py-2 text-on-surface focus-within:ring-2 focus-within:ring-primary">
+        <form
+          role="search"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onChange({ q: draft.trim() });
+          }}
+          className="flex flex-1 items-center gap-2 rounded-lg bg-surface-container-low px-3 py-2 text-on-surface focus-within:ring-2 focus-within:ring-primary"
+        >
           <Search aria-hidden="true" className="size-5 text-outline" />
           <input
             type="search"
             aria-label="Filtrar el listado de comprobantes"
-            value={filters.query}
+            value={draft}
             onChange={(event) => {
-              onChange({ query: event.target.value });
+              setDraft(event.target.value);
             }}
             placeholder="Buscar por CDC (44 dígitos), RUC emisor/receptor, N° de Factura o Razón Social..."
             className="w-full bg-transparent font-body-sm text-body-sm placeholder:text-outline focus:outline-none"
           />
-        </div>
+        </form>
         <div className="flex flex-wrap items-center gap-2">
           <Select
             label="Tipo de documento"
-            value={filters.kind}
-            onChange={(kind) => {
-              onChange({ kind: kind as Filters['kind'] });
+            value={filters.type}
+            onChange={(type) => {
+              onChange({ type: type as Filters['type'] });
             }}
           >
             <option value="">Todos los Documentos</option>
@@ -85,7 +101,7 @@ export function DocumentsFilters({ filters, onChange }: DocumentsFiltersProps) {
             label="Estado"
             value={filters.status}
             onChange={(status) => {
-              onChange({ status: status as Filters['status'] });
+              onChange({ status });
             }}
           >
             <option value="">Todos los estados</option>
@@ -95,25 +111,18 @@ export function DocumentsFilters({ filters, onChange }: DocumentsFiltersProps) {
               </option>
             ))}
           </Select>
-          <button
-            type="button"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-surface-container-low px-3 py-2 font-body-sm text-body-sm text-on-surface hover:bg-surface-container-high"
-          >
-            <CalendarDays aria-hidden="true" className="size-4 text-outline" />
-            <span>Últimos 30 días</span>
-          </button>
-          <Select
-            label="Sucursal"
-            value={filters.establishment}
-            onChange={(establishment) => {
-              onChange({ establishment });
-            }}
-          >
-            <option value="">Todas las Sucursales</option>
-            {Object.entries(ESTABLISHMENTS).map(([code, name]) => (
-              <option key={code} value={code}>{`${code} ${name}`}</option>
-            ))}
-          </Select>
+          {(['from', 'to'] as const).map((key) => (
+            <input
+              key={key}
+              type="date"
+              aria-label={key === 'from' ? 'Desde' : 'Hasta'}
+              value={filters[key]}
+              onChange={(event) => {
+                onChange({ [key]: event.target.value });
+              }}
+              className={DATE}
+            />
+          ))}
         </div>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 pt-1 font-body-sm text-body-sm">
@@ -151,19 +160,6 @@ export function DocumentsFilters({ filters, onChange }: DocumentsFiltersProps) {
         ) : (
           <span />
         )}
-        <label className="inline-flex cursor-pointer items-center gap-2 select-none">
-          <input
-            type="checkbox"
-            checked={filters.onlyIssues}
-            onChange={(event) => {
-              onChange({ onlyIssues: event.target.checked });
-            }}
-            className="size-4 rounded accent-primary"
-          />
-          <span className="font-label-md text-label-md font-medium text-on-surface-variant">
-            Solo con observaciones o rechazos
-          </span>
-        </label>
       </div>
     </section>
   );

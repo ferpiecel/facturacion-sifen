@@ -28,9 +28,9 @@ describe('DocumentsBrowser (type tabs and selection)', () => {
       'aria-pressed',
       'true',
     );
-    expect(client.list).toHaveBeenLastCalledWith({ type: 'NCE' });
+    expect(client.list).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'NCE', page: 1 }));
     await user.click(within(group).getByRole('button', { name: 'Autofacturas' }));
-    expect(client.list).toHaveBeenLastCalledWith({ type: 'AFE' });
+    expect(client.list).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'AFE' }));
   });
 
   it('selects rows and enables the bulk actions only with a selection', async () => {

@@ -5,6 +5,8 @@ interface DocumentsPaginationProps {
   total: number;
   page: number;
   pageSize: number;
+  onPage: (page: number) => void;
+  onPageSize: (pageSize: number) => void;
 }
 
 const integer = (value: number) => String(value).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
@@ -12,10 +14,19 @@ const PAGE_SIZES = [10, 20, 50];
 const ARROW =
   'flex size-8 items-center justify-center rounded-lg bg-surface-container-lowest text-on-surface shadow-sm disabled:opacity-40';
 
-/** Pagination footer; inert until `GET /v1/documents` supports paging. */
-export function DocumentsPagination({ shown, total, page, pageSize }: DocumentsPaginationProps) {
+/** Pagination footer: first and last page plus the neighbours of the current one. */
+export function DocumentsPagination({
+  shown,
+  total,
+  page,
+  pageSize,
+  onPage,
+  onPageSize,
+}: DocumentsPaginationProps) {
   const last = Math.max(1, Math.ceil(total / pageSize));
-  const pages = [...new Set([1, 2, 3, last].filter((n) => n <= last))];
+  const pages = [...new Set([1, page - 1, page, page + 1, last])]
+    .filter((n) => n >= 1 && n <= last)
+    .sort((a, b) => a - b);
 
   return (
     <nav
@@ -31,7 +42,10 @@ export function DocumentsPagination({ shown, total, page, pageSize }: DocumentsP
           <span>Filas:</span>
           <select
             aria-label="Filas por página"
-            defaultValue={pageSize}
+            value={pageSize}
+            onChange={(event) => {
+              onPageSize(Number(event.target.value));
+            }}
             className="rounded bg-surface-container-lowest px-1.5 py-0.5 font-label-sm text-label-sm font-medium text-on-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
             {PAGE_SIZES.map((size) => (
@@ -43,7 +57,15 @@ export function DocumentsPagination({ shown, total, page, pageSize }: DocumentsP
         </label>
       </div>
       <div className="flex items-center gap-1">
-        <button type="button" aria-label="Anterior" disabled={page === 1} className={ARROW}>
+        <button
+          type="button"
+          aria-label="Anterior"
+          disabled={page === 1}
+          onClick={() => {
+            onPage(page - 1);
+          }}
+          className={ARROW}
+        >
           <ChevronLeft aria-hidden="true" className="size-[18px]" />
         </button>
         {pages.map((n, index) => (
@@ -55,6 +77,9 @@ export function DocumentsPagination({ shown, total, page, pageSize }: DocumentsP
               type="button"
               aria-label={`Página ${String(n)}`}
               aria-current={n === page ? 'page' : undefined}
+              onClick={() => {
+                onPage(n);
+              }}
               className={`flex size-8 items-center justify-center rounded-lg ${
                 n === page
                   ? 'bg-primary-container font-bold text-on-primary shadow-sm'
@@ -65,7 +90,15 @@ export function DocumentsPagination({ shown, total, page, pageSize }: DocumentsP
             </button>
           </span>
         ))}
-        <button type="button" aria-label="Siguiente" disabled={page === last} className={ARROW}>
+        <button
+          type="button"
+          aria-label="Siguiente"
+          disabled={page === last}
+          onClick={() => {
+            onPage(page + 1);
+          }}
+          className={ARROW}
+        >
           <ChevronRight aria-hidden="true" className="size-[18px]" />
         </button>
       </div>

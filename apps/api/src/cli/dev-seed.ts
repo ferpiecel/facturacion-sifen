@@ -2,6 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import {
   createNodePostgresDatabase,
   documents,
+  tenantDocumentSequences,
   tenantEstablishments,
   tenantExpeditionPoints,
   tenants,
@@ -208,6 +209,20 @@ async function seedDemoDocuments(db: Database, tenantId: string): Promise<number
       .returning({ id: documents.id });
     created += rows.length;
   }
+  // Numbering must continue after the seeded numbers, or the first real emission would collide.
+  await db
+    .insert(tenantDocumentSequences)
+    .values({
+      tenantId,
+      environment: 'test',
+      timbradoId: timbrado.id,
+      establishmentId: est.id,
+      expeditionPointId: point.id,
+      documentType: 1,
+      lastNumber: DEMO_DOCUMENTS.length,
+    })
+    // The guard trigger only lets an UPDATE advance last_number by 1, so an existing row stays as is.
+    .onConflictDoNothing();
   return created;
 }
 

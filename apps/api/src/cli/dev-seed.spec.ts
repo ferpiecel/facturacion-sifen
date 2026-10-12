@@ -1,6 +1,7 @@
 import {
   createPgliteDatabase,
   documents,
+  tenantDocumentSequences,
   tenantMemberships,
   tenants,
   type DatabaseHandle,
@@ -38,6 +39,9 @@ describe('runDevSeed', () => {
       'queued',
       'rejected',
     ]);
+    // The next real emission must get number 7, not collide with the seeded 1..6.
+    const sequences = await handle.db.select().from(tenantDocumentSequences);
+    expect(sequences.map((row) => [row.series, row.lastNumber])).toEqual([['', 6]]);
     // A running worker must not pick the queued demo document up and turn it into "submitted".
     const queued = rows.find((row) => row.status === 'queued');
     expect(queued?.nextTransmissionAt?.getTime()).toBeGreaterThan(

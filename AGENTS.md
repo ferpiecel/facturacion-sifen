@@ -125,6 +125,7 @@ pnpm --filter @sifen/api start:dev  # API en :3000 (desarrollo)
 pnpm --filter @sifen/web dev        # portal en :3001
 pnpm --filter @sifen/api worker     # worker de transmisión
 pnpm --filter @sifen/api ops <cmd>  # CLI de operación
+pnpm dev:seed                       # datos de ejemplo para probar el portal (solo desarrollo local)
 pnpm --filter @sifen/db test:postgres
 pnpm --filter @sifen/api coverage
 ```

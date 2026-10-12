@@ -59,6 +59,12 @@ describe('DocumentsRow', () => {
     expect(within(row).getByText('120.50 USD')).toBeInTheDocument();
   });
 
+  it('shows a neutral label for a SIFEN type the portal has no code for', () => {
+    const { row } = show({ ...ITEM, type: null });
+
+    expect(row).toHaveAccessibleName('Documento 001-001-0004520');
+  });
+
   it('opens the detail and toggles the selection', async () => {
     const user = userEvent.setup();
     const { row, onOpen, onToggle } = show(ITEM, { current: true });

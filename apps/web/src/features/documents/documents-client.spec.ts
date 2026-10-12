@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { authClient } from '../auth/default-client';
 import { createDocumentsClient, type FetchLike } from './documents-client';
+
+vi.mock('../auth/default-client', () => ({ authClient: { me: vi.fn() } }));
 
 const ITEM = {
   id: 'doc-1',
@@ -12,7 +15,7 @@ const ITEM = {
   receiverRuc: '80034567-3',
   total: '16100000',
   currency: 'PYG',
-  status: 'aprobado',
+  status: 'approved',
   hasObservations: false,
 };
 const PAGE = { items: [ITEM], page: 1, pageSize: 20, total: 1 };
@@ -74,6 +77,21 @@ describe('documents client: list', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
+  it('answers unavailable (not unauthenticated) when the session check fails transiently', async () => {
+    const { client, ensureSession } = setup(json({}, 401));
+    ensureSession.mockRejectedValueOnce(new Error('503'));
+
+    expect(await client.list({})).toEqual({ kind: 'unavailable' });
+  });
+
+  it('falls back to the item count when the API omits the total', async () => {
+    const { client } = setup(json({ items: [ITEM], page: 1, pageSize: 20 }));
+
+    const result = await client.list({});
+
+    expect(result.kind === 'ok' ? result.page.total : -1).toBe(1);
+  });
+
   it('answers unauthenticated when the retry is still 401', async () => {
     const { client, ensureSession } = setup(json({}, 401), json({}, 401));
     ensureSession.mockResolvedValueOnce(true);
@@ -101,7 +119,7 @@ describe('documents client: detail', () => {
   const DETAIL = {
     ...ITEM,
     environment: 'test',
-    events: [{ status: 'aprobado', at: '2026-10-02T18:42:03Z', code: '0260', message: 'ok' }],
+    events: [{ status: 'approved', at: '2026-10-02T18:42:03Z', code: '0260', message: 'ok' }],
     rejectionReason: null,
   };
 
@@ -141,8 +159,15 @@ describe('documents client: xml and kude', () => {
     expect(fetchImpl.mock.calls[0]?.[0]).toBe('/api/portal/documents/d1/kude');
   });
 
-  it('answers not_available when the KuDE is not implemented yet (501)', async () => {
-    expect(await setup(json({}, 501)).client.kude('d1')).toEqual({ kind: 'not_available' });
+  it.each([422, 501])(
+    'answers not_available when the KuDE cannot be printed (%i)',
+    async (status) => {
+      expect(await setup(json({}, status)).client.kude('d1')).toEqual({ kind: 'not_available' });
+    },
+  );
+
+  it('answers not_signed while the document is not signed yet (409)', async () => {
+    expect(await setup(json({}, 409)).client.kude('d1')).toEqual({ kind: 'not_signed' });
   });
 
   it('answers not_found for an XML that does not exist', async () => {
@@ -154,5 +179,22 @@ describe('documents client: xml and kude', () => {
 
     expect(client.xmlUrl('a/b')).toBe('/api/portal/documents/a%2Fb/xml');
     expect(client.kudeUrl('d1')).toBe('/api/portal/documents/d1/kude');
+  });
+});
+
+describe('documents client: default session recovery', () => {
+  const me = vi.mocked(authClient.me);
+  const client = (...r: Response[]) => createDocumentsClient({ fetchImpl: setup(...r).fetchImpl });
+
+  it('sends the user to the login only when the auth session is really gone', async () => {
+    me.mockResolvedValueOnce({ kind: 'unauthenticated' });
+
+    expect(await client(json({}, 401)).list({})).toEqual({ kind: 'unauthenticated' });
+  });
+
+  it('keeps the session and reports a retryable error when the check is transient', async () => {
+    me.mockResolvedValueOnce({ kind: 'unavailable' });
+
+    expect(await client(json({}, 401)).list({})).toEqual({ kind: 'unavailable' });
   });
 });

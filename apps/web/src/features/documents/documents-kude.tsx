@@ -1,7 +1,7 @@
 'use client';
 
 import { Download } from 'lucide-react';
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 import type { DocumentDetail, DocumentsClient } from './documents-client';
 import { useRemote } from './use-remote';
@@ -19,24 +19,33 @@ export function DocumentsKude({
   document: DocumentDetail;
   client: DocumentsClient;
 }) {
-  const load = useCallback(
-    () =>
-      client
-        .kude(document.id)
-        .then((result) =>
-          result.kind === 'ok' ? { ...result, href: URL.createObjectURL(result.pdf) } : result,
-        ),
-    [client, document.id],
-  );
+  // Blob URLs are tracked so a discarded response (unmount, id change) never leaks one: the cleanup revokes
+  // every URL of the previous load and bumps `generation`, so a late response creates none.
+  const generation = useRef(0);
+  const urls = useRef(new Set<string>());
+  const load = useCallback(() => {
+    const started = generation.current;
+    return client.kude(document.id).then((result) => {
+      if (result.kind !== 'ok') return result;
+      if (started !== generation.current) return { kind: 'unavailable' as const };
+      const href = URL.createObjectURL(result.pdf);
+      urls.current.add(href);
+      return { ...result, href };
+    });
+  }, [client, document.id]);
   const { state, retry } = useRemote(load);
   const href = state?.kind === 'ok' ? state.href : undefined;
 
-  useEffect(
-    () => () => {
-      if (href) URL.revokeObjectURL(href);
-    },
-    [href],
-  );
+  useEffect(() => {
+    const created = urls.current;
+    return () => {
+      generation.current += 1;
+      created.forEach((url) => {
+        URL.revokeObjectURL(url);
+      });
+      created.clear();
+    };
+  }, [load]);
 
   if (!state)
     return (
@@ -44,7 +53,10 @@ export function DocumentsKude({
         Cargando KuDE…
       </p>
     );
-  if (state.kind === 'not_available') return <p className={NOTE}>KuDE no disponible todavía</p>;
+  if (state.kind === 'not_signed')
+    return <p className={NOTE}>El KuDE estará disponible cuando el comprobante esté firmado</p>;
+  if (state.kind === 'not_available')
+    return <p className={NOTE}>KuDE no disponible para este comprobante</p>;
   if (state.kind === 'not_found')
     return <p className={NOTE}>El KuDE de este comprobante no existe.</p>;
   if (state.kind !== 'ok')

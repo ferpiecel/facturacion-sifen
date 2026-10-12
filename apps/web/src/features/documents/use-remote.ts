@@ -34,6 +34,8 @@ export function useRemote<T extends { kind: string }>(load: () => Promise<T>) {
   const state = settled?.load === load && settled.attempt === attempt ? settled.result : undefined;
   return {
     state,
+    /** The last answer, kept while a newer request is in flight (so the screen can stay mounted). */
+    previous: settled?.result,
     retry: () => {
       setAttempt((n) => n + 1);
     },

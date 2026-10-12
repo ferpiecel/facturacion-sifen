@@ -18,16 +18,18 @@ export const KIND_OPTIONS: readonly { value: DocumentKind; label: string }[] = [
   { value: 'AFE', label: 'Autofacturas (AFE)' },
 ];
 
-/** Lifecycle states the portal knows; the API takes one `status` value. Unknown ones are never offered. */
+/** The API's lifecycle states (`PORTAL_DOCUMENT_STATUSES`); it takes one `status` value. */
 export const STATUS_OPTIONS: readonly { value: string; label: string }[] = [
-  { value: 'borrador', label: 'Borrador' },
-  { value: 'firmado', label: 'Firmado' },
-  { value: 'en_lote', label: 'En lote' },
-  { value: 'aprobado', label: 'Aprobado SIFEN' },
-  { value: 'aprobado_con_observacion', label: 'Aprobado con observación' },
-  { value: 'rechazado', label: 'Rechazado' },
-  { value: 'cancelado', label: 'Cancelado' },
-  { value: 'inutilizado', label: 'Inutilizado' },
+  { value: 'accepted', label: 'Recibido' },
+  { value: 'signed', label: 'Firmado' },
+  { value: 'queued', label: 'En cola' },
+  { value: 'submitted', label: 'Enviado a SIFEN' },
+  { value: 'approved', label: 'Aprobado SIFEN' },
+  { value: 'approved_with_observations', label: 'Aprobado con observación' },
+  { value: 'rejected', label: 'Rechazado' },
+  { value: 'corrected', label: 'Corregido' },
+  { value: 'number_voided', label: 'Número inutilizado' },
+  { value: 'cancelled', label: 'Cancelado' },
 ];
 
 /** Active filters as removable chips (the date inputs and the search box have their own controls). */

@@ -4,14 +4,16 @@ import { describe, expect, it } from 'vitest';
 import { StatusBadge } from './status-badge';
 
 const CASES = [
-  ['borrador', 'Borrador', 'neutral'],
-  ['firmado', 'Firmado', 'info'],
-  ['en_lote', 'En lote', 'info'],
-  ['aprobado', 'Aprobado SIFEN', 'success'],
-  ['aprobado_con_observacion', 'Aprobado con observación', 'warning'],
-  ['rechazado', 'Rechazado', 'danger'],
-  ['cancelado', 'Cancelado', 'neutral'],
-  ['inutilizado', 'Inutilizado', 'neutral'],
+  ['accepted', 'Recibido', 'neutral'],
+  ['signed', 'Firmado', 'info'],
+  ['queued', 'En cola', 'info'],
+  ['submitted', 'Enviado a SIFEN', 'info'],
+  ['approved', 'Aprobado SIFEN', 'success'],
+  ['approved_with_observations', 'Aprobado con observación', 'warning'],
+  ['rejected', 'Rechazado', 'danger'],
+  ['corrected', 'Corregido', 'neutral'],
+  ['number_voided', 'Número inutilizado', 'neutral'],
+  ['cancelled', 'Cancelado', 'neutral'],
 ] as const;
 
 describe('StatusBadge', () => {

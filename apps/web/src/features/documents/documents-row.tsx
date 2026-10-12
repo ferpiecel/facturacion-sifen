@@ -4,7 +4,7 @@ import { CdcDisplay } from '../../design-system/components/cdc-display';
 import { MoneyPYG } from '../../design-system/components/money-pyg';
 import { StatusBadge } from '../../design-system/components/status-badge';
 import type { DocumentItem, DocumentKind } from './documents-client';
-import { formatIssuedAt } from './format';
+import { formatIssuedAt, kindLabel } from './format';
 
 const KIND_PILL: Partial<Record<DocumentKind, string>> = {
   NCE: 'Nota de Crédito',
@@ -37,12 +37,13 @@ interface DocumentsRowProps {
 }
 
 export function DocumentsRow({ doc, selected, current, onToggle, onOpen }: DocumentsRowProps) {
-  const rejected = doc.status === 'rechazado';
+  const pill = doc.type ? KIND_PILL[doc.type] : undefined;
+  const rejected = doc.status === 'rejected';
   const Icon = doc.receiverRuc ? Building2 : User;
 
   return (
     <li
-      aria-label={`${doc.type} ${doc.number}`}
+      aria-label={`${kindLabel(doc.type)} ${doc.number}`}
       aria-current={current ? 'true' : undefined}
       className={`flex flex-col gap-2.5 p-4 transition-colors ${
         rejected
@@ -56,17 +57,17 @@ export function DocumentsRow({ doc, selected, current, onToggle, onOpen }: Docum
         <div className="flex items-center gap-3">
           <input
             type="checkbox"
-            aria-label={`Seleccionar ${doc.type} ${doc.number}`}
+            aria-label={`Seleccionar ${kindLabel(doc.type)} ${doc.number}`}
             checked={selected}
             onChange={onToggle}
             className="size-4 cursor-pointer rounded accent-primary"
           />
           <div className="flex flex-col">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-headline-md text-headline-md font-bold text-on-surface">{`${doc.type} ${doc.number}`}</span>
-              {KIND_PILL[doc.type] && (
+              <span className="font-headline-md text-headline-md font-bold text-on-surface">{`${kindLabel(doc.type)} ${doc.number}`}</span>
+              {pill && (
                 <span className="rounded-full bg-tertiary-fixed px-2 py-0.5 font-code-sm text-code-sm font-bold text-on-tertiary-fixed">
-                  {KIND_PILL[doc.type]}
+                  {pill}
                 </span>
               )}
               <StatusBadge status={doc.status} />

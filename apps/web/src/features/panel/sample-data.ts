@@ -31,7 +31,7 @@ export const SAMPLE_RECENT_DOCUMENTS: readonly RecentDocument[] = [
     receiverId: 'RUC: 80003214-5',
     cdc: '01800123450001001000481222026092911789423585',
     amount: 12_850_000,
-    status: 'aprobado',
+    status: 'approved',
   },
   {
     type: 'FE',
@@ -40,7 +40,7 @@ export const SAMPLE_RECENT_DOCUMENTS: readonly RecentDocument[] = [
     receiverId: 'RUC: 80021487-1',
     cdc: '01800123450001001000481122026092911789423593',
     amount: 3_420_000,
-    status: 'aprobado',
+    status: 'approved',
   },
   {
     type: 'NC',
@@ -49,7 +49,7 @@ export const SAMPLE_RECENT_DOCUMENTS: readonly RecentDocument[] = [
     receiverId: 'RUC: 80099412-9',
     cdc: '05800123450001001000031922026092911789423604',
     amount: -650_000,
-    status: 'aprobado',
+    status: 'approved',
   },
   {
     type: 'FE',
@@ -58,7 +58,7 @@ export const SAMPLE_RECENT_DOCUMENTS: readonly RecentDocument[] = [
     receiverId: 'CI: 4.120.985',
     cdc: '01800123450001002000100522026092911789423612',
     amount: 780_000,
-    status: 'aprobado',
+    status: 'approved',
   },
   {
     type: 'AF',
@@ -67,6 +67,6 @@ export const SAMPLE_RECENT_DOCUMENTS: readonly RecentDocument[] = [
     receiverId: 'RUC: 80000109-6',
     cdc: '04800123450001001000008422026092911789423629',
     amount: 31_350_000,
-    status: 'aprobado',
+    status: 'approved',
   },
 ];

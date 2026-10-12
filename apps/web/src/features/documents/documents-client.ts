@@ -15,7 +15,8 @@ export type DocumentKind = 'FE' | 'NCE' | 'NDE' | 'AFE';
 export interface DocumentItem {
   id: string;
   cdc: string;
-  type: DocumentKind;
+  /** `null` for a SIFEN type the portal has no code for. */
+  type: DocumentKind | null;
   /** `establishment-point-number`, as printed on the document. */
   number: string;
   /** ISO instant in UTC; shown in America/Asuncion. */
@@ -38,6 +39,7 @@ export interface DocumentEvent {
 }
 
 export interface DocumentDetail extends DocumentItem {
+  /** `test` or `production`. */
   environment: string;
   events: DocumentEvent[];
   rejectionReason: string | null;
@@ -69,7 +71,11 @@ export type DetailResult =
   { kind: 'ok'; document: DocumentDetail } | { kind: 'not_found' } | Failure;
 export type XmlResult = { kind: 'ok'; xml: string } | { kind: 'not_found' } | Failure;
 export type KudeResult =
-  { kind: 'ok'; pdf: Blob } | { kind: 'not_available' } | { kind: 'not_found' } | Failure;
+  | { kind: 'ok'; pdf: Blob }
+  | { kind: 'not_signed' }
+  | { kind: 'not_available' }
+  | { kind: 'not_found' }
+  | Failure;
 
 export interface DocumentsClient {
   list: (query: DocumentsQuery) => Promise<ListResult>;
@@ -84,7 +90,7 @@ export interface DocumentsClient {
 interface Options {
   fetchImpl?: FetchLike;
   baseUrl?: string;
-  /** Recovers an expired session (refresh); `false` means the user must sign in again. */
+  /** Recovers an expired session (refresh); `false` means the user must sign in again, a rejection means transient. */
   ensureSession?: () => Promise<boolean>;
 }
 
@@ -97,7 +103,13 @@ const isDetail = (data: unknown): data is DocumentDetail =>
 export function createDocumentsClient({
   fetchImpl = (url, init) => fetch(url, init),
   baseUrl = '/api/portal/documents',
-  ensureSession = () => authClient.me().then((result) => result.kind === 'ok'),
+  ensureSession = async () => {
+    const result = await authClient.me();
+    if (result.kind === 'ok') return true;
+    // Only a gone session logs out; a transient failure (5xx, 429, network) is a retryable error.
+    if (result.kind === 'unauthenticated') return false;
+    throw new Error('session check unavailable');
+  },
 }: Options = {}): DocumentsClient {
   const get = (url: string) => fetchImpl(url, { method: 'GET', credentials: 'include' });
   const url = (id: string, suffix = '') => `${baseUrl}/${encodeURIComponent(id)}${suffix}`;
@@ -139,7 +151,15 @@ export function createDocumentsClient({
       return run<ListResult>(`${baseUrl}?${params.toString()}`, async (response) => {
         if (!response.ok) return { kind: 'unavailable' };
         const data: unknown = await response.json();
-        return isPage(data) ? { kind: 'ok', page: data } : { kind: 'unavailable' };
+        return isPage(data)
+          ? {
+              kind: 'ok',
+              page: {
+                ...data,
+                total: Number.isFinite(data.total) ? data.total : data.items.length,
+              },
+            }
+          : { kind: 'unavailable' };
       });
     },
 
@@ -160,7 +180,9 @@ export function createDocumentsClient({
 
     kude: (id) =>
       run<KudeResult>(url(id, '/kude'), async (response) => {
-        if (response.status === 501) return { kind: 'not_available' };
+        // 409: not signed yet; 422 (or a legacy 501): the generator cannot print this document.
+        if (response.status === 409) return { kind: 'not_signed' };
+        if (response.status === 422 || response.status === 501) return { kind: 'not_available' };
         if (response.status === 404) return { kind: 'not_found' };
         if (!response.ok) return { kind: 'unavailable' };
         return {

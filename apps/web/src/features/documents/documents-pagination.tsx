@@ -5,6 +5,7 @@ interface DocumentsPaginationProps {
   total: number;
   page: number;
   pageSize: number;
+  busy?: boolean;
   onPage: (page: number) => void;
   onPageSize: (pageSize: number) => void;
 }
@@ -20,6 +21,7 @@ export function DocumentsPagination({
   total,
   page,
   pageSize,
+  busy = false,
   onPage,
   onPageSize,
 }: DocumentsPaginationProps) {
@@ -31,6 +33,7 @@ export function DocumentsPagination({
   return (
     <nav
       aria-label="Paginación"
+      aria-busy={busy}
       className="flex flex-col items-center justify-between gap-3 bg-surface-container-low p-4 font-body-sm text-body-sm text-on-surface-variant sm:flex-row"
     >
       <div className="flex items-center gap-2">

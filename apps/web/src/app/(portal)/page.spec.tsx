@@ -24,7 +24,7 @@ describe('HomePage (Panel de Control)', () => {
   it('shows the non-dismissible test-environment legend and no environment toggle', () => {
     render(<HomePage />);
 
-    expect(screen.getByRole('status')).toHaveTextContent('Ambiente de prueba');
+    expect(screen.getByText(/Ambiente de prueba/).closest('[role="status"]')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /producción|pruebas/i })).not.toBeInTheDocument();
   });
 
@@ -67,13 +67,6 @@ describe('HomePage (Panel de Control)', () => {
     expect(hero).toHaveClass('to-primary-container');
     expect(hero?.className).not.toContain('surface-container-high');
     expect(screen.getByText(/Tu asistente inteligente/)).toHaveClass('text-white');
-  });
-
-  it('formats the billing KPI as Guaraníes', () => {
-    render(<HomePage />);
-
-    const kpis = screen.getByRole('region', { name: 'Indicadores' });
-    expect(within(kpis).getByText('₲ 48.750.000')).toBeInTheDocument();
   });
 
   it('gives the documents table an accessible name, column scopes and a focusable scroll area', () => {

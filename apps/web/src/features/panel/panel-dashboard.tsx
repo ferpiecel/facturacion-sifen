@@ -1,34 +1,18 @@
-import {
-  ArrowRight,
-  BadgeCheck,
-  Banknote,
-  Building,
-  EllipsisVertical,
-  ListFilter,
-  ReceiptText,
-  RefreshCw,
-  TrendingUp,
-  Zap,
-} from 'lucide-react';
+import { ArrowRight, EllipsisVertical, ListFilter } from 'lucide-react';
 import Link from 'next/link';
 
 import { BRAND } from '../../design-system/brand';
 import { CdcDisplay } from '../../design-system/components/cdc-display';
 import { MoneyPYG } from '../../design-system/components/money-pyg';
 import { StatusBadge } from '../../design-system/components/status-badge';
-import { SAMPLE_BILLING_TODAY, SAMPLE_RECENT_DOCUMENTS, type DocumentType } from './sample-data';
+import { PanelKpis } from './panel-kpis';
+import { SAMPLE_RECENT_DOCUMENTS, type DocumentType } from './sample-data';
 
 const TYPE_CHIP: Record<DocumentType, string> = {
   FE: 'bg-primary-fixed text-primary',
   NC: 'bg-secondary-fixed text-on-secondary-fixed',
   AF: 'bg-surface-container text-on-surface',
 };
-
-const CARD =
-  'relative flex flex-col justify-between overflow-hidden rounded-xl bg-surface-container-lowest p-space-md shadow-sm transition-shadow hover:shadow-md';
-const KPI_LABEL = 'font-label-sm text-label-sm tracking-wide text-outline uppercase';
-const KPI_VALUE = 'font-headline-xl text-headline-xl tracking-tight text-on-surface';
-const KPI_ICON = 'flex size-10 items-center justify-center rounded-xl bg-surface-container-low';
 
 function Hero() {
   return (
@@ -62,99 +46,6 @@ function Hero() {
         </p>
       </div>
     </div>
-  );
-}
-
-function KpiCards() {
-  return (
-    <section
-      aria-label="Indicadores"
-      className="grid grid-cols-1 gap-space-md sm:grid-cols-2 xl:grid-cols-4"
-    >
-      <div className={CARD}>
-        <div className="flex items-start justify-between">
-          <div className="flex flex-col gap-1">
-            <span className={KPI_LABEL}>Facturación Hoy</span>
-            <MoneyPYG amount={SAMPLE_BILLING_TODAY} className={KPI_VALUE} />
-          </div>
-          <div className={`${KPI_ICON} text-primary`}>
-            <Banknote aria-hidden="true" className="size-[22px]" />
-          </div>
-        </div>
-        <div className="mt-space-md flex items-center justify-between pt-space-xs">
-          <span className="inline-flex items-center gap-1 rounded-full bg-secondary-fixed/40 px-2 py-0.5 font-label-sm text-label-sm font-semibold text-secondary">
-            <TrendingUp aria-hidden="true" className="size-3.5" />
-            +14% vs ayer
-          </span>
-        </div>
-      </div>
-      <div className={CARD}>
-        <div className="flex items-start justify-between">
-          <div className="flex flex-col gap-1">
-            <span className={KPI_LABEL}>Comprobantes Emitidos</span>
-            <span className={KPI_VALUE}>1.428</span>
-          </div>
-          <div className={`${KPI_ICON} text-secondary`}>
-            <ReceiptText aria-hidden="true" className="size-[22px]" />
-          </div>
-        </div>
-        <div className="mt-space-md flex items-center justify-between pt-space-xs">
-          <span className="inline-flex items-center gap-1 rounded-full bg-secondary-fixed/40 px-2 py-0.5 font-label-sm text-label-sm font-semibold text-secondary">
-            <BadgeCheck aria-hidden="true" className="size-3.5" />
-            99.2% aprobado DNIT
-          </span>
-        </div>
-      </div>
-      <div className={CARD}>
-        <div className="flex items-start justify-between">
-          <div className="flex flex-col gap-1">
-            <span className={KPI_LABEL}>En Cola Sincronizada</span>
-            <div className="flex items-center gap-2">
-              <span className={KPI_VALUE}>4</span>
-              <span className="font-body-sm text-body-sm text-outline">comprobantes</span>
-            </div>
-          </div>
-          <div className={`${KPI_ICON} text-tertiary`}>
-            <RefreshCw aria-hidden="true" className="size-[22px] motion-safe:animate-spin" />
-          </div>
-        </div>
-        <div className="mt-space-md flex items-center justify-between pt-space-xs">
-          <span className="inline-flex items-center gap-1 rounded-full bg-tertiary-fixed px-2 py-0.5 font-label-sm text-label-sm font-semibold text-tertiary">
-            <Zap aria-hidden="true" className="size-3.5" />
-            185ms latencia prom.
-          </span>
-          <span className="font-code-sm text-code-sm text-outline">Lote #9824</span>
-        </div>
-      </div>
-      <div className={CARD}>
-        <div className="flex items-start justify-between">
-          <div className="flex flex-col gap-1">
-            <span className={KPI_LABEL}>Comercios Activos</span>
-            <div className="flex items-baseline gap-2">
-              <span className={KPI_VALUE}>3</span>
-              <span className="font-body-sm text-body-sm text-outline">empresas vinculadas</span>
-            </div>
-          </div>
-          <div className={`${KPI_ICON} text-primary-container`}>
-            <Building aria-hidden="true" className="size-[22px]" />
-          </div>
-        </div>
-        <div className="mt-space-md flex items-center justify-between pt-space-xs">
-          <div className="flex items-center gap-1.5">
-            <span aria-hidden="true" className="size-2 rounded-full bg-secondary" />
-            <span className="font-label-sm text-label-sm font-semibold text-on-surface">
-              8 sucursales activas
-            </span>
-          </div>
-          <Link
-            href="/comercios"
-            className="font-label-sm text-label-sm font-semibold text-primary hover:underline"
-          >
-            Administrar
-          </Link>
-        </div>
-      </div>
-    </section>
   );
 }
 
@@ -300,7 +191,7 @@ export function PanelDashboard() {
   return (
     <div className="mx-auto flex w-full max-w-[1520px] flex-col gap-space-lg px-space-lg py-space-lg">
       <Hero />
-      <KpiCards />
+      <PanelKpis />
       <RecentDocuments />
     </div>
   );

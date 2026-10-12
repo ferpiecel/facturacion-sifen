@@ -19,8 +19,6 @@ export interface RecentDocument {
 
 export const SAMPLE_TENANT = 'Acme Paraguay S.A.';
 
-export const SAMPLE_BILLING_TODAY = 48_750_000;
-
 export const SAMPLE_USER = { name: 'Carlos Bogado', role: 'Operador Certificado' } as const;
 
 export const SAMPLE_RECENT_DOCUMENTS: readonly RecentDocument[] = [

@@ -1,8 +1,18 @@
-import { eq } from 'drizzle-orm';
-import { createNodePostgresDatabase, tenants, type Database } from '@sifen/db';
+import { and, eq } from 'drizzle-orm';
+import {
+  createNodePostgresDatabase,
+  documents,
+  tenantDocumentSequences,
+  tenantEstablishments,
+  tenantExpeditionPoints,
+  tenants,
+  tenantTimbrados,
+  type Database,
+} from '@sifen/db';
 import { parseOpsArgs } from './args.js';
 import { createPartner, createTenant, issueApiKey } from './commands.js';
 import { assertSafeDevSeedEnv } from './dev-seed-guard.js';
+import { buildSignedDemoInvoice, generateDemoCertificate } from './dev-seed-invoice.js';
 import { DEMO_ISSUER } from './dev-seed-issuer.js';
 import { formatOpsError, runOpsCommand } from './ops.js';
 
@@ -13,10 +23,45 @@ export const DEMO = {
   password: 'Tigre-Azul-Mesa-2026',
 } as const;
 
+const DAY_MS = 24 * 3600 * 1000;
+
+/** Documents of the demo: the status each one ends in and what SIFEN answered, if anything. */
+const DEMO_DOCUMENTS = [
+  {
+    status: 'approved',
+    receiver: 'Cliente Aprobado SA',
+    messages: [{ code: '0260', message: 'Aprobado' }],
+  },
+  {
+    status: 'approved',
+    receiver: 'Comercial Guaraní SRL',
+    messages: [{ code: '0260', message: 'Aprobado' }],
+  },
+  {
+    status: 'rejected',
+    receiver: 'Rechazos y Cía',
+    messages: [
+      { code: '1002', message: 'Timbrado inexistente o vencido (mensaje de demostración)' },
+    ],
+  },
+  {
+    status: 'approved_with_observations',
+    receiver: 'Observaciones SA',
+    messages: [{ code: '0261', message: 'Aprobado con observación (mensaje de demostración)' }],
+  },
+  { status: 'queued', receiver: 'En Cola SA', messages: null },
+  {
+    status: 'cancelled',
+    receiver: 'Cancelados SRL',
+    messages: [{ code: '0260', message: 'Aprobado' }],
+  },
+] as const;
+
 export interface DevSeedResult {
   tenantId: string;
   /** The API key, printed once; null when the demo tenant already existed (the key is not recoverable). */
   apiKey: string | null;
+  documentsCreated: number;
 }
 
 async function run(db: Database, argv: string[]): Promise<void> {
@@ -104,7 +149,84 @@ async function createDemoTenant(db: Database): Promise<{ tenantId: string; apiKe
   return { tenantId, apiKey: key.formattedKey };
 }
 
-/** Idempotent: the demo tenant is found by name, so a second run changes nothing. */
+/**
+ * Inserts the demo documents already settled in their final status. They do not travel the
+ * emission path (POST /v1/documents + worker) because the simulator gateway only answers
+ * "approved" unless scripted in-process, so rejected, observed and cancelled could not be
+ * produced that way. The XML is real (TIPS builder, XMLDSig, QR), so XML and KuDE downloads work.
+ * Re-running is a no-op: `(tenant, environment, cdc)` is unique and the CDC is deterministic.
+ */
+async function seedDemoDocuments(db: Database, tenantId: string): Promise<number> {
+  const [est] = await db
+    .select({ id: tenantEstablishments.id })
+    .from(tenantEstablishments)
+    .where(
+      and(
+        eq(tenantEstablishments.tenantId, tenantId),
+        eq(tenantEstablishments.code, DEMO_ISSUER.establishment),
+      ),
+    );
+  const [point] = await db
+    .select({ id: tenantExpeditionPoints.id })
+    .from(tenantExpeditionPoints)
+    .where(eq(tenantExpeditionPoints.tenantId, tenantId));
+  const [timbrado] = await db
+    .select({ id: tenantTimbrados.id })
+    .from(tenantTimbrados)
+    .where(eq(tenantTimbrados.tenantId, tenantId));
+  const certificate = generateDemoCertificate();
+  let created = 0;
+  for (const [index, demo] of DEMO_DOCUMENTS.entries()) {
+    const number = index + 1;
+    const { xml, cdc } = await buildSignedDemoInvoice(certificate, number, demo.receiver);
+    const at = new Date(Date.now() - (DEMO_DOCUMENTS.length - index) * DAY_MS);
+    const rows = await db
+      .insert(documents)
+      .values({
+        tenantId,
+        environment: 'test',
+        cdc,
+        documentType: 1,
+        timbradoId: timbrado.id,
+        establishmentId: est.id,
+        expeditionPointId: point.id,
+        number,
+        securityCode: cdc.slice(34, 43),
+        status: demo.status,
+        receiverRuc: '80000002-7',
+        issuedAt: at,
+        totalAmount: '11000',
+        payload: { receiver: { name: demo.receiver } },
+        signedXml: xml,
+        signedAt: at,
+        sifenMessages: demo.messages,
+        // Backoff far in the future keeps the queued document queued even with a worker running.
+        nextTransmissionAt: demo.status === 'queued' ? new Date(Date.now() + 365 * DAY_MS) : null,
+        createdAt: at,
+        updatedAt: new Date(at.getTime() + 60_000),
+      })
+      .onConflictDoNothing()
+      .returning({ id: documents.id });
+    created += rows.length;
+  }
+  // Numbering must continue after the seeded numbers, or the first real emission would collide.
+  await db
+    .insert(tenantDocumentSequences)
+    .values({
+      tenantId,
+      environment: 'test',
+      timbradoId: timbrado.id,
+      establishmentId: est.id,
+      expeditionPointId: point.id,
+      documentType: 1,
+      lastNumber: DEMO_DOCUMENTS.length,
+    })
+    // The guard trigger only lets an UPDATE advance last_number by 1, so an existing row stays as is.
+    .onConflictDoNothing();
+  return created;
+}
+
+/** Idempotent: the demo tenant is found by name, so a second run only completes missing documents. */
 export async function runDevSeed(db: Database): Promise<DevSeedResult> {
   const existing = (
     await db.select({ id: tenants.id }).from(tenants).where(eq(tenants.name, DEMO.tenant))
@@ -114,6 +236,7 @@ export async function runDevSeed(db: Database): Promise<DevSeedResult> {
   return {
     tenantId,
     apiKey: created?.apiKey ?? null,
+    documentsCreated: await seedDemoDocuments(db, tenantId),
   };
 }
 
@@ -125,6 +248,7 @@ export function formatDevSeedResult(result: DevSeedResult): string {
     result.apiKey
       ? `api key: ${result.apiKey}   (printed once)`
       : 'api key: already issued by a previous run (not recoverable; use `ops apikey:create`)',
+    `documents created: ${String(result.documentsCreated)}`,
   ].join('\n');
 }
 

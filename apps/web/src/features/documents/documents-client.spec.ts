@@ -159,9 +159,12 @@ describe('documents client: xml and kude', () => {
     expect(fetchImpl.mock.calls[0]?.[0]).toBe('/api/portal/documents/d1/kude');
   });
 
-  it.each([422, 501])('answers not_available when the KuDE cannot be printed (%i)', async (status) => {
-    expect(await setup(json({}, status)).client.kude('d1')).toEqual({ kind: 'not_available' });
-  });
+  it.each([422, 501])(
+    'answers not_available when the KuDE cannot be printed (%i)',
+    async (status) => {
+      expect(await setup(json({}, status)).client.kude('d1')).toEqual({ kind: 'not_available' });
+    },
+  );
 
   it('answers not_signed while the document is not signed yet (409)', async () => {
     expect(await setup(json({}, 409)).client.kude('d1')).toEqual({ kind: 'not_signed' });

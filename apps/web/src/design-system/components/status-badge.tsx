@@ -3,14 +3,16 @@ import { cva } from 'class-variance-authority';
 import { cn } from '../lib/cn';
 
 export type DocumentStatus =
-  | 'borrador'
-  | 'firmado'
-  | 'en_lote'
-  | 'aprobado'
-  | 'aprobado_con_observacion'
-  | 'rechazado'
-  | 'cancelado'
-  | 'inutilizado';
+  | 'accepted'
+  | 'signed'
+  | 'queued'
+  | 'submitted'
+  | 'approved'
+  | 'approved_with_observations'
+  | 'rejected'
+  | 'corrected'
+  | 'number_voided'
+  | 'cancelled';
 
 type Tone = 'neutral' | 'info' | 'success' | 'warning' | 'danger';
 
@@ -43,14 +45,16 @@ const dot = cva('size-1.5 shrink-0 rounded-full', {
 });
 
 const STATUSES: Record<DocumentStatus, { label: string; tone: Tone }> = {
-  borrador: { label: 'Borrador', tone: 'neutral' },
-  firmado: { label: 'Firmado', tone: 'info' },
-  en_lote: { label: 'En lote', tone: 'info' },
-  aprobado: { label: 'Aprobado SIFEN', tone: 'success' },
-  aprobado_con_observacion: { label: 'Aprobado con observación', tone: 'warning' },
-  rechazado: { label: 'Rechazado', tone: 'danger' },
-  cancelado: { label: 'Cancelado', tone: 'neutral' },
-  inutilizado: { label: 'Inutilizado', tone: 'neutral' },
+  accepted: { label: 'Recibido', tone: 'neutral' },
+  signed: { label: 'Firmado', tone: 'info' },
+  queued: { label: 'En cola', tone: 'info' },
+  submitted: { label: 'Enviado a SIFEN', tone: 'info' },
+  approved: { label: 'Aprobado SIFEN', tone: 'success' },
+  approved_with_observations: { label: 'Aprobado con observación', tone: 'warning' },
+  rejected: { label: 'Rechazado', tone: 'danger' },
+  corrected: { label: 'Corregido', tone: 'neutral' },
+  number_voided: { label: 'Número inutilizado', tone: 'neutral' },
+  cancelled: { label: 'Cancelado', tone: 'neutral' },
 };
 
 const UNKNOWN = { label: 'Desconocido', tone: 'neutral' } as const;

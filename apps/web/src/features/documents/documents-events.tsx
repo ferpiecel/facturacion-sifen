@@ -8,8 +8,9 @@ const HOURS_TO_CANCEL = { FE: 48, NCE: 168, NDE: 168, AFE: 168 } as const;
 
 /** Events tab: timeline plus the cancellation action with its SIFEN window (HU-E8-02). */
 export function DocumentsEvents({ document }: { document: DocumentDetail }) {
-  const hours = HOURS_TO_CANCEL[document.type];
-  const deadline = formatIssuedAt(document.issuedAt, hours * 3600);
+  // No cancellation window is known for a SIFEN type the portal has no code for.
+  const hours = document.type ? HOURS_TO_CANCEL[document.type] : undefined;
+  const deadline = hours === undefined ? '' : formatIssuedAt(document.issuedAt, hours * 3600);
 
   return (
     <div className="flex flex-col gap-4 p-4">
@@ -44,23 +45,25 @@ export function DocumentsEvents({ document }: { document: DocumentDetail }) {
           </li>
         ))}
       </ol>
-      <div className="mt-2 flex flex-col gap-2 rounded-lg bg-surface-container-low p-3">
-        <span className="font-label-sm text-label-sm font-bold text-on-surface uppercase">
-          Gestión de Eventos SIFEN
-        </span>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            className="flex items-center gap-1 rounded bg-error-container px-3 py-1.5 font-label-sm text-label-sm font-semibold text-on-error-container hover:opacity-90"
-          >
-            <Ban aria-hidden="true" className="size-4" />
-            Cancelar en SIFEN
-          </button>
-          <span className="font-label-sm text-label-sm text-on-surface-variant">
-            {`Plazo de cancelación: hasta ${deadline} (${String(hours)} h desde la aprobación)`}
+      {hours !== undefined && (
+        <div className="mt-2 flex flex-col gap-2 rounded-lg bg-surface-container-low p-3">
+          <span className="font-label-sm text-label-sm font-bold text-on-surface uppercase">
+            Gestión de Eventos SIFEN
           </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="flex items-center gap-1 rounded bg-error-container px-3 py-1.5 font-label-sm text-label-sm font-semibold text-on-error-container hover:opacity-90"
+            >
+              <Ban aria-hidden="true" className="size-4" />
+              Cancelar en SIFEN
+            </button>
+            <span className="font-label-sm text-label-sm text-on-surface-variant">
+              {`Plazo de cancelación: hasta ${deadline} (${String(hours)} h desde la aprobación)`}
+            </span>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

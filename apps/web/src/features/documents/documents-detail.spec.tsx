@@ -43,7 +43,10 @@ describe('DocumentsDetail', () => {
   it('names the production environment', async () => {
     const client = fakeDocumentsClient({
       detail: vi.fn(() =>
-        Promise.resolve({ kind: 'ok' as const, document: { ...DETAIL, environment: 'production' } }),
+        Promise.resolve({
+          kind: 'ok' as const,
+          document: { ...DETAIL, environment: 'production' },
+        }),
       ),
     });
     render(<DocumentsDetail documentId={ITEM.id} client={client} />);

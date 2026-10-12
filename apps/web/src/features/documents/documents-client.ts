@@ -15,7 +15,8 @@ export type DocumentKind = 'FE' | 'NCE' | 'NDE' | 'AFE';
 export interface DocumentItem {
   id: string;
   cdc: string;
-  type: DocumentKind;
+  /** `null` for a SIFEN type the portal has no code for. */
+  type: DocumentKind | null;
   /** `establishment-point-number`, as printed on the document. */
   number: string;
   /** ISO instant in UTC; shown in America/Asuncion. */
@@ -38,6 +39,7 @@ export interface DocumentEvent {
 }
 
 export interface DocumentDetail extends DocumentItem {
+  /** `test` or `production`. */
   environment: string;
   events: DocumentEvent[];
   rejectionReason: string | null;
@@ -69,7 +71,11 @@ export type DetailResult =
   { kind: 'ok'; document: DocumentDetail } | { kind: 'not_found' } | Failure;
 export type XmlResult = { kind: 'ok'; xml: string } | { kind: 'not_found' } | Failure;
 export type KudeResult =
-  { kind: 'ok'; pdf: Blob } | { kind: 'not_available' } | { kind: 'not_found' } | Failure;
+  | { kind: 'ok'; pdf: Blob }
+  | { kind: 'not_signed' }
+  | { kind: 'not_available' }
+  | { kind: 'not_found' }
+  | Failure;
 
 export interface DocumentsClient {
   list: (query: DocumentsQuery) => Promise<ListResult>;
@@ -174,7 +180,9 @@ export function createDocumentsClient({
 
     kude: (id) =>
       run<KudeResult>(url(id, '/kude'), async (response) => {
-        if (response.status === 501) return { kind: 'not_available' };
+        // 409: not signed yet; 422 (or a legacy 501): the generator cannot print this document.
+        if (response.status === 409) return { kind: 'not_signed' };
+        if (response.status === 422 || response.status === 501) return { kind: 'not_available' };
         if (response.status === 404) return { kind: 'not_found' };
         if (!response.ok) return { kind: 'unavailable' };
         return {

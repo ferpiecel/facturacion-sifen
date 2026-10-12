@@ -53,7 +53,10 @@ export function DocumentsKude({
         Cargando KuDE…
       </p>
     );
-  if (state.kind === 'not_available') return <p className={NOTE}>KuDE no disponible todavía</p>;
+  if (state.kind === 'not_signed')
+    return <p className={NOTE}>El KuDE estará disponible cuando el comprobante esté firmado</p>;
+  if (state.kind === 'not_available')
+    return <p className={NOTE}>KuDE no disponible para este comprobante</p>;
   if (state.kind === 'not_found')
     return <p className={NOTE}>El KuDE de este comprobante no existe.</p>;
   if (state.kind !== 'ok')

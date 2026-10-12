@@ -76,8 +76,12 @@ describe('DocumentsDetail tabs', () => {
       }),
     );
 
-    expect(within(panel()).queryByRole('button', { name: 'Cancelar en SIFEN' })).not.toBeInTheDocument();
-    expect(within(panel()).getByRole('heading', { level: 2 })).toHaveTextContent('Documento 001-001-0004520');
+    expect(
+      within(panel()).queryByRole('button', { name: 'Cancelar en SIFEN' }),
+    ).not.toBeInTheDocument();
+    expect(within(panel()).getByRole('heading', { level: 2 })).toHaveTextContent(
+      'Documento 001-001-0004520',
+    );
   });
 
   it('keeps the cancellation window of the document type', async () => {
@@ -106,7 +110,9 @@ describe('DocumentsDetail tabs', () => {
     render(<DocumentsDetail documentId={ITEM.id} client={fakeDocumentsClient({ kude })} />);
 
     expect(
-      await within(panel()).findByText('El KuDE estará disponible cuando el comprobante esté firmado'),
+      await within(panel()).findByText(
+        'El KuDE estará disponible cuando el comprobante esté firmado',
+      ),
     ).toBeInTheDocument();
   });
 

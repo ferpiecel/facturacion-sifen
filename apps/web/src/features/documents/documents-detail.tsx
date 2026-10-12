@@ -7,11 +7,12 @@ import { documentsClient, type DetailResult, type DocumentsClient } from './docu
 import { DocumentsEvents } from './documents-events';
 import { DocumentsKude } from './documents-kude';
 import { DocumentsXml } from './documents-xml';
+import { kindLabel } from './format';
 import { useRemote } from './use-remote';
 
 const TABS = ['Vista Gráfica KuDE', 'XML Firmado <rDE>', 'Eventos & Trazabilidad'] as const;
 
-const ENVIRONMENTS: Record<string, string> = { test: 'Pruebas', prod: 'Producción' };
+const ENVIRONMENTS: Record<string, string> = { test: 'Pruebas', production: 'Producción' };
 const MESSAGE = 'p-6 text-center font-body-sm text-body-sm text-on-surface-variant';
 
 /** Inspector of the Stitch explorer (right column): signature metadata and KuDE preview. */
@@ -50,7 +51,7 @@ export function DocumentsDetail({
         <>
           <div className="flex flex-col gap-2 bg-surface-container p-4">
             <div className="flex items-center justify-between gap-2">
-              <h2 className="font-headline-md text-headline-md font-bold text-on-surface">{`${doc.type} ${doc.number}`}</h2>
+              <h2 className="font-headline-md text-headline-md font-bold text-on-surface">{`${kindLabel(doc.type)} ${doc.number}`}</h2>
               <StatusBadge status={doc.status} />
             </div>
             <div className="font-code-sm text-code-sm text-on-surface-variant">

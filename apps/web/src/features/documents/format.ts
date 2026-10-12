@@ -21,6 +21,9 @@ function asuncion(iso: string, offsetSeconds = 0) {
   };
 }
 
+/** Portal code of a document type; a neutral label for a SIFEN type without one. */
+export const kindLabel = (type: string | null): string => type ?? 'Documento';
+
 /** `02/10/2026 15:42` in Paraguay time. */
 export function formatIssuedAt(iso: string, offsetSeconds = 0): string {
   const { date, hm } = asuncion(iso, offsetSeconds);

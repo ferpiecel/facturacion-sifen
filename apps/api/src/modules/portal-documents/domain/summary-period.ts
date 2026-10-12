@@ -43,8 +43,12 @@ function day(raw: Record<string, unknown>, name: string): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== 'string')
     throw new InvalidSummaryQueryError(`${name} must be a single value`);
+  // Date.parse yields NaN for month 00/13 or day 00/32, and a rolled-over date (02-30) does not round-trip.
+  const time = Date.parse(`${value}T00:00:00Z`);
   const valid =
-    /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(value).toISOString().slice(0, 10) === value;
+    /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    !Number.isNaN(time) &&
+    new Date(time).toISOString().slice(0, 10) === value;
   if (!valid) throw new InvalidSummaryQueryError(`${name} must be a YYYY-MM-DD date`);
   return value;
 }

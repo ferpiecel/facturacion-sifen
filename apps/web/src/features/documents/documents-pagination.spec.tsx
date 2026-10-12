@@ -1,8 +1,9 @@
 import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DocumentsBrowser } from './documents-browser';
-import { fakeDocumentsClient } from './documents-fixtures';
+import { fakeDocumentsClient, PAGE } from './documents-fixtures';
 import { DocumentsHelpBanner } from './documents-help-banner';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
@@ -31,6 +32,35 @@ describe('DocumentsBrowser (pagination)', () => {
     );
     expect(within(nav).getByRole('button', { name: 'Anterior' })).toBeDisabled();
     expect(within(nav).getByRole('button', { name: 'Siguiente' })).toBeDisabled();
+  });
+});
+
+describe('DocumentsBrowser (paging)', () => {
+  const many = (page: number) => ({
+    kind: 'ok' as const,
+    page: { items: PAGE.items, page, pageSize: 20, total: 45 },
+  });
+
+  it('asks for the next and previous pages and resets to page 1 when the size changes', async () => {
+    const user = userEvent.setup();
+    const list = vi.fn((query: { page?: number }) => Promise.resolve(many(query.page ?? 1)));
+    render(<DocumentsBrowser client={fakeDocumentsClient({ list })} />);
+
+    const nav = await screen.findByRole('navigation', { name: 'Paginación' });
+    expect(within(nav).getByRole('button', { name: 'Página 3' })).toBeInTheDocument();
+    await user.click(within(nav).getByRole('button', { name: 'Siguiente' }));
+    await within(await screen.findByRole('navigation', { name: 'Paginación' })).findByRole(
+      'button',
+      {
+        name: 'Página 2',
+        current: 'page',
+      },
+    );
+    expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, pageSize: 20 }));
+    await user.click(screen.getByRole('button', { name: 'Anterior' }));
+    expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1 }));
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Filas por página' }), '50');
+    expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1, pageSize: 50 }));
   });
 });
 

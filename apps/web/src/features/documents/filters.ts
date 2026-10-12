@@ -1,23 +1,15 @@
-import type { DocumentStatus } from '../../design-system/components/status-badge';
-import { ESTABLISHMENTS, type DocumentKind, type DocumentRow } from './sample-documents';
-
-export type StatusGroup = 'approved' | 'queue' | 'rejected' | 'void';
+import type { DocumentKind } from './documents-client';
 
 export interface Filters {
-  query: string;
-  kind: DocumentKind | '';
-  status: StatusGroup | '';
-  establishment: string;
-  onlyIssues: boolean;
+  q: string;
+  type: DocumentKind | '';
+  status: string;
+  /** `YYYY-MM-DD`, inclusive. */
+  from: string;
+  to: string;
 }
 
-export const NO_FILTERS: Filters = {
-  query: '',
-  kind: '',
-  status: '',
-  establishment: '',
-  onlyIssues: false,
-};
+export const NO_FILTERS: Filters = { q: '', type: '', status: '', from: '', to: '' };
 
 export const KIND_OPTIONS: readonly { value: DocumentKind; label: string }[] = [
   { value: 'FE', label: 'Facturas Electrónicas (FE)' },
@@ -26,57 +18,27 @@ export const KIND_OPTIONS: readonly { value: DocumentKind; label: string }[] = [
   { value: 'AFE', label: 'Autofacturas (AFE)' },
 ];
 
-export const STATUS_OPTIONS: readonly {
-  value: StatusGroup;
-  label: string;
-  statuses: readonly DocumentStatus[];
-}[] = [
-  { value: 'approved', label: 'Aprobado', statuses: ['aprobado', 'aprobado_con_observacion'] },
-  { value: 'queue', label: 'En cola / Procesando', statuses: ['borrador', 'firmado', 'en_lote'] },
-  { value: 'rejected', label: 'Rechazado', statuses: ['rechazado'] },
-  { value: 'void', label: 'Inutilizado / Anulado', statuses: ['cancelado', 'inutilizado'] },
+/** Lifecycle states the portal knows; the API takes one `status` value. Unknown ones are never offered. */
+export const STATUS_OPTIONS: readonly { value: string; label: string }[] = [
+  { value: 'borrador', label: 'Borrador' },
+  { value: 'firmado', label: 'Firmado' },
+  { value: 'en_lote', label: 'En lote' },
+  { value: 'aprobado', label: 'Aprobado SIFEN' },
+  { value: 'aprobado_con_observacion', label: 'Aprobado con observación' },
+  { value: 'rechazado', label: 'Rechazado' },
+  { value: 'cancelado', label: 'Cancelado' },
+  { value: 'inutilizado', label: 'Inutilizado' },
 ];
 
-const digits = (text: string) => text.replace(/\D/g, '');
-
-function matchesQuery(doc: DocumentRow, query: string): boolean {
-  const needle = query.trim().toLowerCase();
-  if (needle === '') return true;
-  const numeric = digits(needle);
-  return (
-    doc.receiver.name.toLowerCase().includes(needle) ||
-    doc.number.includes(needle) ||
-    (numeric !== '' && (doc.cdc.includes(numeric) || digits(doc.receiver.id).includes(numeric)))
-  );
-}
-
-export function filterDocuments(rows: readonly DocumentRow[], filters: Filters): DocumentRow[] {
-  const statuses = STATUS_OPTIONS.find(({ value }) => value === filters.status)?.statuses;
-  return rows.filter(
-    (doc) =>
-      matchesQuery(doc, filters.query) &&
-      (filters.kind === '' || doc.kind === filters.kind) &&
-      (statuses === undefined || statuses.includes(doc.status)) &&
-      (filters.establishment === '' || doc.establishment === filters.establishment) &&
-      (!filters.onlyIssues ||
-        doc.status === 'rechazado' ||
-        doc.status === 'aprobado_con_observacion'),
-  );
-}
-
-/** Active filters as removable chips (the search text has its own input). */
+/** Active filters as removable chips (the date inputs and the search box have their own controls). */
 export function appliedFilters(filters: Filters): { key: keyof Filters; label: string }[] {
   const chips: { key: keyof Filters; label: string }[] = [];
-  const kind = KIND_OPTIONS.find(({ value }) => value === filters.kind);
-  if (kind) chips.push({ key: 'kind', label: kind.label });
+  const kind = KIND_OPTIONS.find(({ value }) => value === filters.type);
+  if (kind) chips.push({ key: 'type', label: kind.label });
   const status = STATUS_OPTIONS.find(({ value }) => value === filters.status);
   if (status) chips.push({ key: 'status', label: status.label });
-  if (filters.establishment) {
-    chips.push({
-      key: 'establishment',
-      label: `${ESTABLISHMENTS[filters.establishment] ?? ''} (${filters.establishment})`,
-    });
-  }
-  if (filters.onlyIssues) chips.push({ key: 'onlyIssues', label: 'Con observaciones o rechazos' });
+  if (filters.from) chips.push({ key: 'from', label: `Desde ${filters.from}` });
+  if (filters.to) chips.push({ key: 'to', label: `Hasta ${filters.to}` });
+  if (filters.q) chips.push({ key: 'q', label: `Búsqueda: ${filters.q}` });
   return chips;
 }

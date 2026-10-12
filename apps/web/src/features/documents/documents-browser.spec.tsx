@@ -27,7 +27,15 @@ describe('DocumentsBrowser (document list)', () => {
     expect(screen.getByRole('status', { name: 'Cargando comprobantes' })).toBeInTheDocument();
     const list = await screen.findByRole('list', { name: 'Comprobantes' });
     expect(within(list).getAllByRole('listitem')).toHaveLength(PAGE.items.length);
-    expect(client.list).toHaveBeenCalledWith({ type: '' });
+    expect(client.list).toHaveBeenCalledWith({
+      type: '',
+      q: '',
+      status: '',
+      from: '',
+      to: '',
+      page: 1,
+      pageSize: 20,
+    });
   });
 
   it('opens the detail of the first document and switches it from a row', async () => {

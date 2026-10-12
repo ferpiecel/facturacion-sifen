@@ -4,14 +4,16 @@ import { RefreshCw } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 
 import {
+  DEFAULT_PAGE_SIZE,
   documentsClient,
   type DocumentKind,
   type DocumentsClient,
-  type DocumentsQuery,
 } from './documents-client';
 import { DocumentsDetail } from './documents-detail';
+import { DocumentsFilters } from './documents-filters';
 import { DocumentsPagination } from './documents-pagination';
 import { DocumentsRow } from './documents-row';
+import { NO_FILTERS, type Filters } from './filters';
 import { useRemote } from './use-remote';
 
 const TABS: readonly { type: DocumentKind | ''; label: string }[] = [
@@ -26,16 +28,23 @@ const BULK =
 
 /** Type tabs, bulk bar and master list of the Stitch explorer (left column). */
 export function DocumentsBrowser({ client = documentsClient }: { client?: DocumentsClient }) {
-  const [type, setType] = useState<DocumentKind | ''>('');
+  const [filters, setFilters] = useState<Filters>(NO_FILTERS);
+  const [paging, setPaging] = useState({ page: 1, pageSize: DEFAULT_PAGE_SIZE });
   const [activeId, setActiveId] = useState<string>();
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
-  const query = useMemo<DocumentsQuery>(() => ({ type }), [type]);
+  const query = useMemo(() => ({ ...filters, ...paging }), [filters, paging]);
   const load = useCallback(() => client.list(query), [client, query]);
   const { state, retry } = useRemote(load);
   const page = state?.kind === 'ok' ? state.page : undefined;
   const rows = page?.items ?? [];
   const current = rows.find(({ id }) => id === activeId) ?? rows.at(0);
   const chosen = rows.filter(({ id }) => selected.has(id)).length;
+
+  /** A new search always starts from the first page. */
+  const applyFilters = (patch: Partial<Filters>) => {
+    setFilters({ ...filters, ...patch });
+    setPaging({ ...paging, page: 1 });
+  };
 
   const toggle = (id: string) => {
     const next = new Set(selected);
@@ -45,18 +54,19 @@ export function DocumentsBrowser({ client = documentsClient }: { client?: Docume
 
   return (
     <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-12">
+      <DocumentsFilters filters={filters} onChange={applyFilters} />
       <div className="overflow-hidden rounded-xl bg-surface-container-lowest shadow-sm xl:col-span-7">
         <div className="flex items-center justify-between bg-surface-container-low px-4 pt-3">
           <div role="group" aria-label="Tipo de comprobante" className="flex items-center gap-1">
             {TABS.map(({ type: tabType, label }) => {
-              const active = tabType === type;
+              const active = tabType === filters.type;
               return (
                 <button
                   key={label}
                   type="button"
                   aria-pressed={active}
                   onClick={() => {
-                    setType(tabType);
+                    applyFilters({ type: tabType });
                   }}
                   className={`flex items-center gap-1.5 px-3.5 py-2 font-body-sm text-body-sm transition-colors ${
                     active
@@ -150,6 +160,12 @@ export function DocumentsBrowser({ client = documentsClient }: { client?: Docume
             total={page.total}
             page={page.page}
             pageSize={page.pageSize}
+            onPage={(next) => {
+              setPaging({ ...paging, page: next });
+            }}
+            onPageSize={(pageSize) => {
+              setPaging({ page: 1, pageSize });
+            }}
           />
         )}
       </div>

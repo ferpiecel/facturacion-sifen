@@ -34,8 +34,11 @@ export function DocumentsBrowser({ client = documentsClient }: { client?: Docume
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const query = useMemo(() => ({ ...filters, ...paging }), [filters, paging]);
   const load = useCallback(() => client.list(query), [client, query]);
-  const { state, retry } = useRemote(load);
-  const page = state?.kind === 'ok' ? state.page : undefined;
+  const { state, previous, retry } = useRemote(load);
+  // While a reload is in flight the previous page stays on screen (focus is kept) and is marked busy.
+  const shown = state ?? previous;
+  const page = shown?.kind === 'ok' ? shown.page : undefined;
+  const loading = state === undefined;
   const rows = page?.items ?? [];
   const current = rows.find(({ id }) => id === activeId) ?? rows.at(0);
   const chosen = rows.filter(({ id }) => selected.has(id)).length;
@@ -110,7 +113,12 @@ export function DocumentsBrowser({ client = documentsClient }: { client?: Docume
             </button>
           </div>
         </div>
-        {!state ? (
+        {loading && shown && (
+          <p role="status" className="px-4 py-2 font-label-sm text-label-sm text-outline">
+            Actualizando…
+          </p>
+        )}
+        {!shown ? (
           <p
             role="status"
             aria-label="Cargando comprobantes"
@@ -137,7 +145,11 @@ export function DocumentsBrowser({ client = documentsClient }: { client?: Docume
             No hay comprobantes para los filtros aplicados.
           </p>
         ) : (
-          <ul aria-label="Comprobantes" className="divide-y divide-surface-container-low">
+          <ul
+            aria-label="Comprobantes"
+            aria-busy={loading}
+            className="divide-y divide-surface-container-low"
+          >
             {rows.map((doc) => (
               <DocumentsRow
                 key={doc.id}
@@ -160,6 +172,7 @@ export function DocumentsBrowser({ client = documentsClient }: { client?: Docume
             total={page.total}
             page={page.page}
             pageSize={page.pageSize}
+            busy={loading}
             onPage={(next) => {
               setPaging({ ...paging, page: next });
             }}

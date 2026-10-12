@@ -84,7 +84,7 @@ export interface DocumentsClient {
 interface Options {
   fetchImpl?: FetchLike;
   baseUrl?: string;
-  /** Recovers an expired session (refresh); `false` means the user must sign in again. */
+  /** Recovers an expired session (refresh); `false` means the user must sign in again, a rejection means transient. */
   ensureSession?: () => Promise<boolean>;
 }
 
@@ -97,7 +97,13 @@ const isDetail = (data: unknown): data is DocumentDetail =>
 export function createDocumentsClient({
   fetchImpl = (url, init) => fetch(url, init),
   baseUrl = '/api/portal/documents',
-  ensureSession = () => authClient.me().then((result) => result.kind === 'ok'),
+  ensureSession = async () => {
+    const result = await authClient.me();
+    if (result.kind === 'ok') return true;
+    // Only a gone session logs out; a transient failure (5xx, 429, network) is a retryable error.
+    if (result.kind === 'unauthenticated') return false;
+    throw new Error('session check unavailable');
+  },
 }: Options = {}): DocumentsClient {
   const get = (url: string) => fetchImpl(url, { method: 'GET', credentials: 'include' });
   const url = (id: string, suffix = '') => `${baseUrl}/${encodeURIComponent(id)}${suffix}`;
@@ -139,7 +145,15 @@ export function createDocumentsClient({
       return run<ListResult>(`${baseUrl}?${params.toString()}`, async (response) => {
         if (!response.ok) return { kind: 'unavailable' };
         const data: unknown = await response.json();
-        return isPage(data) ? { kind: 'ok', page: data } : { kind: 'unavailable' };
+        return isPage(data)
+          ? {
+              kind: 'ok',
+              page: {
+                ...data,
+                total: Number.isFinite(data.total) ? data.total : data.items.length,
+              },
+            }
+          : { kind: 'unavailable' };
       });
     },
 

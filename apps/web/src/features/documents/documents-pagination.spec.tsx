@@ -48,7 +48,8 @@ describe('DocumentsBrowser (paging)', () => {
 
     const nav = await screen.findByRole('navigation', { name: 'Paginación' });
     expect(within(nav).getByRole('button', { name: 'Página 3' })).toBeInTheDocument();
-    await user.click(within(nav).getByRole('button', { name: 'Siguiente' }));
+    const next = within(nav).getByRole('button', { name: 'Siguiente' });
+    await user.click(next);
     await within(await screen.findByRole('navigation', { name: 'Paginación' })).findByRole(
       'button',
       {
@@ -57,6 +58,8 @@ describe('DocumentsBrowser (paging)', () => {
       },
     );
     expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2, pageSize: 20 }));
+    expect(next).toBeInTheDocument();
+    expect(next).toHaveFocus();
     await user.click(screen.getByRole('button', { name: 'Anterior' }));
     expect(list).toHaveBeenLastCalledWith(expect.objectContaining({ page: 1 }));
     await user.selectOptions(screen.getByRole('combobox', { name: 'Filas por página' }), '50');

@@ -6,9 +6,14 @@ import { DocumentsDetail } from './documents-detail';
 import { DETAIL, fakeDocumentsClient, ITEM } from './documents-fixtures';
 
 const panel = () => screen.getByRole('region', { name: 'Detalle del comprobante' });
+let create = vi.fn(() => 'blob:kude');
+let revoke = vi.fn();
+
 beforeEach(() => {
-  URL.createObjectURL = vi.fn(() => 'blob:kude');
-  URL.revokeObjectURL = vi.fn();
+  create = vi.fn(() => 'blob:kude');
+  revoke = vi.fn();
+  URL.createObjectURL = create;
+  URL.revokeObjectURL = revoke;
 });
 
 async function open(name: RegExp, client = fakeDocumentsClient()) {
@@ -103,6 +108,34 @@ describe('DocumentsDetail tabs', () => {
     expect(
       await within(panel()).findByRole('link', { name: 'Descargar KuDE (PDF)' }),
     ).toBeInTheDocument();
+  });
+
+  it('revokes the blob URL on unmount and when the document changes', async () => {
+    const client = fakeDocumentsClient();
+    const { unmount, rerender } = render(<DocumentsDetail documentId="a" client={client} />);
+    await within(panel()).findByRole('link', { name: 'Descargar KuDE (PDF)' });
+
+    rerender(<DocumentsDetail documentId="b" client={client} />);
+    await within(panel()).findByRole('link', { name: 'Descargar KuDE (PDF)' });
+    expect(revoke).toHaveBeenCalledWith('blob:kude');
+    unmount();
+    expect(revoke.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('does not create a blob URL for a response that arrives after unmount', async () => {
+    let resolve: (value: { kind: 'ok'; pdf: Blob }) => void = () => undefined;
+    const kude = vi.fn(() => new Promise<{ kind: 'ok'; pdf: Blob }>((r) => (resolve = r)));
+    const { unmount } = render(
+      <DocumentsDetail documentId="a" client={fakeDocumentsClient({ kude })} />,
+    );
+    await vi.waitFor(() => {
+      expect(kude).toHaveBeenCalled();
+    });
+
+    unmount();
+    resolve({ kind: 'ok', pdf: new Blob(['%PDF']) });
+    await Promise.resolve();
+    expect(create).not.toHaveBeenCalled();
   });
 
   it('shows the signed XML with a download link and copies it', async () => {

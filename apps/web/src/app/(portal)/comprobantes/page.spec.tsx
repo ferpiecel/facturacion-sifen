@@ -52,6 +52,13 @@ describe('ComprobantesPage (explorer header and KPIs)', () => {
     expect(within(kpis).queryByText(/BullMQ|Redis/i)).not.toBeInTheDocument();
   });
 
+  it('labels the indicators as example data until the summary endpoint exists (HU-E12-03)', () => {
+    render(<ComprobantesPage />);
+
+    const kpis = screen.getByRole('region', { name: 'Indicadores del período' });
+    expect(within(kpis).getByText(/Datos de ejemplo.*HU-E12-03/)).toBeInTheDocument();
+  });
+
   it('exposes the approval ratio as a progress bar and links to the rejection reasons', () => {
     render(<ComprobantesPage />);
 

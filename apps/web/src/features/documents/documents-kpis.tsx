@@ -18,13 +18,19 @@ const ICON = 'flex size-8 items-center justify-center rounded-lg';
 const integer = (value: number) => String(value).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 const percent = (value: number) => `${value.toFixed(1)}%`;
 
-/** Period indicators (HU-E12-03): issued, approved, queued and rejected. */
+/**
+ * Period indicators (HU-E12-03): issued, approved, queued and rejected. MOCK DATA (debt): they need a summary
+ * endpoint that does not exist yet, so they read `SAMPLE_PERIOD_SUMMARY` and the section says so.
+ */
 export function DocumentsKpis() {
   return (
     <section
       aria-label="Indicadores del período"
       className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4"
     >
+      <p className="font-label-sm text-label-sm text-outline sm:col-span-2 lg:col-span-4">
+        Datos de ejemplo: los indicadores reales llegan con HU-E12-03.
+      </p>
       <div className={CARD}>
         <div className="flex items-center justify-between">
           <span className={LABEL}>Emitidos (últimos 30 días)</span>

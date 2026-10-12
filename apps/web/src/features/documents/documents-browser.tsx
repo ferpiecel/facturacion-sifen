@@ -1,60 +1,41 @@
 'use client';
 
 import { RefreshCw } from 'lucide-react';
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
-import type { DocumentItem } from './documents-client';
+import {
+  documentsClient,
+  type DocumentKind,
+  type DocumentsClient,
+  type DocumentsQuery,
+} from './documents-client';
 import { DocumentsDetail } from './documents-detail';
-import { DocumentsFilters } from './documents-filters';
 import { DocumentsPagination } from './documents-pagination';
 import { DocumentsRow } from './documents-row';
-import { filterDocuments, NO_FILTERS, type Filters } from './filters';
-import {
-  SAMPLE_DOCUMENTS_PAGE as PAGE,
-  type DocumentKind,
-  type DocumentRow,
-} from './sample-documents';
+import { useRemote } from './use-remote';
 
-/** Bridge while the list still reads the mock page; removed when the list loads from the API. */
-const toItem = (doc: DocumentRow): DocumentItem => ({
-  id: doc.documentId,
-  cdc: doc.cdc,
-  type: doc.kind,
-  number: doc.number,
-  issuedAt: doc.issuedAt,
-  receiverName: doc.receiver.name,
-  receiverRuc: doc.receiver.kind === 'ruc' ? doc.receiver.id : null,
-  total: String(doc.total),
-  currency: 'PYG',
-  status: doc.status,
-  hasObservations: doc.status === 'aprobado_con_observacion',
-});
-
-const TABS: readonly {
-  kind: DocumentKind | '';
-  label: string;
-  counted: readonly DocumentKind[];
-}[] = [
-  { kind: '', label: 'Todos', counted: ['FE', 'NCE', 'NDE', 'AFE'] },
-  { kind: 'FE', label: 'Facturas', counted: ['FE'] },
-  { kind: 'NCE', label: 'Notas de Crédito', counted: ['NCE'] },
-  { kind: 'AFE', label: 'Autofacturas', counted: ['AFE'] },
+const TABS: readonly { type: DocumentKind | ''; label: string }[] = [
+  { type: '', label: 'Todos' },
+  { type: 'FE', label: 'Facturas' },
+  { type: 'NCE', label: 'Notas de Crédito' },
+  { type: 'AFE', label: 'Autofacturas' },
 ];
 
-const integer = (value: number) => String(value).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 const BULK =
   'rounded bg-surface-container-lowest px-2 py-1 font-label-sm text-label-sm font-semibold text-on-surface hover:bg-surface-container-high disabled:opacity-40';
 
 /** Type tabs, bulk bar and master list of the Stitch explorer (left column). */
-export function DocumentsBrowser() {
-  const [filters, setFilters] = useState<Filters>(NO_FILTERS);
-  const [activeId, setActiveId] = useState(PAGE.items[0]?.documentId);
+export function DocumentsBrowser({ client = documentsClient }: { client?: DocumentsClient }) {
+  const [type, setType] = useState<DocumentKind | ''>('');
+  const [activeId, setActiveId] = useState<string>();
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
-  const rows = filterDocuments(PAGE.items, filters);
-  const current =
-    rows.find((doc) => doc.documentId === activeId && doc.status === 'aprobado') ??
-    rows.find((doc) => doc.status === 'aprobado');
-  const chosen = rows.filter(({ documentId }) => selected.has(documentId)).length;
+  const query = useMemo<DocumentsQuery>(() => ({ type }), [type]);
+  const load = useCallback(() => client.list(query), [client, query]);
+  const { state, retry } = useRemote(load);
+  const page = state?.kind === 'ok' ? state.page : undefined;
+  const rows = page?.items ?? [];
+  const current = rows.find(({ id }) => id === activeId) ?? rows.at(0);
+  const chosen = rows.filter(({ id }) => selected.has(id)).length;
 
   const toggle = (id: string) => {
     const next = new Set(selected);
@@ -64,24 +45,18 @@ export function DocumentsBrowser() {
 
   return (
     <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-12">
-      <DocumentsFilters
-        filters={filters}
-        onChange={(patch) => {
-          setFilters({ ...filters, ...patch });
-        }}
-      />
       <div className="overflow-hidden rounded-xl bg-surface-container-lowest shadow-sm xl:col-span-7">
         <div className="flex items-center justify-between bg-surface-container-low px-4 pt-3">
           <div role="group" aria-label="Tipo de comprobante" className="flex items-center gap-1">
-            {TABS.map(({ kind: tabKind, label, counted }) => {
-              const active = tabKind === filters.kind;
+            {TABS.map(({ type: tabType, label }) => {
+              const active = tabType === type;
               return (
                 <button
                   key={label}
                   type="button"
                   aria-pressed={active}
                   onClick={() => {
-                    setFilters({ ...filters, kind: tabKind });
+                    setType(tabType);
                   }}
                   className={`flex items-center gap-1.5 px-3.5 py-2 font-body-sm text-body-sm transition-colors ${
                     active
@@ -90,15 +65,6 @@ export function DocumentsBrowser() {
                   }`}
                 >
                   <span>{label}</span>
-                  <span
-                    className={`rounded-full px-1.5 font-code-sm text-code-sm ${
-                      active
-                        ? 'bg-primary/10 text-primary'
-                        : 'bg-surface-container-high text-on-surface-variant'
-                    }`}
-                  >
-                    {integer(counted.reduce((sum, k) => sum + PAGE.countsByKind[k], 0))}
-                  </span>
                 </button>
               );
             })}
@@ -106,6 +72,7 @@ export function DocumentsBrowser() {
           <button
             type="button"
             aria-label="Actualizar datos"
+            onClick={retry}
             className="mb-1 rounded p-1 text-outline transition-colors hover:bg-surface-container-high hover:text-on-surface"
           >
             <RefreshCw aria-hidden="true" className="size-[18px]" />
@@ -118,9 +85,7 @@ export function DocumentsBrowser() {
               aria-label="Seleccionar todos los comprobantes"
               checked={rows.length > 0 && chosen === rows.length}
               onChange={() => {
-                setSelected(
-                  chosen === rows.length ? new Set() : new Set(rows.map((r) => r.documentId)),
-                );
+                setSelected(chosen === rows.length ? new Set() : new Set(rows.map(({ id }) => id)));
               }}
               className="size-4 rounded accent-primary"
             />
@@ -135,7 +100,29 @@ export function DocumentsBrowser() {
             </button>
           </div>
         </div>
-        {rows.length === 0 ? (
+        {!state ? (
+          <p
+            role="status"
+            aria-label="Cargando comprobantes"
+            className="p-6 text-center font-body-sm text-body-sm text-on-surface-variant"
+          >
+            Cargando comprobantes…
+          </p>
+        ) : !page ? (
+          <p
+            role="alert"
+            className="p-6 text-center font-body-sm text-body-sm text-on-surface-variant"
+          >
+            No pudimos cargar los comprobantes.{' '}
+            <button
+              type="button"
+              onClick={retry}
+              className="font-semibold text-primary hover:underline"
+            >
+              Reintentar
+            </button>
+          </p>
+        ) : rows.length === 0 ? (
           <p className="p-6 text-center font-body-sm text-body-sm text-on-surface-variant">
             No hay comprobantes para los filtros aplicados.
           </p>
@@ -143,29 +130,31 @@ export function DocumentsBrowser() {
           <ul aria-label="Comprobantes" className="divide-y divide-surface-container-low">
             {rows.map((doc) => (
               <DocumentsRow
-                key={doc.documentId}
-                doc={toItem(doc)}
-                selected={selected.has(doc.documentId)}
+                key={doc.id}
+                doc={doc}
+                selected={selected.has(doc.id)}
                 current={doc === current}
                 onOpen={() => {
-                  setActiveId(doc.documentId);
+                  setActiveId(doc.id);
                 }}
                 onToggle={() => {
-                  toggle(doc.documentId);
+                  toggle(doc.id);
                 }}
               />
             ))}
           </ul>
         )}
-        <DocumentsPagination
-          shown={rows.length}
-          total={rows.length === PAGE.items.length ? PAGE.total : rows.length}
-          page={PAGE.page}
-          pageSize={PAGE.pageSize}
-        />
+        {page && (
+          <DocumentsPagination
+            shown={rows.length}
+            total={page.total}
+            page={page.page}
+            pageSize={page.pageSize}
+          />
+        )}
       </div>
       <div className="xl:col-span-5">
-        <DocumentsDetail documentId={current?.documentId} />
+        <DocumentsDetail documentId={current?.id} client={client} />
       </div>
     </div>
   );

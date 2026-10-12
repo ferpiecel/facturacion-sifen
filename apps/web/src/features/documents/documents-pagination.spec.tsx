@@ -1,38 +1,36 @@
 import { render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DocumentsBrowser } from './documents-browser';
+import { fakeDocumentsClient } from './documents-fixtures';
 import { DocumentsHelpBanner } from './documents-help-banner';
 
-describe('DocumentsBrowser (pagination)', () => {
-  it('states the visible range against the period total and the page size', () => {
-    render(<DocumentsBrowser />);
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
 
-    const nav = screen.getByRole('navigation', { name: 'Paginación' });
-    expect(within(nav).getByText('Mostrando 1 - 5 de 1.428 comprobantes')).toBeInTheDocument();
-    expect(within(nav).getByRole('combobox', { name: 'Filas por página' })).toHaveValue('5');
+beforeEach(() => {
+  URL.createObjectURL = vi.fn(() => 'blob:kude');
+  URL.revokeObjectURL = vi.fn();
+});
+
+describe('DocumentsBrowser (pagination)', () => {
+  it('states the visible range against the total and the page size', async () => {
+    render(<DocumentsBrowser client={fakeDocumentsClient()} />);
+
+    const nav = await screen.findByRole('navigation', { name: 'Paginación' });
+    expect(within(nav).getByText('Mostrando 1 - 3 de 3 comprobantes')).toBeInTheDocument();
+    expect(within(nav).getByRole('combobox', { name: 'Filas por página' })).toHaveValue('20');
   });
 
-  it('marks page 1 as current, disables Anterior and links to the last page', () => {
-    render(<DocumentsBrowser />);
+  it('marks page 1 as current and disables both arrows when everything fits', async () => {
+    render(<DocumentsBrowser client={fakeDocumentsClient()} />);
 
-    const nav = screen.getByRole('navigation', { name: 'Paginación' });
+    const nav = await screen.findByRole('navigation', { name: 'Paginación' });
     expect(within(nav).getByRole('button', { name: 'Página 1' })).toHaveAttribute(
       'aria-current',
       'page',
     );
-    expect(within(nav).getByRole('button', { name: 'Página 286' })).toBeInTheDocument();
     expect(within(nav).getByRole('button', { name: 'Anterior' })).toBeDisabled();
-    expect(within(nav).getByRole('button', { name: 'Siguiente' })).toBeEnabled();
-  });
-
-  it('counts the filtered rows instead of the period total', async () => {
-    const user = userEvent.setup();
-    render(<DocumentsBrowser />);
-
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Estado' }), 'rejected');
-    expect(screen.getByText('Mostrando 1 - 1 de 1 comprobantes')).toBeInTheDocument();
+    expect(within(nav).getByRole('button', { name: 'Siguiente' })).toBeDisabled();
   });
 });
 

@@ -8,7 +8,7 @@ interface DocumentsPaginationProps {
 }
 
 const integer = (value: number) => String(value).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-const PAGE_SIZES = [5, 10, 25, 50];
+const PAGE_SIZES = [10, 20, 50];
 const ARROW =
   'flex size-8 items-center justify-center rounded-lg bg-surface-container-lowest text-on-surface shadow-sm disabled:opacity-40';
 

@@ -16,10 +16,22 @@ export interface PortalDocumentRow {
   status: string;
 }
 
+/** The list row plus what only the detail shows. */
+export interface PortalDocumentDetailRow extends PortalDocumentRow {
+  environment: 'test' | 'production';
+  createdAt: Date;
+  signedAt: Date | null;
+  updatedAt: Date;
+  /** The stored `sifen_messages` JSON, not yet validated. */
+  sifenMessages: unknown;
+}
+
 /** Tenant-scoped reads inside the tenant's RLS transaction; another tenant's data is never visible. */
 export interface PortalDocumentSource {
   list(
     tenantId: string,
     filter: DocumentListFilter,
   ): Promise<{ rows: PortalDocumentRow[]; total: number }>;
+  /** `null` when the id is not a document of the tenant. */
+  findById(tenantId: string, id: string): Promise<PortalDocumentDetailRow | null>;
 }

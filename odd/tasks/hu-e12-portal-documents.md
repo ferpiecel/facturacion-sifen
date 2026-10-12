@@ -23,8 +23,8 @@ in the active tenant's RLS transaction; the client never sends a tenant id. All 
 
 - [x] T1 (inline) RED: unit spec for the list use case and e2e spec for `GET /portal/documents`. — PR 1
 - [x] T2 (inline) GREEN: port, use case, SQL adapter, controller, module. — PR 1
-- [ ] T3 (inline) RED: e2e for detail, XML and KuDE. — PR 2
-- [ ] T4 (inline) GREEN: detail/XML/KuDE use cases and routes. — PR 2
+- [x] T3 (inline) RED: e2e for detail, XML and KuDE. — PR 2
+- [x] T4 (inline) GREEN: detail/XML/KuDE use cases and routes. — PR 2
 
 Route: inline for both (each PR is under 400 lines and the files are small and already understood).
 

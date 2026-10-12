@@ -62,6 +62,19 @@ const onEstablishment = and(
   eq(tenantEstablishments.id, documents.establishmentId),
 );
 
+const rowFields = {
+  id: documents.id,
+  cdc: documents.cdc,
+  documentType: documents.documentType,
+  number,
+  issuedAt: documents.issuedAt,
+  receiverName,
+  receiverRuc: documents.receiverRuc,
+  totalAmount: documents.totalAmount,
+  currency: documents.currency,
+  status: documents.status,
+};
+
 /** Reads inside `withTenantTransaction`; the explicit tenant filter backs up RLS. */
 export class SqlPortalDocumentSource implements PortalDocumentSource {
   constructor(private readonly db: Database) {}
@@ -70,18 +83,7 @@ export class SqlPortalDocumentSource implements PortalDocumentSource {
     return withTenantTransaction(this.db, tenantId, async (tx) => {
       const where = conditions(tenantId, filter);
       const rows: PortalDocumentRow[] = await tx
-        .select({
-          id: documents.id,
-          cdc: documents.cdc,
-          documentType: documents.documentType,
-          number,
-          issuedAt: documents.issuedAt,
-          receiverName,
-          receiverRuc: documents.receiverRuc,
-          totalAmount: documents.totalAmount,
-          currency: documents.currency,
-          status: documents.status,
-        })
+        .select(rowFields)
         .from(documents)
         .innerJoin(tenants, onTenant)
         .innerJoin(tenantExpeditionPoints, onPoint)
@@ -98,6 +100,27 @@ export class SqlPortalDocumentSource implements PortalDocumentSource {
         .innerJoin(tenantEstablishments, onEstablishment)
         .where(where);
       return { rows, total };
+    });
+  }
+
+  findById(tenantId: string, id: string) {
+    return withTenantTransaction(this.db, tenantId, async (tx) => {
+      const rows = await tx
+        .select({
+          ...rowFields,
+          environment: documents.environment,
+          createdAt: documents.createdAt,
+          signedAt: documents.signedAt,
+          updatedAt: documents.updatedAt,
+          sifenMessages: documents.sifenMessages,
+        })
+        .from(documents)
+        .innerJoin(tenants, onTenant)
+        .innerJoin(tenantExpeditionPoints, onPoint)
+        .innerJoin(tenantEstablishments, onEstablishment)
+        .where(and(eq(documents.tenantId, tenantId), eq(documents.id, id)))
+        .limit(1);
+      return rows.at(0) ?? null;
     });
   }
 }

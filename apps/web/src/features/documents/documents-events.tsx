@@ -1,63 +1,46 @@
 import { Ban } from 'lucide-react';
 
-import { formatClock, formatIssuedAt } from './format';
-import type { DocumentRow } from './sample-documents';
+import { StatusBadge } from '../../design-system/components/status-badge';
+import type { DocumentDetail } from './documents-client';
+import { formatIssuedAt } from './format';
 
 const HOURS_TO_CANCEL = { FE: 48, NCE: 168, NDE: 168, AFE: 168 } as const;
 
-/** Lifecycle derived from the document; the API will return the real events. */
-function lifecycle(doc: DocumentRow) {
-  const events = [
-    {
-      title: 'Comprobante generado y firmado',
-      at: 1,
-      detail: 'Firma XMLDSig RSA-SHA256 generada con el certificado del emisor.',
-      dot: 'bg-secondary',
-    },
-    {
-      title: 'Aprobado por SIFEN',
-      at: 3,
-      detail: `Código 0260: autorización del DE satisfactoria.${
-        doc.latencyMs === undefined ? '' : ` Latencia de conexión: ${String(doc.latencyMs)} ms.`
-      }`,
-      dot: 'bg-secondary',
-    },
-  ];
-  if (doc.detail?.notifiedTo) {
-    events.push({
-      title: 'KuDE notificado al cliente',
-      at: 10,
-      detail: `KuDE y XML enviados por email a ${doc.detail.notifiedTo}.`,
-      dot: 'bg-primary',
-    });
-  }
-  return events;
-}
-
 /** Events tab: timeline plus the cancellation action with its SIFEN window (HU-E8-02). */
-export function DocumentsEvents({ doc }: { doc: DocumentRow }) {
-  const hours = HOURS_TO_CANCEL[doc.kind];
-  const deadline = formatIssuedAt(doc.issuedAt, hours * 3600);
+export function DocumentsEvents({ document }: { document: DocumentDetail }) {
+  const hours = HOURS_TO_CANCEL[document.type];
+  const deadline = formatIssuedAt(document.issuedAt, hours * 3600);
 
   return (
     <div className="flex flex-col gap-4 p-4">
+      {document.rejectionReason && (
+        <p
+          role="alert"
+          className="rounded-lg bg-error-container p-3 font-body-sm text-body-sm text-on-error-container"
+        >
+          <strong className="block font-label-md text-label-md">Motivo del rechazo</strong>
+          {document.rejectionReason}
+        </p>
+      )}
       <span className="font-label-md text-label-md font-medium text-on-surface-variant">
         Ciclo de Vida del Documento Electrónico
       </span>
       <ol aria-label="Ciclo de vida del comprobante" className="relative flex flex-col gap-4 pl-6">
-        {lifecycle(doc).map(({ title, at, detail, dot }) => (
-          <li key={title} className="relative flex flex-col">
+        {document.events.map(({ status, at, code, message }) => (
+          <li key={`${status}-${at}`} className="relative flex flex-col">
             <span
               aria-hidden="true"
-              className={`absolute top-1 -left-6 size-3 rounded-full ${dot}`}
+              className="absolute top-1 -left-6 size-3 rounded-full bg-secondary"
             />
             <div className="flex items-center justify-between font-label-md text-label-md font-semibold text-on-surface">
-              <span>{title}</span>
-              <span className="font-code-sm text-code-sm text-outline">
-                {formatClock(doc.issuedAt, at)}
-              </span>
+              <StatusBadge status={status} />
+              <span className="font-code-sm text-code-sm text-outline">{formatIssuedAt(at)}</span>
             </div>
-            <p className="mt-0.5 font-body-sm text-body-sm text-on-surface-variant">{detail}</p>
+            {(code ?? message) && (
+              <p className="mt-0.5 font-body-sm text-body-sm text-on-surface-variant">
+                {[code, message].filter(Boolean).join(': ')}
+              </p>
+            )}
           </li>
         ))}
       </ol>

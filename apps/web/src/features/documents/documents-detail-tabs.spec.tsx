@@ -40,17 +40,18 @@ describe('DocumentsDetail tabs', () => {
     await open(/Eventos/);
 
     const events = within(panel()).getByRole('list', { name: 'Ciclo de vida del comprobante' });
-    expect(within(events).getAllByRole('listitem')).toHaveLength(2);
+    expect(within(events).getAllByRole('listitem')).toHaveLength(3);
+    expect(within(events).getByText('Recibido')).toBeInTheDocument();
     expect(within(events).getByText('Firmado')).toBeInTheDocument();
     expect(within(events).getByText('Aprobado SIFEN')).toBeInTheDocument();
-    expect(within(events).getAllByText('02/10/2026 15:42')).toHaveLength(2);
+    expect(within(events).getAllByText('02/10/2026 15:42')).toHaveLength(3);
     expect(within(events).getByText(/0260.*Autorización del DE satisfactoria/)).toBeInTheDocument();
   });
 
   it('shows the rejection reason of a rejected document', async () => {
     const rejected = {
       ...DETAIL,
-      status: 'rechazado',
+      status: 'rejected',
       rejectionReason: '1321: Receptor innominado no permitido',
     };
     await open(
@@ -64,6 +65,19 @@ describe('DocumentsDetail tabs', () => {
     expect(within(panel()).getByRole('alert')).toHaveTextContent(
       '1321: Receptor innominado no permitido',
     );
+  });
+
+  it('hides the cancellation window for a type without a portal code', async () => {
+    const nullType = { ...DETAIL, type: null };
+    await open(
+      /Eventos/,
+      fakeDocumentsClient({
+        detail: vi.fn(() => Promise.resolve({ kind: 'ok' as const, document: nullType })),
+      }),
+    );
+
+    expect(within(panel()).queryByRole('button', { name: 'Cancelar en SIFEN' })).not.toBeInTheDocument();
+    expect(within(panel()).getByRole('heading', { level: 2 })).toHaveTextContent('Documento 001-001-0004520');
   });
 
   it('keeps the cancellation window of the document type', async () => {
@@ -87,11 +101,22 @@ describe('DocumentsDetail tabs', () => {
     expect(client.kude).toHaveBeenCalledWith(ITEM.id);
   });
 
-  it('says the KuDE is not available yet on a 501', async () => {
+  it('explains that the KuDE needs the document to be signed first (409)', async () => {
+    const kude = vi.fn(() => Promise.resolve({ kind: 'not_signed' as const }));
+    render(<DocumentsDetail documentId={ITEM.id} client={fakeDocumentsClient({ kude })} />);
+
+    expect(
+      await within(panel()).findByText('El KuDE estará disponible cuando el comprobante esté firmado'),
+    ).toBeInTheDocument();
+  });
+
+  it('says the KuDE is not available for this document (422/501)', async () => {
     const kude = vi.fn(() => Promise.resolve({ kind: 'not_available' as const }));
     render(<DocumentsDetail documentId={ITEM.id} client={fakeDocumentsClient({ kude })} />);
 
-    expect(await within(panel()).findByText('KuDE no disponible todavía')).toBeInTheDocument();
+    expect(
+      await within(panel()).findByText('KuDE no disponible para este comprobante'),
+    ).toBeInTheDocument();
     expect(within(panel()).queryByRole('link', { name: /KuDE/ })).not.toBeInTheDocument();
   });
 

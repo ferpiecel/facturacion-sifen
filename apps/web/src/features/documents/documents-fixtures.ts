@@ -18,7 +18,7 @@ export const ITEM: DocumentItem = {
   receiverRuc: '80034567-3',
   total: '16100000',
   currency: 'PYG',
-  status: 'aprobado',
+  status: 'approved',
   hasObservations: false,
 };
 
@@ -27,9 +27,10 @@ export const DETAIL: DocumentDetail = {
   environment: 'test',
   rejectionReason: null,
   events: [
-    { status: 'firmado', at: '2026-10-02T18:42:01Z', code: null, message: null },
+    { status: 'accepted', at: '2026-10-02T18:42:00Z', code: null, message: null },
+    { status: 'signed', at: '2026-10-02T18:42:01Z', code: null, message: null },
     {
-      status: 'aprobado',
+      status: 'approved',
       at: '2026-10-02T18:42:04Z',
       code: '0260',
       message: 'Autorización del DE satisfactoria',
@@ -41,7 +42,7 @@ export const REJECTED: DocumentItem = {
   ...ITEM,
   id: 'b1c1f2a0-6a0d-4a57-9f0e-0a1f5d1c2e05',
   number: '001-001-0004518',
-  status: 'rechazado',
+  status: 'rejected',
   receiverName: 'Innominado',
   receiverRuc: null,
   total: '8900000',
@@ -53,6 +54,7 @@ export const NOTE: DocumentItem = {
   type: 'NCE',
   number: '001-001-0000104',
   total: '850000',
+  status: 'approved_with_observations',
   hasObservations: true,
 };
 

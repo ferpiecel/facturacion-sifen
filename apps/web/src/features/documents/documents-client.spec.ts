@@ -15,7 +15,7 @@ const ITEM = {
   receiverRuc: '80034567-3',
   total: '16100000',
   currency: 'PYG',
-  status: 'aprobado',
+  status: 'approved',
   hasObservations: false,
 };
 const PAGE = { items: [ITEM], page: 1, pageSize: 20, total: 1 };
@@ -119,7 +119,7 @@ describe('documents client: detail', () => {
   const DETAIL = {
     ...ITEM,
     environment: 'test',
-    events: [{ status: 'aprobado', at: '2026-10-02T18:42:03Z', code: '0260', message: 'ok' }],
+    events: [{ status: 'approved', at: '2026-10-02T18:42:03Z', code: '0260', message: 'ok' }],
     rejectionReason: null,
   };
 
@@ -159,8 +159,12 @@ describe('documents client: xml and kude', () => {
     expect(fetchImpl.mock.calls[0]?.[0]).toBe('/api/portal/documents/d1/kude');
   });
 
-  it('answers not_available when the KuDE is not implemented yet (501)', async () => {
-    expect(await setup(json({}, 501)).client.kude('d1')).toEqual({ kind: 'not_available' });
+  it.each([422, 501])('answers not_available when the KuDE cannot be printed (%i)', async (status) => {
+    expect(await setup(json({}, status)).client.kude('d1')).toEqual({ kind: 'not_available' });
+  });
+
+  it('answers not_signed while the document is not signed yet (409)', async () => {
+    expect(await setup(json({}, 409)).client.kude('d1')).toEqual({ kind: 'not_signed' });
   });
 
   it('answers not_found for an XML that does not exist', async () => {

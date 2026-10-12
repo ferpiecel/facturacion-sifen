@@ -37,14 +37,16 @@ describe('DocumentsBrowser (filters)', () => {
     ]);
     expect(labels('Estado')).toEqual([
       'Todos los estados',
-      'Borrador',
+      'Recibido',
       'Firmado',
-      'En lote',
+      'En cola',
+      'Enviado a SIFEN',
       'Aprobado SIFEN',
       'Aprobado con observación',
       'Rechazado',
+      'Corregido',
+      'Número inutilizado',
       'Cancelado',
-      'Inutilizado',
     ]);
   });
 
@@ -67,12 +69,12 @@ describe('DocumentsBrowser (filters)', () => {
   it('filters by status and date range and resets everything with "Limpiar filtros"', async () => {
     const { user, lastQuery } = setup();
 
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Estado' }), 'rechazado');
-    expect(lastQuery()).toMatchObject({ status: 'rechazado' });
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Estado' }), 'rejected');
+    expect(lastQuery()).toMatchObject({ status: 'rejected' });
     await user.type(screen.getByLabelText('Desde'), '2026-10-01');
     await user.type(screen.getByLabelText('Hasta'), '2026-10-31');
     expect(lastQuery()).toMatchObject({
-      status: 'rechazado',
+      status: 'rejected',
       from: '2026-10-01',
       to: '2026-10-31',
     });

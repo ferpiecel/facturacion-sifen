@@ -38,36 +38,13 @@ describe('ComprobantesPage (explorer header and KPIs)', () => {
     expect(screen.getByText('Ambiente de pruebas')).toBeInTheDocument();
   });
 
-  it('shows the four period indicators without infrastructure jargon', () => {
+  it('hosts the period indicators with a period selector (data comes from the summary API)', () => {
     render(<ComprobantesPage />);
 
     const kpis = screen.getByRole('region', { name: 'Indicadores del período' });
-    expect(within(kpis).getByText('Emitidos (últimos 30 días)')).toBeInTheDocument();
-    expect(within(kpis).getByText('1.428')).toBeInTheDocument();
-    expect(within(kpis).getByText('+14.2%')).toBeInTheDocument();
-    expect(within(kpis).getByText('1.398')).toBeInTheDocument();
-    expect(within(kpis).getByText('97.9% del total')).toBeInTheDocument();
-    expect(within(kpis).getByText('24')).toBeInTheDocument();
-    expect(within(kpis).getByText('6')).toHaveClass('text-error');
-    expect(within(kpis).queryByText(/BullMQ|Redis/i)).not.toBeInTheDocument();
-  });
-
-  it('labels the indicators as example data until the summary endpoint exists (HU-E12-03)', () => {
-    render(<ComprobantesPage />);
-
-    const kpis = screen.getByRole('region', { name: 'Indicadores del período' });
-    expect(within(kpis).getByText(/Datos de ejemplo.*HU-E12-03/)).toBeInTheDocument();
-  });
-
-  it('exposes the approval ratio as a progress bar and links to the rejection reasons', () => {
-    render(<ComprobantesPage />);
-
-    expect(screen.getByRole('progressbar', { name: 'Aprobados por SIFEN' })).toHaveAttribute(
-      'aria-valuenow',
-      '97.9',
-    );
-    const bar = screen.getByRole('progressbar', { name: 'Aprobados por SIFEN' });
-    expect(bar.firstElementChild).toHaveStyle({ width: '97.9%' });
-    expect(screen.getByRole('button', { name: /Ver motivos \(1321\)/ })).toBeInTheDocument();
+    expect(
+      within(kpis).getByRole('button', { name: '30 días', pressed: true }),
+    ).toBeInTheDocument();
+    expect(within(kpis).queryByText(/Datos de ejemplo/)).not.toBeInTheDocument();
   });
 });

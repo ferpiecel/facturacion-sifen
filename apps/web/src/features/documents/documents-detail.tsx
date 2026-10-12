@@ -4,6 +4,8 @@ import { useCallback, useState, type KeyboardEvent } from 'react';
 
 import { StatusBadge } from '../../design-system/components/status-badge';
 import { documentsClient, type DetailResult, type DocumentsClient } from './documents-client';
+import { DocumentsEvents } from './documents-events';
+import { DocumentsXml } from './documents-xml';
 import { useRemote } from './use-remote';
 
 const TABS = ['Vista Gráfica KuDE', 'XML Firmado <rDE>', 'Eventos & Trazabilidad'] as const;
@@ -83,7 +85,9 @@ export function DocumentsDetail({
             ))}
           </div>
           <div role="tabpanel" id="detail-panel" aria-labelledby={`detail-tab-${String(tab)}`}>
-            <p className={MESSAGE}>Disponible en el siguiente cambio.</p>
+            {tab === 0 && <p className={MESSAGE}>Disponible en el siguiente cambio.</p>}
+            {tab === 1 && <DocumentsXml id={doc.id} client={client} />}
+            {tab === 2 && <DocumentsEvents document={doc} />}
           </div>
         </>
       ) : state === undefined && documentId !== undefined ? (

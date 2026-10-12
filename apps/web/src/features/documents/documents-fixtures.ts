@@ -37,7 +37,31 @@ export const DETAIL: DocumentDetail = {
   ],
 };
 
-export const PAGE: DocumentsPage = { items: [ITEM], page: 1, pageSize: 20, total: 1 };
+export const REJECTED: DocumentItem = {
+  ...ITEM,
+  id: 'b1c1f2a0-6a0d-4a57-9f0e-0a1f5d1c2e05',
+  number: '001-001-0004518',
+  status: 'rechazado',
+  receiverName: 'Innominado',
+  receiverRuc: null,
+  total: '8900000',
+};
+
+export const NOTE: DocumentItem = {
+  ...ITEM,
+  id: 'b1c1f2a0-6a0d-4a57-9f0e-0a1f5d1c2e03',
+  type: 'NCE',
+  number: '001-001-0000104',
+  total: '850000',
+  hasObservations: true,
+};
+
+export const PAGE: DocumentsPage = {
+  items: [ITEM, NOTE, REJECTED],
+  page: 1,
+  pageSize: 20,
+  total: 3,
+};
 
 /** A client whose every call is a spy answering the happy path unless overridden. */
 export function fakeDocumentsClient(overrides: Partial<DocumentsClient> = {}) {

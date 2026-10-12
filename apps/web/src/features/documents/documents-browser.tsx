@@ -3,12 +3,32 @@
 import { RefreshCw } from 'lucide-react';
 import { useState } from 'react';
 
+import type { DocumentItem } from './documents-client';
 import { DocumentsDetail } from './documents-detail';
 import { DocumentsFilters } from './documents-filters';
 import { DocumentsPagination } from './documents-pagination';
 import { DocumentsRow } from './documents-row';
 import { filterDocuments, NO_FILTERS, type Filters } from './filters';
-import { SAMPLE_DOCUMENTS_PAGE as PAGE, type DocumentKind } from './sample-documents';
+import {
+  SAMPLE_DOCUMENTS_PAGE as PAGE,
+  type DocumentKind,
+  type DocumentRow,
+} from './sample-documents';
+
+/** Bridge while the list still reads the mock page; removed when the list loads from the API. */
+const toItem = (doc: DocumentRow): DocumentItem => ({
+  id: doc.documentId,
+  cdc: doc.cdc,
+  type: doc.kind,
+  number: doc.number,
+  issuedAt: doc.issuedAt,
+  receiverName: doc.receiver.name,
+  receiverRuc: doc.receiver.kind === 'ruc' ? doc.receiver.id : null,
+  total: String(doc.total),
+  currency: 'PYG',
+  status: doc.status,
+  hasObservations: doc.status === 'aprobado_con_observacion',
+});
 
 const TABS: readonly {
   kind: DocumentKind | '';
@@ -124,7 +144,7 @@ export function DocumentsBrowser() {
             {rows.map((doc) => (
               <DocumentsRow
                 key={doc.documentId}
-                doc={doc}
+                doc={toItem(doc)}
                 selected={selected.has(doc.documentId)}
                 current={doc === current}
                 onOpen={() => {

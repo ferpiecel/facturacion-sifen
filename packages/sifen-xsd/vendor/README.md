@@ -38,3 +38,8 @@ The workbook is not committed (no explicit license, 460 KB); the script refuses 
 differs from the one above. The "Checksum MD5" PDF on the same page (`80733BB1C4834C9C2ABBBF3C194D1566`,
 file dated 2023) does not match this 2025 workbook, so it cannot be used to verify it.
 
+What is verified where: CI (`verify-vendor`) only checks `geo-catalog.json` against its entry in
+`checksums.json`. That the JSON is what the workbook produces is verified by running
+`node scripts/build-geo-catalog.ts <xlsx>` (without `--update`) against the pinned workbook; CI does not
+have the workbook.
+

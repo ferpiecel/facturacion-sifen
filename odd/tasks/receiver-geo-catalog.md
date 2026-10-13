@@ -111,3 +111,8 @@ touch 2 or more non-trivial files and the generated XML path, so they are expect
 
 - T4 (slice B): `packages/sifen-xsd/scripts/build-geo-catalog.ts` + `geo-catalog.ts` (pure parsing, unit tested; RED first for parsing and `refresh-xsd` keeping datasets). Dataset 18 departments / 272 districts / 6766 cities, department names equal `Departamentos_v141.xsd`. Workbook not committed (no explicit license); pinned by SHA-256. The 2023 MD5 PDF (`80733BB1C4834C9C2ABBBF3C194D1566`) does not cover the 2025 file. Existing fixtures use city 3432 / district 145, which exist in the table.
 - None run yet. Pending: Prevalidador confirmation for B2F and optional address (T8).
+
+## Debt (slice B review, input is SHA-pinned)
+
+- Zip reader: no `maxOutputLength` on inflate, no ZIP64 or CRC check.
+- Sheet parser: phonetic runs (`rPh`) in shared strings and numeric XML entities are not handled.

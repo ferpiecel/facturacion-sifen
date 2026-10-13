@@ -68,6 +68,8 @@ Historias del MVP agrupadas por épica, con la fase en que entran ([roadmap](../
 | HU-E5-05 | Como plataforma, quiero firmar el DE | M | XMLDSig enveloped sobre `<DE>`; RSA-SHA256; KeyInfo según D3 (configurable); `fecha_firma` persistida | §8.7 |
 | HU-E5-06 | Como plataforma, quiero generar el QR | S | Parámetros en hexadecimal donde corresponde; `cHashQR` con el CSC; URL del ambiente; verificable en e-kuatia | §8.8 |
 | HU-E5-07 | Como integrador, quiero consultar un DE por id o CDC | S | `GET /v1/documents/{id}` y `?cdc=`; estado, respuesta SIFEN y URLs | RF-06 |
+| HU-E5-08 (F2) | Como integrador, quiero informar la dirección del receptor según SIFEN y consultar códigos geográficos válidos | L | Dirección opcional salvo B2F (obligatoria, sin `cDepRec`/`cCiuRec`); distrito y ciudad validados contra la Tabla 2.1 vendorizada, descripción igual al código (1325, 1329); `GET /v1/geo/*` filtrado por padre. Plan: [`odd/tasks/receiver-geo-catalog.md`](../../odd/tasks/receiver-geo-catalog.md) | MT v150 D213–D223; NT 003, 010, 014, 017; ADR-0017 |
+| HU-E5-09 (F2) | Como integrador, quiero montos y cantidades con decimales, calculados sin error de redondeo | L | `quantity` hasta 4 decimales y `unitPrice` hasta 8; aritmética exacta (`Decimal` sobre BigInt); todo documento aceptado hoy produce el mismo XML, totales y KuDE; redondeo a 50 Gs sin cambios. Plan: [`odd/tasks/decimal-precision.md`](../../odd/tasks/decimal-precision.md) | MT v150 E8, F; ADR-0018 |
 
 ## E6 — Transmisión a SIFEN · F1 (lote) / F2 (resto)
 
@@ -174,9 +176,9 @@ Recomendación del líder técnico: candidatos a v1.0, no en el MVP.
 |---|---|---|---|
 | F0 | E0 | 6 | 3 semanas |
 | F1 | E1, E2, E3 (01–02), E4, E5, E6 (01–04), E10-01, E11-01, E13 | 31 | 5 semanas |
-| F2 | E6 (05–09), E7, E8, E9, E10-02, E11-02, E12 (01–02), E15 | 22 | 5 semanas |
+| F2 | E5 (08–09), E6 (05–09), E7, E8, E9, E10-02, E11-02, E12 (01–02), E15 | 24 | 5 semanas |
 | F3 | E12 (03–04), E14, E3-03 | 8 | 3 semanas |
-| **MVP** | | **67** | **16 semanas** |
+| **MVP** | | **69** | **16 semanas** |
 
 ## Ejemplo de detalle al tomar una historia (HU-E7-01)
 

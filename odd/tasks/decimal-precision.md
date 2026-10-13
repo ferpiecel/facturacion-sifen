@@ -1,6 +1,6 @@
 # Decimal precision in amounts and quantities
 
-- Feature: `decimal-precision` · Refs: none in the backlog (found while documenting `POST /v1/documents`)
+- Feature: `decimal-precision` · Refs: HU-E5-09 (F2; found while documenting `POST /v1/documents`)
 - Engram mirror: `odd/decimal-precision/tasks`
 - TDD: strict (source: `openspec/config.yaml`, `strict_tdd: true`) · runner: Vitest (`pnpm --filter @sifen/api exec vitest run`, thresholds 85%)
 - Delivery: `ask-on-risk`, chain `stacked-to-main`; each PR about 400 changed lines or less (advisory).
@@ -52,7 +52,7 @@ Out: foreign currency, exchange rate (`dTiCamIt`), 50-centimos rounding, discoun
 - Amounts stay within 15 digits plus up to 8 decimals; the larger range needs BigInt-based arithmetic.
 - No new dependency without need; if a decimal library is chosen it is pinned exactly.
 
-## Technical decisions (to record in an ADR; 0017 is reserved by `receiver-geo-catalog`)
+## Technical decisions (to record in ADR-0018; 0017 is reserved by `receiver-geo-catalog`)
 
 | Decision | Rationale |
 |---|---|

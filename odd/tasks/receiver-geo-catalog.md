@@ -1,6 +1,6 @@
 # Receiver address contract and geographic catalog
 
-- Feature: `receiver-geo-catalog` · Refs: none in the backlog (integration gap found while documenting `POST /v1/documents`)
+- Feature: `receiver-geo-catalog` · Refs: HU-E5-08 (F2; integration gap found while documenting `POST /v1/documents`)
 - Engram mirror: `odd/receiver-geo-catalog/tasks`
 - TDD: strict (source: `openspec/config.yaml`, `strict_tdd: true`) · runner: Vitest (`pnpm --filter @sifen/api exec vitest run`, thresholds 85%)
 - Delivery: `ask-on-risk`, chain `stacked-to-main`; each PR about 400 changed lines or less (advisory), generated data declared per PR.

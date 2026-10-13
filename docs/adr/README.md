@@ -18,4 +18,4 @@
 | [0014](0014-jerarquia-partner-tenant.md) | Jerarquía partner → tenant para el modelo embebido | Aceptado |
 | [0015](0015-tips-libs-emision.md) | xmlgen, qrgen y xmlsign (modo Node) detrás de puertos de emisión | Aceptado |
 | [0016](0016-tenant-transaction-runner-sin-plugin-cls.md) | `TenantTransactionRunner` singleton en vez del plugin transaccional de nestjs-cls | Aceptado |
-| [0018](0018-precision-decimal-en-montos-y-cantidades.md) | Precisión decimal exacta en montos y cantidades | Aceptado |
+| [0018](0018-precision-decimal-en-montos-y-cantidades.md) | Precisión decimal exacta en montos y cantidades (el 0017 está reservado para HU-E5-08) | Aceptado |

@@ -58,7 +58,7 @@ Out: foreign currency, exchange rate (`dTiCamIt`), 50-centimos rounding, discoun
 | Domain `Decimal` value object over BigInt scaled integers (scale 8) | Exact, no dependency, covers 15+8 digits |
 | Wire format of `unitPrice`, `quantity`, `roundingPyg`: keep JSON number, also accept decimal strings | Backward compatible; strings give exact values beyond 15 significant digits |
 | A JSON number is converted through its shortest decimal string; numbers with more than 15 significant digits are rejected | Avoids silent binary-float drift |
-| Limits follow the XSD and NT 023: `unitPrice` up to 15 integer + 8 decimal digits, `quantity` up to 10 integer + 8 decimals (the plan said 4; NT 023 widened it), `roundingPyg` up to 4 decimals | Same bounds SIFEN enforces |
+| Limits follow the XSD and NT 023: `unitPrice` up to 15 integer + 8 decimal digits, `quantity` up to 10 integer + 8 decimals (the plan said 4; NT 023 widened it), `roundingPyg` an integer from 0 to 49 for now (the field `dRedon` itself allows 4 decimals) | Same bounds SIFEN enforces |
 | A line whose exact `quantity × unitPrice` has more than 8 decimals is rejected | The exact product then needs no rounding, so E727 and EA008 hold with equality |
 | PYG rounding unchanged: multiple of 50 on the total, `roundingPyg` in 0..49 | Manual group F |
 | Resolved in T0: item total (E727, EA008) is the exact product, no rounding; the validations ask for equality, not a tolerance | Manual validations 141 and 145 (codes 1859, 1853) |

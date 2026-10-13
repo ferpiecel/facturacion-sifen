@@ -120,6 +120,31 @@ describe('parseGeoSheet', () => {
     ]);
   });
 
+  it('does not let a self-closing row swallow the next data row', () => {
+    const withEmptyRow = sheet.replace(
+      '<row r="15"><c r="B15" s="3"/></row>',
+      '<row r="15" spans="2:9"/>',
+    );
+
+    expect(withEmptyRow).toContain('<row r="15" spans="2:9"/>');
+    expect(parseGeoSheet(sharedStrings, withEmptyRow)).toHaveLength(1);
+  });
+
+  it('fails on an out-of-range shared string index instead of skipping it', () => {
+    const broken = sheet.replace('<c r="C16" t="s"><v>2</v></c>', '<c r="C16" t="s"><v>99</v></c>');
+
+    expect(() => parseGeoSheet(sharedStrings, broken)).toThrow(/row 16.*out of range/);
+  });
+
+  it.each(['1.5', '-1', 'x'])(
+    'fails on the non-integer code %s instead of skipping the row',
+    (code) => {
+      const broken = sheet.replace('<c r="B16"><v>1</v></c>', `<c r="B16"><v>${code}</v></c>`);
+
+      expect(() => parseGeoSheet(sharedStrings, broken)).toThrow(/row 16.*numeric code/);
+    },
+  );
+
   it('fails when a data row misses a column instead of guessing', () => {
     const broken = `<worksheet><sheetData>${row(16, [
       ['B', 1],

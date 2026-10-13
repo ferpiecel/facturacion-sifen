@@ -80,12 +80,26 @@ function parseSharedStrings(xml: string): string[] {
 /** Columns of Tabla 2.1: B/C department, D/E district, F/G city (H/I neighbourhood is ignored). */
 const COLUMNS = ['B', 'C', 'D', 'E', 'F', 'G'] as const;
 
-function parseCells(rowXml: string, strings: readonly string[]): Map<string, string> {
+function parseCells(
+  rowXml: string,
+  strings: readonly string[],
+  rowNumber: number,
+  textCells: Set<string>,
+): Map<string, string> {
   const cells = new Map<string, string>();
   for (const cell of rowXml.matchAll(/<c r="([A-Z]+)\d+"([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
     const value = /<v>([\s\S]*?)<\/v>/.exec(optional(cell[3]))?.[1];
     if (value === undefined) continue;
-    cells.set(cell[1], /\bt="s"/.test(cell[2]) ? strings[Number(value)] : value);
+    if (/\bt="s"/.test(cell[2])) {
+      const index = Number(value);
+      if (!Number.isInteger(index) || index < 0 || index >= strings.length) {
+        throw new Error(`row ${String(rowNumber)}: shared string ${value} is out of range`);
+      }
+      textCells.add(cell[1]);
+      cells.set(cell[1], strings[index]);
+    } else {
+      cells.set(cell[1], value);
+    }
   }
   return cells;
 }
@@ -99,15 +113,18 @@ const toCode = (text: string | undefined, row: number, column: string): number =
 
 /**
  * Extracts the department/district/city rows. A data row starts with a numeric department code in
- * column B; title, header and blank rows are skipped. A data row missing any column is an error.
+ * column B (a non-integer value there is an error); title, header, blank and self-closing rows
+ * are skipped. A data row missing any column is an error.
  */
 export function parseGeoSheet(sharedStringsXml: string, sheetXml: string): GeoRow[] {
   const strings = parseSharedStrings(sharedStringsXml);
   const rows: GeoRow[] = [];
-  for (const row of sheetXml.matchAll(/<row r="(\d+)"[^>]*>([\s\S]*?)<\/row>/g)) {
+  for (const row of sheetXml.matchAll(/<row r="(\d+)"[^>]*?(?:\/>|>([\s\S]*?)<\/row>)/g)) {
     const number = Number(row[1]);
-    const cells = parseCells(row[2], strings);
-    if (!/^\d+$/.test(cells.get('B') ?? '')) continue;
+    const textCells = new Set<string>();
+    const cells = parseCells(optional(row[2]), strings, number, textCells);
+    // Title and header rows hold text (or nothing) in B; any other value there must be a code.
+    if (!cells.has('B') || textCells.has('B')) continue;
     for (const column of COLUMNS) {
       if (!cells.has(column)) throw new Error(`row ${String(number)}: column ${column} is empty`);
     }

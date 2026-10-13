@@ -44,11 +44,11 @@ read -rs P12_PASSWORD && printf '%s' "$P12_PASSWORD" | KMS_LOCAL_MASTER_KEY="<cl
 
 `certificate:revoke --tenant <id> (--id <uuid> | --fingerprint <sha256-hex>) [--env test|production]` revoca un certificado del tenant (`status = 'revoked'`, `revoked_at`) sin tocar el blob sellado, para que los documentos ya firmados sigan siendo verificables. No necesita `KMS_LOCAL_MASTER_KEY` ni las raíces PSC. Es idempotente (si ya estaba revocado lo informa, no cambia la fecha y no audita de nuevo), un certificado de otro tenant se informa como no encontrado y, si la huella existe en ambos ambientes, exige `--env`. Cada revocación efectiva queda en el audit log (`certificate.revoked`, con id, ambiente y huella). Con el certificado revocado la firma falla con `CertificateNotFoundError` y el pipeline retiene los documentos (`signing:CertificateNotFoundError`) hasta cargar uno nuevo con `certificate:add` y liberarlos con `document:release-holds`.
 
-`user:create --tenant <id> --email <email> --name <nombre> --role owner|admin|emisor|lector [--password -]` da de alta un usuario del portal en el tenant. La contraseña solo se lee de stdin con `--password -` (nunca por argv). El MFA no se carga acá: el usuario lo enrola en su primer ingreso al portal. Si la cuenta (email) ya existía, solo se agrega al tenant con el rol indicado y se ignoran `--name` y la contraseña.
+`user:create --tenant <id> --email <email> --name <nombre> --role owner|admin|emisor|lector [--password -]` da de alta un usuario del portal en el tenant. La contraseña solo se lee de stdin con `--password -` (nunca por argv). El MFA no se carga acá: el usuario lo enrola en su primer ingreso al portal. Si la cuenta (email) ya existía, solo se agrega al tenant con el rol indicado y se ignoran `--name` (que igual es obligatorio) y la contraseña.
 
 ## Alta de un tenant nuevo
 
-Orden recomendado (cada paso depende del anterior):
+Orden recomendado. Dependencias reales: todo exige que exista el tenant; `establishment:contact` y `point:add` exigen el establecimiento (`--establishment`); `certificate:add` exige `fiscal:set`. El resto (`timbrado:add`, `user:create`) solo exige el tenant, así que su orden es libre:
 
 1. `tenant:create`
 2. `fiscal:set`

@@ -16,7 +16,7 @@ pnpm install
 pnpm check            # lint, typecheck, depcruise y tests (los de base de datos usan Docker)
 docker compose up -d  # PostgreSQL 16 y Redis 7
 pnpm build:api        # turbo run build --filter=@sifen/api...: compila también los paquetes de los que depende (p. ej. @sifen/db)
-pnpm --filter @sifen/api start:dev   # API en http://localhost:3000; NODE_ENV=development y PORTAL_ORIGIN=http://localhost:3001
+pnpm --filter @sifen/api start:dev   # API en http://localhost:3000; NODE_ENV=development (PORTAL_ORIGIN=http://localhost:3001 por defecto)
 # Documentación de la API de integradores: http://localhost:3000/docs (spec: /docs/openapi.json)
 ```
 

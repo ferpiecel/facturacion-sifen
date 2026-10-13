@@ -17,6 +17,7 @@ import {
   toReceiverXml,
   toSifenXml,
   type InvoiceXmlContext,
+  type XmlReceiver,
 } from './invoice-xml.js';
 
 const ruc = parseRuc('80000001-3');
@@ -80,6 +81,13 @@ function context(environment: 'test' | 'production'): InvoiceXmlContext {
 }
 
 const builder = new TipsDeXmlBuilder();
+
+const noReceiver = (ctx: InvoiceXmlContext): InvoiceXmlContext => ({ ...ctx, receiver: undefined });
+
+function namedReceiver(ctx: InvoiceXmlContext): XmlReceiver {
+  if (ctx.receiver === undefined) throw new Error('the context has no named receiver');
+  return ctx.receiver;
+}
 
 const MISSING_SIGNATURE =
   "Element '{http://ekuatia.set.gov.py/sifen/xsd}rDE': Missing child element(s). Expected is ( {http://www.w3.org/2000/09/xmldsig#}Signature ).";
@@ -245,10 +253,12 @@ describe('generateInvoiceXml', () => {
     );
   });
 
-  it('rejects an unnamed receiver, which this mapper does not support yet', async () => {
-    const unnamed = { ...draft, receiver: { kind: 'unnamed' } as const, location: {} };
+  it('rejects a named receiver whose data the context does not carry', async () => {
+    const withoutReceiver = noReceiver(context('test'));
 
-    await expect(generateInvoiceXml(builder, unnamed, context('test'))).rejects.toThrow(/unnamed/);
+    await expect(generateInvoiceXml(builder, draft, withoutReceiver)).rejects.toThrow(
+      InvoiceXmlError,
+    );
   });
 
   it('reports XSD errors other than the not-yet-applied signature', async () => {
@@ -257,6 +267,42 @@ describe('generateInvoiceXml', () => {
     await expect(generateInvoiceXml(broken, draft, context('test'))).rejects.toThrow(
       InvoiceXmlError,
     );
+  });
+});
+
+/** MT v150 D208/D209/D210/D211 and NT 024: the innominado B2C receiver. */
+describe('unnamed receiver (innominado)', () => {
+  const unnamedContext = noReceiver(context('production'));
+  // A legacy client always sent the department, even for an unnamed receiver.
+  const unnamed: InvoiceDraft = {
+    ...draft,
+    receiver: { kind: 'unnamed' },
+    operationType: 'B2C',
+    location: { departmentCode: 11 },
+  };
+
+  it('builds XSD-valid XML with exactly the innominado receiver fields', async () => {
+    const { xml } = await generateInvoiceXml(builder, unnamed, unnamedContext);
+
+    expect(xml.match(/<gDatRec>.*<\/gDatRec>/s)?.[0]).toBe(
+      '<gDatRec><iNatRec>2</iNatRec><iTiOpe>2</iTiOpe><cPaisRec>PRY</cPaisRec>' +
+        '<dDesPaisRe>Paraguay</dDesPaisRe><iTipIDRec>5</iTipIDRec>' +
+        '<dDTipIDRec>Innominado</dDTipIDRec><dNumIDRec>0</dNumIDRec>' +
+        '<dNomRec>Sin Nombre</dNomRec></gDatRec>',
+    );
+  });
+
+  it('still builds when the context carries a stale named receiver', async () => {
+    const { xml } = await generateInvoiceXml(builder, unnamed, context('production'));
+
+    expect(xml).toContain('<dNomRec>Sin Nombre</dNomRec>');
+    expect(xml).not.toContain('<dRucRec>');
+  });
+
+  it('refuses an innominado receiver outside B2C (D208b / 1319)', async () => {
+    await expect(
+      generateInvoiceXml(builder, { ...unnamed, operationType: 'B2B' }, unnamedContext),
+    ).rejects.toThrow(/unnamed-receiver-requires-b2c/);
   });
 });
 
@@ -273,7 +319,7 @@ describe('receiver address block (D213-D223)', () => {
   ];
   const withoutAddress = (ctx: InvoiceXmlContext): InvoiceXmlContext => ({
     ...ctx,
-    receiver: { ruc: ctx.receiver.ruc, name: ctx.receiver.name },
+    receiver: { ruc: namedReceiver(ctx).ruc, name: namedReceiver(ctx).name },
   });
   const noAddressDraft: InvoiceDraft = {
     ...draft,
@@ -359,8 +405,8 @@ describe('receiver address block (D213-D223)', () => {
   it('omits the optional district while keeping department and city', () => {
     const ctx = context('production');
     const rest = Object.fromEntries(
-      Object.entries(ctx.receiver).filter(([k]) => !k.startsWith('district')),
-    ) as typeof ctx.receiver;
+      Object.entries(namedReceiver(ctx)).filter(([k]) => !k.startsWith('district')),
+    ) as unknown as XmlReceiver;
 
     const { data } = mapInvoiceToXmlInput(draft, { ...ctx, receiver: rest });
 

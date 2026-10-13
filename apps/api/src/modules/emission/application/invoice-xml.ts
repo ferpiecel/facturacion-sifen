@@ -50,7 +50,8 @@ export interface InvoiceXmlContext {
   numbering: { documentNumber: string; securityCode: string };
   /** Emission instant; dFeEmiDE and the CDC date are derived in America/Asuncion. */
   issuedAt: Date;
-  receiver: XmlReceiver;
+  /** Named receiver data; absent for an unnamed (innominado) receiver, which has none. */
+  receiver?: XmlReceiver;
   /** One entry per draft item, in order: dCodInt, dDesProSer, cUniMed. */
   lines: readonly { code: string; description: string; unitCode: number }[];
   /** Overrides the test literal (ADR-0012 D2). */
@@ -79,6 +80,48 @@ function receiverAddress(receiver: XmlReceiver, departmentCode: number | undefin
     ...(withGeo && receiver.cityCode !== undefined
       ? { ciudad: receiver.cityCode, ciudadDescripcion: receiver.cityDescription }
       : {}),
+  };
+}
+
+function requireNamedReceiver(receiver: XmlReceiver | undefined): XmlReceiver {
+  if (receiver === undefined) throw new InvoiceXmlError('a named receiver needs its D2 data');
+  return receiver;
+}
+
+function namedReceiverInput(
+  receiver: XmlReceiver,
+  operationType: number,
+  departmentCode: number | undefined,
+) {
+  return {
+    contribuyente: true,
+    ruc: receiver.ruc,
+    razonSocial: receiver.name,
+    tipoOperacion: operationType,
+    ...receiverAddress(receiver, departmentCode),
+    pais: 'PRY',
+    paisDescripcion: 'Paraguay',
+    tipoContribuyente: 1,
+    documentoTipo: 1,
+    documentoNumero: receiver.ruc.split('-')[0],
+    codigo: '0001',
+  };
+}
+
+/**
+ * Innominado receiver (MT v150 D201 = 2, D208 = 5, D210 = 0, D211 = "Sin Nombre"; B2C only, NT 024
+ * caps the total). It carries no RUC, taxpayer type, address block or customer code; xmlgen fills
+ * iTipIDRec 5, dDTipIDRec "Innominado", dNumIDRec "0" and dNomRec "Sin Nombre".
+ */
+function unnamedReceiverInput(operationType: number) {
+  return {
+    contribuyente: false,
+    razonSocial: 'Sin Nombre',
+    tipoOperacion: operationType,
+    pais: 'PRY',
+    paisDescripcion: 'Paraguay',
+    documentoTipo: 5,
+    documentoNumero: '0',
   };
 }
 
@@ -113,10 +156,7 @@ export function asuncionTimestamp(instant: Date): string {
  * PYG amounts are integers: validateInvoiceDraft rejects any fractional line total
  * (MT group F, no decimals in Guaranies) before this mapper runs. */
 export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext): FacturaPocInput {
-  if (draft.receiver.kind === 'unnamed') {
-    throw new InvoiceXmlError('an unnamed receiver is not supported yet');
-  }
-  const { issuer, establishment: est, receiver } = ctx;
+  const { issuer, establishment: est } = ctx;
   const content = resolveIssuerDocumentContent(
     ctx.environment,
     { legalName: issuer.legalName, firstItemDescription: ctx.lines[0]?.description ?? '' },
@@ -178,19 +218,14 @@ export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext
       descuentoGlobal: 0,
       anticipoGlobal: 0,
       cambio: 0,
-      cliente: {
-        contribuyente: true,
-        ruc: receiver.ruc,
-        razonSocial: receiver.name,
-        tipoOperacion: operationType,
-        ...receiverAddress(receiver, draft.operationType === 'B2F' ? undefined : departmentCode),
-        pais: 'PRY',
-        paisDescripcion: 'Paraguay',
-        tipoContribuyente: 1,
-        documentoTipo: 1,
-        documentoNumero: receiver.ruc.split('-')[0],
-        codigo: '0001',
-      },
+      cliente:
+        draft.receiver.kind === 'unnamed'
+          ? unnamedReceiverInput(operationType)
+          : namedReceiverInput(
+              requireNamedReceiver(ctx.receiver),
+              operationType,
+              draft.operationType === 'B2F' ? undefined : departmentCode,
+            ),
       factura: { presencia: 1 },
       condicion: {
         tipo: 1,

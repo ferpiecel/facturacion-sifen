@@ -32,6 +32,21 @@ describe('validateInvoiceDraft', () => {
         roundingPyg: rounding,
       });
 
+    it.each(['B2B', 'B2G', 'B2F'] as const)(
+      'rejects an innominado receiver in %s operations (D208b / 1319)',
+      (operationType) => {
+        const errors = validateInvoiceDraft({ ...unnamed(100_000), operationType }, {});
+
+        expect(errors).toContainEqual(
+          expect.objectContaining({
+            field: 'operationType',
+            rule: 'unnamed-receiver-requires-b2c',
+            sifenCode: '1319',
+          }),
+        );
+      },
+    );
+
     it('allows just below 7,000,000', () => {
       expect(validateInvoiceDraft(unnamed(6_999_950), {})).toEqual([]);
     });

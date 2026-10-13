@@ -221,17 +221,19 @@ describe('DrizzleSigningStore', () => {
       expect(validateInvoiceDraft(loaded.draft, {})).toEqual([]);
     });
 
-    it('reports an old unnamed payload that carries the department as incomplete, as before', async () => {
+    it.each([
+      ['carries the department', { location: { departmentCode: 11 } }],
+      ['carries no location', { location: undefined }],
+    ])('signs an old unnamed payload that %s', async (_name, patch) => {
       await seed({
-        payload: { ...PAYLOAD, receiver: { kind: 'unnamed' }, location: { departmentCode: 11 } },
+        payload: { ...PAYLOAD, operationType: 'B2C', receiver: { kind: 'unnamed' }, ...patch },
       });
 
-      const error = await storeFor(tenantId)
-        .load(tenantId, documentId)
-        .catch((e: unknown) => e);
+      const loaded = asSignable(await storeFor(tenantId).load(tenantId, documentId));
 
-      expect(error).toBeInstanceOf(SigningDataIncompleteError);
-      expect((error as SigningDataIncompleteError).missing).toContain('receiver.name');
+      expect(loaded.draft.receiver).toEqual({ kind: 'unnamed' });
+      expect(loaded.context.receiver).toBeUndefined();
+      expect(validateInvoiceDraft(loaded.draft, {})).toEqual([]);
     });
 
     it('is null for an unknown document and for another tenant', async () => {

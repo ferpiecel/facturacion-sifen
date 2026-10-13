@@ -186,7 +186,6 @@ describe('validateInvoiceDraft', () => {
       [
         'department-code',
         'quantity-positive',
-        'receiver-address-required',
         'rounding-multiple-of-50',
         'unnamed-receiver-over-threshold',
         'vat-rate',
@@ -258,6 +257,26 @@ describe('validateInvoiceDraft', () => {
       expect(rules(optional({ location: { departmentCode: 1 } }))).toEqual([
         'receiver-address-required',
       ]);
+    });
+
+    it('ignores the department of an unnamed receiver (legacy clients always sent it)', () => {
+      const unnamed = draft({
+        receiver: { kind: 'unnamed' },
+        operationType: 'B2C',
+        location: { departmentCode: 11 },
+      });
+
+      expect(validateInvoiceDraft(unnamed, {})).toEqual([]);
+    });
+
+    it('still checks the department code against the table for an unnamed receiver', () => {
+      const unnamed = draft({
+        receiver: { kind: 'unnamed' },
+        operationType: 'B2C',
+        location: { departmentCode: 99 },
+      });
+
+      expect(rules(unnamed)).toEqual(['department-code']);
     });
 
     it('requires an address for B2F (4478)', () => {

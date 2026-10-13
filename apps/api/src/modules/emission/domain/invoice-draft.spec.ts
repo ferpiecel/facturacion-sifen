@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { validateInvoiceDraft, type InvoiceDraft } from './invoice-draft.js';
 
-const named = { kind: 'named', isPublicEntity: false } as const;
+const address = { street: 'Av. Mariscal Lopez', houseNumber: '123', cityCode: 1 };
+const named = { kind: 'named', isPublicEntity: false, address } as const;
 
 function draft(overrides: Partial<InvoiceDraft> = {}): InvoiceDraft {
   return {
@@ -25,6 +26,7 @@ describe('validateInvoiceDraft', () => {
     const unnamed = (price: number, rounding = 0) =>
       draft({
         receiver: { kind: 'unnamed' },
+        location: {},
         operationType: 'B2C',
         items: [{ quantity: 1, unitPrice: price, vatRate: 10 }],
         roundingPyg: rounding,
@@ -58,7 +60,7 @@ describe('validateInvoiceDraft', () => {
   });
 
   describe('public entity receiver (D202b / 1332, NT 020)', () => {
-    const oee = { kind: 'named', isPublicEntity: true } as const;
+    const oee = { kind: 'named', isPublicEntity: true, address } as const;
 
     it('requires B2G', () => {
       expect(validateInvoiceDraft(draft({ receiver: oee, operationType: 'B2B' }), {})).toEqual([
@@ -190,7 +192,7 @@ describe('validateInvoiceDraft', () => {
       ].sort(),
     );
     const oee = draft({
-      receiver: { kind: 'named', isPublicEntity: true },
+      receiver: { kind: 'named', isPublicEntity: true, address },
       operationType: 'B2B',
       items: [{ quantity: -1, unitPrice: 1, vatRate: 5 }],
     });
@@ -218,6 +220,89 @@ describe('validateInvoiceDraft', () => {
     it('accepts the largest allowed total', () => {
       const d = draft({ items: [{ quantity: 1, unitPrice: 999_999_999_999_950, vatRate: 10 }] });
       expect(rules(d)).not.toContain('amount-range');
+    });
+  });
+
+  describe('receiver address (D213-D223, NT 003/014)', () => {
+    const noAddress = { kind: 'named', isPublicEntity: false } as const;
+    const optional = (overrides: Partial<InvoiceDraft> = {}) =>
+      draft({ receiver: noAddress, location: {}, ...overrides });
+
+    it('accepts a named receiver without address for B2B, B2C and B2G', () => {
+      for (const operationType of ['B2B', 'B2C', 'B2G'] as const) {
+        expect(validateInvoiceDraft(optional({ operationType }), {})).toEqual([]);
+      }
+    });
+
+    it('requires the house number when the address is informed (D218 / 4470)', () => {
+      const d = draft({ receiver: { ...named, address: { street: 'Av. X', cityCode: 1 } } });
+      expect(validateInvoiceDraft(d, {})).toEqual([
+        expect.objectContaining({
+          field: 'receiver.houseNumber',
+          rule: 'receiver-house-number-required',
+          sifenCode: '4470',
+        }),
+      ]);
+    });
+
+    it('requires department and city when the address is informed outside B2F (D219/D223)', () => {
+      const d = draft({
+        receiver: { ...named, address: { street: 'Av. X', houseNumber: '1' } },
+        location: {},
+      });
+      expect(rules(d)).toEqual(['receiver-department-required', 'receiver-city-required']);
+    });
+
+    it('rejects department, house number or city without an address (all or nothing)', () => {
+      expect(rules(optional({ location: { departmentCode: 1 } }))).toEqual([
+        'receiver-address-required',
+      ]);
+    });
+
+    it('ignores the department of an unnamed receiver (legacy clients always sent it)', () => {
+      const unnamed = draft({
+        receiver: { kind: 'unnamed' },
+        operationType: 'B2C',
+        location: { departmentCode: 11 },
+      });
+
+      expect(validateInvoiceDraft(unnamed, {})).toEqual([]);
+    });
+
+    it('still checks the department code against the table for an unnamed receiver', () => {
+      const unnamed = draft({
+        receiver: { kind: 'unnamed' },
+        operationType: 'B2C',
+        location: { departmentCode: 99 },
+      });
+
+      expect(rules(unnamed)).toEqual(['department-code']);
+    });
+
+    it('requires an address for B2F (4478)', () => {
+      expect(validateInvoiceDraft(optional({ operationType: 'B2F' }), {})).toEqual([
+        expect.objectContaining({
+          field: 'receiver.address',
+          rule: 'receiver-address-required',
+          sifenCode: '4478',
+        }),
+      ]);
+    });
+
+    it('rejects department and city for B2F (D219/D223 must not be informed)', () => {
+      expect(rules(draft({ operationType: 'B2F' }))).toEqual([
+        'receiver-department-not-allowed',
+        'receiver-city-not-allowed',
+      ]);
+    });
+
+    it('accepts B2F with an address and no department or city', () => {
+      const d = draft({
+        operationType: 'B2F',
+        receiver: { ...named, address: { street: 'Main St', houseNumber: '1' } },
+        location: {},
+      });
+      expect(validateInvoiceDraft(d, {})).toEqual([]);
     });
   });
 });

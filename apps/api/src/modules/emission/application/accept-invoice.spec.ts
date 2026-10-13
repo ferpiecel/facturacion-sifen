@@ -29,7 +29,11 @@ const ISSUER: IssuerContext = {
 };
 
 const DRAFT: InvoiceDraft = {
-  receiver: { kind: 'named', isPublicEntity: false },
+  receiver: {
+    kind: 'named',
+    isPublicEntity: false,
+    address: { street: 'Avda Prueba', houseNumber: '100', cityCode: 3344 },
+  },
   operationType: 'B2B',
   items: [{ quantity: 2, unitPrice: 55_000, vatRate: 10 }],
   roundingPyg: 0,

@@ -21,7 +21,11 @@ import {
 const ruc = parseRuc('80000001-3');
 
 const draft: InvoiceDraft = {
-  receiver: { kind: 'named', isPublicEntity: false },
+  receiver: {
+    kind: 'named',
+    isPublicEntity: false,
+    address: { street: 'Avda Prueba', houseNumber: '100', cityCode: 3344 },
+  },
   operationType: 'B2B',
   items: [
     { quantity: 2, unitPrice: 5000, vatRate: 10 },
@@ -241,7 +245,7 @@ describe('generateInvoiceXml', () => {
   });
 
   it('rejects an unnamed receiver, which this mapper does not support yet', async () => {
-    const unnamed = { ...draft, receiver: { kind: 'unnamed' } as const };
+    const unnamed = { ...draft, receiver: { kind: 'unnamed' } as const, location: {} };
 
     await expect(generateInvoiceXml(builder, unnamed, context('test'))).rejects.toThrow(/unnamed/);
   });

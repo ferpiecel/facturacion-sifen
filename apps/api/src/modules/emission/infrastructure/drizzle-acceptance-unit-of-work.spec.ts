@@ -25,7 +25,11 @@ import { parseCdc } from '../domain/cdc.js';
 import { createDrizzleAcceptanceUnitOfWork } from './drizzle-acceptance-unit-of-work.js';
 
 const DRAFT: AcceptInvoiceInput['draft'] = {
-  receiver: { kind: 'named', isPublicEntity: false },
+  receiver: {
+    kind: 'named',
+    isPublicEntity: false,
+    address: { street: 'Avda Prueba', houseNumber: '100', cityCode: 3344 },
+  },
   operationType: 'B2B',
   items: [{ quantity: 1, unitPrice: 110_000, vatRate: 10 }],
   roundingPyg: 0,

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { parseCreateDocument } from './create-document.request.js';
+import {
+  parseCreateDocument,
+  toAcceptInvoiceInput,
+  toInvoiceDraft,
+} from './create-document.request.js';
 
 const NAMED = {
   kind: 'named',
@@ -126,5 +130,37 @@ describe('parseCreateDocument', () => {
     expect(fields({ ...BODY, receiver: { kind: 'unnamed', name: 'Juan' } })).toContain(
       'receiver.name',
     );
+  });
+});
+
+describe('toInvoiceDraft', () => {
+  const draftOf = (body: unknown) => {
+    const result = parseCreateDocument(body);
+    if (!result.ok) throw new Error('fixture must parse');
+    return toInvoiceDraft(result.value);
+  };
+
+  it('carries the address block and the department into the draft', () => {
+    const draft = draftOf(BODY);
+
+    expect(draft.receiver).toEqual({
+      kind: 'named',
+      isPublicEntity: false,
+      address: { street: 'Av. Mariscal Lopez', houseNumber: '123', cityCode: 1 },
+    });
+    expect(draft.location).toEqual({ departmentCode: 11 });
+  });
+
+  it('feeds the same draft to the acceptance use case', () => {
+    const result = parseCreateDocument(BODY);
+    if (!result.ok) throw new Error('fixture must parse');
+    const input = toAcceptInvoiceInput(result.value, {
+      tenantId: 't',
+      actor: { type: 'api_key', id: 'k' },
+      payload: BODY,
+      idempotencyKey: 'i',
+    } as never);
+
+    expect(input.draft).toEqual(toInvoiceDraft(result.value));
   });
 });

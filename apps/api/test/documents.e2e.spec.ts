@@ -244,6 +244,17 @@ describe('POST /v1/documents (e2e)', () => {
     expect(response.statusCode).toBe(413);
   });
 
+  it('accepts an unnamed receiver that still sends the department (legacy clients)', async () => {
+    const response = await post({
+      ...BODY,
+      operationType: 'B2C',
+      receiver: { kind: 'unnamed' },
+      location: { departmentCode: 11 },
+    });
+
+    expect(response.statusCode).toBe(202);
+  });
+
   it('answers 422 when an unnamed receiver carries a RUC or a named one has an invalid RUC', async () => {
     const unnamed = await post({ ...BODY, receiver: { kind: 'unnamed', ruc: '80069563-1' } });
     const badRuc = await post({ ...BODY, receiver: { kind: 'named', ruc: '80069563-9' } });

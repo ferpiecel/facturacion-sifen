@@ -38,7 +38,7 @@ Idempotency-Key: <valor único por documento>
 | `receiver` | objeto | Ver [Receptor](#receptor) |
 | `items` | array | De 1 a 999 ítems. Ver [Ítems](#ítems) |
 | `roundingPyg` | entero | De 0 a 49. Por defecto 0. Ver [Montos y redondeo](#montos-y-redondeo) |
-| `location.departmentCode` | entero | Código de departamento |
+| `location.departmentCode` | entero | Departamento **del receptor**, de la tabla de [códigos geográficos](#códigos-geográficos) |
 | `currency` | string | Solo `PYG`. Por defecto `PYG` |
 
 ### Receptor
@@ -56,6 +56,18 @@ Receptor identificado (`kind: "named"`):
 | `cityCode` / `cityDescription` | Código entero de 1 a 99999 y descripción de hasta 30 caracteres |
 
 Receptor innominado (`kind: "unnamed"`): no lleva `ruc` ni `name`. Se rechaza si el total neto es de 7.000.000 Gs o más.
+
+### Códigos geográficos
+
+| Dato | Qué valida la plataforma | Qué debe hacer su sistema |
+|---|---|---|
+| `location.departmentCode` | Debe estar en la tabla oficial de 20 departamentos; si no, responde `422` con `rule: "department-code"`. La descripción la completa la plataforma | Enviar el código del departamento del receptor |
+| `receiver.districtCode` y `receiver.cityCode` | Solo el formato (entero dentro del rango). **No se cruzan contra la tabla oficial de distritos y ciudades** ni entre sí, porque esa tabla aún no está cargada en la plataforma | Enviar los códigos y descripciones **tal como figuran en las tablas de la DNIT** (Manual Técnico v150, tablas 2.1 y 2.2) |
+| `districtDescription` y `cityDescription` | Solo la longitud. Se copian al XML sin verificar | Enviar la descripción oficial que corresponde al código |
+
+Un código de distrito o ciudad inexistente, o una descripción que no corresponda, **pasa la validación de la plataforma** y puede ser rechazado luego por SIFEN. El departamento del emisor no se envía: sale del establecimiento configurado.
+
+Departamentos (`cDepEmi`): 1 Capital, 2 Concepción, 3 San Pedro, 4 Cordillera, 5 Guairá, 6 Caaguazú, 7 Caazapá, 8 Itapúa, 9 Misiones, 10 Paraguarí, 11 Alto Paraná, 12 Central, 13 Ñeembucú, 14 Amambay, 15 Presidente Hayes, 16 Boquerón, 17 Alto Paraguay, 18 Canindeyú, 19 Chaco, 20 Nueva Asunción.
 
 ### Ítems
 

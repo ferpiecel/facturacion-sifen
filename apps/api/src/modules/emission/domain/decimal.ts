@@ -1,7 +1,4 @@
-/**
- * Exact decimal value over BigInt scaled integers (scale 8). Pure TypeScript: no framework, no
- * `number` arithmetic. ADR-0018.
- */
+// Exact decimal over BigInt scaled integers (scale 8), pure TypeScript. ADR-0018.
 
 const SCALE = 8;
 const FACTOR = 10n ** BigInt(SCALE);
@@ -25,7 +22,6 @@ export type DecimalParseResult =
 const PLAIN = /^(-?)(\d+)(?:\.(\d+))?$/;
 const EXPONENT = /^(-?)(\d+)(?:\.(\d+))?e([+-]\d+)$/;
 
-/** Optional regex groups are `undefined` at runtime although typed as `string`. */
 function group(match: RegExpExecArray, index: number): string {
   return match.at(index) ?? '';
 }
@@ -164,7 +160,6 @@ export class Decimal {
     return this.fraction().length;
   }
 
-  /** Digits of the integer part; `0.5` has none. */
   integerDigits(): number {
     const int = absolute(this.units) / FACTOR;
     return int === 0n ? 0 : int.toString().length;
@@ -180,10 +175,6 @@ export class Decimal {
     const frac = this.fraction();
     const sign = this.units < 0n ? '-' : '';
     return frac === '' ? `${sign}${int}` : `${sign}${int}.${frac}`;
-  }
-
-  toJSON(): string {
-    return this.toString();
   }
 
   private fraction(): string {

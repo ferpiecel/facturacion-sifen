@@ -13,7 +13,7 @@
 Let an integrator issue an NCE (`iTiDE` 5, C002) associated by CDC with an FE the tenant already issued
 and SIFEN approved, through the same asynchronous flow as the FE (202, numbering, signing, QR, lote
 transmission, webhooks, KuDE). The platform must refuse before burning a number what SIFEN would refuse
-later: credits that exceed the FE (2417), a different currency (2438), an unknown, cancelled or foreign FE.
+later: credits that exceed the FE (2417), a different currency (2438, a guard while only PYG exists), an unknown, cancelled or foreign FE.
 
 ## Problem (gap analysis)
 
@@ -62,7 +62,7 @@ examples). All citations are to `docs/referencia/dnit/`.
 | C002 = 5 NCE; C003 description | MT v150, group C, fields C002/C003 | Constant for the type |
 | H001 `gCamDEAsoc` 0-99, mandatory if C002 = 4, 5, 6; error 2400 | MT v150, group H, validation 240; NT 023 sec. 2.2 | Required in the contract |
 | NCE group occurs once, 2415 | MT v150, validation 242 (H001b) | One association only |
-| H002 = 1 requires H004 (2416); H004 forbidden for H002 = 2 or 3 (2418) | MT v150, validations 243 to 249 | Always H002 = 1 |
+| H002 = 1 requires H004 (2402); H004 forbidden for H002 = 2 or 3 (2418) | MT v150, validations 243 to 249 | Always H002 = 1 |
 | FE-only association for NCE and NDE (no other document type) | MT v150, validation 241 (H001a, 2414) | Reject a CDC that is not `01...` |
 | H002 ≠ 3 for C002 = 1, 5, 6, 7, 2434 | MT v150, validation 244 | Not applicable (constancia is never sent) |
 | H004a CDC must exist, 2403; H004b CDC not cancelled, 2404 | MT v150, validations 247 and 248 | Pre-check against our `documents` (status approved, not `cancelled`) |
@@ -164,10 +164,10 @@ an FE not issued by the platform; foreign currency and exchange rate (`multi-cur
 | D1 | Same endpoint `POST /v1/documents` with a `type` discriminator (`FE` default, `NCE`) | Keeps ADR-0011 (202, `Idempotency-Key`), controller, idempotency and OpenAPI path; the default keeps old bodies valid. **Open**: a separate `POST /v1/credit-notes` is cleaner for OpenAPI and for scopes but doubles the idempotency wiring. Decide in the ADR. |
 | D2 | The NCE request carries `associatedCdc`, `reasonCode` (1..8), items and `roundingPyg`; establishment and expedition point as the FE | Minimal surface; mirrors the API's flat naming |
 | D3 | The receiver is **not** in the request; the platform copies it from the stored payload of the FE | 2441 is satisfied by construction and the integrator cannot send inconsistent data. Cost: depends on the FE payload shape (hence after geo slice A). **Open**: accept an optional receiver and compare. |
-| D4 | Association is stored in a new nullable column `documents.associated_cdc char(44)` plus an index on (`tenant_id`, `environment`, `associated_cdc`) and a CHECK that it is a 44-digit CDC starting `01` | Cheap and queryable for the sum; the `documents` table already has RLS. **Open**: a link table is more general for NDE and AFE but adds RLS surface; the NDE shares the same shape so the column is likely enough. |
-| D5 | The sum is computed in one query under `SELECT ... FOR UPDATE` on the FE row, summing `total_amount` of documents with that `associated_cdc`, type 5 and status not in (`rejected`, `cancelled`, `number_voided`, `corrected`) | Serializes concurrent NCEs on the same FE. **Open**: whether `corrected` (a rejection followed by a fix) must count; settle in T0 with the state machine of plan v1.1 sec. 8.0. |
+| D4 | Association is stored in a new nullable column `documents.associated_cdc char(44)` plus an index on (`tenant_id`, `environment`, `associated_cdc`) and a CHECK `^[0-9]{44}$`; that it must belong to an FE (`01...`) is a domain rule (2414), not a database one | Cheap and queryable for the sum; the `documents` table already has RLS. **Open**: a link table is more general for NDE and AFE but adds RLS surface; the NDE shares the same shape so the column is likely enough. |
+| D5 | The sum is computed in one query under `SELECT ... FOR UPDATE` on the FE row, summing `total_amount` of documents with that `associated_cdc`, type 5 and status not in (`cancelled`, `number_voided`) | Serializes concurrent NCEs on the same FE. **Decided**: only `number_voided` and `cancelled` release credit; `rejected` and `corrected` still count because they are resent with the same CDC (plan v1.1 sec. 8.0). |
 | D6 | The FE must be `approved` or `approved_with_observations` (**open**: the second, see T0) and not `cancelled` | MT 11.1.3: the NCE needs an FE already approved by SIFEN; 2403 and 2404 |
-| D7 | Rules are named like the FE ones (`rule` plus `sifenCode`): `credit-note-sum-exceeds-invoice` (2417), `credit-note-currency-mismatch` (2438), `associated-document-not-found` (2403), `associated-document-cancelled` (2404), `associated-document-not-invoice` (2414), `credit-note-unnamed-receiver` (1331) | Same 422 problem format as `validationProblem` |
+| D7 | Rules are named like the FE ones (`rule` plus `sifenCode`): `credit-note-sum-exceeds-invoice` (2417), `credit-note-currency-mismatch` (2438), `associated-document-not-found` (2403), `associated-document-cancelled` (2404), `associated-document-not-approved` (the FE exists but SIFEN has not approved it yet; distinct from 2403, no SIFEN code), `associated-document-not-invoice` (2414), `credit-note-unnamed-receiver` (1331) | Same 422 problem format as `validationProblem` |
 | D8 | Generalize, do not fork: `INVOICE_DOCUMENT_TYPE` and the `'01'` in `generateInvoiceXml` become a per-document type input; `mapInvoiceToXmlInput` gets a credit-note branch that omits `factura`, `condicion` and sets the `notaCreditoDebito` and `documentoAsociado` blocks | Avoids a second pipeline; changes are guarded by the byte-identical FE test |
 | D9 | `tipoTransaccion` is passed to the TIPS validator but never emitted for NCE (to confirm in T2) | See library notes |
 | D10 | KuDE: same renderer with a type-aware title and an "associated document" block; the reader dispatches on `iTiDE` and reads `gCamNCDE` and `gCamDEAsoc`; `gCamCond` becomes optional | One renderer, MT 13.3 titles |
@@ -186,7 +186,7 @@ an FE not issued by the platform; foreign currency and exchange rate (`multi-cur
 - [ ] T8 KuDE: reader supports `iTiDE` 5, model and renderer title and associated document block, `gCamCond` optional; golden text assertions as the FE ones.
 - [ ] T9 Transmission and events: test that NCE documents form their own lotes and are sent; webhook payloads and portal listing show `NCE`; no code change expected, confirm.
 - [ ] T10 Docs: `docs/integracion/emision.md` section on NCE (contract, reasons, errors 2417 and 2438, innominado limit), `docs/api/openapi.json`, backlog and roadmap status.
-- [ ] T11 End to end and battery: FE accepted and approved (simulator) then partial NCE (202, signed); second NCE over the limit (422 rule 2417, no number consumed); USD NCE rejected (2438); then the Guía de Pruebas battery of 5 approved and 5 rejected NCE on both web services. **The battery is blocked on environment access**; the platform pre-checks mean the "rejected" cases must be built with documents that pass local validation (to plan with the PO).
+- [ ] T11 End to end and battery: FE accepted and approved (simulator) then partial NCE (202, signed); second NCE over the limit (422 rule 2417, no number consumed); then the Guía de Pruebas battery of 5 approved and 5 rejected NCE on both web services. **The battery is blocked on environment access**; the "rejected" cases need a dev/test-only path that bypasses local pre-checks (decided in ADR-0019).
 
 ## PR slices (chained, each about 400 changed lines or less)
 
@@ -229,9 +229,9 @@ Postgres run use fresh per-action workers.
 - After NCEs totalling 700,000 PYG, another of 400,000 PYG answers 422 with rule `credit-note-sum-exceeds-invoice`
   and SIFEN code `2417`, and no number is consumed. Two concurrent NCEs whose sum exceeds the FE: exactly one
   is accepted.
-- An NCE in a currency different from the FE answers 422 with `2438`. An unknown CDC, a cancelled FE, a CDC
+- Currency stays PYG-only (consistent with `decimal-precision`; multi-currency is a follow-up), so 2438 is unreachable today and remains as a guard with a unit test. An unknown CDC, a cancelled FE, a CDC
   of another type, another issuer or another tenant answers 422 with the matching rule (2403, 2404, 2414,
-  2439) and leaks nothing across tenants.
+  2439), an FE not yet approved answers `associated-document-not-approved`, and nothing leaks across tenants.
 - An FE issued to an unnamed receiver cannot be credited (rule `credit-note-unnamed-receiver`, 1331).
 - The generated NCE XML validates against the vendored `siRecepDE` XSD, carries `iTiDE` 5, `gCamNCDE`,
   `gCamDEAsoc` with `dCdCDERef`, and no `gCamCond`, `gCamFE`, `iTipTra`.
@@ -240,17 +240,17 @@ Postgres run use fresh per-action workers.
 - `pnpm check`, `pnpm --filter @sifen/db test:postgres` and the coverage thresholds pass; the OpenAPI test
   passes after regeneration.
 
-## Open decisions
+## Decisions
 
-Product (for the PO): P1 which of the eight reasons to expose in F2 (proposal: all eight, they are one table);
-P2 confirm that crediting an FE issued to "Sin Nombre" is out until the Nominación event exists (SIFEN
-refuses with 1331); P3 confirm that NCE against pre-printed invoices or FE issued outside the platform
-is out of the MVP; P4 how to build the five "rejected" NCE of the Guía de Pruebas battery if local
-pre-checks stop them (send them with the checks disabled in the test environment, or accept the gap).
+Decided (the review found no product decision left):
 
-Technical (tech lead): D1 endpoint shape, D3 receiver derivation versus accepting it, D4 association storage,
-D5 which states count in the sum, D6 whether an FE `approved_with_observations` can be credited, and the
-`tipoTransaccion` handling (D9), all closed in ADR-0019 and T0 or T2.
+- P1 expose all eight reasons: MT E401/E402 and 1452 define one closed table.
+- P2 an FE issued to "Sin Nombre" cannot be credited until HU-E8-05 (Nominación): SIFEN refuses with 1331 (NT 010, NT 023).
+- P3 pre-printed or externally issued FE are out: they cannot satisfy 2403, 2404, 2417 or 2439 and the MT 11.1.3 pre-printed coexistence was only for the pilot.
+- D5 only `number_voided` and `cancelled` release credit in the 2417 sum.
+- Currency is PYG-only; 2438 is kept as an unreachable guard.
+
+Open, technical (tech lead), all closed in ADR-0019, T0 or T2: D1 endpoint shape, D3 receiver derivation versus accepting it, D4 association storage (column versus link table), D6 whether an FE `approved_with_observations` can be credited, D9 `tipoTransaccion` handling, and P4 the dev/test-only path to produce the battery's five rejected NCE.
 
 ## Progress and next step
 

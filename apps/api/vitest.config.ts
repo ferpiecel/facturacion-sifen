@@ -23,6 +23,11 @@ export default defineConfig({
     env: { TZ: 'UTC' },
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    // A worker that cannot shut down (an unclosed PGlite or socket) must fail the run in
+    // seconds instead of keeping the process alive until the CI job is cancelled.
+    teardownTimeout: 10_000,
+    // In CI, name the handles that keep the process alive when a run does not exit.
+    reporters: process.env.CI ? ['default', 'hanging-process'] : ['default'],
     coverage: {
       provider: 'v8',
       all: true,

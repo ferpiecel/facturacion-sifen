@@ -213,7 +213,8 @@ describe('runCli certificate:add', () => {
     }
     const tooLarge = await run({ readFailure: new BoundedReadError('too-large') });
     expect(tooLarge.err).toContain('64 KiB');
-  });
+    // Five runs, each booting a PGlite: ~5 s on a dev machine, over 30 s on a CI runner under load.
+  }, 120_000);
 
   it('keeps trailing spaces of the stdin password and strips only the line ending', async () => {
     const spaced = await run({ p12Password: 'with trailing  ', stdin: 'with trailing  \n' });

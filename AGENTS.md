@@ -141,7 +141,7 @@ pnpm --filter @sifen/api coverage
 | Historias del MVP | [`docs/backlog/mvp.md`](docs/backlog/mvp.md) |
 | Decisiones de arquitectura | [`docs/adr/`](docs/adr/README.md) |
 | Diseño técnico | [`docs/plan/plan-desarrollo-v1.1.md`](docs/plan/plan-desarrollo-v1.1.md) |
-| API de integradores | `/docs` con la API en marcha; spec en [`docs/api/openapi.json`](docs/api/openapi.json); webhooks en [`docs/integracion/webhooks.md`](docs/integracion/webhooks.md) |
+| API de integradores | `/docs` con la API en marcha; spec en [`docs/api/openapi.json`](docs/api/openapi.json); emisión en [`docs/integracion/emision.md`](docs/integracion/emision.md); webhooks en [`docs/integracion/webhooks.md`](docs/integracion/webhooks.md) |
 | Normativa DNIT | [`docs/referencia/`](docs/referencia/README.md) |
 | Variables de entorno | [`docs/configuracion.md`](docs/configuracion.md) |
 | Operación y CLI | [`docs/operacion.md`](docs/operacion.md) |

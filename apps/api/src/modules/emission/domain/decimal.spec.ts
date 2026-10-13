@@ -179,6 +179,31 @@ describe('Decimal division', () => {
   });
 });
 
+describe('Decimal ties on negative values', () => {
+  it('rounds negative halves away from zero with half-up and to even with half-even', () => {
+    expect(dec('-1.235').roundTo(2, 'half-up').toString()).toBe('-1.24');
+    expect(dec('-1.225').roundTo(2, 'half-up').toString()).toBe('-1.23');
+    expect(dec('-1.225').roundTo(2, 'half-even').toString()).toBe('-1.22');
+    expect(dec('-1.235').roundTo(2, 'half-even').toString()).toBe('-1.24');
+    const tiny = dec('-0.00000001');
+    expect(tiny.divide(dec('2'), 'half-up').toString()).toBe('-0.00000001');
+    expect(tiny.divide(dec('2'), 'half-even').toString()).toBe('0');
+    expect(dec('-0.00000003').divide(dec('2'), 'half-even').toString()).toBe('-0.00000002');
+  });
+});
+
+describe('Decimal negative zero strings', () => {
+  it('reads -0 and -0.0 as plain zero', () => {
+    for (const text of ['-0', '-0.0']) {
+      const value = dec(text);
+      expect(value.isZero()).toBe(true);
+      expect(value.isNegative()).toBe(false);
+      expect(value.toString()).toBe('0');
+      expect(value.equals(dec('0'))).toBe(true);
+    }
+  });
+});
+
 describe('Decimal rescaling and digit checks', () => {
   it('rounds to fewer decimals with the explicit mode', () => {
     expect(dec('1.2345').roundTo(2, 'half-up').toString()).toBe('1.23');

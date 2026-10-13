@@ -186,6 +186,7 @@ PYG rounding (MT section F, SEDECO 347/2014): multiples of 50 Gs, example 107.43
   the places that assume integers.
 - Done: T0 (findings above) and T2 (ADR-0018), slice A.
 - Done: T3 (`Decimal`, slice B): parse (number via shortest string, string), compare, add, subtract, multiply, multiplyExact, divide, roundTo, fitsIn, plain output.
+- Note for T4: `Decimal` operations do not signal overflow beyond 15+8 digits (a product can reach 30 digits), so T4 must call `fitsIn` after every operation whose result is stored or sent.
 - Next: T4 waits for the T1 open points; meanwhile see the note below. T1 needs access to a SIFEN test environment and a certificate;
   T4 should not start before the T1 open points 1 and 2 are settled or an interim rule is accepted.
 

@@ -259,6 +259,80 @@ describe('generateInvoiceXml', () => {
   });
 });
 
+describe('receiver address block (D213-D223)', () => {
+  const ADDRESS_TAGS = [
+    'dDirRec',
+    'dNumCasRec',
+    'cDepRec',
+    'dDesDepRec',
+    'cDisRec',
+    'dDesDisRec',
+    'cCiuRec',
+    'dDesCiuRec',
+  ];
+  const withoutAddress = (ctx: InvoiceXmlContext): InvoiceXmlContext => ({
+    ...ctx,
+    receiver: { ruc: ctx.receiver.ruc, name: ctx.receiver.name },
+  });
+  const noAddressDraft: InvoiceDraft = {
+    ...draft,
+    receiver: { kind: 'named', isPublicEntity: false },
+    location: {},
+  };
+
+  it('emits the whole address block when the receiver has one', async () => {
+    const { xml } = await generateInvoiceXml(builder, draft, context('production'));
+
+    for (const tag of ADDRESS_TAGS) expect(xml).toContain(`<${tag}>`);
+  });
+
+  it.each(['B2B', 'B2C'] as const)(
+    'omits every address field and stays XSD-valid for a receiver without address (%s)',
+    async (operationType) => {
+      const { xml } = await generateInvoiceXml(
+        builder,
+        { ...noAddressDraft, operationType },
+        withoutAddress(context('production')),
+      );
+
+      for (const tag of ADDRESS_TAGS) expect(xml).not.toContain(`<${tag}>`);
+      expect(validateXml(xml, 'siRecepDE').errors).toHaveLength(1);
+    },
+  );
+
+  it('keeps the address but omits department, district and city for B2F (D202 = 4)', () => {
+    const b2f: InvoiceDraft = {
+      ...draft,
+      operationType: 'B2F',
+      receiver: {
+        kind: 'named',
+        isPublicEntity: false,
+        address: { street: 'Avda Prueba', houseNumber: '100' },
+      },
+      location: {},
+    };
+
+    const { data } = mapInvoiceToXmlInput(b2f, context('production'));
+
+    expect(data.cliente).toMatchObject({ direccion: 'Avda Prueba', numeroCasa: '100' });
+    expect(data.cliente).not.toHaveProperty('departamento');
+    expect(data.cliente).not.toHaveProperty('ciudad');
+    expect(data.cliente).not.toHaveProperty('distrito');
+  });
+
+  it('omits the optional district while keeping department and city', () => {
+    const ctx = context('production');
+    const rest = Object.fromEntries(
+      Object.entries(ctx.receiver).filter(([k]) => !k.startsWith('district')),
+    ) as typeof ctx.receiver;
+
+    const { data } = mapInvoiceToXmlInput(draft, { ...ctx, receiver: rest });
+
+    expect(data.cliente).not.toHaveProperty('distrito');
+    expect(data.cliente).toMatchObject({ departamento: 11, ciudad: 3344 });
+  });
+});
+
 describe('SIFEN and receiver variants (rule 2503, J003)', () => {
   const qr = '<dCarQR>https://q?a=1&amp;b=2</dCarQR>';
   const signed = '<DE Id="x"><gCamItem><dInfAdic>item note</dInfAdic></gCamItem></DE><Signature/>';

@@ -202,6 +202,18 @@ describe('DrizzleSigningStore', () => {
       expect(loaded.context.timbrado.number).toBe('12345678');
     });
 
+    it('loads a receiver without address block and without location', async () => {
+      const receiver = { kind: 'named', ruc: '80000005-6', name: 'Receptor Prueba SA' };
+      const rest = Object.fromEntries(Object.entries(PAYLOAD).filter(([k]) => k !== 'location'));
+      await seed({ payload: { ...rest, receiver } });
+
+      const loaded = asSignable(await storeFor(tenantId).load(tenantId, documentId));
+
+      expect(loaded.draft.receiver).toEqual({ kind: 'named', isPublicEntity: false });
+      expect(loaded.draft.location).toEqual({});
+      expect(loaded.context.receiver).toEqual({ ruc: '80000005-6', name: 'Receptor Prueba SA' });
+    });
+
     it('is null for an unknown document and for another tenant', async () => {
       expect(
         await storeFor(tenantId).load(tenantId, '00000000-0000-4000-8000-000000000000'),
@@ -242,7 +254,7 @@ describe('DrizzleSigningStore', () => {
   it('lists the missing receiver and item data instead of guessing it', async () => {
     const without = (value: object, ...keys: string[]) =>
       Object.fromEntries(Object.entries(value).filter(([key]) => !keys.includes(key)));
-    const receiver = without(PAYLOAD.receiver, 'name', 'address');
+    const receiver = without(PAYLOAD.receiver, 'name', 'ruc');
     const item = without(PAYLOAD.items[0], 'code', 'description');
     await seed({ payload: { ...PAYLOAD, receiver, items: [item] } });
     const error = await storeFor(tenantId)
@@ -252,7 +264,7 @@ describe('DrizzleSigningStore', () => {
     expect((error as SigningDataIncompleteError).missing).toEqual(
       expect.arrayContaining([
         'receiver.name',
-        'receiver.address',
+        'receiver.ruc',
         'items[0].code',
         'items[0].description',
       ]),

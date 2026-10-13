@@ -4,7 +4,7 @@
 - Engram mirror: `odd/receiver-geo-catalog/tasks`
 - TDD: strict (source: `openspec/config.yaml`, `strict_tdd: true`) · runner: Vitest (`pnpm --filter @sifen/api exec vitest run`, thresholds 85%)
 - Delivery: `ask-on-risk`, chain `stacked-to-main`; each PR about 400 changed lines or less (advisory), generated data declared per PR.
-- Status: slice A is split in two chained PRs (A1: T1 + domain half of T2; A2: rest of T2 + T3); slices B-E pending.
+- Status: slice A done in two chained PRs (A1: T1 + domain half of T2; A2: rest of T2 + T3); slices B-E pending.
 
 ## Objective
 
@@ -65,8 +65,8 @@ Out: Nota de Remision address rules, emission of other document types, transport
 
 - [x] T0 Obtain the geographic file and record its source, date and checksum. Public download, no login (see Evidence). The file is NOT committed in slice A; it is kept at `/tmp/claude-1000/geo-source/geo.xlsx` for slice B.
 - [x] T1 ADR-0017: receiver address contract and geographic catalog ownership (resolve the two open decisions).
-- [ ] T2 Contract alignment (A1: domain rules and `toInvoiceDraft` mapping done; A2: optional request fields, signing store): optional address block, conditional rules, B2F rules, `location.departmentCode` optional; domain tests first.
-- [ ] T3 Confirm how the TIPS builder emits B2F and optional address; adjust `invoice-xml.ts` so `cDepRec` and `cCiuRec` are omitted for B2F and the receiver block omits absent fields. XSD check on the generated XML.
+- [x] T2 Contract alignment: optional address block, conditional rules, B2F rules, `location.departmentCode` optional; domain tests first.
+- [x] T3 Confirm how the TIPS builder emits B2F and optional address; adjust `invoice-xml.ts` so `cDepRec` and `cCiuRec` are omitted for B2F and the receiver block omits absent fields. XSD check on the generated XML.
 - [ ] T4 Vendor the catalog (generation script or reviewed conversion, checksum test, README entry) and remove the stale claim in `department.ts`.
 - [ ] T5 Catalog validation: district and city exist, city belongs to district, district belongs to department, descriptions match codes; new `ValidationError` rules with SIFEN codes.
 - [ ] T6 Read endpoints with OpenAPI regeneration (`pnpm --filter @sifen/api openapi`) and Fastify `inject()` e2e tests.
@@ -105,8 +105,8 @@ such in the PR description.
 ## Progress and next step
 
 - Done: gap analysis; T0 (file obtained); T1 (ADR-0017 accepted, both open points resolved: catalog endpoints
-  need only a valid API key, dataset goes in `packages/sifen-xsd/vendor`).
-- Next: A2 (rest of T2, T3), then slice B (T4: vendor the file).
+  need only a valid API key, dataset goes in `packages/sifen-xsd/vendor`); T2 and T3 (A1, A2).
+- Next: slice B (T4: convert and vendor the file, checksum test). It needs the tech lead to place the file.
 
 ## Checks and evidence
 
@@ -116,5 +116,13 @@ such in the PR description.
   Downloaded 2026-10-13, 469941 bytes, SHA-256 `3918fc3517ce0b5ae883648b9316bbb2583c1b49e614d51d8b441dae978abc16`
   (MD5 `0d817dee1a6a0c307a8fd25140c4f9be`). The page lists only this version. It also links a "Checksum MD5"
   PDF dated 2023 (older than the file); it was not compared, so integrity against DNIT is unverified.
-- T2 (A1) RED: `invoice-draft.spec.ts` 7 failed | 21 passed before the rules; GREEN after. `pnpm verify` result in the PR.
+- T2/T3 RED: `invoice-draft.spec.ts` 7 failed | 21 passed before the rules; `create-document.request.spec.ts`
+  10 failed | 36 passed before the optional block and `toInvoiceDraft`; `invoice-xml.spec.ts` 6 failed | 24 passed
+  before the mapper change. GREEN after each implementation. The signing-store and e2e cases were added after the
+  implementation (not observed RED).
+- T3 findings: `xmlgen` already omits `cDepRec`/`cDisRec`/`cCiuRec` for `tipoOperacion = 4` and every address
+  field when `direccion` is absent; the mapper now also withholds them explicitly. B2F XML still cannot be built
+  because `xmlgen` requires a foreign non-contributor receiver (the API only models RUC receivers). B2G XML cannot
+  be built either (`dEntCont`), with or without an address; both are pre-existing and out of scope.
+  `xmlgen` also overwrites department and district from the city using its own table (reconcile in slice C).
 - Pending: Prevalidador confirmation for B2F and optional address (T8).

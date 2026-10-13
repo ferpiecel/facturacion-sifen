@@ -267,12 +267,32 @@ describe('POST /v1/documents (e2e)', () => {
     expect(response.statusCode).toBe(422);
     const { errors } = response.json<{ errors: Array<{ field: string }> }>();
     expect(errors.map((e) => e.field)).toEqual(
-      expect.arrayContaining([
-        'receiver.name',
-        'receiver.address',
-        'items[0].code',
-        'items[0].unitCode',
-      ]),
+      expect.arrayContaining(['receiver.name', 'items[0].code', 'items[0].unitCode']),
+    );
+    expect(await handle.db.select().from(documents)).toHaveLength(0);
+  });
+
+  it('accepts a named receiver without address block and without location (D213 occurs 0-1)', async () => {
+    const response = await post({
+      ...BODY,
+      receiver: { kind: 'named', ruc: '80069563-1', name: 'Cliente SA' },
+      location: undefined,
+    });
+
+    expect(response.statusCode).toBe(202);
+  });
+
+  it('answers 422 receiver-address-required (4478) for B2F without address', async () => {
+    const response = await post({
+      ...BODY,
+      operationType: 'B2F',
+      receiver: { kind: 'named', ruc: '80069563-1', name: 'Cliente SA' },
+      location: undefined,
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json<{ errors: Array<{ rule: string }> }>().errors).toContainEqual(
+      expect.objectContaining({ rule: 'receiver-address-required' }),
     );
     expect(await handle.db.select().from(documents)).toHaveLength(0);
   });

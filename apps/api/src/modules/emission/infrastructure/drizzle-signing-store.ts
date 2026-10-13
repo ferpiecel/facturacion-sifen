@@ -25,6 +25,7 @@ import {
 } from '../application/ports/signing.port.js';
 import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
 import { parseCreateDocument, toInvoiceDraft } from './http/create-document.request.js';
+import type { XmlReceiver } from '../application/invoice-xml.js';
 
 export interface DrizzleSigningStoreOptions {
   readonly db: Database;
@@ -32,21 +33,11 @@ export interface DrizzleSigningStoreOptions {
 }
 
 /**
- * What the XML needs beyond the accepted request: named-receiver data (D2) and item descriptions
- * (E7). They are read from the stored payload; a document accepted without them cannot be signed
+ * What the XML needs beyond the accepted request: item descriptions (E7); the named receiver data
+ * (D2, address block optional) is already validated by `parseCreateDocument`. They are read from the stored payload; a document accepted without them cannot be signed
  * and the store says exactly which fields are missing instead of inventing values.
  */
 const xmlDetailSchema = z.object({
-  receiver: z.object({
-    ruc: z.string(),
-    name: z.string().min(1),
-    address: z.string().min(1),
-    houseNumber: z.string().min(1),
-    districtCode: z.number(),
-    districtDescription: z.string().min(1),
-    cityCode: z.number(),
-    cityDescription: z.string().min(1),
-  }),
   items: z.array(
     z.object({ code: z.string().min(1), description: z.string().min(1), unitCode: z.number() }),
   ),
@@ -74,7 +65,19 @@ function readPayload(payload: unknown) {
     throw new SigningDataIncompleteError(detail.error.issues.map((i) => pathOf(i.path)));
   }
   const body = base.value;
-  return { draft: toInvoiceDraft(body), ...detail.data };
+  // An innominado receiver has no D2 data to put in the XML yet (see mapInvoiceToXmlInput).
+  if (body.receiver.kind !== 'named') throw new SigningDataIncompleteError(['receiver.name']);
+  const { ruc, name, address, houseNumber, districtCode, districtDescription } = body.receiver;
+  const { cityCode, cityDescription } = body.receiver;
+  const receiver: XmlReceiver = {
+    ruc,
+    name,
+    ...(address === undefined ? {} : { address }),
+    ...(houseNumber === undefined ? {} : { houseNumber }),
+    ...(districtCode === undefined ? {} : { districtCode, districtDescription }),
+    ...(cityCode === undefined ? {} : { cityCode, cityDescription }),
+  };
+  return { draft: toInvoiceDraft(body), receiver, ...detail.data };
 }
 
 const first = <T>(rows: T[]): T | undefined => rows.at(0);
@@ -218,14 +221,7 @@ export function createDrizzleSigningStore({
               },
               issuedAt: document.issuedAt,
               receiver: {
-                ruc: receiver.ruc,
-                name: receiver.name,
-                address: receiver.address,
-                houseNumber: receiver.houseNumber,
-                districtCode: receiver.districtCode,
-                districtDescription: receiver.districtDescription,
-                cityCode: receiver.cityCode,
-                cityDescription: receiver.cityDescription,
+                ...receiver,
               },
               lines: items.map((i) => ({
                 code: i.code,

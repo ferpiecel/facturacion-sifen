@@ -29,12 +29,13 @@ export interface XmlReceiver {
   /** `<base>-<dv>`. */
   ruc: string;
   name: string;
-  address: string;
-  houseNumber: string;
-  districtCode: number;
-  districtDescription: string;
-  cityCode: number;
-  cityDescription: string;
+  /** D213-D223 are optional (0-1); the draft rules decide which combinations reach this mapper. */
+  address?: string;
+  houseNumber?: string;
+  districtCode?: number;
+  districtDescription?: string;
+  cityCode?: number;
+  cityDescription?: string;
 }
 
 export interface InvoiceXmlContext {
@@ -54,6 +55,31 @@ export interface InvoiceXmlContext {
   lines: readonly { code: string; description: string; unitCode: number }[];
   /** Overrides the test literal (ADR-0012 D2). */
   testLiteral?: string;
+}
+
+/**
+ * D213-D223 for xmlgen, only for what is informed. B2F (D202 = 4) never carries department,
+ * district or city: the caller passes no department and the city/district are dropped here.
+ */
+function receiverAddress(receiver: XmlReceiver, departmentCode: number | undefined) {
+  if (receiver.address === undefined) return {};
+  const withGeo = departmentCode !== undefined;
+  return {
+    direccion: receiver.address,
+    ...(receiver.houseNumber === undefined ? {} : { numeroCasa: receiver.houseNumber }),
+    ...(withGeo
+      ? {
+          departamento: departmentCode,
+          departamentoDescripcion: getDepartmentDescription(departmentCode),
+        }
+      : {}),
+    ...(withGeo && receiver.districtCode !== undefined
+      ? { distrito: receiver.districtCode, distritoDescripcion: receiver.districtDescription }
+      : {}),
+    ...(withGeo && receiver.cityCode !== undefined
+      ? { ciudad: receiver.cityCode, ciudadDescripcion: receiver.cityDescription }
+      : {}),
+  };
 }
 
 /** Inverse of `asuncionTimestamp`: the instant whose Paraguay local time is `local` (`AAAA-MM-DDThh:mm:ss`). */
@@ -99,9 +125,6 @@ export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext
   const total = draft.items.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0);
   const operationType = { B2B: 1, B2C: 2, B2G: 3, B2F: 4 }[draft.operationType];
   const { departmentCode } = draft.location;
-  // Interim: the optional address block reaches this mapper in the next slice (HU-E5-08, T3).
-  if (departmentCode === undefined)
-    throw new InvoiceXmlError('the receiver department is required');
 
   return {
     params: {
@@ -160,14 +183,7 @@ export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext
         ruc: receiver.ruc,
         razonSocial: receiver.name,
         tipoOperacion: operationType,
-        direccion: receiver.address,
-        numeroCasa: receiver.houseNumber,
-        departamento: departmentCode,
-        departamentoDescripcion: getDepartmentDescription(departmentCode),
-        distrito: receiver.districtCode,
-        distritoDescripcion: receiver.districtDescription,
-        ciudad: receiver.cityCode,
-        ciudadDescripcion: receiver.cityDescription,
+        ...receiverAddress(receiver, draft.operationType === 'B2F' ? undefined : departmentCode),
         pais: 'PRY',
         paisDescripcion: 'Paraguay',
         tipoContribuyente: 1,

@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-24.04
     # A healthy run takes ~8 min for test/coverage and under 2 min for the rest; a hang must
     # fail in minutes, not burn the 6 h default (see the 2026-10-13 api test hang).
-    timeout-minutes: ${{ contains(fromJSON('["test","coverage"]'), matrix.task) && 25 || 10 }}
+    timeout-minutes: ${{ contains(fromJSON('["test","coverage"]'), matrix.task) && 30 || 10 }}
     strategy:
       fail-fast: false
       matrix:

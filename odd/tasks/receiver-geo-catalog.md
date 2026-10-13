@@ -1,6 +1,6 @@
 # Receiver address contract and geographic catalog
 
-- Feature: `receiver-geo-catalog` · Refs: none in the backlog (integration gap found while documenting `POST /v1/documents`)
+- Feature: `receiver-geo-catalog` · Refs: HU-E5-08 (F2; integration gap found while documenting `POST /v1/documents`)
 - Engram mirror: `odd/receiver-geo-catalog/tasks`
 - TDD: strict (source: `openspec/config.yaml`, `strict_tdd: true`) · runner: Vitest (`pnpm --filter @sifen/api exec vitest run`, thresholds 85%)
 - Delivery: `ask-on-risk`, chain `stacked-to-main`; each PR about 400 changed lines or less (advisory), generated data declared per PR.
@@ -67,7 +67,7 @@ Out: Nota de Remision address rules, emission of other document types, transport
 - [ ] T1 ADR-0017: receiver address contract and geographic catalog ownership (resolve the two open decisions).
 - [ ] T2 Contract alignment: optional address block, conditional rules, B2F rules, `location.departmentCode` optional; domain tests first.
 - [ ] T3 Confirm how the TIPS builder emits B2F and optional address; adjust `invoice-xml.ts` so `cDepRec` and `cCiuRec` are omitted for B2F and the receiver block omits absent fields. XSD check on the generated XML.
-- [ ] T4 Vendor the catalog (generation script or reviewed conversion, checksum test, README entry) and remove the stale claim in `department.ts`.
+- [x] T4 Vendor the catalog (generation script or reviewed conversion, checksum test, README entry) and remove the stale claim in `department.ts`.
 - [ ] T5 Catalog validation: district and city exist, city belongs to district, district belongs to department, descriptions match codes; new `ValidationError` rules with SIFEN codes.
 - [ ] T6 Read endpoints with OpenAPI regeneration (`pnpm --filter @sifen/api openapi`) and Fastify `inject()` e2e tests.
 - [ ] T7 Docs: update `docs/integracion/emision.md` (address optional, B2F, catalog endpoints), `docs/api`, and the PR descriptions.
@@ -109,4 +109,10 @@ touch 2 or more non-trivial files and the generated XML path, so they are expect
 
 ## Checks and evidence
 
+- T4 (slice B): `packages/sifen-xsd/scripts/build-geo-catalog.ts` + `geo-catalog.ts` (pure parsing, unit tested; RED first for parsing and `refresh-xsd` keeping datasets). Dataset 18 departments / 272 districts / 6766 cities, department names equal `Departamentos_v141.xsd`. Workbook not committed (no explicit license); pinned by SHA-256. The 2023 MD5 PDF (`80733BB1C4834C9C2ABBBF3C194D1566`) does not cover the 2025 file. Existing fixtures use city 3432 / district 145, which exist in the table.
 - None run yet. Pending: Prevalidador confirmation for B2F and optional address (T8).
+
+## Debt (slice B review, input is SHA-pinned)
+
+- Zip reader: no `maxOutputLength` on inflate, no ZIP64 or CRC check.
+- Sheet parser: phonetic runs (`rPh`) in shared strings and numeric XML entities are not handled.

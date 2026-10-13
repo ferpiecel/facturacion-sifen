@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
+import { describe, expect, it, vi } from 'vitest';
 import { validateXml } from '@sifen/sifen-xsd';
 import { TipsDeXmlBuilder } from '@sifen/sifen-tips';
 import { createEstablishment } from '../../fiscal-config/domain/establishment.js';
@@ -256,6 +257,115 @@ describe('generateInvoiceXml', () => {
     await expect(generateInvoiceXml(broken, draft, context('test'))).rejects.toThrow(
       InvoiceXmlError,
     );
+  });
+});
+
+describe('receiver address block (D213-D223)', () => {
+  const ADDRESS_TAGS = [
+    'dDirRec',
+    'dNumCasRec',
+    'cDepRec',
+    'dDesDepRec',
+    'cDisRec',
+    'dDesDisRec',
+    'cCiuRec',
+    'dDesCiuRec',
+  ];
+  const withoutAddress = (ctx: InvoiceXmlContext): InvoiceXmlContext => ({
+    ...ctx,
+    receiver: { ruc: ctx.receiver.ruc, name: ctx.receiver.name },
+  });
+  const noAddressDraft: InvoiceDraft = {
+    ...draft,
+    receiver: { kind: 'named', isPublicEntity: false },
+    location: {},
+  };
+
+  it('emits the whole address block when the receiver has one', async () => {
+    const { xml } = await generateInvoiceXml(builder, draft, context('production'));
+
+    for (const tag of ADDRESS_TAGS) expect(xml).toContain(`<${tag}>`);
+  });
+
+  it.each(['B2B', 'B2C'] as const)(
+    'omits every address field and stays XSD-valid for a receiver without address (%s)',
+    async (operationType) => {
+      const { xml } = await generateInvoiceXml(
+        builder,
+        { ...noAddressDraft, operationType },
+        withoutAddress(context('production')),
+      );
+
+      for (const tag of ADDRESS_TAGS) expect(xml).not.toContain(`<${tag}>`);
+      expect(validateXml(xml, 'siRecepDE').errors.map((e) => e.message)).toEqual([
+        MISSING_SIGNATURE,
+      ]);
+    },
+  );
+
+  it('keeps the address but omits department and city for B2F (D202 = 4)', () => {
+    const b2f: InvoiceDraft = {
+      ...draft,
+      operationType: 'B2F',
+      receiver: {
+        kind: 'named',
+        isPublicEntity: false,
+        address: { street: 'Avda Prueba', houseNumber: '100' },
+      },
+      location: {},
+    };
+
+    const { data } = mapInvoiceToXmlInput(b2f, context('production'));
+
+    expect(data.cliente).toMatchObject({ direccion: 'Avda Prueba', numeroCasa: '100' });
+    expect(data.cliente).not.toHaveProperty('departamento');
+    expect(data.cliente).not.toHaveProperty('ciudad');
+  });
+
+  it('keeps the district for B2F: only D219 and D223 are forbidden', () => {
+    const b2f: InvoiceDraft = {
+      ...draft,
+      operationType: 'B2F',
+      receiver: {
+        kind: 'named',
+        isPublicEntity: false,
+        address: { street: 'Avda Prueba', houseNumber: '100' },
+      },
+      location: {},
+    };
+
+    const { data } = mapInvoiceToXmlInput(b2f, context('production'));
+
+    expect(data.cliente).toMatchObject({
+      distrito: 143,
+      distritoDescripcion: 'DOMINGO MARTINEZ DE IRALA',
+    });
+  });
+
+  it('emits the same bytes as before the optional address for a fully informed receiver', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-30T13:00:05Z'));
+    try {
+      const { xml } = await generateInvoiceXml(builder, draft, context('production'));
+
+      expect(createHash('sha256').update(xml).digest('hex')).toBe(
+        'e12a7329daa6124ed0c85b9aefabe19c1c205966d56a1a7da3bfe6503566cd66',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('omits the optional district while keeping department and city', () => {
+    const ctx = context('production');
+    const rest = Object.fromEntries(
+      Object.entries(ctx.receiver).filter(([k]) => !k.startsWith('district')),
+    ) as typeof ctx.receiver;
+
+    const { data } = mapInvoiceToXmlInput(draft, { ...ctx, receiver: rest });
+
+    expect(data.cliente).not.toHaveProperty('distrito');
+    expect(data.cliente).toMatchObject({ departamento: 11, ciudad: 3344 });
   });
 });
 

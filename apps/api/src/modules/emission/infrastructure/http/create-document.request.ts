@@ -32,30 +32,64 @@ const digits = (max: number) =>
 const code = (length: number) => z.string().regex(new RegExp(`^\\d{${String(length)}}$`));
 
 const receiver = z.discriminatedUnion('kind', [
-  z.object({
-    kind: z.literal('named'),
-    ruc: z.string().refine((value) => {
-      try {
-        parseRuc(value);
-        return true;
-      } catch {
-        return false;
+  z
+    .object({
+      kind: z.literal('named'),
+      ruc: z.string().refine((value) => {
+        try {
+          parseRuc(value);
+          return true;
+        } catch {
+          return false;
+        }
+      }, 'Receiver RUC is not a valid RUC (base-DV)'),
+      isPublicEntity: z.boolean().default(false),
+      /** dNomRec (D109): tdNombre, 4..255 (DE_Types_v150.xsd:2242). */
+      name: text(255, 4),
+      /**
+       * Address block (D213-D223), all optional (0-1): the cross-field rules (house number, department,
+       * city, B2F) live in `validateInvoiceDraft`; here only the pairs that SIFEN ties together.
+       */
+      /** dDirRec (D213): tdDirec, up to 255 (:2206). */
+      address: text(255).optional(),
+      /** dNumCasRec (D218): tdNumCas, integer >= 0 of up to 6 digits (:2217), kept as text. */
+      houseNumber: z
+        .string()
+        .regex(/^\d{1,6}$/, 'House number must be 1 to 6 digits')
+        .optional(),
+      /** cDisRec / dDesDisRec (D221/D222): tDistrito 4 digits (:1789), description 1..30 (:1801). */
+      districtCode: digits(4).optional(),
+      districtDescription: text(30).optional(),
+      /** cCiuRec / dDesCiuRec (D223/D224): tCiudad 5 digits (:1764), description up to 30 (:1776). */
+      cityCode: digits(5).optional(),
+      cityDescription: text(30).optional(),
+    })
+    .superRefine((receiver, ctx) => {
+      if (
+        receiver.address === undefined &&
+        (receiver.houseNumber ?? receiver.districtCode ?? receiver.cityCode) !== undefined
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['address'],
+          message: 'The address is required when house number, district or city are informed',
+        });
       }
-    }, 'Receiver RUC is not a valid RUC (base-DV)'),
-    isPublicEntity: z.boolean().default(false),
-    /** dNomRec (D109): tdNombre, 4..255 (DE_Types_v150.xsd:2242). */
-    name: text(255, 4),
-    /** dDirRec (D110): tdDirec, up to 255 (:2206). */
-    address: text(255),
-    /** dNumCasRec (D111): tdNumCas, integer >= 0 of up to 6 digits (:2217), kept as text. */
-    houseNumber: z.string().regex(/^\d{1,6}$/, 'House number must be 1 to 6 digits'),
-    /** cDisRec / dDesDisRec (D113/D114): tDistrito 4 digits (:1789), description 1..30 (:1801). */
-    districtCode: digits(4),
-    districtDescription: text(30),
-    /** cCiuRec / dDesCiuRec (D115/D116): tCiudad 5 digits (:1764), description up to 30 (:1776). */
-    cityCode: digits(5),
-    cityDescription: text(30),
-  }),
+      const pairs = [
+        ['districtCode', 'districtDescription'],
+        ['cityCode', 'cityDescription'],
+      ] as const;
+      for (const [code, description] of pairs) {
+        if ((receiver[code] === undefined) !== (receiver[description] === undefined)) {
+          const missing = receiver[code] === undefined ? code : description;
+          ctx.addIssue({
+            code: 'custom',
+            path: [missing],
+            message: `${code} and ${description} must be informed together`,
+          });
+        }
+      }
+    }),
   z.object({
     kind: z.literal('unnamed'),
     ruc: z.never({ error: 'An unnamed receiver must not carry a RUC' }).optional(),
@@ -90,7 +124,8 @@ export const createDocumentSchema = z.object({
     )
     .max(MAX_ITEMS),
   roundingPyg: z.number().default(0),
-  location: z.object({ departmentCode: z.number() }),
+  /** cDepRec (D219): the receiver department, required with an address unless B2F. */
+  location: z.object({ departmentCode: z.number().optional() }).default({}),
   currency: z.literal('PYG').default('PYG'),
 });
 
@@ -120,7 +155,7 @@ export function parseCreateDocument(
   };
 }
 
-/** The domain view of the body. */
+/** The domain view of the body: the address block is present only when the receiver informs it. */
 export function toInvoiceDraft(body: CreateDocumentBody): AcceptInvoiceInput['draft'] {
   const { receiver } = body;
   return {
@@ -129,11 +164,17 @@ export function toInvoiceDraft(body: CreateDocumentBody): AcceptInvoiceInput['dr
         ? {
             kind: 'named',
             isPublicEntity: receiver.isPublicEntity,
-            address: {
-              street: receiver.address,
-              houseNumber: receiver.houseNumber,
-              cityCode: receiver.cityCode,
-            },
+            ...(receiver.address === undefined
+              ? {}
+              : {
+                  address: {
+                    street: receiver.address,
+                    ...(receiver.houseNumber === undefined
+                      ? {}
+                      : { houseNumber: receiver.houseNumber }),
+                    ...(receiver.cityCode === undefined ? {} : { cityCode: receiver.cityCode }),
+                  },
+                }),
           }
         : { kind: 'unnamed' },
     operationType: body.operationType,

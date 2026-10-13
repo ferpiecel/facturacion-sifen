@@ -38,7 +38,7 @@ Idempotency-Key: <valor único por documento>
 | `receiver` | objeto | Ver [Receptor](#receptor) |
 | `items` | array | De 1 a 999 ítems. Ver [Ítems](#ítems) |
 | `roundingPyg` | entero | De 0 a 49. Por defecto 0. Ver [Montos y redondeo](#montos-y-redondeo) |
-| `location.departmentCode` | entero | Departamento **del receptor**, de la tabla de [códigos geográficos](#códigos-geográficos) |
+| `location.departmentCode` | entero | Opcional. Departamento **del receptor**, de la tabla de [códigos geográficos](#códigos-geográficos). Obligatorio cuando el receptor informa dirección, salvo en `B2F`, donde no debe informarse. Se ignora con un receptor innominado |
 | `currency` | string | Solo `PYG`. Por defecto `PYG` |
 
 ### Receptor
@@ -50,10 +50,12 @@ Receptor identificado (`kind: "named"`):
 | `ruc` | RUC con dígito verificador, formato `base-DV` |
 | `isPublicEntity` | Booleano, por defecto `false`. Si es `true`, `operationType` debe ser `B2G` |
 | `name` | De 4 a 255 caracteres |
-| `address` | Hasta 255 caracteres |
-| `houseNumber` | Texto de 1 a 6 dígitos |
-| `districtCode` / `districtDescription` | Código entero de 1 a 9999 y descripción de hasta 30 caracteres |
-| `cityCode` / `cityDescription` | Código entero de 1 a 99999 y descripción de hasta 30 caracteres |
+| `address` | Opcional, hasta 255 caracteres. El bloque de dirección es todo o nada: `houseNumber`, `districtCode`, `cityCode` y `location.departmentCode` no se aceptan sin `address`. Obligatorio con `B2F` (`receiver-address-required`) |
+| `houseNumber` | Texto de 1 a 6 dígitos. Obligatorio si hay `address` (`receiver-house-number-required`) |
+| `districtCode` / `districtDescription` | Opcionales, siempre juntos. Código entero de 1 a 9999 y descripción de hasta 30 caracteres |
+| `cityCode` / `cityDescription` | Siempre juntos. Código entero de 1 a 99999 y descripción de hasta 30 caracteres. Con `address` son obligatorios salvo en `B2F`, donde no deben informarse (`receiver-city-required`, `receiver-city-not-allowed`) |
+
+Con `B2F` se rechaza `location.departmentCode` (`receiver-department-not-allowed`) y `cityCode`. Con otra operación y `address`, el departamento es obligatorio (`receiver-department-required`).
 
 Receptor innominado (`kind: "unnamed"`): no lleva `ruc` ni `name`. Se rechaza si el total neto es de 7.000.000 Gs o más.
 
@@ -61,7 +63,7 @@ Receptor innominado (`kind: "unnamed"`): no lleva `ruc` ni `name`. Se rechaza si
 
 | Dato | Qué valida la plataforma | Qué debe hacer su sistema |
 |---|---|---|
-| `location.departmentCode` | Debe estar en la tabla oficial de 20 departamentos; si no, responde `422` con `rule: "department-code"`. La descripción la completa la plataforma | Enviar el código del departamento del receptor |
+| `location.departmentCode` | Debe estar en la tabla oficial de 20 departamentos; si no, responde `422` con `rule: "department-code"`. La descripción la completa la plataforma | Enviar el código del departamento del receptor cuando informe dirección (no en `B2F`) |
 | `receiver.districtCode` y `receiver.cityCode` | Solo el formato (entero dentro del rango). **No se cruzan contra la tabla oficial de distritos y ciudades** ni entre sí, porque esa tabla aún no está cargada en la plataforma | Enviar los códigos y descripciones **tal como figuran en las tablas de la DNIT** (Manual Técnico v150, tablas 2.1 y 2.2) |
 | `districtDescription` y `cityDescription` | Solo la longitud. Se copian al XML sin verificar | Enviar la descripción oficial que corresponde al código |
 

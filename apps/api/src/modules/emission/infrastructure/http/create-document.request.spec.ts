@@ -59,17 +59,51 @@ describe('parseCreateDocument', () => {
     });
   });
 
+  it('requires receiver.name for a named receiver', () => {
+    expect(fields({ ...BODY, receiver: without(NAMED, 'name') })).toContain('receiver.name');
+  });
+
   it.each([
-    'name',
-    'address',
-    'houseNumber',
-    'districtCode',
-    'districtDescription',
-    'cityCode',
-    'cityDescription',
-  ])('requires receiver.%s for a named receiver', (key) => {
-    const receiver = without(NAMED, key);
-    expect(fields({ ...BODY, receiver })).toContain(`receiver.${key}`);
+    ['houseNumber'],
+    ['districtCode', 'districtDescription'],
+    ['cityCode', 'cityDescription'],
+    [
+      'address',
+      'houseNumber',
+      'districtCode',
+      'districtDescription',
+      'cityCode',
+      'cityDescription',
+    ],
+  ])('treats %s as optional (D213-D223 occur 0-1)', (...keys) => {
+    const receiver = Object.fromEntries(Object.entries(NAMED).filter(([k]) => !keys.includes(k)));
+    expect(parseCreateDocument({ ...BODY, receiver }).ok).toBe(true);
+  });
+
+  it('accepts a named receiver with no address block and no location', () => {
+    const receiver = { kind: 'named', ruc: NAMED.ruc, name: NAMED.name };
+    const rest = without(BODY, 'location');
+    expect(parseCreateDocument({ ...rest, receiver }).ok).toBe(true);
+  });
+
+  it.each(['houseNumber', 'districtCode', 'cityCode'])(
+    'rejects receiver.%s without receiver.address (the block is all or nothing)',
+    (key) => {
+      expect(fields({ ...BODY, receiver: without(NAMED, 'address') })).toContain(
+        'receiver.address',
+      );
+      expect(key in NAMED).toBe(true);
+    },
+  );
+
+  it.each([
+    ['districtCode', 'districtDescription'],
+    ['cityCode', 'cityDescription'],
+  ])('requires %s and %s together (D221/D222, D223/D224)', (code, description) => {
+    expect(fields({ ...BODY, receiver: without(NAMED, description) })).toContain(
+      `receiver.${description}`,
+    );
+    expect(fields({ ...BODY, receiver: without(NAMED, code) })).toContain(`receiver.${code}`);
   });
 
   it.each(['code', 'description', 'unitCode'])('requires items[0].%s', (key) => {
@@ -149,6 +183,14 @@ describe('toInvoiceDraft', () => {
       address: { street: 'Av. Mariscal Lopez', houseNumber: '123', cityCode: 1 },
     });
     expect(draft.location).toEqual({ departmentCode: 11 });
+  });
+
+  it('leaves the address out when the receiver has none', () => {
+    const receiver = { kind: 'named', ruc: NAMED.ruc, name: NAMED.name };
+    const draft = draftOf({ ...BODY, receiver, location: {} });
+
+    expect(draft.receiver).toEqual({ kind: 'named', isPublicEntity: false });
+    expect(draft.location).toEqual({});
   });
 
   it('feeds the same draft to the acceptance use case', () => {

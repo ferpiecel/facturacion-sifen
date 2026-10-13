@@ -986,13 +986,7 @@
                 "required": [
                   "kind",
                   "ruc",
-                  "name",
-                  "address",
-                  "houseNumber",
-                  "districtCode",
-                  "districtDescription",
-                  "cityCode",
-                  "cityDescription"
+                  "name"
                 ]
               },
               {
@@ -1057,15 +1051,13 @@
             "type": "number"
           },
           "location": {
+            "default": {},
             "type": "object",
             "properties": {
               "departmentCode": {
                 "type": "number"
               }
-            },
-            "required": [
-              "departmentCode"
-            ]
+            }
           },
           "currency": {
             "default": "PYG",
@@ -1078,8 +1070,7 @@
           "expeditionPoint",
           "operationType",
           "receiver",
-          "items",
-          "location"
+          "items"
         ]
       },
       "DocumentAccepted": {

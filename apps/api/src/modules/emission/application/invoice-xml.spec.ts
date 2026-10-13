@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
+import { describe, expect, it, vi } from 'vitest';
 import { validateXml } from '@sifen/sifen-xsd';
 import { TipsDeXmlBuilder } from '@sifen/sifen-tips';
 import { createEstablishment } from '../../fiscal-config/domain/establishment.js';
@@ -296,11 +297,13 @@ describe('receiver address block (D213-D223)', () => {
       );
 
       for (const tag of ADDRESS_TAGS) expect(xml).not.toContain(`<${tag}>`);
-      expect(validateXml(xml, 'siRecepDE').errors).toHaveLength(1);
+      expect(validateXml(xml, 'siRecepDE').errors.map((e) => e.message)).toEqual([
+        MISSING_SIGNATURE,
+      ]);
     },
   );
 
-  it('keeps the address but omits department, district and city for B2F (D202 = 4)', () => {
+  it('keeps the address but omits department and city for B2F (D202 = 4)', () => {
     const b2f: InvoiceDraft = {
       ...draft,
       operationType: 'B2F',
@@ -317,7 +320,40 @@ describe('receiver address block (D213-D223)', () => {
     expect(data.cliente).toMatchObject({ direccion: 'Avda Prueba', numeroCasa: '100' });
     expect(data.cliente).not.toHaveProperty('departamento');
     expect(data.cliente).not.toHaveProperty('ciudad');
-    expect(data.cliente).not.toHaveProperty('distrito');
+  });
+
+  it('keeps the district for B2F: only D219 and D223 are forbidden', () => {
+    const b2f: InvoiceDraft = {
+      ...draft,
+      operationType: 'B2F',
+      receiver: {
+        kind: 'named',
+        isPublicEntity: false,
+        address: { street: 'Avda Prueba', houseNumber: '100' },
+      },
+      location: {},
+    };
+
+    const { data } = mapInvoiceToXmlInput(b2f, context('production'));
+
+    expect(data.cliente).toMatchObject({
+      distrito: 143,
+      distritoDescripcion: 'DOMINGO MARTINEZ DE IRALA',
+    });
+  });
+
+  it('emits the same bytes as before the optional address for a fully informed receiver', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-30T13:00:05Z'));
+    try {
+      const { xml } = await generateInvoiceXml(builder, draft, context('production'));
+
+      expect(createHash('sha256').update(xml).digest('hex')).toBe(
+        'e12a7329daa6124ed0c85b9aefabe19c1c205966d56a1a7da3bfe6503566cd66',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('omits the optional district while keeping department and city', () => {

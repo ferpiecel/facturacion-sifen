@@ -14,6 +14,7 @@ import {
   type DatabaseHandle,
 } from '@sifen/db';
 import { buildCdc } from '../domain/cdc.js';
+import { validateInvoiceDraft } from '../domain/invoice-draft.js';
 import {
   EstablishmentContactMissingError,
   SigningDataIncompleteError,
@@ -212,6 +213,25 @@ describe('DrizzleSigningStore', () => {
       expect(loaded.draft.receiver).toEqual({ kind: 'named', isPublicEntity: false });
       expect(loaded.draft.location).toEqual({});
       expect(loaded.context.receiver).toEqual({ ruc: '80000005-6', name: 'Receptor Prueba SA' });
+    });
+
+    it('re-parses an old full named payload into a draft the domain still accepts', async () => {
+      const loaded = asSignable(await storeFor(tenantId).load(tenantId, documentId));
+
+      expect(validateInvoiceDraft(loaded.draft, {})).toEqual([]);
+    });
+
+    it('reports an old unnamed payload that carries the department as incomplete, as before', async () => {
+      await seed({
+        payload: { ...PAYLOAD, receiver: { kind: 'unnamed' }, location: { departmentCode: 11 } },
+      });
+
+      const error = await storeFor(tenantId)
+        .load(tenantId, documentId)
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(SigningDataIncompleteError);
+      expect((error as SigningDataIncompleteError).missing).toContain('receiver.name');
     });
 
     it('is null for an unknown document and for another tenant', async () => {

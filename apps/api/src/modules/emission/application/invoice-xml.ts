@@ -58,8 +58,8 @@ export interface InvoiceXmlContext {
 }
 
 /**
- * D213-D223 for xmlgen, only for what is informed. B2F (D202 = 4) never carries department,
- * district or city: the caller passes no department and the city/district are dropped here.
+ * D213-D223 for xmlgen, only for what is informed. B2F (D202 = 4) never carries department or
+ * city (D219/D223): the caller passes no department and the city is dropped here. The district stays.
  */
 function receiverAddress(receiver: XmlReceiver, departmentCode: number | undefined) {
   if (receiver.address === undefined) return {};
@@ -73,7 +73,7 @@ function receiverAddress(receiver: XmlReceiver, departmentCode: number | undefin
           departamentoDescripcion: getDepartmentDescription(departmentCode),
         }
       : {}),
-    ...(withGeo && receiver.districtCode !== undefined
+    ...(receiver.districtCode !== undefined
       ? { distrito: receiver.districtCode, distritoDescripcion: receiver.districtDescription }
       : {}),
     ...(withGeo && receiver.cityCode !== undefined

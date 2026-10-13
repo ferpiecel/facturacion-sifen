@@ -1,0 +1,132 @@
+import { deflateRawSync } from 'node:zlib';
+import { describe, expect, it } from 'vitest';
+import { parseGeoSheet, readZipEntries, type GeoRow } from '../scripts/geo-catalog.ts';
+
+const crcTable = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+const crc32 = (data: Buffer): number => {
+  let c = 0xffffffff;
+  for (const byte of data) c = (crcTable[(c ^ byte) & 0xff] ?? 0) ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+};
+
+/** Minimal zip writer: `deflated` entries use method 8, the others are stored (method 0). */
+function zip(files: { name: string; data: string; deflated: boolean }[]): Buffer {
+  const locals: Buffer[] = [];
+  const centrals: Buffer[] = [];
+  let offset = 0;
+  for (const file of files) {
+    const raw = Buffer.from(file.data, 'utf8');
+    const body = file.deflated ? deflateRawSync(raw) : raw;
+    const name = Buffer.from(file.name);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(file.deflated ? 8 : 0, 8);
+    local.writeUInt32LE(crc32(raw), 14);
+    local.writeUInt32LE(body.length, 18);
+    local.writeUInt32LE(raw.length, 22);
+    local.writeUInt16LE(name.length, 26);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(file.deflated ? 8 : 0, 10);
+    central.writeUInt32LE(crc32(raw), 16);
+    central.writeUInt32LE(body.length, 20);
+    central.writeUInt32LE(raw.length, 24);
+    central.writeUInt16LE(name.length, 28);
+    central.writeUInt32LE(offset, 42);
+    locals.push(local, name, body);
+    centrals.push(central, name);
+    offset += 30 + name.length + body.length;
+  }
+  const centralBytes = Buffer.concat(centrals);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(files.length, 8);
+  end.writeUInt16LE(files.length, 10);
+  end.writeUInt32LE(centralBytes.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, centralBytes, end]);
+}
+
+describe('readZipEntries', () => {
+  it('reads stored and deflated entries by name', () => {
+    const archive = zip([
+      { name: 'a.txt', data: 'stored text', deflated: false },
+      { name: 'xl/b.xml', data: '<x>deflated ñ</x>'.repeat(20), deflated: true },
+    ]);
+
+    const entries = readZipEntries(archive);
+
+    expect(entries.get('a.txt')?.toString('utf8')).toBe('stored text');
+    expect(entries.get('xl/b.xml')?.toString('utf8')).toBe('<x>deflated ñ</x>'.repeat(20));
+  });
+
+  it('rejects a buffer that is not a zip archive', () => {
+    expect(() => readZipEntries(Buffer.from('not a zip'))).toThrow(/zip/);
+  });
+});
+
+const strings = [
+  'Código',
+  'Departamento',
+  'CAPITAL',
+  "REPUBLICANO 'A'",
+  'ASUNCION (DISTRITO)',
+  'A &amp; B',
+];
+const sharedStrings = `<sst>${strings.map((s) => `<si><t>${s}</t></si>`).join('')}</sst>`.replace(
+  '<si><t>CAPITAL</t></si>',
+  '<si><r><t>CAPI</t></r><r><t>TAL</t></r></si>',
+);
+const cell = (ref: string, value: number | string) =>
+  typeof value === 'string'
+    ? `<c r="${ref}" t="s"><v>${String(strings.indexOf(value))}</v></c>`
+    : `<c r="${ref}"><v>${String(value)}</v></c>`;
+const row = (n: number, cells: [string, number | string][]) =>
+  `<row r="${String(n)}">${cells.map(([col, v]) => cell(`${col}${String(n)}`, v)).join('')}</row>`;
+
+describe('parseGeoSheet', () => {
+  const sheet = `<worksheet><sheetData>
+    ${row(14, [
+      ['B', 'Código'],
+      ['C', 'Departamento'],
+    ])}
+    <row r="15"><c r="B15" s="3"/></row>
+    ${row(16, [
+      ['B', 1],
+      ['C', 'CAPITAL'],
+      ['D', 1],
+      ['E', 'ASUNCION (DISTRITO)'],
+      ['F', 1],
+      ['G', 'A &amp; B'],
+      ['H', 1],
+      ['I', "REPUBLICANO 'A'"],
+    ])}
+    </sheetData></worksheet>`;
+
+  it('skips headers, joins rich-text strings and unescapes entities', () => {
+    expect(parseGeoSheet(sharedStrings, sheet)).toEqual<GeoRow[]>([
+      {
+        departmentCode: 1,
+        departmentName: 'CAPITAL',
+        districtCode: 1,
+        districtName: 'ASUNCION (DISTRITO)',
+        cityCode: 1,
+        cityName: 'A & B',
+      },
+    ]);
+  });
+
+  it('fails when a data row misses a column instead of guessing', () => {
+    const broken = `<worksheet><sheetData>${row(16, [
+      ['B', 1],
+      ['C', 'CAPITAL'],
+      ['D', 1],
+    ])}</sheetData></worksheet>`;
+
+    expect(() => parseGeoSheet(sharedStrings, broken)).toThrow(/row 16/);
+  });
+});

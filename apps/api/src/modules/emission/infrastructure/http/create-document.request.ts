@@ -120,6 +120,29 @@ export function parseCreateDocument(
   };
 }
 
+/** The domain view of the body. */
+export function toInvoiceDraft(body: CreateDocumentBody): AcceptInvoiceInput['draft'] {
+  const { receiver } = body;
+  return {
+    receiver:
+      receiver.kind === 'named'
+        ? {
+            kind: 'named',
+            isPublicEntity: receiver.isPublicEntity,
+            address: {
+              street: receiver.address,
+              houseNumber: receiver.houseNumber,
+              cityCode: receiver.cityCode,
+            },
+          }
+        : { kind: 'unnamed' },
+    operationType: body.operationType,
+    items: body.items as AcceptInvoiceInput['draft']['items'],
+    roundingPyg: body.roundingPyg,
+    location: body.location,
+  };
+}
+
 /** Maps a parsed body onto the use case input (the draft's `vatRate` is checked by the domain). */
 export function toAcceptInvoiceInput(
   body: CreateDocumentBody,
@@ -130,15 +153,6 @@ export function toAcceptInvoiceInput(
     establishmentCode: body.establishment,
     expeditionPointCode: body.expeditionPoint,
     receiverRuc: body.receiver.kind === 'named' ? body.receiver.ruc : null,
-    draft: {
-      receiver:
-        body.receiver.kind === 'named'
-          ? { kind: 'named', isPublicEntity: body.receiver.isPublicEntity }
-          : { kind: 'unnamed' },
-      operationType: body.operationType,
-      items: body.items as AcceptInvoiceInput['draft']['items'],
-      roundingPyg: body.roundingPyg,
-      location: body.location,
-    },
+    draft: toInvoiceDraft(body),
   };
 }

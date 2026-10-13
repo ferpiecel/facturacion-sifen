@@ -40,7 +40,10 @@ export function diffClosure(
     if (!(name in manifest)) drift.added.push(name);
     else if (manifest[name] !== sha256Hex(bytes)) drift.changed.push(name);
   }
-  drift.removed = Object.keys(manifest).filter((name) => !fetched.has(name));
+  // Vendored datasets (geo-catalog.json) are not upstream XSDs: they are never "removed".
+  drift.removed = Object.keys(manifest).filter(
+    (name) => name.endsWith('.xsd') && !fetched.has(name),
+  );
   return drift;
 }
 
@@ -81,13 +84,27 @@ async function fetchClosure(): Promise<Map<string, Buffer>> {
   return closure;
 }
 
-async function writeVendorFiles(closure: Map<string, Buffer>, vendorDir: string): Promise<void> {
+/** New XSD hashes plus the non-XSD entries (datasets) of the previous manifest. */
+export function mergeManifest(
+  previous: ChecksumManifest,
+  xsdHashes: Record<string, string>,
+): Record<string, string> {
+  const datasets = Object.entries(previous).filter(([name]) => !name.endsWith('.xsd'));
+  return { ...xsdHashes, ...Object.fromEntries(datasets) };
+}
+
+async function writeVendorFiles(
+  closure: Map<string, Buffer>,
+  vendorDir: string,
+  previous: ChecksumManifest,
+): Promise<void> {
   await mkdir(vendorDir, { recursive: true });
-  const manifest: Record<string, string> = {};
+  const hashes: Record<string, string> = {};
   for (const [name, bytes] of closure) {
     await writeFile(join(vendorDir, name), bytes);
-    manifest[name] = sha256Hex(bytes);
+    hashes[name] = sha256Hex(bytes);
   }
+  const manifest = mergeManifest(previous, hashes);
   const manifestJson = `${JSON.stringify(manifest, null, 2)}\n`;
   await writeFile(join(vendorDir, 'checksums.json'), manifestJson, 'utf8');
 }
@@ -116,7 +133,7 @@ async function main(): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  await writeVendorFiles(closure, vendorDir);
+  await writeVendorFiles(closure, vendorDir, manifest);
   console.log(`refresh-xsd: wrote ${String(closure.size)} files to ${vendorDir}`);
 }
 

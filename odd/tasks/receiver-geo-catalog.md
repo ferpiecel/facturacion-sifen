@@ -1,10 +1,10 @@
 # Receiver address contract and geographic catalog
 
-- Feature: `receiver-geo-catalog` · Refs: none in the backlog (integration gap found while documenting `POST /v1/documents`)
+- Feature: `receiver-geo-catalog` · Refs: HU-E5-08 (F2; integration gap found while documenting `POST /v1/documents`)
 - Engram mirror: `odd/receiver-geo-catalog/tasks`
 - TDD: strict (source: `openspec/config.yaml`, `strict_tdd: true`) · runner: Vitest (`pnpm --filter @sifen/api exec vitest run`, thresholds 85%)
 - Delivery: `ask-on-risk`, chain `stacked-to-main`; each PR about 400 changed lines or less (advisory), generated data declared per PR.
-- Status: planned, nothing implemented. No source change has been made.
+- Status: slice A is split in two chained PRs (A1: T1 + domain half of T2; A2: rest of T2 + T3); slices B-E pending.
 
 ## Objective
 
@@ -63,11 +63,11 @@ Out: Nota de Remision address rules, emission of other document types, transport
 
 ## Tasks
 
-- [ ] T0 Obtain `CODIGO DE REFERENCIA GEOGRAFICA.xlsx` from the e-Kuatia portal and record its source, date and checksum. **Blocked on a person with portal access.**
-- [ ] T1 ADR-0017: receiver address contract and geographic catalog ownership (resolve the two open decisions).
-- [ ] T2 Contract alignment: optional address block, conditional rules, B2F rules, `location.departmentCode` optional; domain tests first.
+- [x] T0 Obtain the geographic file and record its source, date and checksum. Public download, no login (see Evidence). The file is NOT committed in slice A; it is kept at `/tmp/claude-1000/geo-source/geo.xlsx` for slice B.
+- [x] T1 ADR-0017: receiver address contract and geographic catalog ownership (resolve the two open decisions).
+- [ ] T2 Contract alignment (A1: domain rules and `toInvoiceDraft` mapping done; A2: optional request fields, signing store): optional address block, conditional rules, B2F rules, `location.departmentCode` optional; domain tests first.
 - [ ] T3 Confirm how the TIPS builder emits B2F and optional address; adjust `invoice-xml.ts` so `cDepRec` and `cCiuRec` are omitted for B2F and the receiver block omits absent fields. XSD check on the generated XML.
-- [ ] T4 Vendor the catalog (generation script or reviewed conversion, checksum test, README entry) and remove the stale claim in `department.ts`.
+- [x] T4 Vendor the catalog (generation script or reviewed conversion, checksum test, README entry) and remove the stale claim in `department.ts`.
 - [ ] T5 Catalog validation: district and city exist, city belongs to district, district belongs to department, descriptions match codes; new `ValidationError` rules with SIFEN codes.
 - [ ] T6 Read endpoints with OpenAPI regeneration (`pnpm --filter @sifen/api openapi`) and Fastify `inject()` e2e tests.
 - [ ] T7 Docs: update `docs/integracion/emision.md` (address optional, B2F, catalog endpoints), `docs/api`, and the PR descriptions.
@@ -88,8 +88,9 @@ such in the PR description.
 
 ## Route declaration
 
-Each task will be recorded here as inline or delegated when it starts, with the trigger evidence. T2 and T3
-touch 2 or more non-trivial files and the generated XML path, so they are expected to use one delegated writer.
+- T0: inline (web fetch of one public page, one download).
+- T1: inline (one document plus a one-line README entry).
+- T2, T3: delegated, one writer (writer trigger: 6 non-trivial source files plus their specs); split into A1 and A2 to stay under 400 lines. TDD strict (source: `openspec/config.yaml`), runner Vitest.
 
 ## Acceptance criteria
 
@@ -103,10 +104,23 @@ touch 2 or more non-trivial files and the generated XML path, so they are expect
 
 ## Progress and next step
 
-- Done: gap analysis against Manual Tecnico v150 and NT 003, 010, 014 and 017.
-- Next: T0 (obtain the geographic file) and T1 (ADR). PR A needs neither the file nor a decision on the
-  two open ADR points beyond what is listed above.
+- Done: gap analysis; T0 (file obtained); T1 (ADR-0017 accepted, both open points resolved: catalog endpoints
+  need only a valid API key, dataset goes in `packages/sifen-xsd/vendor`).
+- Next: A2 (rest of T2, T3), then slice B (T4: vendor the file).
 
 ## Checks and evidence
 
-- None run yet. Pending: Prevalidador confirmation for B2F and optional address (T8).
+- T0 source: page `https://www.dnit.gov.py/en/web/e-kuatia/tablas-y-codificaciones` (DNIT, Tablas y codificaciones).
+  File `CÓDIGO DE REFERENCIA GEOGRAFICA_NOVIEMBRE_2025__.xlsx` (single sheet "División Político-Administrativ"),
+  URL `https://www.dnit.gov.py/documents/20123/420592/C%C3%93DIGO+DE+REFERENCIA+GEOGRAFICA_NOVIEMBRE_2025__.xlsx/baf35d49-b6d2-406b-de70-a1d9f63e9e32?t=1769521630085`.
+  Downloaded 2026-10-13, 469941 bytes, SHA-256 `3918fc3517ce0b5ae883648b9316bbb2583c1b49e614d51d8b441dae978abc16`
+  (MD5 `0d817dee1a6a0c307a8fd25140c4f9be`). The page lists only this version. It also links a "Checksum MD5"
+  PDF dated 2023 (older than the file); it was not compared, so integrity against DNIT is unverified.
+- T2 (A1) RED: `invoice-draft.spec.ts` 7 failed | 21 passed before the rules; GREEN after. `pnpm verify` result in the PR.
+- Pending: Prevalidador confirmation for B2F and optional address (T8).
+- T4 (slice B): `packages/sifen-xsd/scripts/build-geo-catalog.ts` + `geo-catalog.ts` (pure parsing, unit tested; RED first for parsing and `refresh-xsd` keeping datasets). Dataset 18 departments / 272 districts / 6766 cities, department names equal `Departamentos_v141.xsd`. Workbook not committed (no explicit license); pinned by SHA-256. The 2023 MD5 PDF (`80733BB1C4834C9C2ABBBF3C194D1566`) does not cover the 2025 file. Existing fixtures use city 3432 / district 145, which exist in the table.
+
+## Debt (slice B review, input is SHA-pinned)
+
+- Zip reader: no `maxOutputLength` on inflate, no ZIP64 or CRC check.
+- Sheet parser: phonetic runs (`rPh`) in shared strings and numeric XML entities are not handled.

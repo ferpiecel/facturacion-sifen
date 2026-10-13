@@ -98,6 +98,10 @@ export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext
   );
   const total = draft.items.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0);
   const operationType = { B2B: 1, B2C: 2, B2G: 3, B2F: 4 }[draft.operationType];
+  const { departmentCode } = draft.location;
+  // Interim: the optional address block reaches this mapper in the next slice (HU-E5-08, T3).
+  if (departmentCode === undefined)
+    throw new InvoiceXmlError('the receiver department is required');
 
   return {
     params: {
@@ -158,8 +162,8 @@ export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext
         tipoOperacion: operationType,
         direccion: receiver.address,
         numeroCasa: receiver.houseNumber,
-        departamento: draft.location.departmentCode,
-        departamentoDescripcion: getDepartmentDescription(draft.location.departmentCode),
+        departamento: departmentCode,
+        departamentoDescripcion: getDepartmentDescription(departmentCode),
         distrito: receiver.districtCode,
         distritoDescripcion: receiver.districtDescription,
         ciudad: receiver.cityCode,

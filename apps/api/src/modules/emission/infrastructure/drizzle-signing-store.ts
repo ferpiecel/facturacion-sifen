@@ -23,9 +23,8 @@ import {
   type SignableDocument,
   type SigningStore,
 } from '../application/ports/signing.port.js';
-import type { InvoiceDraft } from '../domain/invoice-draft.js';
 import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
-import { parseCreateDocument } from './http/create-document.request.js';
+import { parseCreateDocument, toInvoiceDraft } from './http/create-document.request.js';
 
 export interface DrizzleSigningStoreOptions {
   readonly db: Database;
@@ -75,17 +74,7 @@ function readPayload(payload: unknown) {
     throw new SigningDataIncompleteError(detail.error.issues.map((i) => pathOf(i.path)));
   }
   const body = base.value;
-  const draft: InvoiceDraft = {
-    receiver:
-      body.receiver.kind === 'named'
-        ? { kind: 'named', isPublicEntity: body.receiver.isPublicEntity }
-        : { kind: 'unnamed' },
-    operationType: body.operationType,
-    items: body.items as InvoiceDraft['items'],
-    roundingPyg: body.roundingPyg,
-    location: body.location,
-  };
-  return { draft, ...detail.data };
+  return { draft: toInvoiceDraft(body), ...detail.data };
 }
 
 const first = <T>(rows: T[]): T | undefined => rows.at(0);

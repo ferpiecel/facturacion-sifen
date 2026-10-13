@@ -52,8 +52,8 @@ Receptor identificado (`kind: "named"`):
 | `name` | De 4 a 255 caracteres |
 | `address` | Hasta 255 caracteres |
 | `houseNumber` | Texto de 1 a 6 dígitos |
-| `districtCode` / `districtDescription` | Código de 4 dígitos y descripción de hasta 30 caracteres |
-| `cityCode` / `cityDescription` | Código de 5 dígitos y descripción de hasta 30 caracteres |
+| `districtCode` / `districtDescription` | Código entero de 1 a 9999 y descripción de hasta 30 caracteres |
+| `cityCode` / `cityDescription` | Código entero de 1 a 99999 y descripción de hasta 30 caracteres |
 
 Receptor innominado (`kind: "unnamed"`): no lleva `ruc` ni `name`. Se rechaza si el total neto es de 7.000.000 Gs o más.
 
@@ -89,7 +89,7 @@ curl -X POST "$BASE_URL/v1/documents" \
   -d '{
     "establishment": "001",
     "expeditionPoint": "001",
-    "operationType": "B2C",
+    "operationType": "B2B",
     "receiver": {
       "kind": "named",
       "ruc": "4490207-7",

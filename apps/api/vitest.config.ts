@@ -23,13 +23,14 @@ export default defineConfig({
     env: { TZ: 'UTC' },
     // GitHub runners (2 vCPU, shared) ran this suite 2x-4x slower than normal on 2026-10-13; a
     // PGlite-booting spec then crossed 30 s. The job-level timeout bounds a real hang.
-    testTimeout: process.env.CI ? 120_000 : 30_000,
-    hookTimeout: process.env.CI ? 120_000 : 30_000,
+    testTimeout: process.env.CI === 'true' ? 120_000 : 30_000,
+    hookTimeout: process.env.CI === 'true' ? 120_000 : 30_000,
     // A worker that cannot shut down (an unclosed PGlite or socket) must fail the run in
     // seconds instead of keeping the process alive until the CI job is cancelled.
     teardownTimeout: 10_000,
     // In CI, name the handles that keep the process alive when a run does not exit.
-    reporters: process.env.CI ? ['default', 'hanging-process'] : ['default'],
+    reporters:
+      process.env.CI === 'true' ? ['default', 'github-actions', 'hanging-process'] : ['default'],
     coverage: {
       provider: 'v8',
       all: true,

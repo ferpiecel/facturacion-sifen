@@ -16,9 +16,10 @@ jobs:
   quality-gates:
     name: ${{ matrix.task }}
     runs-on: ubuntu-24.04
-    # A healthy run takes ~8 min for test/coverage and under 2 min for the rest; a hang must
+    # Measured: test ~8 min healthy and ~13 min on a slow runner, coverage up to ~20 min, the rest
+    # under 2 min. A hang must
     # fail in minutes, not burn the 6 h default (see the 2026-10-13 api test hang).
-    timeout-minutes: ${{ contains(fromJSON('["test","coverage"]'), matrix.task) && 30 || 10 }}
+    timeout-minutes: ${{ matrix.task == 'coverage' && 40 || matrix.task == 'test' && 30 || 10 }}
     strategy:
       fail-fast: false
       matrix:

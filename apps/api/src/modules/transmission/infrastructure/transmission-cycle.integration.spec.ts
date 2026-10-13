@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { X509Certificate } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import {
@@ -78,6 +78,8 @@ describe('TransmissionCycle end to end', () => {
   let handle: DatabaseHandle;
   let tenantId: string;
   let clock: Date;
+  // `documents.payload` is immutable once stored, so a suite picks it before the row is seeded.
+  let storedPayload: unknown = PAYLOAD;
 
   beforeEach(async () => {
     clock = new Date('2026-10-02T12:00:00Z');
@@ -135,7 +137,7 @@ describe('TransmissionCycle end to end', () => {
       securityCode: '298398000',
       issuedAt: new Date('2026-09-30T13:00:00Z'),
       totalAmount: '10000',
-      payload: PAYLOAD,
+      payload: storedPayload,
     });
   });
 
@@ -209,6 +211,31 @@ describe('TransmissionCycle end to end', () => {
     expect(await cycle.run()).toMatchObject({ signed: 0, assembled: 0, sent: [], polled: [] });
     expect(gateway.callsTo('enviarLote')).toHaveLength(1);
     expect(gateway.callsTo('consultarLote')).toHaveLength(1);
+  });
+
+  describe('unnamed receiver (innominado B2C, stored by an old build)', () => {
+    beforeAll(() => {
+      // Old payload: the unnamed receiver still carries the department the clients used to send.
+      storedPayload = { ...PAYLOAD, operationType: 'B2C', receiver: { kind: 'unnamed' } };
+    });
+    afterAll(() => {
+      storedPayload = PAYLOAD;
+    });
+
+    it('signs and sends a document that was held by this bug', async () => {
+      const gateway = new FakeSifenGateway();
+      gateway.enqueue('enviarLote', sifenScenarios.loteRecibido('4500123'));
+
+      const result = await buildCycle(gateway).run();
+
+      expect(result).toMatchObject({ signed: 1, failures: [] });
+      const submitted = await readDocument();
+      expect(submitted.status).toBe('submitted');
+      expect(submitted.signedXml).toContain('<dNomRec>Sin Nombre</dNomRec>');
+      expect(submitted.signedXml).toContain('<iTipIDRec>5</iTipIDRec>');
+      expect(submitted.signedXml).toMatch(/dNumIDRec=0&/);
+      expect(submitted.signedXml).not.toContain('<dRucRec>');
+    });
   });
 
   /** First send, then 48 h of silence: the lote ends in recovery at 12:11 two days later. */

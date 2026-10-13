@@ -57,7 +57,11 @@ const pathOf = (path: readonly PropertyKey[]): string =>
     '',
   );
 
-function readPayload(payload: unknown) {
+function readPayload(payload: unknown): {
+  draft: ReturnType<typeof toInvoiceDraft>;
+  receiver: XmlReceiver | undefined;
+  items: { code: string; description: string; unitCode: number }[];
+} {
   const base = parseCreateDocument(payload);
   if (!base.ok) throw new SigningDataIncompleteError(base.errors.map((e) => e.field));
   const detail = xmlDetailSchema.safeParse(payload);
@@ -65,8 +69,10 @@ function readPayload(payload: unknown) {
     throw new SigningDataIncompleteError(detail.error.issues.map((i) => pathOf(i.path)));
   }
   const body = base.value;
-  // An innominado receiver has no D2 data to put in the XML yet (see mapInvoiceToXmlInput).
-  if (body.receiver.kind !== 'named') throw new SigningDataIncompleteError(['receiver.name']);
+  // An innominado receiver has no D2 data: the mapper writes the fixed fields (MT v150 D208-D211).
+  if (body.receiver.kind !== 'named') {
+    return { draft: toInvoiceDraft(body), receiver: undefined, ...detail.data };
+  }
   const { ruc, name, address, houseNumber, districtCode, districtDescription } = body.receiver;
   const { cityCode, cityDescription } = body.receiver;
   const receiver: XmlReceiver = {
@@ -220,9 +226,7 @@ export function createDrizzleSigningStore({
                 securityCode: document.securityCode,
               },
               issuedAt: document.issuedAt,
-              receiver: {
-                ...receiver,
-              },
+              ...(receiver === undefined ? {} : { receiver }),
               lines: items.map((i) => ({
                 code: i.code,
                 description: i.description,

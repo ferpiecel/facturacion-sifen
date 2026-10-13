@@ -158,6 +158,16 @@ export function validateInvoiceDraft(
     });
   }
 
+  // D208b / 1319: innominado (D208 = 5) is only valid for B2C (D202 = 2).
+  if (draft.receiver.kind === 'unnamed' && draft.operationType !== 'B2C') {
+    errors.push({
+      field: 'operationType',
+      rule: 'unnamed-receiver-requires-b2c',
+      sifenCode: '1319',
+      message: 'An unnamed receiver is only allowed in B2C operations',
+    });
+  }
+
   // D202b / 1332 (NT 020)
   if (
     draft.receiver.kind === 'named' &&

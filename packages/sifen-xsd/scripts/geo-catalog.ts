@@ -73,9 +73,7 @@ const unescapeXml = (text: string): string =>
 
 function parseSharedStrings(xml: string): string[] {
   return [...xml.matchAll(/<si>([\s\S]*?)<\/si>/g)].map((item) =>
-    unescapeXml(
-      [...item[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((t) => t[1]).join(''),
-    ),
+    unescapeXml([...item[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((t) => t[1]).join('')),
   );
 }
 
@@ -87,10 +85,7 @@ function parseCells(rowXml: string, strings: readonly string[]): Map<string, str
   for (const cell of rowXml.matchAll(/<c r="([A-Z]+)\d+"([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g)) {
     const value = /<v>([\s\S]*?)<\/v>/.exec(optional(cell[3]))?.[1];
     if (value === undefined) continue;
-    cells.set(
-      cell[1],
-      /\bt="s"/.test(cell[2]) ? strings[Number(value)] : value,
-    );
+    cells.set(cell[1], /\bt="s"/.test(cell[2]) ? strings[Number(value)] : value);
   }
   return cells;
 }

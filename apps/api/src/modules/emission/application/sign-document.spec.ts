@@ -35,7 +35,11 @@ const TENANT = '11111111-1111-4111-8111-111111111111';
 const CSC = 'ABCD0000000000000000000000000000';
 
 const draft: InvoiceDraft = {
-  receiver: { kind: 'named', isPublicEntity: false },
+  receiver: {
+    kind: 'named',
+    isPublicEntity: false,
+    address: { street: 'Avda Prueba', houseNumber: '100', cityCode: 3344 },
+  },
   operationType: 'B2B',
   items: [{ quantity: 2, unitPrice: 5000, vatRate: 10 }],
   roundingPyg: 0,

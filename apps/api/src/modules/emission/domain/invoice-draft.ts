@@ -3,9 +3,19 @@ import { DEPARTMENTS } from '../../fiscal-config/domain/department.js';
 /** iTiOpe (D202): 1=B2B, 2=B2C, 3=B2G, 4=B2F. */
 export type OperationType = 'B2B' | 'B2C' | 'B2G' | 'B2F';
 
+/** Receiver address block (D213-D223): optional, except for B2F (D202 = 4). */
+export interface DraftReceiverAddress {
+  /** dDirRec (D213). */
+  street: string;
+  /** dNumCasRec (D218): mandatory when the address is informed. */
+  houseNumber?: string;
+  /** cCiuRec (D223): mandatory when the address is informed, unless B2F. */
+  cityCode?: number;
+}
+
 export type DraftReceiver =
   /** `isPublicEntity`: the receiver RUC belongs to an OEE. MT/NT ship no OEE registry, so the caller resolves it. */
-  | { kind: 'named'; isPublicEntity: boolean }
+  | { kind: 'named'; isPublicEntity: boolean; address?: DraftReceiverAddress }
   /** Innominado (D208 = 5). */
   | { kind: 'unnamed' };
 
@@ -22,7 +32,8 @@ export interface InvoiceDraft {
   items: DraftItem[];
   /** dRedon (F013): rounding discounted from the operation total, in PYG. */
   roundingPyg: number;
-  location: { departmentCode: number };
+  /** cDepRec (D219): the receiver department; mandatory with an address, unless B2F. */
+  location: { departmentCode?: number };
 }
 
 export interface ValidationConfig {
@@ -161,7 +172,21 @@ export function validateInvoiceDraft(
     });
   }
 
-  if (DEPARTMENTS[draft.location.departmentCode] === undefined) {
+  validateReceiverAddress(draft, errors);
+
+  return errors;
+}
+
+/**
+ * Receiver address rules (MT v150 D213-D223, NT 003 1324/1327, NT 014 4470/4478): the block is
+ * all or nothing; B2F requires it and forbids department and city.
+ */
+function validateReceiverAddress(draft: InvoiceDraft, errors: ValidationError[]): void {
+  const address = draft.receiver.kind === 'named' ? draft.receiver.address : undefined;
+  const { departmentCode } = draft.location;
+  const isB2f = draft.operationType === 'B2F';
+
+  if (departmentCode !== undefined && DEPARTMENTS[departmentCode] === undefined) {
     errors.push({
       field: 'location.departmentCode',
       rule: 'department-code',
@@ -169,5 +194,63 @@ export function validateInvoiceDraft(
     });
   }
 
-  return errors;
+  if (address === undefined) {
+    if (isB2f) {
+      errors.push({
+        field: 'receiver.address',
+        rule: 'receiver-address-required',
+        sifenCode: '4478',
+        message: 'The receiver address is required for B2F',
+      });
+    } else if (departmentCode !== undefined) {
+      errors.push({
+        field: 'receiver.address',
+        rule: 'receiver-address-required',
+        message: 'The receiver department and city require the receiver address',
+      });
+    }
+    return;
+  }
+
+  if (address.houseNumber === undefined) {
+    errors.push({
+      field: 'receiver.houseNumber',
+      rule: 'receiver-house-number-required',
+      sifenCode: '4470',
+      message: 'The house number is required when the receiver address is informed',
+    });
+  }
+  if (isB2f) {
+    if (departmentCode !== undefined) {
+      errors.push({
+        field: 'location.departmentCode',
+        rule: 'receiver-department-not-allowed',
+        message: 'The receiver department must not be informed for B2F',
+      });
+    }
+    if (address.cityCode !== undefined) {
+      errors.push({
+        field: 'receiver.cityCode',
+        rule: 'receiver-city-not-allowed',
+        message: 'The receiver city must not be informed for B2F',
+      });
+    }
+    return;
+  }
+  if (departmentCode === undefined) {
+    errors.push({
+      field: 'location.departmentCode',
+      rule: 'receiver-department-required',
+      sifenCode: '1324',
+      message: 'The receiver department is required when the address is informed',
+    });
+  }
+  if (address.cityCode === undefined) {
+    errors.push({
+      field: 'receiver.cityCode',
+      rule: 'receiver-city-required',
+      sifenCode: '1327',
+      message: 'The receiver city is required when the address is informed',
+    });
+  }
 }

@@ -44,7 +44,11 @@ function throwawayMaterial(): { material: LoadedCertificate; certPem: string } {
 }
 
 const draft: InvoiceDraft = {
-  receiver: { kind: 'named', isPublicEntity: false },
+  receiver: {
+    kind: 'named',
+    isPublicEntity: false,
+    address: { street: 'Avda Prueba', houseNumber: '100', cityCode: 3344 },
+  },
   operationType: 'B2B',
   items: [{ quantity: 2, unitPrice: 5000, vatRate: 10 }],
   roundingPyg: 0,

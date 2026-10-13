@@ -50,7 +50,8 @@ export function buildOpenApiDocument() {
       version: '1.0.0',
       description:
         'Electronic invoicing for Paraguay (SIFEN). Authenticate with an API key: `Authorization: Bearer sk_live_...`. ' +
-        'Errors use `{ statusCode, message, errors? }`. Webhook payloads and signatures are described in docs/integracion/webhooks.md.',
+        'Errors use `{ statusCode, message, errors? }`. Webhook payloads and signatures are described in docs/integracion/webhooks.md. ' +
+        'Project documentation (PRD, ADRs, plan, operations) is browsable in the [guides](/docs/guides).',
     },
     paths: {
       '/v1/documents': {

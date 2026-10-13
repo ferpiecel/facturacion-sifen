@@ -47,6 +47,10 @@ describe('GET /docs (e2e, HU-E5-01)', () => {
     expect(JSON.parse(spec.payload)).toEqual(JSON.parse(JSON.stringify(buildOpenApiDocument())));
   });
 
+  it('links to the Markdown guides from the API description', () => {
+    expect(buildOpenApiDocument().info.description).toContain('[guides](/docs/guides)');
+  });
+
   it('does not list its own routes in the integrator spec', () => {
     expect(Object.keys(buildOpenApiDocument().paths).filter((p) => p.startsWith('/docs'))).toEqual(
       [],

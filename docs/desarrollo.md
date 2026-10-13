@@ -16,7 +16,7 @@ pnpm install
 pnpm check            # lint, typecheck, depcruise y tests (los de base de datos usan Docker)
 docker compose up -d  # PostgreSQL 16 y Redis 7
 pnpm build:api        # turbo run build --filter=@sifen/api...: compila también los paquetes de los que depende (p. ej. @sifen/db)
-pnpm --filter @sifen/api start:dev   # API en http://localhost:3000; NODE_ENV=development y PORTAL_ORIGIN=http://localhost:3001
+pnpm --filter @sifen/api start:dev   # API en http://localhost:3000; NODE_ENV=development (PORTAL_ORIGIN=http://localhost:3001 por defecto)
 # Documentación de la API de integradores: http://localhost:3000/docs (spec: /docs/openapi.json)
 ```
 
@@ -55,7 +55,7 @@ pnpm --filter @sifen/web build   # build de producción (descarga las fuentes de
 
 ## Probar el portal de punta a punta
 
-Levanta todo en local con datos de ejemplo: Postgres, Redis, API en el puerto 4000, worker con el simulador y portal en el puerto 3000. El puerto por defecto del portal (`pnpm --filter @sifen/web dev`) es 3001; acá se usa `next dev -p 3000` y `PORTAL_ORIGIN=http://localhost:3000` para que coincidan. Cada bloque va en su propia terminal, desde la raíz del repositorio.
+Levanta todo en local con datos de ejemplo: Postgres, Redis, API en el puerto 3000, worker con el simulador y portal en el puerto 3001 (los valores por defecto: `PORTAL_ORIGIN=http://localhost:3001` en la API y `API_INTERNAL_URL=http://localhost:3000` en el portal). Cada bloque va en su propia terminal, desde la raíz del repositorio.
 
 ```bash
 # 1. Postgres y Redis, migraciones como rol dueño y contraseña de app_login (solo desarrollo)
@@ -70,8 +70,8 @@ pnpm build:api
 # 3. Datos de ejemplo (idempotente; ver abajo)
 NODE_ENV=development OPS_DATABASE_URL="$POSTGRES_URL" pnpm dev:seed
 
-# 4. API en http://localhost:4000 (terminal 1)
-cd apps/api && PORT=4000 NODE_ENV=development PORTAL_ORIGIN=http://localhost:3000 \
+# 4. API en http://localhost:3000 (terminal 1)
+cd apps/api && NODE_ENV=development PORTAL_ORIGIN=http://localhost:3001 \
   DATABASE_URL="postgresql://app_login:app_login@localhost:5432/sifen" node dist/main.js
 
 # 5. Worker con el simulador (terminal 2; solo hace falta para emitir documentos nuevos por la API)
@@ -83,8 +83,8 @@ cd apps/api && NODE_ENV=development SIFEN_GATEWAY=simulator REDIS_URL=redis://lo
   KMS_LOCAL_MASTER_KEY="$(openssl rand -base64 32)" PSC_TRUSTED_ROOTS_PATH=/tmp/dev-roots.pem \
   node dist/worker/worker.js
 
-# 6. Portal en http://localhost:3000 (terminal 3)
-cd apps/web && API_INTERNAL_URL=http://localhost:4000 pnpm exec next dev -p 3000
+# 6. Portal en http://localhost:3001 (terminal 3)
+pnpm --filter @sifen/web dev
 ```
 
 `pnpm dev:seed` crea el partner "Partner Demo", el tenant "Demo SA" (perfil fiscal, establecimiento, punto y timbrado), un usuario `owner`, una API key de prueba y seis documentos: dos aprobados, uno rechazado con mensaje de SIFEN, uno aprobado con observaciones, uno en cola y uno cancelado. Imprime el email, la contraseña y la API key (esta última solo la primera vez: no se puede recuperar; para otra, `pnpm --filter @sifen/api ops apikey:create`). Reglas:
@@ -95,12 +95,12 @@ cd apps/web && API_INTERNAL_URL=http://localhost:4000 pnpm exec next dev -p 3000
 - El tenant de demostración sirve para navegar el portal. Emitir documentos nuevos por la API además exige cargar un certificado y un CSC con el CLI de operación (ver [Operación](operacion.md)); el seed deja la numeración en 6 para que el siguiente documento sea el 7.
 - Los documentos de demostración comparten emisor, timbrado y fecha de emisión del XML (30/09/2026); solo cambian número y receptor.
 
-Primer ingreso en http://localhost:3000/login con `owner@demo.example.com` y `Tigre-Azul-Mesa-2026`. Como el usuario no tiene MFA, el portal pasa a la pantalla de enrolamiento: escaneá el QR con una app TOTP (o cargá el secreto a mano), ingresá el código de 6 dígitos y guardá los diez códigos de recuperación, que no se vuelven a mostrar. La sesión queda iniciada en el tenant "Demo SA". En desarrollo la sesión absoluta dura 20 minutos (`SESSION_ABSOLUTE_TTL_SECONDS`); al vencer, el ingreso siguiente pide el código TOTP. Para repetir el enrolamiento hay que partir de una base limpia.
+Primer ingreso en http://localhost:3001/login con `owner@demo.example.com` y `Tigre-Azul-Mesa-2026`. Como el usuario no tiene MFA, el portal pasa a la pantalla de enrolamiento: escaneá el QR con una app TOTP (o cargá el secreto a mano), ingresá el código de 6 dígitos y guardá los diez códigos de recuperación, que no se vuelven a mostrar. La sesión queda iniciada en el tenant "Demo SA". En desarrollo la sesión absoluta dura 20 minutos (`SESSION_ABSOLUTE_TTL_SECONDS`); al vencer, el ingreso siguiente pide el código TOTP. Para repetir el enrolamiento hay que partir de una base limpia.
 
 Verificación sin navegador (cookies `__Host-` por HTTP funcionan con `curl` sobre `localhost`; el `Origin` debe ser el del portal):
 
 ```bash
-P=http://localhost:3000; O="Origin: $P"
+P=http://localhost:3001; O="Origin: $P"
 curl -s -c jar -b jar -H "$O" -H 'content-type: application/json' \
   -d '{"email":"owner@demo.example.com","password":"Tigre-Azul-Mesa-2026"}' $P/api/auth/login   # {"status":"mfa_enrollment_required"}
 curl -s -c jar -b jar -H "$O" -X POST $P/api/auth/mfa/enroll                                       # {"otpauthUri":"otpauth://totp/...","secret":"..."}

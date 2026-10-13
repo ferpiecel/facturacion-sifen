@@ -10,7 +10,7 @@ export interface AuthHttpConfig {
   readonly trustProxyHops: number;
 }
 
-const DEVELOPMENT_ORIGIN = 'http://localhost:3000';
+const DEVELOPMENT_ORIGIN = 'http://localhost:3001';
 const MAX_PROXY_HOPS = 3;
 
 function parseOrigin(raw: string): string {

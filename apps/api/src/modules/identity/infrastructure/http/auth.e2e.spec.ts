@@ -25,7 +25,7 @@ import { PortalAuthModule } from '../../portal-auth.module.js';
 import { WebhooksModule } from '../../../webhooks/webhooks.module.js';
 import { COOKIE_NAMES } from './auth-cookies.js';
 
-const ORIGIN = 'http://localhost:3000';
+const ORIGIN = 'http://localhost:3001';
 const PASSWORD = 'correct horse battery staple';
 const EMAIL = 'ana@example.com';
 

@@ -19,3 +19,4 @@
 | [0015](0015-tips-libs-emision.md) | xmlgen, qrgen y xmlsign (modo Node) detrás de puertos de emisión | Aceptado |
 | [0016](0016-tenant-transaction-runner-sin-plugin-cls.md) | `TenantTransactionRunner` singleton en vez del plugin transaccional de nestjs-cls | Aceptado |
 | [0017](0017-direccion-del-receptor-y-catalogo-geografico.md) | Dirección del receptor y propiedad del catálogo geográfico | Aceptado |
+| [0018](0018-precision-decimal-en-montos-y-cantidades.md) | Precisión decimal exacta en montos y cantidades | Aceptado |

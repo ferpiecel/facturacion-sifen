@@ -16,6 +16,10 @@ jobs:
   quality-gates:
     name: ${{ matrix.task }}
     runs-on: ubuntu-24.04
+    # Measured: test ~8 min healthy and ~13 min on a slow runner, coverage up to ~20 min, the rest
+    # under 2 min. A hang must
+    # fail in minutes, not burn the 6 h default (see the 2026-10-13 api test hang).
+    timeout-minutes: ${{ matrix.task == 'coverage' && 40 || matrix.task == 'test' && 30 || 10 }}
     strategy:
       fail-fast: false
       matrix:
@@ -64,6 +68,7 @@ jobs:
   db-postgres:
     name: db-postgres
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -95,6 +100,7 @@ jobs:
   worker-redis:
     name: worker-redis
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     # Real Redis for the BullMQ specs that skip themselves without REDIS_URL (unit tests stay Redis-free).
     services:
       redis:

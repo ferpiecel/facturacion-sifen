@@ -3,6 +3,7 @@ import { sha256Hex } from '../scripts/checksums.ts';
 import {
   assertXsdContent,
   diffClosure,
+  mergeManifest,
   extractSchemaLocationNames,
 } from '../scripts/refresh-xsd.ts';
 
@@ -73,6 +74,24 @@ describe('diffClosure', () => {
       changed: ['a.xsd'],
       added: ['c.xsd'],
       removed: ['b.xsd'],
+    });
+  });
+});
+
+describe('non-XSD vendored data', () => {
+  it('does not report vendored datasets as removed upstream files', () => {
+    const manifest = { 'a.xsd': sha256Hex(Buffer.from('A')), 'geo-catalog.json': 'abc' };
+    const fetched = new Map([['a.xsd', Buffer.from('A')]]);
+
+    expect(diffClosure(manifest, fetched).removed).toEqual([]);
+  });
+
+  it('keeps the dataset checksums when the XSD manifest is rewritten', () => {
+    const previous = { 'old.xsd': 'x', 'geo-catalog.json': 'abc' };
+
+    expect(mergeManifest(previous, { 'a.xsd': 'h' })).toEqual({
+      'a.xsd': 'h',
+      'geo-catalog.json': 'abc',
     });
   });
 });

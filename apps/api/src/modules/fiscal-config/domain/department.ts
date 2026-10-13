@@ -4,11 +4,10 @@
  * vendored at packages/sifen-xsd/vendor/Departamentos_v141.xsd
  * (`tDepartamentos` / `tDesDepartamento`), transcribed verbatim.
  *
- * cDisEmi (district, D113) and cCiuEmi (city, D115) reference "Tabla 2.1 –
- * Distritos" / "Tabla 2.2 – Ciudades", which are NOT present anywhere in
- * docs/referencia/dnit or packages/sifen-xsd — only their format/range is
- * declared (tcDisEmi, tcCiuEmi in DE_Types_v150.xsd). District and city
- * validation therefore stays format-only until that table is sourced.
+ * cDisEmi (district, D113) and cCiuEmi (city, D115) reference the DNIT geographic
+ * reference table (Tabla 2.1), vendored as packages/sifen-xsd/vendor/geo-catalog.json
+ * (see its README). District and city validation against it is not wired yet: until then
+ * only their format/range is checked (tcDisEmi, tcCiuEmi in DE_Types_v150.xsd).
  */
 export const DEPARTMENTS: Readonly<Partial<Record<number, string>>> = {
   1: 'CAPITAL',

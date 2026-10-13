@@ -6,5 +6,6 @@
   "Departamentos_v141.xsd": "1de13902a775dce85e124e814f1777dc24ab6f80903b23d3ffe05cdfce16351c",
   "Monedas_v150.xsd": "16520dd42b5a6e463cb9fb84c74b0a5c9c7ca8542c813636bb390accc7ccdd72",
   "Unidades_Medida_v141.xsd": "8a25e5e5decc0540cfdf6adc9fa43a3599ff1e6e5ecbb33e24a202cdf872b9fd",
-  "DE_Types_v150.xsd": "99c5c2ca69eaf56781f8dd4bf6ce779e116ee807293e7eac15d1832634d29150"
+  "DE_Types_v150.xsd": "99c5c2ca69eaf56781f8dd4bf6ce779e116ee807293e7eac15d1832634d29150",
+  "geo-catalog.json": "c3fdd0640f2b8276024a88c68f7dfa591e236144504b5fc7a3177880c06aaf65"
 }

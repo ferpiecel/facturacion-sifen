@@ -20,6 +20,7 @@ pnpm --filter @sifen/api ops apikey:revoke --key-id <key-id>
 pnpm --filter @sifen/api ops fiscal:set --tenant <tenant-id> --ruc 4490207-7 --legal-name "Acme SA" --taxpayer-type juridica --activity 62010:"Programación informática"
 pnpm --filter @sifen/api ops establishment:add --tenant <tenant-id> --code 001 --address "Avda. Siempre Viva 123" --house-number 123 --department 11 --district 145 --district-description "Ciudad del Este" --city 3316 --city-description "Ciudad del Este"
 pnpm --filter @sifen/api ops establishment:contact --tenant <tenant-id> --establishment 001 --phone 0973-000000 --email emisor@empresa.com.py --name "Casa Matriz"
+read -rs PW && printf '%s' "$PW" | pnpm --filter @sifen/api ops user:create --tenant <tenant-id> --email owner@empresa.com.py --name "Ana Pérez" --role owner --password -
 pnpm --filter @sifen/api ops document:release-hold --tenant <tenant-id> --document <document-id>
 pnpm --filter @sifen/api ops document:release-holds --tenant <tenant-id> --reason signing:CertificateNotFoundError
 pnpm --filter @sifen/api ops point:add --tenant <tenant-id> --establishment 001 --code 001
@@ -43,6 +44,20 @@ read -rs P12_PASSWORD && printf '%s' "$P12_PASSWORD" | KMS_LOCAL_MASTER_KEY="<cl
 
 `certificate:revoke --tenant <id> (--id <uuid> | --fingerprint <sha256-hex>) [--env test|production]` revoca un certificado del tenant (`status = 'revoked'`, `revoked_at`) sin tocar el blob sellado, para que los documentos ya firmados sigan siendo verificables. No necesita `KMS_LOCAL_MASTER_KEY` ni las raíces PSC. Es idempotente (si ya estaba revocado lo informa, no cambia la fecha y no audita de nuevo), un certificado de otro tenant se informa como no encontrado y, si la huella existe en ambos ambientes, exige `--env`. Cada revocación efectiva queda en el audit log (`certificate.revoked`, con id, ambiente y huella). Con el certificado revocado la firma falla con `CertificateNotFoundError` y el pipeline retiene los documentos (`signing:CertificateNotFoundError`) hasta cargar uno nuevo con `certificate:add` y liberarlos con `document:release-holds`.
 
+`user:create --tenant <id> --email <email> --name <nombre> --role owner|admin|emisor|lector [--password -]` da de alta un usuario del portal en el tenant. La contraseña solo se lee de stdin con `--password -` (nunca por argv). El MFA no se carga acá: el usuario lo enrola en su primer ingreso al portal. Si la cuenta (email) ya existía, solo se agrega al tenant con el rol indicado y se ignoran `--name` (que igual es obligatorio) y la contraseña.
+
+## Alta de un tenant nuevo
+
+Orden recomendado. Dependencias reales: todo exige que exista el tenant; `establishment:contact` y `point:add` exigen el establecimiento (`--establishment`); `certificate:add` exige `fiscal:set`. El resto (`timbrado:add`, `user:create`) solo exige el tenant, así que su orden es libre:
+
+1. `tenant:create`
+2. `fiscal:set`
+3. `establishment:add` (y `establishment:contact` si faltan teléfono y correo)
+4. `point:add`
+5. `timbrado:add`
+6. `user:create`
+
+Para emitir documentos además hacen falta `apikey:create`, `csc:add` y `certificate:add` (este último exige haber ejecutado antes `fiscal:set`).
 
 ## Worker de transmisión
 

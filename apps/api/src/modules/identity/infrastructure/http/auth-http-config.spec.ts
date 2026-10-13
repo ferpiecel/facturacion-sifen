@@ -20,9 +20,9 @@ describe('loadAuthHttpConfig (portal origin for CSRF, trusted proxy hops)', () =
   );
 
   it.each(['development', 'test'])(
-    'defaults the portal origin to localhost:3000 in %s',
+    'defaults the portal origin to localhost:3001 in %s',
     (NODE_ENV) => {
-      expect(loadAuthHttpConfig({ NODE_ENV }).portalOrigin).toBe('http://localhost:3000');
+      expect(loadAuthHttpConfig({ NODE_ENV }).portalOrigin).toBe('http://localhost:3001');
     },
   );
 

@@ -2,7 +2,7 @@ import { inflateRawSync } from 'node:zlib';
 
 /**
  * Pure parsing for the DNIT "CODIGO DE REFERENCIA GEOGRAFICA" workbook (Tabla 2.1): a minimal
- * zip reader and the sheet parser. No I/O, so it is unit tested; the CLI in
+ * zip reader, the sheet parser and the catalog builder. No I/O, so it is unit tested; the CLI in
  * `build-geo-catalog.ts` wires it to the file system.
  */
 
@@ -138,4 +138,108 @@ export function parseGeoSheet(sharedStringsXml: string, sheetXml: string): GeoRo
     });
   }
   return rows;
+}
+
+export interface GeoCatalog {
+  departments: { code: number; name: string }[];
+  districts: { code: number; departmentCode: number; name: string }[];
+  cities: { code: number; districtCode: number; name: string }[];
+}
+
+/** Registers `code -> value`, failing when the same code appears with a different value. */
+function register<T>(
+  seen: Map<number, T & { name: string }>,
+  label: string,
+  code: number,
+  value: T & { name: string },
+  sameParent: (a: T, b: T) => boolean,
+): void {
+  const previous = seen.get(code);
+  if (previous === undefined) {
+    seen.set(code, value);
+  } else if (previous.name !== value.name || !sameParent(previous, value)) {
+    throw new Error(`${label} ${String(code)} appears with conflicting name or parent`);
+  }
+}
+
+/** Deduplicates the denormalised rows into three sorted tables; inconsistent source data throws. */
+export function buildCatalog(rows: readonly GeoRow[]): GeoCatalog {
+  const departments = new Map<number, { code: number; name: string }>();
+  const districts = new Map<number, { code: number; departmentCode: number; name: string }>();
+  const cities = new Map<number, { code: number; districtCode: number; name: string }>();
+  for (const row of rows) {
+    register(
+      departments,
+      'department',
+      row.departmentCode,
+      {
+        code: row.departmentCode,
+        name: row.departmentName,
+      },
+      () => true,
+    );
+    register(
+      districts,
+      'district',
+      row.districtCode,
+      {
+        code: row.districtCode,
+        departmentCode: row.departmentCode,
+        name: row.districtName,
+      },
+      (a, b) => a.departmentCode === b.departmentCode,
+    );
+    register(
+      cities,
+      'city',
+      row.cityCode,
+      {
+        code: row.cityCode,
+        districtCode: row.districtCode,
+        name: row.cityName,
+      },
+      (a, b) => a.districtCode === b.districtCode,
+    );
+  }
+  const byCode = <T extends { code: number }>(map: Map<number, T>): T[] =>
+    [...map.values()].sort((a, b) => a.code - b.code);
+  return {
+    departments: byCode(departments),
+    districts: byCode(districts),
+    cities: byCode(cities),
+  };
+}
+
+export interface GeoSource {
+  url: string;
+  file: string;
+  downloadedAt: string;
+  sha256: string;
+}
+
+/** Stable text form: metadata first, then one compact tuple per line so diffs stay reviewable. */
+export function serializeCatalog(catalog: GeoCatalog, source: GeoSource): string {
+  const block = (name: string, tuples: unknown[][]): string =>
+    `  "${name}": [\n${tuples.map((t) => `    ${JSON.stringify(t)}`).join(',\n')}\n  ]`;
+  return `{
+  "source": ${JSON.stringify(source)},
+  "departments_columns": ["code", "name"],
+  "districts_columns": ["code", "departmentCode", "name"],
+  "cities_columns": ["code", "districtCode", "name"],
+${[
+  block(
+    'departments',
+    catalog.departments.map((d) => [d.code, d.name]),
+  ),
+  block(
+    'districts',
+    catalog.districts.map((d) => [d.code, d.departmentCode, d.name]),
+  ),
+  block(
+    'cities',
+    catalog.cities.map((c) => [c.code, c.districtCode, c.name]),
+  ),
+].join(',\n')}
+}
+`;
 }

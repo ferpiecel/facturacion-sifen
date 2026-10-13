@@ -1,6 +1,12 @@
 import { deflateRawSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { parseGeoSheet, readZipEntries, type GeoRow } from '../scripts/geo-catalog.ts';
+import {
+  buildCatalog,
+  parseGeoSheet,
+  readZipEntries,
+  serializeCatalog,
+  type GeoRow,
+} from '../scripts/geo-catalog.ts';
 
 const crcTable = Array.from({ length: 256 }, (_, n) => {
   let c = n;
@@ -153,5 +159,88 @@ describe('parseGeoSheet', () => {
     ])}</sheetData></worksheet>`;
 
     expect(() => parseGeoSheet(sharedStrings, broken)).toThrow(/row 16/);
+  });
+});
+
+const rows = (...specs: [number, string, number, string, number, string][]): GeoRow[] =>
+  specs.map(([departmentCode, departmentName, districtCode, districtName, cityCode, cityName]) => ({
+    departmentCode,
+    departmentName,
+    districtCode,
+    districtName,
+    cityCode,
+    cityName,
+  }));
+
+describe('buildCatalog', () => {
+  it('deduplicates the parents repeated on every row and sorts by code', () => {
+    const catalog = buildCatalog(
+      rows(
+        [2, 'CONCEPCION', 2, 'CONCEPCION (MUNICIPIO)', 100, 'LOMA PYTA'],
+        [1, 'CAPITAL', 1, 'ASUNCION (DISTRITO)', 1, 'ASUNCION (DISTRITO)'],
+        [1, 'CAPITAL', 1, 'ASUNCION (DISTRITO)', 1, 'ASUNCION (DISTRITO)'],
+        [2, 'CONCEPCION', 2, 'CONCEPCION (MUNICIPIO)', 99, 'LOMA'],
+      ),
+    );
+
+    expect(catalog.departments).toEqual([
+      { code: 1, name: 'CAPITAL' },
+      { code: 2, name: 'CONCEPCION' },
+    ]);
+    expect(catalog.districts).toEqual([
+      { code: 1, departmentCode: 1, name: 'ASUNCION (DISTRITO)' },
+      { code: 2, departmentCode: 2, name: 'CONCEPCION (MUNICIPIO)' },
+    ]);
+    expect(catalog.cities.map((c) => c.code)).toEqual([1, 99, 100]);
+  });
+
+  it('rejects one code with two names', () => {
+    expect(() =>
+      buildCatalog(rows([1, 'CAPITAL', 1, 'A', 1, 'X'], [1, 'CAPITAL', 1, 'B', 2, 'Y'])),
+    ).toThrow(/district 1/);
+  });
+
+  it('rejects a district code under two departments and a city code under two districts', () => {
+    expect(() => buildCatalog(rows([1, 'D1', 5, 'A', 1, 'X'], [2, 'D2', 5, 'A', 2, 'Y']))).toThrow(
+      /district 5/,
+    );
+    expect(() => buildCatalog(rows([1, 'D1', 5, 'A', 1, 'X'], [1, 'D1', 6, 'B', 1, 'X']))).toThrow(
+      /city 1/,
+    );
+  });
+});
+
+describe('serializeCatalog', () => {
+  const source = {
+    url: 'https://example.test/file.xlsx',
+    file: 'file.xlsx',
+    downloadedAt: '2026-10-13',
+    sha256: 'ab'.repeat(32),
+  };
+
+  it('is deterministic and one entry per line', () => {
+    const a = buildCatalog(rows([1, 'CAPITAL', 1, 'A', 1, 'X'], [2, 'D2', 2, 'B', 2, 'Y']));
+    const b = buildCatalog(rows([2, 'D2', 2, 'B', 2, 'Y'], [1, 'CAPITAL', 1, 'A', 1, 'X']));
+
+    const text = serializeCatalog(a, source);
+
+    expect(text).toBe(serializeCatalog(b, source));
+    expect(text.endsWith('\n')).toBe(true);
+    expect(JSON.parse(text)).toMatchObject({
+      source,
+      departments: [
+        [1, 'CAPITAL'],
+        [2, 'D2'],
+      ],
+      districts: [
+        [1, 1, 'A'],
+        [2, 2, 'B'],
+      ],
+      cities: [
+        [1, 1, 'X'],
+        [2, 2, 'Y'],
+      ],
+    });
+    expect(text.split('\n').length).toBeGreaterThan(10);
   });
 });

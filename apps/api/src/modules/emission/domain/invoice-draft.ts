@@ -168,17 +168,26 @@ export function validateInvoiceDraft(
     });
   }
 
-  // D202b / 1332 (NT 020)
-  if (
-    draft.receiver.kind === 'named' &&
-    draft.receiver.isPublicEntity &&
-    draft.operationType !== 'B2G'
-  ) {
+  // MVP (PO decision 2026-10-14): B2G and B2F cannot be built yet (xmlgen needs public
+  // procurement data or a foreign receiver), so they are rejected before any number is consumed.
+  const unsupportedOperation = draft.operationType === 'B2G' || draft.operationType === 'B2F';
+  if (unsupportedOperation) {
+    errors.push({
+      field: 'operationType',
+      rule: 'operation-type-not-supported',
+      message: `El tipo de operación ${draft.operationType} no está soportado todavía`,
+    });
+  }
+
+  // D202b / 1332 (NT 020). A public-entity receiver needs B2G, which is unsupported for now, so
+  // it cannot be invoiced at all. Skipped with B2G/B2F: they already carry the error above.
+  if (draft.receiver.kind === 'named' && draft.receiver.isPublicEntity && !unsupportedOperation) {
     errors.push({
       field: 'operationType',
       rule: 'public-entity-requires-b2g',
       sifenCode: '1332',
-      message: 'Operation type must be B2G when the receiver is a public entity (OEE)',
+      message:
+        'Un receptor entidad pública (OEE) requiere B2G, que no está soportado todavía: no se puede facturar',
     });
   }
 

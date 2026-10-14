@@ -85,7 +85,53 @@ describe('validateInvoiceDraft', () => {
           sifenCode: '1332',
         }),
       ]);
-      expect(validateInvoiceDraft(draft({ receiver: oee, operationType: 'B2G' }), {})).toEqual([]);
+      expect(rules(draft({ receiver: oee, operationType: 'B2G' }))).not.toContain(
+        'public-entity-requires-b2g',
+      );
+    });
+  });
+
+  describe('operation type support (MVP: B2G and B2F postponed)', () => {
+    const oee = { kind: 'named', isPublicEntity: true, address } as const;
+
+    it.each(['B2G', 'B2F'] as const)('rejects %s as not supported yet', (operationType) => {
+      const errors = validateInvoiceDraft(
+        draft({
+          operationType,
+          receiver:
+            operationType === 'B2F'
+              ? { ...named, address: { street: 'X', houseNumber: '1' } }
+              : named,
+          location: operationType === 'B2F' ? {} : { departmentCode: 1 },
+        }),
+        {},
+      );
+
+      expect(errors).toEqual([
+        expect.objectContaining({
+          field: 'operationType',
+          rule: 'operation-type-not-supported',
+          message: expect.stringContaining('no está soportado'),
+        }),
+      ]);
+    });
+
+    it('reports a single error for a public entity receiver with B2G', () => {
+      expect(rules(draft({ receiver: oee, operationType: 'B2G' }))).toEqual([
+        'operation-type-not-supported',
+      ]);
+    });
+
+    it('says a public entity cannot be invoiced yet when it is sent as B2B', () => {
+      const errors = validateInvoiceDraft(draft({ receiver: oee, operationType: 'B2B' }), {});
+
+      expect(errors).toEqual([
+        expect.objectContaining({
+          rule: 'public-entity-requires-b2g',
+          sifenCode: '1332',
+          message: expect.stringContaining('no se puede facturar'),
+        }),
+      ]);
     });
   });
 
@@ -242,9 +288,12 @@ describe('validateInvoiceDraft', () => {
     const noAddress = { kind: 'named', isPublicEntity: false } as const;
     const optional = (overrides: Partial<InvoiceDraft> = {}) =>
       draft({ receiver: noAddress, location: {}, ...overrides });
+    // B2F is rejected as a whole in the MVP; the address rules are asserted apart from that.
+    const addressErrors = (d: InvoiceDraft) =>
+      validateInvoiceDraft(d, {}).filter((e) => e.rule !== 'operation-type-not-supported');
 
-    it('accepts a named receiver without address for B2B, B2C and B2G', () => {
-      for (const operationType of ['B2B', 'B2C', 'B2G'] as const) {
+    it('accepts a named receiver without address for B2B and B2C', () => {
+      for (const operationType of ['B2B', 'B2C'] as const) {
         expect(validateInvoiceDraft(optional({ operationType }), {})).toEqual([]);
       }
     });
@@ -295,7 +344,7 @@ describe('validateInvoiceDraft', () => {
     });
 
     it('requires an address for B2F (4478)', () => {
-      expect(validateInvoiceDraft(optional({ operationType: 'B2F' }), {})).toEqual([
+      expect(addressErrors(optional({ operationType: 'B2F' }))).toEqual([
         expect.objectContaining({
           field: 'receiver.address',
           rule: 'receiver-address-required',
@@ -305,7 +354,7 @@ describe('validateInvoiceDraft', () => {
     });
 
     it('rejects department and city for B2F (D219/D223 must not be informed)', () => {
-      expect(rules(draft({ operationType: 'B2F' }))).toEqual([
+      expect(addressErrors(draft({ operationType: 'B2F' })).map((e) => e.rule)).toEqual([
         'receiver-department-not-allowed',
         'receiver-city-not-allowed',
       ]);
@@ -317,7 +366,7 @@ describe('validateInvoiceDraft', () => {
         receiver: { ...named, address: { street: 'Main St', houseNumber: '1' } },
         location: {},
       });
-      expect(validateInvoiceDraft(d, {})).toEqual([]);
+      expect(addressErrors(d)).toEqual([]);
     });
   });
 });

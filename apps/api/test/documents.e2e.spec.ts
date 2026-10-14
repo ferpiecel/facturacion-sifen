@@ -308,6 +308,34 @@ describe('POST /v1/documents (e2e)', () => {
     expect(await handle.db.select().from(documents)).toHaveLength(0);
   });
 
+  it.each(['B2G', 'B2F'] as const)(
+    'answers 422 operation-type-not-supported for %s and consumes no number',
+    async (operationType) => {
+      const response = await post({
+        ...BODY,
+        operationType,
+        receiver:
+          operationType === 'B2F'
+            ? {
+                kind: 'named',
+                ruc: '80069563-1',
+                name: 'Cliente SA',
+                address: 'Main St 1',
+                houseNumber: '1',
+              }
+            : BODY.receiver,
+        location: operationType === 'B2F' ? undefined : BODY.location,
+      });
+
+      expect(response.statusCode).toBe(422);
+      expect(response.json<{ errors: Array<{ rule: string }> }>().errors).toContainEqual(
+        expect.objectContaining({ rule: 'operation-type-not-supported' }),
+      );
+      expect(await handle.db.select().from(documents)).toHaveLength(0);
+      expect(await handle.db.select().from(tenantDocumentSequences)).toHaveLength(0);
+    },
+  );
+
   it('stores the receiver and item XML data in the payload', async () => {
     const response = await post(BODY);
 

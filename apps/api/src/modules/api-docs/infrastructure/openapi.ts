@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { DOCUMENT_STATUSES } from '@sifen/db';
 import { createDocumentSchema } from '../../emission/infrastructure/http/create-document.request.js';
+import { createCreditNoteSchema } from '../../emission/infrastructure/http/credit-note.request.js';
 import { WEBHOOK_EVENT_TYPES } from '../../webhooks/domain/webhook-event.js';
 
 /**
@@ -58,8 +59,10 @@ export function buildOpenApiDocument() {
         post: {
           operationId: 'createDocument',
           tags: ['Documents'],
-          summary: 'Accept an invoice (FE) for emission',
+          summary: 'Accept an invoice (FE) or a credit note (NCE) for emission',
           description:
+            'The body is an FE unless `type` is `NCE` (credit note associated to an approved FE; its receiver is taken from that FE). ' +
+            'Credit notes are validated but answer 422 `document-type-not-supported` until their acceptance is enabled. ' +
             'Returns 202 once the document is persisted with its CDC; signing and transmission to SIFEN are asynchronous. ' +
             'Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.',
           ...secured(['documents:write']),
@@ -74,7 +77,11 @@ export function buildOpenApiDocument() {
           ],
           requestBody: {
             required: true,
-            content: { 'application/json': { schema: ref('CreateDocumentRequest') } },
+            content: {
+              'application/json': {
+                schema: { oneOf: [ref('CreateDocumentRequest'), ref('CreateCreditNoteRequest')] },
+              },
+            },
           },
           responses: {
             '202': json('Accepted', ref('DocumentAccepted')),
@@ -297,6 +304,10 @@ export function buildOpenApiDocument() {
           },
         },
         CreateDocumentRequest: z.toJSONSchema(createDocumentSchema, {
+          io: 'input',
+          unrepresentable: 'any',
+        }),
+        CreateCreditNoteRequest: z.toJSONSchema(createCreditNoteSchema, {
           io: 'input',
           unrepresentable: 'any',
         }),

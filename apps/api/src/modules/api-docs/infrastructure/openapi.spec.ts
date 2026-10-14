@@ -127,6 +127,27 @@ describe('OpenAPI document', () => {
     );
   });
 
+  it('offers the invoice and the credit note bodies, told apart by `type`', () => {
+    const schemas = spec.components.schemas as Record<
+      string,
+      { required?: string[]; properties?: Record<string, unknown> }
+    >;
+    expect(schemas.CreateCreditNoteRequest.required).toEqual(
+      expect.arrayContaining(['type', 'associatedCdc', 'reasonCode', 'items']),
+    );
+    expect(schemas.CreateCreditNoteRequest.required).not.toContain('receiver');
+    expect(schemas.CreateDocumentRequest.required).not.toContain('type');
+    const post = (spec.paths as Record<string, Record<string, unknown>>)['/v1/documents'].post as {
+      requestBody: { content: Record<string, { schema: unknown }> };
+    };
+    expect(post.requestBody.content['application/json'].schema).toEqual({
+      oneOf: [
+        { $ref: '#/components/schemas/CreateDocumentRequest' },
+        { $ref: '#/components/schemas/CreateCreditNoteRequest' },
+      ],
+    });
+  });
+
   it('matches the checked-in docs/api/openapi.json', () => {
     const file = new URL('../../../../../../docs/api/openapi.json', import.meta.url);
     expect(

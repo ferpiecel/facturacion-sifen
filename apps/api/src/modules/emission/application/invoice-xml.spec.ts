@@ -138,6 +138,15 @@ describe('generateInvoiceXml with decimal amounts (HU-E5-09)', () => {
     expect(xml).not.toMatch(/<d\w+>-?[\d.]+e[+-]?\d+</i);
   });
 
+  it('never rewrites free text that looks like an exponent number (product code 1E5)', async () => {
+    const d = withItems([{ quantity: 0.5, unitPrice: 1001, vatRate: 10 }], 0.5);
+    const ctx = context('production');
+    const withCode = { ...ctx, lines: [{ code: '1E5', description: '2e3', unitCode: 77 }] };
+    const { xml } = await generateInvoiceXml(builder, d, withCode, decimals);
+
+    expect(text(xml, 'dCodInt')).toBe('1E5');
+  });
+
   it('still rejects decimals when the validation config does not allow them', async () => {
     const d = withItems([{ quantity: 2.3, unitPrice: 100.5, vatRate: 10 }], 0);
     await expect(generateInvoiceXml(builder, d, context('test'))).rejects.toThrow(/pyg-integer/);

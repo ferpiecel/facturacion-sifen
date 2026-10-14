@@ -1,3 +1,4 @@
+import { Decimal } from '../domain/decimal.js';
 import type { KudeInvoice, KudeItem } from '../domain/kude-model.js';
 import { qrBaseUrl } from '../domain/qr.js';
 
@@ -41,16 +42,24 @@ function required(source: string, name: string): string {
   return value;
 }
 
-/** PYG amounts are whole numbers; anything else means the XML is not what we can print. */
+/**
+ * PYG amounts: whole numbers as before, or exact decimals (HU-E5-09). A decimal must survive the
+ * trip through `number` unchanged, otherwise the KuDE would print a different amount.
+ */
 function pyg(source: string, name: string, fallback?: number): number {
   const text = optional(source, name);
   if (text === undefined || text === '') {
     if (fallback === undefined) throw new KudeSourceError(name, 'is missing');
     return fallback;
   }
-  if (!/^-?\d+(\.0+)?$/.test(text))
-    throw new KudeSourceError(name, `is not a PYG integer: ${text}`);
-  return Number(text);
+  if (/^-?\d+(\.0+)?$/.test(text)) return Number(text);
+  if (!/^-?\d+\.\d+$/.test(text)) throw new KudeSourceError(name, `is not a PYG amount: ${text}`);
+  const exact = Decimal.parse(text);
+  const value = Number(text);
+  const roundTrip = Decimal.parse(value);
+  if (!exact.ok || !roundTrip.ok || !exact.value.equals(roundTrip.value))
+    throw new KudeSourceError(name, `cannot be printed exactly: ${text}`);
+  return value;
 }
 
 function section(source: string, name: string): string {

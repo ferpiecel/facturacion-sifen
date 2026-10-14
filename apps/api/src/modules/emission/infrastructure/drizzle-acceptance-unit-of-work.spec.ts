@@ -84,10 +84,11 @@ describe('AcceptInvoice with the Drizzle unit of work', () => {
     await handle.close();
   });
 
-  const accept = (now = '2026-03-06T01:30:00Z') =>
+  const accept = (now = '2026-03-06T01:30:00Z', validation = {}) =>
     createAcceptInvoice({
       unitOfWork: createDrizzleAcceptanceUnitOfWork(handle.db),
       now: () => new Date(now),
+      validation,
     });
 
   const input = (overrides: Partial<AcceptInvoiceInput> = {}): AcceptInvoiceInput => ({
@@ -121,6 +122,22 @@ describe('AcceptInvoice with the Drizzle unit of work', () => {
       .from(tenantTimbrados)
       .where(eq(tenantTimbrados.number, '22222222'));
     expect(stored.every((r) => r.timbradoId === timbrado.id)).toBe(true);
+  });
+
+  it('stores a decimal draft with its exact payload and the net total (HU-E5-09)', async () => {
+    // 2.5 x 4940.2 = 12350.5; rounding 0.5 leaves a net of 12350, a multiple of 50 Gs.
+    const items = [{ quantity: 2.5, unitPrice: 4_940.2, vatRate: 10 as const }];
+    const { documentId } = await accept('2026-03-06T01:30:00Z', { allowDecimals: true })(
+      input({ draft: { ...DRAFT, items, roundingPyg: 0.5 }, payload: { items, roundingPyg: 0.5 } }),
+    );
+
+    const row = (await rows()).find((r) => r.id === documentId);
+    // numeric(23,8) answers eight decimals, so the read side trims them; the net is always whole.
+    expect(row?.totalAmount).toBe('12350.00000000');
+    expect(row?.payload).toMatchObject({
+      roundingPyg: 0.5,
+      items: [{ quantity: 2.5, unitPrice: 4940.2 }],
+    });
   });
 
   it('writes the audit row in the same transaction', async () => {

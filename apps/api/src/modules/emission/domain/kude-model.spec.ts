@@ -31,8 +31,25 @@ describe('KuDE formatting', () => {
     expect(formatPyg(-5000)).toBe('-5.000');
   });
 
-  it('rejects PYG amounts that are not safe integers', () => {
-    for (const bad of [1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 60]) {
+  it('prints integer amounts exactly as before decimals existed', () => {
+    const legacy = (amount: number) =>
+      `${amount < 0 ? '-' : ''}${String(Math.abs(amount)).replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`;
+    const amounts = [
+      0, 1, 50, 999, 1000, 10_990, 107_437, 1_234_567, 999_999_999_999_999, -1, -123_456,
+    ];
+    for (const amount of amounts) expect(formatPyg(amount)).toBe(legacy(amount));
+  });
+
+  it('prints decimal amounts with a decimal comma, trimmed and never in exponent notation', () => {
+    expect(formatPyg(500.5)).toBe('500,5');
+    expect(formatPyg(1234.5678)).toBe('1.234,5678');
+    expect(formatPyg(-12_350.25)).toBe('-12.350,25');
+    expect(formatPyg(0.00000001)).toBe('0,00000001');
+    expect(formatPyg(1e-7)).toBe('0,0000001');
+  });
+
+  it('rejects amounts that are neither safe integers nor exact decimals', () => {
+    for (const bad of [0.1 + 0.2, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 60, 1e-9]) {
       expect(() => formatPyg(bad)).toThrow(/integer/);
     }
   });

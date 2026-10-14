@@ -84,7 +84,7 @@ examples). All citations are to `docs/referencia/dnit/`.
 | Test battery: NCE 5 approved + 5 rejected on the sync web service, same on the async one; 1 NCE number voiding | Guía de Pruebas e-Kuatia 2026-02, sections 4.2 and 4.3 | T11 (blocked on environment) |
 
 Gaps in the sources, to confirm in T0 and not assumed: whether SIFEN accepts an NCE that references an FE
-in `approved_with_observations`; whether a rejected NCE counts in 2417 (our rule: it does not); whether the
+in `approved_with_observations`; whether SIFEN counts a rejected NCE in 2417 (our rule, D5: it does count, because it is resent with the same CDC; only `cancelled` and `number_voided` release credit); whether the
 timbrado of the NCE is validated per document type (the platform resolves one timbrado per tenant,
 `drizzle-acceptance-unit-of-work.ts`); the exact content of Gráfica N° 10 (the MT page is an image).
 
@@ -283,3 +283,5 @@ Closed in ADR-0019 (technical, tech lead): D1 same endpoint with a `type` discri
   on `type`; the OpenAPI spec failed on the missing `CreateCreditNoteRequest` and `oneOf`.
 - The FE schema takes `type` as optional with no default, so an old body parses to the same value (same hash and payload).
 - 2439 is unreachable by construction (lookup per tenant, one issuer per tenant): a foreign FE is "not found" (2403).
+- Slice D must make `drizzle-signing-store` re-parse the stored payload by document type (`parseDocumentRequest`),
+  or an NCE payload fails with `SigningDataIncompleteError`. Slice D also owns reading `type: "FE"` payloads.

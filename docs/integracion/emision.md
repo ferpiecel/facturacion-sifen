@@ -148,6 +148,8 @@ Respuesta `202`:
 
 `Idempotency-Key` es obligatorio. Reintentar con la **misma clave y el mismo cuerpo** devuelve la misma respuesta sin crear otro documento; la misma clave con otro cuerpo responde `409`. Genere una clave nueva por documento y reutilícela solo para reintentar ese mismo documento.
 
+El campo `type` forma parte del cuerpo que se compara: enviar `"type": "FE"` explícito produce un cuerpo distinto de uno sin `type`, aunque ambos sean facturas. No cambie de una forma a otra al reintentar con la misma `Idempotency-Key`, o recibirá `409`.
+
 ## Errores
 
 | Código | Significado | Qué hacer |

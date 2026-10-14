@@ -69,7 +69,7 @@ Out: Nota de Remision address rules, emission of other document types, transport
 - [x] T3 Confirm how the TIPS builder emits B2F and optional address; adjust `invoice-xml.ts` so `cDepRec` and `cCiuRec` are omitted for B2F and the receiver block omits absent fields. XSD check on the generated XML.
 - [x] T4 Vendor the catalog (generation script or reviewed conversion, checksum test, README entry) and remove the stale claim in `department.ts`.
 - [ ] T5 Catalog validation: district and city exist, city belongs to district, district belongs to department, descriptions match codes; new `ValidationError` rules with SIFEN codes.
-- [ ] T6 Read endpoints with OpenAPI regeneration (`pnpm --filter @sifen/api openapi`) and Fastify `inject()` e2e tests.
+- [x] T6 Read endpoints with OpenAPI regeneration (`pnpm --filter @sifen/api openapi`) and Fastify `inject()` e2e tests.
 - [ ] T7 Docs: update `docs/integracion/emision.md` (address optional, B2F, catalog endpoints), `docs/api`, and the PR descriptions.
 - [ ] T8 Operational check: confirm optional address and B2F with the Prevalidador and record the evidence.
 
@@ -132,3 +132,10 @@ such in the PR description.
 
 - Zip reader: no `maxOutputLength` on inflate, no ZIP64 or CRC check.
 - Sheet parser: phonetic runs (`rPh`) in shared strings and numeric XML entities are not handled.
+
+## Slice D (T6) record
+
+- Route: delegated direct, one writer (writer trigger: new module plus package loader, spec and OpenAPI). TDD strict, runner Vitest.
+- RED observed: `load-geo-catalog.spec.ts`, `geo-catalog.spec.ts` and `geo-query.spec.ts` failed on missing modules; `test/geo.e2e.spec.ts` 5 failed | 1 passed with `GeoModule` unwired; `openapi.spec.ts` 2 failed (undocumented routes) plus the checked-in `openapi.json` drift. GREEN after each.
+- Decisions: `GET /v1/geo/departments|districts|cities`, API key only (no scope, ADR-0017), `{ items: [...] }`; missing or malformed parent 400, unknown parent 404. Loader `loadGeoCatalog()` lives in `@sifen/sifen-xsd` next to the vendored data.
+

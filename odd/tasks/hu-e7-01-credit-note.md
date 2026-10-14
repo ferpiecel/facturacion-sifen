@@ -178,7 +178,7 @@ an FE not issued by the platform; foreign currency and exchange rate (`multi-cur
 - [ ] T0 Research and evidence: settle the gaps listed in "Normative basis"; extract the NCE KuDE content from the MT (Gráfica N° 10); confirm with the Prevalidador or test environment an NCE without D011 and E600, and a reference to an FE with observations. **Blocked on test environment access and a certificate.** The sub-items about internal state (D5) are not blocked.
 - [x] T1 ADR-0019 (done in PR A, `docs/adr/0019-nota-de-credito-asociada-a-una-factura.md`; also closes D9 and P4): NCE contract, association storage, sum concurrency, receiver derivation; resolve D1, D3, D4, D5, D6.
 - [x] T2 TIPS spike (done in PR A, `packages/sifen-tips/test/nce-type5.e2e.spec.ts`; the type 5 XML validates against siRecepDE) (tests only, offline): build a type 5 document with `notaCreditoDebito` and `documentoAsociado`, validate against `siRecepDE`, assert the absent groups, record the `tipoTransaccion` behavior (D9).
-- [ ] T3 Migration `0046` (or next free): `documents.associated_cdc` with CHECK and index, rollback script, Drizzle schema, RLS coverage test stays green (no new table), `db-postgres` run.
+- [x] T3 (done in PR B: migration `0046_documents_associated_cdc`, with a separate immutability trigger and extra CHECKs) Migration `0046` (or next free): `documents.associated_cdc` with CHECK and index, rollback script, Drizzle schema, RLS coverage test stays green (no new table), `db-postgres` run.
 - [x] T4 (PR C1, `credit-note-draft.ts`; takes the FE facts as input, lookups stay in slice D) Domain: `credit-note-draft` types, reasons table, `validateCreditNoteDraft` (items and rounding reuse the invoice rules, unnamed receiver 1331), pure `creditNoteSumRule` and currency rule over `Decimal`. Tests first.
 - [x] T5 (PR C2, `credit-note.request.ts`; the controller answers 422 `document-type-not-supported` until slice D) Request contract: `type` discriminator, NCE schema, mapping to the use case input, backward compatibility test with an old FE body, OpenAPI regeneration.
 - [ ] T6 Application and persistence: `acceptCreditNote` use case and `AcceptanceUnit` port methods (`findAssociatedInvoice` with lock, `sumCreditNotes`), Drizzle implementation, numbering type 5, CDC `05`, audit action, idempotency, all checks before `nextNumber`. Concurrency test (two simultaneous NCEs).
@@ -265,6 +265,22 @@ Closed in ADR-0019 (technical, tech lead): D1 same endpoint with a `type` discri
 - None run yet for implementation; this document changes no source. Pending: Prevalidador confirmation of the
   NCE structure (T0), the TIPS spike (T2) and the Guía de Pruebas battery (T11).
 
+### Slice B evidence (2026-10-14)
+
+- Route: T3 inline by the writer (schema, migration, rollback, one test block).
+- RED: the 5 new `associated CDC` tests in `packages/db/test/documents.spec.ts` failed before the migration
+  (column missing: `expected undefined to be null`, syntax error on the unknown column, index not found).
+- GREEN: `pnpm --filter @sifen/db exec vitest run` on PGlite: 35 files, 419 passed, 20 skipped (the skips are
+  the Postgres-only tests); lint, typecheck and `format:check` green.
+- Shape: nullable `char(44)`; CHECKs `^[0-9]{44}$`, not equal to the own CDC, and never on an FE (type 1);
+  partial index (`tenant_id`, `environment`, `associated_cdc`); trigger `documents_associated_cdc_guard`
+  keeps the value immutable without rewriting `documents_guard` (0034). No new table, so the RLS coverage test
+  needs no change and the existing `documents` policy covers the column.
+- Covered only in the `db-postgres` job: the same suite on a real PostgreSQL 16 (`pnpm --filter @sifen/db
+  test:postgres`, Docker, not run here). Rollback `rollback/0046_documents_associated_cdc.down.sql` is manual
+  like the others and has no automated test.
+- "Type 5 requires an association" (H001, 2400) is enforced by the domain, not by a CHECK: the column stays nullable because
+  types 7 and 8 may or may not carry one.
 ### Slice A evidence (2026-10-14)
 
 - Route: T1 and T2 inline by the writer (one ADR, one test file); trigger evidence: 2 files, no mapping needed.

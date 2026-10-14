@@ -1,4 +1,6 @@
 import { DEPARTMENTS } from '../../fiscal-config/domain/department.js';
+import { Decimal } from './decimal.js';
+import { amount, fitsAmount, parseAmount } from './invoice-totals.js';
 
 /** iTiOpe (D202): 1=B2B, 2=B2C, 3=B2G, 4=B2F. */
 export type OperationType = 'B2B' | 'B2C' | 'B2G' | 'B2F';
@@ -20,8 +22,9 @@ export type DraftReceiver =
   | { kind: 'unnamed' };
 
 export interface DraftItem {
+  /** Up to 10 integer and 8 decimal digits (NT 023). */
   quantity: number;
-  /** Unit price in PYG (integer). */
+  /** Unit price in PYG: up to 15 integer and 8 decimal digits. */
   unitPrice: number;
   vatRate: 0 | 5 | 10;
 }
@@ -30,7 +33,7 @@ export interface InvoiceDraft {
   receiver: DraftReceiver;
   operationType: OperationType;
   items: DraftItem[];
-  /** dRedon (F013): rounding discounted from the operation total, in PYG. */
+  /** dRedon (F013): rounding discounted from the operation total, in PYG (0 up to 49.9999). */
   roundingPyg: number;
   /** cDepRec (D219): the receiver department; mandatory with an address, unless B2F. */
   location: { departmentCode?: number };
@@ -39,6 +42,11 @@ export interface InvoiceDraft {
 export interface ValidationConfig {
   /** Innominado limit in PYG (NT 024 sets 7,000,000; earlier MT v150 text said 60,000,000). */
   unnamedThresholdPyg?: number;
+  /**
+   * HU-E5-09: accept decimal prices, quantities and rounding. Off by default (PYG integers, as
+   * before) until the XML, QR and KuDE handle decimals (T5 to T7); the tests run with it on.
+   */
+  allowDecimals?: boolean;
 }
 
 export interface ValidationError {
@@ -49,22 +57,25 @@ export interface ValidationError {
 }
 
 export const DEFAULT_UNNAMED_THRESHOLD_PYG = 7_000_000;
-const ROUNDING_STEP = 50;
+const ROUNDING_STEP = amount('50');
+const ROUNDING_DECIMALS = 4;
+const QUANTITY_INTEGER_DIGITS = 10;
+const DIGITS = { integer: 15, decimals: 8 };
 /** Largest PYG amount the numeric(23,8) columns hold: 15 integer digits. */
 export const MAX_AMOUNT_PYG = 999_999_999_999_999;
-const withinRange = (amount: number) => Math.abs(amount) <= MAX_AMOUNT_PYG;
 
 /**
- * Pure pre-SIFEN validation: collects every violation. PYG amounts are integer-only and
- * rounding follows MT v150 group F (SEDECO Res. 347/2014): the total is rounded down to a
- * multiple of 50 Gs (107.437 -> 107.400), so dRedon must be in 0..49.
+ * Pure pre-SIFEN validation: collects every violation. Amounts are exact decimals (ADR-0018):
+ * up to 15 integer and 8 decimal digits, no `number` arithmetic. Rounding follows MT v150
+ * group F (SEDECO Res. 347/2014): the total is rounded down to a multiple of 50 Gs
+ * (107.437 -> 107.400), so dRedon must be in 0..49.9999.
  */
 export function validateInvoiceDraft(
   draft: InvoiceDraft,
   config: ValidationConfig,
 ): ValidationError[] {
   const errors: ValidationError[] = [];
-  let total = 0;
+  let total = Decimal.zero();
 
   if (draft.items.length === 0) {
     errors.push({
@@ -76,12 +87,20 @@ export function validateInvoiceDraft(
 
   draft.items.forEach((item, i) => {
     const path = `items[${String(i)}]`;
-    const validLine = item.quantity > 0 && item.unitPrice >= 0;
+    const quantity = parseAmount(item.quantity);
+    const unitPrice = parseAmount(item.unitPrice);
+    // A non-finite number is "not positive" (legacy rule); any other unreadable one is imprecise.
     if (!(item.quantity > 0)) {
       errors.push({
         field: `${path}.quantity`,
         rule: 'quantity-positive',
         message: 'Quantity must be greater than zero',
+      });
+    } else if (!quantity?.fitsIn(QUANTITY_INTEGER_DIGITS, DIGITS.decimals)) {
+      errors.push({
+        field: `${path}.quantity`,
+        rule: 'quantity-precision',
+        message: 'Quantity allows up to 10 integer and 8 decimal digits',
       });
     }
     // Zero is allowed (free-of-charge items); negatives are not.
@@ -91,6 +110,21 @@ export function validateInvoiceDraft(
         rule: 'unit-price-non-negative',
         message: 'Unit price must not be negative',
       });
+    } else if (!unitPrice?.fitsIn(DIGITS.integer, DIGITS.decimals)) {
+      errors.push({
+        field: `${path}.unitPrice`,
+        rule: 'unit-price-precision',
+        message: 'Unit price allows up to 15 integer and 8 decimal digits',
+      });
+      // Keep the pre-decimal contract: an amount beyond the column is also an amount-range error.
+      const parsed = Decimal.parse(item.unitPrice);
+      if (!parsed.ok && parsed.reason === 'too-many-integer-digits') {
+        errors.push({
+          field: `${path}.total`,
+          rule: 'amount-range',
+          message: `Item total must not exceed ${String(MAX_AMOUNT_PYG)} Gs`,
+        });
+      }
     }
     if (![0, 5, 10].includes(item.vatRate)) {
       errors.push({
@@ -99,57 +133,71 @@ export function validateInvoiceDraft(
         message: 'VAT rate must be 0, 5 or 10',
       });
     }
-    if (!Number.isInteger(item.unitPrice)) {
-      errors.push({
-        field: `${path}.unitPrice`,
-        rule: 'pyg-integer',
-        message: 'PYG unit price must be an integer',
-      });
+    if (!quantity || !unitPrice || !(item.quantity > 0) || !(item.unitPrice >= 0)) return;
+    if (!quantity.fitsIn(QUANTITY_INTEGER_DIGITS, DIGITS.decimals)) return;
+    if (!unitPrice.fitsIn(DIGITS.integer, DIGITS.decimals)) return;
+    const product = quantity.multiplyExact(unitPrice);
+    // Lines with a valid quantity and price count even when flagged, so they cannot bypass the threshold.
+    if (product) total = total.add(product);
+    if (!config.allowDecimals) {
+      if (unitPrice.decimalPlaces() > 0) {
+        errors.push({
+          field: `${path}.unitPrice`,
+          rule: 'pyg-integer',
+          message: 'PYG unit price must be an integer',
+        });
+      }
+      if (product && product.decimalPlaces() > 0) {
+        errors.push({
+          field: `${path}.total`,
+          rule: 'pyg-integer',
+          message: 'PYG item total (quantity x unit price) must be an integer',
+        });
+        return;
+      }
     }
-    const itemTotal = item.quantity * item.unitPrice;
-    if (!Number.isInteger(itemTotal)) {
+    if (!product) {
       errors.push({
         field: `${path}.total`,
-        rule: 'pyg-integer',
-        message: 'PYG item total (quantity x unit price) must be an integer',
+        rule: 'line-total-precision',
+        message: 'Item total (quantity x unit price) must not need more than 8 decimals',
       });
+      return;
     }
-    if (!withinRange(itemTotal)) {
+    if (!fitsAmount(product)) {
       errors.push({
         field: `${path}.total`,
         rule: 'amount-range',
         message: `Item total must not exceed ${String(MAX_AMOUNT_PYG)} Gs`,
       });
+      return;
     }
-    // Invalid lines never offset valid ones (they would bypass the threshold).
-    if (validLine) total += itemTotal;
   });
 
-  if (!withinRange(total)) {
+  // Lines are non-negative, so the running total only grows: checking once at the end is enough.
+  const totalInRange = fitsAmount(total);
+  if (!totalInRange) {
     errors.push({
       field: 'total',
       rule: 'amount-range',
       message: `Invoice total must not exceed ${String(MAX_AMOUNT_PYG)} Gs`,
     });
   }
-  const net = total - draft.roundingPyg;
-  if (Number.isInteger(total)) {
-    const roundingOk =
-      Number.isInteger(draft.roundingPyg) &&
-      draft.roundingPyg >= 0 &&
-      draft.roundingPyg < ROUNDING_STEP &&
-      net % ROUNDING_STEP === 0;
-    if (!roundingOk) {
+  const rounding = parseAmount(draft.roundingPyg);
+  const net = rounding ? total.subtract(rounding) : total;
+  if (totalInRange && (config.allowDecimals || total.decimalPlaces() === 0)) {
+    if (!isValidRounding(total, rounding, config.allowDecimals ? ROUNDING_DECIMALS : 0)) {
       errors.push({
         field: 'roundingPyg',
         rule: 'rounding-multiple-of-50',
-        message: 'Total must be rounded down to a multiple of 50 Gs (rounding 0..49)',
+        message: 'Total must be rounded down to a multiple of 50 Gs (rounding 0..49.9999)',
       });
     }
   }
   const threshold = config.unnamedThresholdPyg ?? DEFAULT_UNNAMED_THRESHOLD_PYG;
+  const thresholdAmount = parseAmount(threshold) ?? Decimal.zero();
   // D208c / 1321 (NT 024): F014 >= threshold. Muestras medicas (D011=13) exemption is out of scope.
-  if (draft.receiver.kind === 'unnamed' && net >= threshold) {
+  if (draft.receiver.kind === 'unnamed' && net.compare(thresholdAmount) >= 0) {
     errors.push({
       field: 'receiver',
       rule: 'unnamed-receiver-over-threshold',
@@ -185,6 +233,16 @@ export function validateInvoiceDraft(
   validateReceiverAddress(draft, errors);
 
   return errors;
+}
+
+/** dRedon in 0 up to 49.9999 (4 decimals) and total - dRedon a multiple of 50 Gs. */
+function isValidRounding(total: Decimal, rounding: Decimal | undefined, decimals: number): boolean {
+  if (!rounding || rounding.isNegative() || rounding.compare(ROUNDING_STEP) >= 0) return false;
+  if (!rounding.fitsIn(2, decimals)) return false;
+  const net = total.subtract(rounding);
+  // The quotient is truncated at 8 decimals, so it must also be whole and multiply back exactly.
+  const quotient = net.divide(ROUNDING_STEP, 'truncate');
+  return quotient.decimalPlaces() === 0 && quotient.multiply(ROUNDING_STEP, 'truncate').equals(net);
 }
 
 /**

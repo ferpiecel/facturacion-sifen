@@ -71,7 +71,7 @@ Out: foreign currency, exchange rate (`dTiCamIt`), 50-centimos rounding, discoun
 - [ ] T1 Evidence: send PYG documents with decimal price and quantity to the test environment or Prevalidador and record the outcome. **Blocked on test environment access and a certificate.** The TIPS reading half is done (see T0 findings); what remains is the Prevalidador evidence listed there.
 - [x] T2 ADR ([ADR-0018](../../docs/adr/0018-precision-decimal-en-montos-y-cantidades.md)): decimal precision contract (representation, wire format, limits, rounding); resolve the open rows above.
 - [x] T3 Domain `Decimal` value object (`apps/api/src/modules/emission/domain/decimal.ts`): parse, compare, add, multiply, scale checks, string output. Tests first, including `2.3 × 100`, `0.5 × 1001` and 15+8 digit bounds.
-- [ ] T4 Draft validation and totals: replace `Number.isInteger` and `number` math in `invoice-draft.ts` and `accept-invoice.ts`; new rules for decimal places and ranges; keep the 50 Gs rounding rule.
+- [x] T4 Draft validation and totals: replace `Number.isInteger` and `number` math in `invoice-draft.ts` and `accept-invoice.ts`; new rules for decimal places and ranges; keep the 50 Gs rounding rule.
 - [ ] T5 XML and QR: format amounts as plain decimal strings (no exponent), item totals and `dTotOpe`/`dTotGralOpe`; XSD validation of generated XML; QR parameter formatting.
 - [ ] T6 Persistence and read: confirm `numeric(23,8)` round-trips, `trimDecimals` in `get-document.ts`, portal summary sums and KPIs; no migration expected, confirm.
 - [ ] T7 KuDE: print decimals when present (`formatPyg`, `formatQuantity`, reader `pyg()`), keep integer output identical.
@@ -97,6 +97,7 @@ use one delegated writer each, with the value object already merged.
 |---|---|---|
 | T0 | Delegated direct (one writer, background) | Preparation trigger: reading a 395 KB manual and 27 notes to prepare the write; PDFs converted to text with pypdf |
 | T2 | Delegated direct (same writer) | Writes the ADR from the T0 findings |
+| T4 | Delegated direct (same writer) | Writer trigger: `invoice-draft.ts`, new `invoice-totals.ts`, `accept-invoice.ts`, `invoice-xml.ts` and specs |
 | T3 | Delegated direct (same writer) | Writer trigger: value object plus its spec, TDD; commit `feat(emission): add exact Decimal value object` |
 
 ## Acceptance criteria
@@ -187,6 +188,7 @@ PYG rounding (MT section F, SEDECO 347/2014): multiples of 50 Gs, example 107.43
 - Done: T0 (findings above) and T2 (ADR-0018), slice A.
 - Done: T3 (`Decimal`, slice B): parse (number via shortest string, string), compare, add, subtract, multiply, multiplyExact, divide, roundTo, fitsIn, plain output.
 - Note for T4: `Decimal` operations do not signal overflow beyond 15+8 digits (a product can reach 30 digits), so T4 must call `fitsIn` after every operation whose result is stored or sent.
+- Done: T4 (slice C): validation and totals over `Decimal` behind `ValidationConfig.allowDecimals` (default off, so every accepted document keeps byte-identical totals and the integer rules keep applying). T5 to T7 must flip it on once XML, QR and KuDE handle decimals; until then the TIPS builder would round item totals to integers (see T0 findings). Rule deviation from ADR-0018 decision 4: with decimals enabled `roundingPyg` may carry up to 4 decimals (0..49.9999), because otherwise a total such as 0.5 x 1001 = 500.5 can never be a multiple of 50; the ADR text should be amended in PR D.
 - Next: T4 waits for the T1 open points; meanwhile see the note below. T1 needs access to a SIFEN test environment and a certificate;
   T4 should not start before the T1 open points 1 and 2 are settled or an interim rule is accepted.
 

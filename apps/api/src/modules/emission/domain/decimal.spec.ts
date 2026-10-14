@@ -77,6 +77,13 @@ describe('Decimal.parse', () => {
   });
 });
 
+describe('Decimal.zero', () => {
+  it('is a plain zero', () => {
+    expect(Decimal.zero().toString()).toBe('0');
+    expect(Decimal.zero().equals(dec('0.0'))).toBe(true);
+  });
+});
+
 describe('Decimal comparison and sign', () => {
   it('compares by value regardless of how it was written', () => {
     expect(dec('1.50').compare(dec(1.5))).toBe(0);

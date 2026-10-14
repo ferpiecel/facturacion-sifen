@@ -40,7 +40,7 @@ const DRAFT: InvoiceDraft = {
   location: { departmentCode: 11 },
 };
 
-function setup(issuer: IssuerContext | null = ISSUER) {
+function setup(issuer: IssuerContext | null = ISSUER, validation = {}) {
   const inserted: NewDocument[] = [];
   const resolveIssuer = vi.fn(() => Promise.resolve(issuer));
   const nextNumber = vi.fn(() =>
@@ -68,6 +68,7 @@ function setup(issuer: IssuerContext | null = ISSUER) {
   };
   const acceptInvoice = createAcceptInvoice({
     unitOfWork,
+    validation,
     // 2026-03-06T01:30Z is still 2026-03-05 in Paraguay (UTC-3).
     now: () => new Date('2026-03-06T01:30:00Z'),
   });
@@ -146,6 +147,19 @@ describe('acceptInvoice', () => {
       },
     });
     expect(inserted[0].totalAmount).toBe('107400');
+  });
+
+  it('stores the exact net total of decimal lines when decimals are enabled', async () => {
+    const { acceptInvoice, input, inserted } = setup(ISSUER, { allowDecimals: true });
+    await acceptInvoice({
+      ...input,
+      draft: {
+        ...DRAFT,
+        items: [{ quantity: 2.3, unitPrice: 100, vatRate: 10 }],
+        roundingPyg: 30,
+      },
+    });
+    expect(inserted[0].totalAmount).toBe('200');
   });
 
   it('records the series when numbering rolled over', async () => {

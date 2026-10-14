@@ -1,3 +1,4 @@
+import { invoiceTotals } from '../domain/invoice-totals.js';
 import type { DeXmlBuilder, FacturaPocInput } from '@sifen/sifen-gateway';
 import { validateXml } from '@sifen/sifen-xsd';
 import {
@@ -162,7 +163,7 @@ export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext
     { legalName: issuer.legalName, firstItemDescription: ctx.lines[0]?.description ?? '' },
     ctx.testLiteral,
   );
-  const total = draft.items.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0);
+  const { net } = invoiceTotals(draft);
   const operationType = { B2B: 1, B2C: 2, B2G: 3, B2F: 4 }[draft.operationType];
   const { departmentCode } = draft.location;
 
@@ -229,7 +230,7 @@ export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext
       factura: { presencia: 1 },
       condicion: {
         tipo: 1,
-        entregas: [{ tipo: 1, monto: String(total - draft.roundingPyg), moneda: 'PYG', cambio: 0 }],
+        entregas: [{ tipo: 1, monto: net.toString(), moneda: 'PYG', cambio: 0 }],
       },
       items: draft.items.map((item, i) => ({
         codigo: ctx.lines[i]?.code,

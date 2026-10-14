@@ -103,6 +103,10 @@ export class Decimal {
     return { ok: true, value: new Decimal(negative ? -magnitude : magnitude) };
   }
 
+  static zero(): Decimal {
+    return new Decimal(0n);
+  }
+
   compare(other: Decimal): -1 | 0 | 1 {
     if (this.units === other.units) return 0;
     return this.units < other.units ? -1 : 1;

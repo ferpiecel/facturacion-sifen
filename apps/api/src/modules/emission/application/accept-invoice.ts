@@ -5,6 +5,7 @@ import {
   type ValidationConfig,
   type ValidationError,
 } from '../domain/invoice-draft.js';
+import { invoiceTotals } from '../domain/invoice-totals.js';
 import { requestHash } from '../domain/request-hash.js';
 import { generateSecurityCode, type RandomBytes } from '../domain/security-code.js';
 import type { AuditEntry } from '../../audit/application/ports/record-audit.port.js';
@@ -76,11 +77,6 @@ function paraguayDate(instant: Date): string {
     month: '2-digit',
     day: '2-digit',
   }).format(instant);
-}
-
-function netTotal(draft: InvoiceDraft): number {
-  const gross = draft.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-  return gross - draft.roundingPyg;
 }
 
 /**
@@ -159,7 +155,7 @@ export function createAcceptInvoice(deps: AcceptInvoiceDependencies) {
         securityCode,
         receiverRuc: input.receiverRuc,
         issuedAt,
-        totalAmount: String(netTotal(input.draft)),
+        totalAmount: invoiceTotals(input.draft).net.toString(),
         currency: 'PYG',
         payload: input.payload,
         idempotencyKey: input.idempotencyKey,

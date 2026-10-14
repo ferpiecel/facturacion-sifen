@@ -15,6 +15,7 @@ function draft(overrides: Partial<InvoiceDraft> = {}): InvoiceDraft {
   };
 }
 
+const decimals = { allowDecimals: true };
 const rules = (d: InvoiceDraft, config = {}) => validateInvoiceDraft(d, config).map((e) => e.rule);
 
 describe('validateInvoiceDraft', () => {
@@ -136,15 +137,74 @@ describe('validateInvoiceDraft', () => {
   });
 
   describe('PYG amounts and 50 Gs rounding (MT v150 section F)', () => {
-    it('rejects non-integer unit prices and item totals', () => {
-      const d = draft({ items: [{ quantity: 1, unitPrice: 100.5, vatRate: 10 }] });
-      expect(validateInvoiceDraft(d, {})).toContainEqual(
-        expect.objectContaining({ field: 'items[0].unitPrice', rule: 'pyg-integer' }),
+    it('accepts decimal prices and quantities that SIFEN allows (HU-E5-09)', () => {
+      // 2.3 x 100 is 229.99999999999997 with number arithmetic; exactly 230 here.
+      const a = draft({ items: [{ quantity: 2.3, unitPrice: 100, vatRate: 10 }], roundingPyg: 30 });
+      expect(validateInvoiceDraft(a, decimals)).toEqual([]);
+      const b = draft({
+        items: [{ quantity: 0.5, unitPrice: 1001, vatRate: 10 }],
+        roundingPyg: 0.5,
+      });
+      expect(validateInvoiceDraft(b, decimals)).toEqual([]);
+      const c = draft({
+        items: [{ quantity: 1, unitPrice: 100.12345678, vatRate: 10 }],
+        roundingPyg: 0.12345678,
+      });
+      expect(rules(c, decimals)).toEqual(['rounding-multiple-of-50']);
+    });
+
+    it('rejects a unit price with more than 8 decimals or 15 integer digits', () => {
+      const tooMany = draft({ items: [{ quantity: 1, unitPrice: 1.123456789, vatRate: 10 }] });
+      expect(validateInvoiceDraft(tooMany, decimals)).toContainEqual(
+        expect.objectContaining({ field: 'items[0].unitPrice', rule: 'unit-price-precision' }),
       );
-      const q = draft({ items: [{ quantity: 1.5, unitPrice: 101, vatRate: 5 }] });
-      expect(validateInvoiceDraft(q, {})).toContainEqual(
-        expect.objectContaining({ field: 'items[0].total', rule: 'pyg-integer' }),
+      const digits = draft({ items: [{ quantity: 1, unitPrice: 1e15, vatRate: 10 }] });
+      expect(rules(digits, decimals)).toEqual(
+        expect.arrayContaining(['unit-price-precision', 'amount-range']),
       );
+    });
+
+    it('rejects a unit price that a JSON number cannot hold exactly', () => {
+      const d = draft({ items: [{ quantity: 1, unitPrice: 0.1 + 0.2, vatRate: 10 }] });
+      expect(rules(d, decimals)).toContain('unit-price-precision');
+    });
+
+    it('rejects a quantity with more than 8 decimals or 10 integer digits', () => {
+      for (const quantity of [0.123456789, 12_345_678_901]) {
+        const d = draft({ items: [{ quantity, unitPrice: 1, vatRate: 10 }] });
+        expect(validateInvoiceDraft(d, decimals)).toContainEqual(
+          expect.objectContaining({ field: 'items[0].quantity', rule: 'quantity-precision' }),
+        );
+      }
+    });
+
+    it('rejects a line whose exact product needs more than 8 decimals', () => {
+      const d = draft({ items: [{ quantity: 0.00001, unitPrice: 0.0001, vatRate: 10 }] });
+      expect(validateInvoiceDraft(d, decimals)).toContainEqual(
+        expect.objectContaining({ field: 'items[0].total', rule: 'line-total-precision' }),
+      );
+    });
+
+    it('rejects a fractional rounding beyond 4 decimals or outside 0..49', () => {
+      const items = [{ quantity: 1, unitPrice: 100.00001, vatRate: 10 as const }];
+      expect(rules(draft({ items, roundingPyg: 0.00001 }), decimals)).toContain(
+        'rounding-multiple-of-50',
+      );
+      expect(rules(draft({ items, roundingPyg: -0.5 }), decimals)).toContain(
+        'rounding-multiple-of-50',
+      );
+    });
+
+    it('keeps the integer-only rules while decimals are not enabled', () => {
+      const d = draft({ items: [{ quantity: 2.3, unitPrice: 100, vatRate: 10 }], roundingPyg: 30 });
+      expect(validateInvoiceDraft(d, {})).toEqual([]);
+      const half = draft({ items: [{ quantity: 1, unitPrice: 100.5, vatRate: 10 }] });
+      expect(rules(half)).toContain('pyg-integer');
+      const fractionalRounding = draft({
+        items: [{ quantity: 1, unitPrice: 1001, vatRate: 10 }],
+        roundingPyg: 1.5,
+      });
+      expect(rules(fractionalRounding)).toContain('rounding-multiple-of-50');
     });
 
     it('accepts rounding down to a multiple of 50', () => {
@@ -169,6 +229,21 @@ describe('validateInvoiceDraft', () => {
       });
       expect(rules(d)).toContain('rounding-multiple-of-50');
     });
+  });
+
+  it('falls back to the default threshold when the configured one is unusable', () => {
+    const at = (price: number) =>
+      draft({
+        receiver: { kind: 'unnamed' },
+        operationType: 'B2C',
+        items: [{ quantity: 1, unitPrice: price, vatRate: 10 }],
+      });
+    for (const unnamedThresholdPyg of [Number.NaN, 1e20]) {
+      expect(rules(at(7_000_000), { unnamedThresholdPyg })).toContain(
+        'unnamed-receiver-over-threshold',
+      );
+      expect(rules(at(6_999_950), { unnamedThresholdPyg })).toEqual([]);
+    }
   });
 
   it('rejects an unknown department (cDepEmi)', () => {
@@ -264,7 +339,7 @@ describe('validateInvoiceDraft', () => {
 
   describe('amount range (numeric(23,8) column)', () => {
     it('rejects a line total beyond 15 integer digits', () => {
-      const d = draft({ items: [{ quantity: 1, unitPrice: 1e15, vatRate: 10 }] });
+      const d = draft({ items: [{ quantity: 2, unitPrice: 999_999_999_999_999, vatRate: 10 }] });
       expect(validateInvoiceDraft(d, {})).toContainEqual(
         expect.objectContaining({ field: 'items[0].total', rule: 'amount-range' }),
       );

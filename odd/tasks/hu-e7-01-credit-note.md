@@ -84,7 +84,7 @@ examples). All citations are to `docs/referencia/dnit/`.
 | Test battery: NCE 5 approved + 5 rejected on the sync web service, same on the async one; 1 NCE number voiding | Guía de Pruebas e-Kuatia 2026-02, sections 4.2 and 4.3 | T11 (blocked on environment) |
 
 Gaps in the sources, to confirm in T0 and not assumed: whether SIFEN accepts an NCE that references an FE
-in `approved_with_observations`; whether a rejected NCE counts in 2417 (our rule: it does not); whether the
+in `approved_with_observations`; whether SIFEN counts a rejected NCE in 2417 (our rule, D5: it does count, because it is resent with the same CDC; only `cancelled` and `number_voided` release credit); whether the
 timbrado of the NCE is validated per document type (the platform resolves one timbrado per tenant,
 `drizzle-acceptance-unit-of-work.ts`); the exact content of Gráfica N° 10 (the MT page is an image).
 
@@ -179,8 +179,8 @@ an FE not issued by the platform; foreign currency and exchange rate (`multi-cur
 - [x] T1 ADR-0019 (done in PR A, `docs/adr/0019-nota-de-credito-asociada-a-una-factura.md`; also closes D9 and P4): NCE contract, association storage, sum concurrency, receiver derivation; resolve D1, D3, D4, D5, D6.
 - [x] T2 TIPS spike (done in PR A, `packages/sifen-tips/test/nce-type5.e2e.spec.ts`; the type 5 XML validates against siRecepDE) (tests only, offline): build a type 5 document with `notaCreditoDebito` and `documentoAsociado`, validate against `siRecepDE`, assert the absent groups, record the `tipoTransaccion` behavior (D9).
 - [x] T3 (done in PR B: migration `0046_documents_associated_cdc`, with a separate immutability trigger and extra CHECKs) Migration `0046` (or next free): `documents.associated_cdc` with CHECK and index, rollback script, Drizzle schema, RLS coverage test stays green (no new table), `db-postgres` run.
-- [ ] T4 Domain: `credit-note-draft` types, reasons table, `validateCreditNoteDraft` (items and rounding reuse the invoice rules, unnamed receiver 1331), pure `creditNoteSumRule` and currency rule over `Decimal`. Tests first.
-- [ ] T5 Request contract: `type` discriminator, NCE schema, mapping to the use case input, backward compatibility test with an old FE body, OpenAPI regeneration.
+- [x] T4 (PR C1, `credit-note-draft.ts`; takes the FE facts as input, lookups stay in slice D) Domain: `credit-note-draft` types, reasons table, `validateCreditNoteDraft` (items and rounding reuse the invoice rules, unnamed receiver 1331), pure `creditNoteSumRule` and currency rule over `Decimal`. Tests first.
+- [x] T5 (PR C2, `credit-note.request.ts`; the controller answers 422 `document-type-not-supported` until slice D) Request contract: `type` discriminator, NCE schema, mapping to the use case input, backward compatibility test with an old FE body, OpenAPI regeneration.
 - [ ] T6 Application and persistence: `acceptCreditNote` use case and `AcceptanceUnit` port methods (`findAssociatedInvoice` with lock, `sumCreditNotes`), Drizzle implementation, numbering type 5, CDC `05`, audit action, idempotency, all checks before `nextNumber`. Concurrency test (two simultaneous NCEs).
 - [ ] T7 Signing path: signing store dispatches on type, builds the NCE context (reason, associated CDC, receiver from the FE), `invoice-xml.ts` credit-note branch (D8), CDC type from input, XSD check, QR unchanged. FE byte-identical test.
 - [ ] T8 KuDE: reader supports `iTiDE` 5, model and renderer title and associated document block, `gCamCond` optional; golden text assertions as the FE ones.
@@ -290,3 +290,14 @@ Closed in ADR-0019 (technical, tech lead): D1 same endpoint with a `type` discri
   `siRecepDE` (`valid: true`, no errors), carries `iTiDE` 5, `gCamNCDE`, `gCamDEAsoc/dCdCDERef`, `gOpeCom`, and
   has no `gCamCond`, `gCamFE`, `iTipTra`, `gTransp`.
 - `pnpm --filter @sifen/sifen-tips` test (22 passed), lint and typecheck green.
+
+### Slice C evidence (2026-10-14)
+
+- Route: T4 and T5 inline by the writer (two new files plus small edits). `accept-invoice.ts`, `invoice-xml.ts`,
+  the KuDE and the signing store are untouched.
+- RED: both new specs failed first with "Cannot find module"; the e2e NCE case failed before the controller dispatched
+  on `type`; the OpenAPI spec failed on the missing `CreateCreditNoteRequest` and `oneOf`.
+- The FE schema takes `type` as optional with no default, so an old body parses to the same value (same hash and payload).
+- 2439 is unreachable by construction (lookup per tenant, one issuer per tenant): a foreign FE is "not found" (2403).
+- Slice D must make `drizzle-signing-store` re-parse the stored payload by document type (`parseDocumentRequest`),
+  or an NCE payload fails with `SigningDataIncompleteError`. Slice D also owns reading `type: "FE"` payloads.

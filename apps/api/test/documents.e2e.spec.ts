@@ -139,6 +139,47 @@ describe('POST /v1/documents (e2e)', () => {
     expect(rows[0]).toMatchObject({ tenantId, cdc, receiverRuc: '80069563-1' });
   });
 
+  it('keeps accepting an FE with the explicit `type: FE` discriminator', async () => {
+    expect((await post({ ...BODY, type: 'FE' })).statusCode).toBe(202);
+  });
+
+  it('answers 422 for an unknown `type` without consuming a number', async () => {
+    const response = await post({ ...BODY, type: 'NDE' });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json<{ errors: Array<{ field: string }> }>().errors).toEqual([
+      expect.objectContaining({ field: 'type', rule: 'schema' }),
+    ]);
+    expect(await handle.db.select().from(documents)).toHaveLength(0);
+  });
+
+  it('validates a credit note body, then refuses it until the use case lands (slice D)', async () => {
+    const credit = {
+      type: 'NCE',
+      establishment: '001',
+      expeditionPoint: '002',
+      associatedCdc: '01800695631001002000000112026010111234567891',
+      reasonCode: 2,
+      items: [{ ...LINE, quantity: 1, unitPrice: 400_000, vatRate: 10 }],
+    };
+
+    const malformed = await post({ ...credit, reasonCode: 'x', receiver: { kind: 'unnamed' } });
+    expect(malformed.statusCode).toBe(422);
+    expect(
+      malformed
+        .json<{ errors: Array<{ field: string }> }>()
+        .errors.map((e) => e.field)
+        .sort(),
+    ).toEqual(['reasonCode', 'receiver']);
+
+    const valid = await post(credit);
+    expect(valid.statusCode).toBe(422);
+    expect(valid.json<{ errors: Array<{ rule: string }> }>().errors).toEqual([
+      expect.objectContaining({ rule: 'document-type-not-supported' }),
+    ]);
+    expect(await handle.db.select().from(documents)).toHaveLength(0);
+  });
+
   it('rejects a request without a valid API key with 401', async () => {
     expect((await post(BODY, null)).statusCode).toBe(401);
     expect((await post(BODY, 'sk_live_nope')).statusCode).toBe(401);

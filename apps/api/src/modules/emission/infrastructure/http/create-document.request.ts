@@ -29,7 +29,7 @@ const digits = (max: number) =>
     .min(1)
     .max(10 ** max - 1);
 
-const code = (length: number) => z.string().regex(new RegExp(`^\\d{${String(length)}}$`));
+export const code = (length: number) => z.string().regex(new RegExp(`^\\d{${String(length)}}$`));
 
 const receiver = z.discriminatedUnion('kind', [
   z
@@ -100,8 +100,29 @@ const receiver = z.discriminatedUnion('kind', [
   }),
 ]);
 
+/** The item list shared by the FE and the NCE (E8, up to 999 items). */
+export const itemsSchema = z
+  .array(
+    z.object({
+      /** dCodInt (E701): tdCodInt, 1..50 (DE_Types_v150.xsd:1156). */
+      code: text(50),
+      /** dDesProSer (E708): 1..2000 (DE_v150.xsd:878). */
+      description: text(2000),
+      /** cUniMed (E709): closed DNCP list. */
+      unitCode: z
+        .number()
+        .refine(isUnitOfMeasureCode, 'Unit of measure code is not in the cUniMed list'),
+      quantity: z.number(),
+      unitPrice: z.number(),
+      vatRate: z.number(),
+    }),
+  )
+  .max(MAX_ITEMS);
+
 /** Body of `POST /v1/documents` for an FE. Business rules are checked later by the domain. */
 export const createDocumentSchema = z.object({
+  /** Document type (ADR-0019 D1): `FE` when absent, so every body accepted before keeps its meaning. */
+  type: z.literal('FE').optional(),
   establishment: code(3),
   expeditionPoint: code(3),
   operationType: z
@@ -110,30 +131,14 @@ export const createDocumentSchema = z.object({
       'B2G y B2F no están soportados todavía: responden 422 (operation-type-not-supported).',
     ),
   receiver,
-  items: z
-    .array(
-      z.object({
-        /** dCodInt (E701): tdCodInt, 1..50 (DE_Types_v150.xsd:1156). */
-        code: text(50),
-        /** dDesProSer (E708): 1..2000 (DE_v150.xsd:878). */
-        description: text(2000),
-        /** cUniMed (E709): closed DNCP list. */
-        unitCode: z
-          .number()
-          .refine(isUnitOfMeasureCode, 'Unit of measure code is not in the cUniMed list'),
-        quantity: z.number(),
-        unitPrice: z.number(),
-        vatRate: z.number(),
-      }),
-    )
-    .max(MAX_ITEMS),
+  items: itemsSchema,
   roundingPyg: z.number().default(0),
   /** cDepRec (D219): the receiver department, required with an address unless B2F. */
   location: z.object({ departmentCode: z.number().optional() }).default({}),
   currency: z.literal('PYG').default('PYG'),
 });
 
-type CreateDocumentBody = z.infer<typeof createDocumentSchema>;
+export type CreateDocumentBody = z.infer<typeof createDocumentSchema>;
 
 /** Parses the raw body; on failure returns every problem as `{ field, rule, message }`. */
 export function parseCreateDocument(
@@ -141,22 +146,24 @@ export function parseCreateDocument(
 ): { ok: true; value: CreateDocumentBody } | { ok: false; errors: ValidationError[] } {
   const parsed = createDocumentSchema.safeParse(body);
   if (parsed.success) return { ok: true, value: parsed.data };
-  return {
-    ok: false,
-    errors: parsed.error.issues.map((issue) => ({
-      field: issue.path.reduce<string>(
-        (path, key) =>
-          typeof key === 'number'
-            ? `${path}[${String(key)}]`
-            : path
-              ? `${path}.${String(key)}`
-              : String(key),
-        '',
-      ),
-      rule: 'schema',
-      message: issue.message,
-    })),
-  };
+  return { ok: false, errors: schemaErrors(parsed.error) };
+}
+
+/** Every Zod issue as `{ field, rule: 'schema', message }`. */
+export function schemaErrors(error: z.ZodError): ValidationError[] {
+  return error.issues.map((issue) => ({
+    field: issue.path.reduce<string>(
+      (path, key) =>
+        typeof key === 'number'
+          ? `${path}[${String(key)}]`
+          : path
+            ? `${path}.${String(key)}`
+            : String(key),
+      '',
+    ),
+    rule: 'schema',
+    message: issue.message,
+  }));
 }
 
 /** The domain view of the body: the address block is present only when the receiver informs it. */

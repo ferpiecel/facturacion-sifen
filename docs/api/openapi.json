@@ -12,8 +12,8 @@
         "tags": [
           "Documents"
         ],
-        "summary": "Accept an invoice (FE) for emission",
-        "description": "Returns 202 once the document is persisted with its CDC; signing and transmission to SIFEN are asynchronous. Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.",
+        "summary": "Accept an invoice (FE) or a credit note (NCE) for emission",
+        "description": "The body is an FE unless `type` is `NCE` (credit note associated to an approved FE; its receiver is taken from that FE). Credit notes are validated but answer 422 `document-type-not-supported` until their acceptance is enabled. Returns 202 once the document is persisted with its CDC; signing and transmission to SIFEN are asynchronous. Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.",
         "security": [
           {
             "apiKey": []
@@ -39,7 +39,14 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateDocumentRequest"
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/CreateDocumentRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CreateCreditNoteRequest"
+                  }
+                ]
               }
             }
           }
@@ -1094,6 +1101,10 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
+          "type": {
+            "type": "string",
+            "const": "FE"
+          },
           "establishment": {
             "type": "string",
             "pattern": "^\\d{3}$"
@@ -1246,6 +1257,94 @@
           "expeditionPoint",
           "operationType",
           "receiver",
+          "items"
+        ]
+      },
+      "CreateCreditNoteRequest": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "NCE"
+          },
+          "establishment": {
+            "type": "string",
+            "pattern": "^\\d{3}$"
+          },
+          "expeditionPoint": {
+            "type": "string",
+            "pattern": "^\\d{3}$"
+          },
+          "associatedCdc": {
+            "type": "string",
+            "pattern": "^[0-9]{44}$"
+          },
+          "reasonCode": {
+            "type": "number"
+          },
+          "items": {
+            "maxItems": 999,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "maxLength": 50
+                },
+                "description": {
+                  "type": "string",
+                  "maxLength": 2000
+                },
+                "unitCode": {
+                  "type": "number"
+                },
+                "quantity": {
+                  "type": "number"
+                },
+                "unitPrice": {
+                  "type": "number"
+                },
+                "vatRate": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "code",
+                "description",
+                "unitCode",
+                "quantity",
+                "unitPrice",
+                "vatRate"
+              ]
+            }
+          },
+          "roundingPyg": {
+            "default": 0,
+            "type": "number"
+          },
+          "currency": {
+            "default": "PYG",
+            "type": "string",
+            "const": "PYG"
+          },
+          "receiver": {
+            "not": {}
+          },
+          "operationType": {
+            "not": {}
+          },
+          "location": {
+            "not": {}
+          }
+        },
+        "required": [
+          "type",
+          "establishment",
+          "expeditionPoint",
+          "associatedCdc",
+          "reasonCode",
           "items"
         ]
       },

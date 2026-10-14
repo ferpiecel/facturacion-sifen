@@ -104,7 +104,11 @@ const receiver = z.discriminatedUnion('kind', [
 export const createDocumentSchema = z.object({
   establishment: code(3),
   expeditionPoint: code(3),
-  operationType: z.enum(['B2B', 'B2C', 'B2G', 'B2F']),
+  operationType: z
+    .enum(['B2B', 'B2C', 'B2G', 'B2F'])
+    .describe(
+      'B2G y B2F no están soportados todavía: responden 422 (operation-type-not-supported).',
+    ),
   receiver,
   items: z
     .array(

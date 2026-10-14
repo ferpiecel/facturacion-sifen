@@ -34,7 +34,7 @@ Idempotency-Key: <valor único por documento>
 |---|---|---|
 | `establishment` | string | 3 dígitos. Establecimiento configurado del tenant |
 | `expeditionPoint` | string | 3 dígitos. Punto de expedición configurado en ese establecimiento |
-| `operationType` | string | `B2B`, `B2C`, `B2G` o `B2F` |
+| `operationType` | string | `B2B`, `B2C`, `B2G` o `B2F`. Hoy solo `B2B` y `B2C` se aceptan: `B2G` y `B2F` responden `422` con `rule: "operation-type-not-supported"` (diferidos por producto) |
 | `receiver` | objeto | Ver [Receptor](#receptor) |
 | `items` | array | De 1 a 999 ítems. Ver [Ítems](#ítems) |
 | `roundingPyg` | entero | De 0 a 49. Por defecto 0. Ver [Montos y redondeo](#montos-y-redondeo) |
@@ -48,7 +48,7 @@ Receptor identificado (`kind: "named"`):
 | Campo | Regla |
 |---|---|
 | `ruc` | RUC con dígito verificador, formato `base-DV` |
-| `isPublicEntity` | Booleano, por defecto `false`. Si es `true`, `operationType` debe ser `B2G` |
+| `isPublicEntity` | Booleano, por defecto `false`. Si es `true`, SIFEN exige `B2G` (`public-entity-requires-b2g`, 1332), que hoy no está soportado: un receptor entidad pública no se puede facturar todavía |
 | `name` | De 4 a 255 caracteres |
 | `address` | Opcional, hasta 255 caracteres. El bloque de dirección es todo o nada: `houseNumber`, `districtCode`, `cityCode` y `location.departmentCode` no se aceptan sin `address`. Obligatorio con `B2F` (`receiver-address-required`) |
 | `houseNumber` | Texto de 1 a 6 dígitos. Obligatorio si hay `address` (`receiver-house-number-required`) |

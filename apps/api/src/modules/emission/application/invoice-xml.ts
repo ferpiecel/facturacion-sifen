@@ -158,6 +158,9 @@ export function asuncionTimestamp(instant: Date): string {
 }
 
 /**
+ * PROVISIONAL until T1 (Prevalidador confirms how SIFEN wants PYG decimals; see ADR-0018): the 8
+ * decimals in subtotals and IVA sums may have to go back to integers like integer documents.
+ *
  * xmlgen options for documents whose amounts carry decimals (ADR-0018): keep 8 decimals in item
  * totals and subtotals instead of rounding to integers, and leave the 50 Gs rounding to
  * `finalizeDecimalAmounts` (xmlgen's SEDECO rounding only understands integers). Never sent for
@@ -168,6 +171,50 @@ const DECIMAL_XMLGEN_OPTIONS = {
   pygTaxDecimals: 8,
   redondeoSedeco: false,
 } as const;
+
+/** Amount and quantity elements xmlgen prints: the only ones whose exponent notation is rewritten. */
+const AMOUNT_TAGS = [
+  'dPUniProSer',
+  'dCantProSer',
+  'dDescItem',
+  'dDescGloItem',
+  'dAntPreUniIt',
+  'dAntGloPreUniIt',
+  'dTotBruOpeItem',
+  'dTotOpeItem',
+  'dBasGravIVA',
+  'dLiqIVAItem',
+  'dBasExe',
+  'dMonTiPag',
+  'dSubExe',
+  'dSubExo',
+  'dSub5',
+  'dSub10',
+  'dTotOpe',
+  'dTotDesc',
+  'dTotDescGlotem',
+  'dTotAntItem',
+  'dTotAnt',
+  'dPorcDescTotal',
+  'dDescTotal',
+  'dAnticipo',
+  'dRedon',
+  'dComi',
+  'dTotGralOpe',
+  'dIVA5',
+  'dIVA10',
+  'dLiqTotIVA5',
+  'dLiqTotIVA10',
+  'dTotIVA',
+  'dBaseGrav5',
+  'dBaseGrav10',
+  'dTBasGraIVA',
+  'dTotalGs',
+];
+const EXPONENT_AMOUNT = new RegExp(
+  `(<(?:${AMOUNT_TAGS.join('|')})>)(-?\\d+(?:\\.\\d+)?e[+-]?\\d+)(</)`,
+  'g',
+);
 
 /** True when a line total or the rounding is not a whole number of guaranies. */
 function hasDecimalAmounts(draft: InvoiceDraft): boolean {
@@ -291,9 +338,9 @@ function finalizeDecimalAmounts(xml: string, draft: InvoiceDraft): string {
   return xml
     .replace(/<dRedon>[^<]*<\/dRedon>/, `<dRedon>${rounding}</dRedon>`)
     .replace(/<dTotGralOpe>[^<]*<\/dTotGralOpe>/, `<dTotGralOpe>${net.toString()}</dTotGralOpe>`)
-    .replace(/(<d[A-Za-z0-9]+>)(-?\d+(?:\.\d+)?e[+-]?\d+)(<\/)/gi, (whole, open, text, close) => {
+    .replace(EXPONENT_AMOUNT, (whole, open: string, text: string, close: string) => {
       const plain = Decimal.parse(Number(text));
-      return plain.ok ? `${String(open)}${plain.value.toString()}${String(close)}` : whole;
+      return plain.ok ? `${open}${plain.value.toString()}${close}` : whole;
     });
 }
 

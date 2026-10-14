@@ -279,3 +279,5 @@ Open, technical (tech lead), all closed in ADR-0019, T0 or T2: D1 endpoint shape
 - Covered only in the `db-postgres` job: the same suite on a real PostgreSQL 16 (`pnpm --filter @sifen/db
   test:postgres`, Docker, not run here). Rollback `rollback/0046_documents_associated_cdc.down.sql` is manual
   like the others and has no automated test.
+- "Type 5 requires an association" (H001, 2400) is enforced by the domain, not by a CHECK: the column stays nullable because
+  types 7 and 8 may or may not carry one.

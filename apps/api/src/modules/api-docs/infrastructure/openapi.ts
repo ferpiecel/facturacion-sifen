@@ -34,6 +34,34 @@ const idParam = (what: string) => ({
   schema: { type: 'string', format: 'uuid' },
 });
 
+const geoCodeParam = (name: string, what: string) => ({
+  name,
+  in: 'query',
+  required: true,
+  description: `${what}, as listed by the geography endpoints`,
+  schema: { type: 'integer', minimum: 1, maximum: 99999 },
+});
+
+/** `{ items: [{ code, [parent], name }] }` of the geography endpoints. */
+const geoList = (parent?: string) => ({
+  type: 'object',
+  required: ['items'],
+  properties: {
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['code', ...(parent ? [parent] : []), 'name'],
+        properties: {
+          code: { type: 'integer' },
+          ...(parent ? { [parent]: { type: 'integer' } } : {}),
+          name: { type: 'string' },
+        },
+      },
+    },
+  },
+});
+
 const secured = (scopes: string[]) => ({
   security: [{ apiKey: [] }],
   'x-required-scopes': scopes,
@@ -143,6 +171,50 @@ export function buildOpenApiDocument() {
             '404': NOT_FOUND,
             '409': problem('The document is not signed yet'),
             '500': problem('The KuDE could not be generated'),
+          },
+        },
+      },
+      '/v1/geo/departments': {
+        get: {
+          operationId: 'listGeoDepartments',
+          tags: ['Geography'],
+          summary: 'Departments of the DNIT geographic table (Tabla 2.1)',
+          description:
+            'Public reference data: any valid API key works, no scope is needed (ADR-0017).',
+          security: [{ apiKey: [] }],
+          responses: {
+            '200': json('All departments', ref('GeoDepartmentList')),
+            '401': UNAUTHORIZED,
+          },
+        },
+      },
+      '/v1/geo/districts': {
+        get: {
+          operationId: 'listGeoDistricts',
+          tags: ['Geography'],
+          summary: 'Districts of one department',
+          security: [{ apiKey: [] }],
+          parameters: [geoCodeParam('departmentCode', 'Department code')],
+          responses: {
+            '200': json('The districts of the department', ref('GeoDistrictList')),
+            '400': problem('departmentCode missing or not a code of 1 to 5 digits'),
+            '401': UNAUTHORIZED,
+            '404': problem('The department is not in the table'),
+          },
+        },
+      },
+      '/v1/geo/cities': {
+        get: {
+          operationId: 'listGeoCities',
+          tags: ['Geography'],
+          summary: 'Cities of one district',
+          security: [{ apiKey: [] }],
+          parameters: [geoCodeParam('districtCode', 'District code')],
+          responses: {
+            '200': json('The cities of the district', ref('GeoCityList')),
+            '400': problem('districtCode missing or not a code of 1 to 5 digits'),
+            '401': UNAUTHORIZED,
+            '404': problem('The district is not in the table'),
           },
         },
       },
@@ -267,7 +339,7 @@ export function buildOpenApiDocument() {
           type: 'http',
           scheme: 'bearer',
           description:
-            'API key. Each route needs the scope named in `x-required-scopes` (`documents:read`, `documents:write`, `webhooks:read`, `webhooks:write`).',
+            'API key. Each route needs the scope named in `x-required-scopes` (`documents:read`, `documents:write`, `webhooks:read`, `webhooks:write`); the `/v1/geo` routes need only a valid key.',
         },
       },
       schemas: {
@@ -417,6 +489,9 @@ export function buildOpenApiDocument() {
             created_at: dateTime,
           },
         },
+        GeoDepartmentList: geoList(),
+        GeoDistrictList: geoList('departmentCode'),
+        GeoCityList: geoList('districtCode'),
         WebhookDeliveryPage: {
           type: 'object',
           required: ['items', 'next_cursor'],

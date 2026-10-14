@@ -186,6 +186,23 @@ describe('validateCreditNoteDraft', () => {
       ]);
     });
 
+    it.each(['abc', '', '1e3'])(
+      'fails loudly when the stored amounts are unreadable (%j)',
+      (text) => {
+        expect(() => check(draft(), invoice({ totalAmount: text }))).toThrow(/totalAmount/);
+        expect(() => check(draft(), invoice({ creditedAmount: text }))).toThrow(/creditedAmount/);
+      },
+    );
+
+    it('never reports the invoice-only rules of the FE receiver (allowlist)', () => {
+      const rulesOf = validateCreditNoteDraft(
+        draft({ items: [] }),
+        invoice({ receiver: { kind: 'named', isPublicEntity: true }, operationType: 'B2G' }),
+        {},
+      ).map((e) => e.rule);
+      expect(rulesOf).toEqual(['items-required']);
+    });
+
     it('is skipped when the items are invalid, so the errors are not doubled', () => {
       expect(rules(draft({ items: [] }), invoice({ creditedAmount: '999999' }))).toEqual([
         'items-required',

@@ -53,17 +53,17 @@ Out: foreign currency, exchange rate (`dTiCamIt`), 50-centimos rounding, discoun
 
 ## Technical decisions (to record in ADR-0018; 0017 is reserved by `receiver-geo-catalog`)
 
-| Decision | Rationale |
-|---|---|
-| Domain `Decimal` value object over BigInt scaled integers (scale 8) | Exact, no dependency, covers 15+8 digits |
-| Wire format of `unitPrice`, `quantity`, `roundingPyg`: keep JSON number, also accept decimal strings | Backward compatible; strings give exact values beyond 15 significant digits |
-| A JSON number is converted through its shortest decimal string; numbers with more than 15 significant digits are rejected | Avoids silent binary-float drift |
-| Limits follow the XSD and NT 023: `unitPrice` up to 15 integer + 8 decimal digits, `quantity` up to 10 integer + 8 decimals (the plan said 4; NT 023 widened it), `roundingPyg` an integer from 0 to 49 for now (the field `dRedon` itself allows 4 decimals) | Same bounds SIFEN enforces |
-| A line whose exact `quantity × unitPrice` has more than 8 decimals is rejected | The exact product then needs no rounding, so E727 and EA008 hold with equality |
-| PYG rounding unchanged: multiple of 50 on the total, `roundingPyg` in 0..49 | Manual group F |
-| Resolved in T0: item total (E727, EA008) is the exact product, no rounding; the validations ask for equality, not a tolerance | Manual validations 141 and 145 (codes 1859, 1853) |
-| Open for T1: rounding of IVA base (E735) and IVA amount (E736), which divide and cannot be exact; interim rule: round half up to 8 decimals | The documents give no rounding mode or tolerance for them |
-| Open for T1: `roundingPyg` stays integer 0..49 for now. A fractional rounding is not forbidden (F013 allows 4 decimals) but the 50-Gs table is only defined for integer guaranies | Manual group F note; confirm with the Prevalidador |
+| Decision                                                                                                                                                                                                                                                      | Rationale                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Domain `Decimal` value object over BigInt scaled integers (scale 8)                                                                                                                                                                                           | Exact, no dependency, covers 15+8 digits                                       |
+| Wire format of `unitPrice`, `quantity`, `roundingPyg`: keep JSON number, also accept decimal strings                                                                                                                                                          | Backward compatible; strings give exact values beyond 15 significant digits    |
+| A JSON number is converted through its shortest decimal string; numbers with more than 15 significant digits are rejected                                                                                                                                     | Avoids silent binary-float drift                                               |
+| Limits follow the XSD and NT 023: `unitPrice` up to 15 integer + 8 decimal digits, `quantity` up to 10 integer + 8 decimals (the plan said 4; NT 023 widened it), `roundingPyg` an integer from 0 to 49 for now (the field `dRedon` itself allows 4 decimals) | Same bounds SIFEN enforces                                                     |
+| A line whose exact `quantity × unitPrice` has more than 8 decimals is rejected                                                                                                                                                                                | The exact product then needs no rounding, so E727 and EA008 hold with equality |
+| PYG rounding unchanged: multiple of 50 on the total, `roundingPyg` in 0..49                                                                                                                                                                                   | Manual group F                                                                 |
+| Resolved in T0: item total (E727, EA008) is the exact product, no rounding; the validations ask for equality, not a tolerance                                                                                                                                 | Manual validations 141 and 145 (codes 1859, 1853)                              |
+| Open for T1: rounding of IVA base (E735) and IVA amount (E736), which divide and cannot be exact; interim rule: round half up to 8 decimals                                                                                                                   | The documents give no rounding mode or tolerance for them                      |
+| Open for T1: `roundingPyg` stays integer 0..49 for now. A fractional rounding is not forbidden (F013 allows 4 decimals) but the 50-Gs table is only defined for integer guaranies                                                                             | Manual group F note; confirm with the Prevalidador                             |
 
 ## Tasks
 
@@ -80,25 +80,25 @@ Out: foreign currency, exchange rate (`dTiCamIt`), 50-centimos rounding, discoun
 
 ## PR slices (chained, each about 400 changed lines or less)
 
-| PR | Content | Depends on |
-|---|---|---|
-| A | T0 results in this document + T2 (ADR) | none (T1 informs but does not block) |
-| B | T3 `Decimal` value object | A |
-| C | T4 validation and totals | B |
-| D | T5, T6, T7 XML, QR, persistence check and KuDE (split in two if over budget) | C |
-| E | T8, T9 contract, docs and end to end | D |
+| PR  | Content                                                                      | Depends on                           |
+| --- | ---------------------------------------------------------------------------- | ------------------------------------ |
+| A   | T0 results in this document + T2 (ADR)                                       | none (T1 informs but does not block) |
+| B   | T3 `Decimal` value object                                                    | A                                    |
+| C   | T4 validation and totals                                                     | B                                    |
+| D   | T5, T6, T7 XML, QR, persistence check and KuDE (split in two if over budget) | C                                    |
+| E   | T8, T9 contract, docs and end to end                                         | D                                    |
 
 ## Route declaration
 
 Recorded per task when it starts. T4 to T7 touch several non-trivial files across layers and are expected to
 use one delegated writer each, with the value object already merged.
 
-| Task | Route | Trigger evidence |
-|---|---|---|
-| T0 | Delegated direct (one writer, background) | Preparation trigger: reading a 395 KB manual and 27 notes to prepare the write; PDFs converted to text with pypdf |
-| T2 | Delegated direct (same writer) | Writes the ADR from the T0 findings |
-| T4 | Delegated direct (same writer) | Writer trigger: `invoice-draft.ts`, new `invoice-totals.ts`, `accept-invoice.ts`, `invoice-xml.ts` and specs |
-| T3 | Delegated direct (same writer) | Writer trigger: value object plus its spec, TDD; commit `feat(emission): add exact Decimal value object` |
+| Task | Route                                     | Trigger evidence                                                                                                  |
+| ---- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| T0   | Delegated direct (one writer, background) | Preparation trigger: reading a 395 KB manual and 27 notes to prepare the write; PDFs converted to text with pypdf |
+| T2   | Delegated direct (same writer)            | Writes the ADR from the T0 findings                                                                               |
+| T4   | Delegated direct (same writer)            | Writer trigger: `invoice-draft.ts`, new `invoice-totals.ts`, `accept-invoice.ts`, `invoice-xml.ts` and specs      |
+| T3   | Delegated direct (same writer)            | Writer trigger: value object plus its spec, TDD; commit `feat(emission): add exact Decimal value object`          |
 
 ## Acceptance criteria
 
@@ -120,28 +120,28 @@ it (`tMontoBase`: `totalDigits` 23, `fractionDigits` 8, `minInclusive` 0, which 
 
 ### Formats
 
-| Field | Format | Source |
-|---|---|---|
-| `dPUniProSer` E721, `dTotBruOpeItem` E727, `dTotOpeItem` EA008, E735, E736, `dTotOpe` F008, `dTotGralOpe` F014 | up to 15 integer + 8 decimals, not negative | MT section 7 (E8.1, F); XSD `tMontoBase` |
-| `dCantProSer` E711 | MT: 1-10p(0-4). **NT 023 section 1.2 (later, prevails by ADR-0012): 1-10p(0-8).** XSD: 18 digits, 8 decimals | NT 023; XSD `tdCantProSer` |
-| `dRedon` F013 | up to 3 integer + 4 decimals in the MT; XSD `tdCRed` 8 digits, 4 decimals, not negative | MT section 7 (F); XSD |
+| Field                                                                                                          | Format                                                                                                       | Source                                   |
+| -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------- |
+| `dPUniProSer` E721, `dTotBruOpeItem` E727, `dTotOpeItem` EA008, E735, E736, `dTotOpe` F008, `dTotGralOpe` F014 | up to 15 integer + 8 decimals, not negative                                                                  | MT section 7 (E8.1, F); XSD `tMontoBase` |
+| `dCantProSer` E711                                                                                             | MT: 1-10p(0-4). **NT 023 section 1.2 (later, prevails by ADR-0012): 1-10p(0-8).** XSD: 18 digits, 8 decimals | NT 023; XSD `tdCantProSer`               |
+| `dRedon` F013                                                                                                  | up to 3 integer + 4 decimals in the MT; XSD `tdCRed` 8 digits, 4 decimals, not negative                      | MT section 7 (F); XSD                    |
 
 ### Arithmetic validations (all severity R, rejection)
 
-| Rule | Code | Formula | Source |
-|---|---|---|---|
-| E727 gross item total | 1859 | `E721 * E711`, equality, no tolerance stated | MT validation 141 |
-| EA008 item total | 1853 | `(E721 - EA002 - EA004 - EA006 - EA007) * E711`; self-invoice: `E721 * E711` | MT validation 145, field table |
-| E735a / E735b IVA base | 1910 / 1911 | NT 013: `[100 * EA008 * E733] / [10000 + (E734 * E733)]` (replaces the MT `[EA008 * (E733/100)] / 1,05 or 1,1`). With full affectation (E733=100) this is `EA008 * 100 / (100 + E734)` | NT 013 sections 1.1 and 2.2 |
-| E735 for exempt/exonerated | 1909 | `0` | MT validation 157 |
-| E736a IVA amount | 1913 | `E735 * (E734 / 100)` | MT validation 161 |
-| E737 exempt base (new) | 1921 | partial affectation (E731=4): `[100 * EA008 * (100 - E733)] / [10000 + (E734 * E733)]` | NT 013 section 2.1 |
-| F002a, F003a, F004a, F005a subtotals | 2353, 2355, 2357, 2359 | sum of EA008 per affectation and rate; NT 013 adds `E737` to F002 and `E735 + E736` to F004/F005 when E731=4 | MT 212-219; NT 013 section 2.2 |
-| F008 gross total | 2362 | `F002 + F003 + F004 + F005` (self-invoice: sum of EA008) | MT validation 220 |
-| F014 net total | 2365 | `F008 - F011 - F012 - F013` (the field table says `F008 - F013 + F025`) | MT validation 223 |
-| F015a, F016a IVA by rate | 2367, 2369 | sum of E736 per rate | MT 225, 227 |
-| F017a total IVA | 2371 | `F015 + F016` in the validation; the field table adds `- F036 - F037 + F026` | MT 229 |
-| F018a, F019a, F020a bases | 2373, 2375, 2377 | sum of E735 per rate; `F018 + F019` | MT 231-235 |
+| Rule                                 | Code                   | Formula                                                                                                                                                                                | Source                         |
+| ------------------------------------ | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| E727 gross item total                | 1859                   | `E721 * E711`, equality, no tolerance stated                                                                                                                                           | MT validation 141              |
+| EA008 item total                     | 1853                   | `(E721 - EA002 - EA004 - EA006 - EA007) * E711`; self-invoice: `E721 * E711`                                                                                                           | MT validation 145, field table |
+| E735a / E735b IVA base               | 1910 / 1911            | NT 013: `[100 * EA008 * E733] / [10000 + (E734 * E733)]` (replaces the MT `[EA008 * (E733/100)] / 1,05 or 1,1`). With full affectation (E733=100) this is `EA008 * 100 / (100 + E734)` | NT 013 sections 1.1 and 2.2    |
+| E735 for exempt/exonerated           | 1909                   | `0`                                                                                                                                                                                    | MT validation 157              |
+| E736a IVA amount                     | 1913                   | `E735 * (E734 / 100)`                                                                                                                                                                  | MT validation 161              |
+| E737 exempt base (new)               | 1921                   | partial affectation (E731=4): `[100 * EA008 * (100 - E733)] / [10000 + (E734 * E733)]`                                                                                                 | NT 013 section 2.1             |
+| F002a, F003a, F004a, F005a subtotals | 2353, 2355, 2357, 2359 | sum of EA008 per affectation and rate; NT 013 adds `E737` to F002 and `E735 + E736` to F004/F005 when E731=4                                                                           | MT 212-219; NT 013 section 2.2 |
+| F008 gross total                     | 2362                   | `F002 + F003 + F004 + F005` (self-invoice: sum of EA008)                                                                                                                               | MT validation 220              |
+| F014 net total                       | 2365                   | `F008 - F011 - F012 - F013` (the field table says `F008 - F013 + F025`)                                                                                                                | MT validation 223              |
+| F015a, F016a IVA by rate             | 2367, 2369             | sum of E736 per rate                                                                                                                                                                   | MT 225, 227                    |
+| F017a total IVA                      | 2371                   | `F015 + F016` in the validation; the field table adds `- F036 - F037 + F026`                                                                                                           | MT 229                         |
+| F018a, F019a, F020a bases            | 2373, 2375, 2377       | sum of E735 per rate; `F018 + F019`                                                                                                                                                    | MT 231-235                     |
 
 Only two tolerances exist in the documents, both about discount percentages: EA003a and EA004 (1861, 1862),
 "puede haber una variacion de 0.8" (MT validations 143 and 144, NT 001). **No document states a tolerance for
@@ -189,6 +189,8 @@ PYG rounding (MT section F, SEDECO 347/2014): multiples of 50 Gs, example 107.43
 - Done: T3 (`Decimal`, slice B): parse (number via shortest string, string), compare, add, subtract, multiply, multiplyExact, divide, roundTo, fitsIn, plain output.
 - Note for T4: `Decimal` operations do not signal overflow beyond 15+8 digits (a product can reach 30 digits), so T4 must call `fitsIn` after every operation whose result is stored or sent.
 - Done: T4 (slice C): validation and totals over `Decimal` behind `ValidationConfig.allowDecimals` (default off, so every accepted document keeps byte-identical totals and the integer rules keep applying). T5 to T7 must flip it on once XML, QR and KuDE handle decimals; until then the TIPS builder would round item totals to integers (see T0 findings). Rule deviation from ADR-0018 decision 4: with decimals enabled `roundingPyg` may carry up to 4 decimals (0..49.9999), because otherwise a total such as 0.5 x 1001 = 500.5 can never be a multiple of 50; the ADR text should be amended in PR D.
+- T5 must propagate the same `ValidationConfig` (including `allowDecimals`) to `generateInvoiceXml` (`invoice-xml.ts:269` calls `validateInvoiceDraft(draft, {})`), so the worker never rejects a document the API accepted.
+- Golden rules: `invoice-draft.golden.spec.ts` pins the rule names main returned (recorded from a temporary worktree of b8ee5e7) and lists the intended changes.
 - Next: T4 waits for the T1 open points; meanwhile see the note below. T1 needs access to a SIFEN test environment and a certificate;
   T4 should not start before the T1 open points 1 and 2 are settled or an interim rule is accepted.
 

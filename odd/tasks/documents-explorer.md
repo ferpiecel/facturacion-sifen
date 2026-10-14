@@ -25,28 +25,28 @@ Route: delegated writer (one) per PR; strict TDD, RED commit then GREEN commit.
 
 ## Data changes versus Stitch (tech-lead calls)
 
-| Stitch | Ours | Reason |
-|---|---|---|
-| Breadcrumb root "SifenFlow" | "Inicio" | Brand is logo-only (`brand.ts`) |
-| Chip "Ambiente Producción" | "Ambiente de pruebas" | Shell runs in the test environment |
-| "Total Emitidos este Mes", "Periodo Oct 2024" | "Emitidos (últimos 30 días)", dates in 2026 | Matches the date filter; 2026 data |
-| "BullMQ Redis" in the queue KPI | "en proceso" | Infrastructure jargon is not user-facing |
-| "97.9% 1er intento" | "97.9% del total" | First-attempt rate is not tracked |
-| "Ver motivos (Error 4014 / 4011)" | "Ver motivos (1321)" | 4014/4011 are not in our verified codes; 1321 is D208c, in the backlog (HU-E5-03) |
-| Rejected row: "4014 RUC del receptor..." | "1321 Receptor innominado no permitido..." | Real SIFEN rule, total >= 7.000.000 Gs (NT 024) |
-| Receptor/CDC/RUC values | Valid 44-digit CDCs (SET modulo 11), RUCs with valid DV, IVA 10% = total / 11 rounded | Consistent mock data |
-| "NCE" CDC type 04 | iTiDE 05 (04 is AFE) | Official iTiDE codes |
-| "Remisiones (NRE)" type option | Removed | Not in the MVP backlog (FE, NCE, NDE, AFE only) |
-| "Aprobado DNIT" pill | "Aprobado SIFEN" (`StatusBadge`) | Design-system component |
-| "Emitido hoy a las 15:42 hs" | Absolute date `02/10/2026 15:42` (America/Asuncion) | Deterministic, no clock dependency |
-| "Solo con discrepancias fiscales" | "Solo con observaciones o rechazos" | "Discrepancy" has no domain meaning |
-| Help banner "hasta 72hs de emitido" | "hasta 48 hs desde la aprobación para facturas y 168 hs para el resto" | HU-E8-02, plan §cancelación: FE ≤ 48 h, others ≤ 168 h from approval |
-| "Ver Log DNIT" | "Ver respuesta SIFEN" | Wording |
-| "Sucursales: 001-002 POS Ciudad del Este" | Establishment 002 "Sucursal Ciudad del Este" | est-point-number: 002 is the establishment |
-| "Certificado: CODE100 PARAGUAY S.A." / "PKCS#7 SHA-256" | "Certificado: ACME PARAGUAY S.A." / "XMLDSig RSA-SHA256" | The DE is signed with the issuer's certificate using XMLDSig RSA-SHA256 |
-| KuDE issuer "RUC: 80012345-6", validity 2024 | "RUC: 80012345-0" (valid DV), validity 2026 | Valid modulo-11 check digit; 2026 data |
-| Detail "Inutilizar Número" action | Removed; "Emitir Cancelación DNIT" became "Cancelar en SIFEN" with its window (FE 48 h, others 168 h) | Voiding only applies to numbers never approved (HU-E8-03) |
-| XML tab "XAdES-BES", event "sifeRecepcionLote", protocol number | "XMLDSig RSA-SHA256", "Código 0260", no protocol | Verified SIFEN codes only; nothing invented |
-| "WhatsApp al Cliente" (button and event) | "Enviar por email" | WhatsApp is not in the backlog; email is HU-E11-02 |
-| Item names "Cloud SIFEN Enterprise", "HSM FIPS 140-2" | Neutral service descriptions | Infrastructure jargon in user-facing sample data |
-| KuDE QR image (external URL) | QR icon placeholder | The real QR comes with HU-E5-06 / HU-E10-01 |
+| Stitch                                                          | Ours                                                                                                  | Reason                                                                            |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Breadcrumb root "SifenFlow"                                     | "Inicio"                                                                                              | Brand is logo-only (`brand.ts`)                                                   |
+| Chip "Ambiente Producción"                                      | "Ambiente de pruebas"                                                                                 | Shell runs in the test environment                                                |
+| "Total Emitidos este Mes", "Periodo Oct 2024"                   | "Emitidos (últimos 30 días)", dates in 2026                                                           | Matches the date filter; 2026 data                                                |
+| "BullMQ Redis" in the queue KPI                                 | "en proceso"                                                                                          | Infrastructure jargon is not user-facing                                          |
+| "97.9% 1er intento"                                             | "97.9% del total"                                                                                     | First-attempt rate is not tracked                                                 |
+| "Ver motivos (Error 4014 / 4011)"                               | "Ver motivos (1321)"                                                                                  | 4014/4011 are not in our verified codes; 1321 is D208c, in the backlog (HU-E5-03) |
+| Rejected row: "4014 RUC del receptor..."                        | "1321 Receptor innominado no permitido..."                                                            | Real SIFEN rule, total >= 7.000.000 Gs (NT 024)                                   |
+| Receptor/CDC/RUC values                                         | Valid 44-digit CDCs (SET modulo 11), RUCs with valid DV, IVA 10% = total / 11 rounded                 | Consistent mock data                                                              |
+| "NCE" CDC type 04                                               | iTiDE 05 (04 is AFE)                                                                                  | Official iTiDE codes                                                              |
+| "Remisiones (NRE)" type option                                  | Removed                                                                                               | Not in the MVP backlog (FE, NCE, NDE, AFE only)                                   |
+| "Aprobado DNIT" pill                                            | "Aprobado SIFEN" (`StatusBadge`)                                                                      | Design-system component                                                           |
+| "Emitido hoy a las 15:42 hs"                                    | Absolute date `02/10/2026 15:42` (America/Asuncion)                                                   | Deterministic, no clock dependency                                                |
+| "Solo con discrepancias fiscales"                               | "Solo con observaciones o rechazos"                                                                   | "Discrepancy" has no domain meaning                                               |
+| Help banner "hasta 72hs de emitido"                             | "hasta 48 hs desde la aprobación para facturas y 168 hs para el resto"                                | HU-E8-02, plan §cancelación: FE ≤ 48 h, others ≤ 168 h from approval              |
+| "Ver Log DNIT"                                                  | "Ver respuesta SIFEN"                                                                                 | Wording                                                                           |
+| "Sucursales: 001-002 POS Ciudad del Este"                       | Establishment 002 "Sucursal Ciudad del Este"                                                          | est-point-number: 002 is the establishment                                        |
+| "Certificado: CODE100 PARAGUAY S.A." / "PKCS#7 SHA-256"         | "Certificado: ACME PARAGUAY S.A." / "XMLDSig RSA-SHA256"                                              | The DE is signed with the issuer's certificate using XMLDSig RSA-SHA256           |
+| KuDE issuer "RUC: 80012345-6", validity 2024                    | "RUC: 80012345-0" (valid DV), validity 2026                                                           | Valid modulo-11 check digit; 2026 data                                            |
+| Detail "Inutilizar Número" action                               | Removed; "Emitir Cancelación DNIT" became "Cancelar en SIFEN" with its window (FE 48 h, others 168 h) | Voiding only applies to numbers never approved (HU-E8-03)                         |
+| XML tab "XAdES-BES", event "sifeRecepcionLote", protocol number | "XMLDSig RSA-SHA256", "Código 0260", no protocol                                                      | Verified SIFEN codes only; nothing invented                                       |
+| "WhatsApp al Cliente" (button and event)                        | "Enviar por email"                                                                                    | WhatsApp is not in the backlog; email is HU-E11-02                                |
+| Item names "Cloud SIFEN Enterprise", "HSM FIPS 140-2"           | Neutral service descriptions                                                                          | Infrastructure jargon in user-facing sample data                                  |
+| KuDE QR image (external URL)                                    | QR icon placeholder                                                                                   | The real QR comes with HU-E5-06 / HU-E10-01                                       |

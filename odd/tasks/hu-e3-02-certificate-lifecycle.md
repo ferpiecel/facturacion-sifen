@@ -104,7 +104,6 @@ and `document:release-holds`.
 - No logging in the cache; failed opens are never cached. No single-flight (the tenant run lock already
   serializes a tenant's cycle).
 
-
 ## S3b — `fix/hu-e3-02-decrypt-error-parks` (chained on S3)
 
 - `SecretDecryptionError` (corrupt sealed blob or wrong key; also raised by the CSC vault) joins
@@ -127,6 +126,7 @@ and `document:release-holds`.
 - Residual: during an outage each attempt still commits one `certificate.accessed` row (audit precedes the
   decrypt), bounded by the cycle interval and documents per cycle. Park reason does not distinguish
   certificate from CSC (not done).
+
 ### S3 review fixes
 
 - Expiry was lazy-only, so an idle tenant's plaintext outlived the TTL. Chosen: sweep on every `open`

@@ -21,7 +21,7 @@ HU-E6-04 recovery (query by CDC). Sources: backlog HU-E6-03, plan v1.1 §8.1 (st
       transient failure; `nextPollAt = now + 10 min`, never earlier), `processed` (0362; per-DE
       `approved | approved_with_observations | rejected` + code/message; DEs missing from the answer
       or with an unknown `dEstRes` go to `needsRecovery`), `recovery` (0364, 0360 or `now >
-      pollDeadlineAt`; the deadline check makes no call). In-memory store fake in tests.
+    pollDeadlineAt`; the deadline check makes no call). In-memory store fake in tests.
 - [x] **S2 — Drizzle `LotePollStore` + migration 0024.** `lotes.status` gains `processed` and
       `recovery`; `lotes_guard` allows `sent -> processed | recovery` (and `sent -> sent` stays a
       non-transition for reschedules); `lotes` gets `last_polled_at`/`poll_attempts` only if needed.

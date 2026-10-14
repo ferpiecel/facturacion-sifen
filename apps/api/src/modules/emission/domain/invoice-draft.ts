@@ -58,6 +58,7 @@ export interface ValidationError {
 
 export const DEFAULT_UNNAMED_THRESHOLD_PYG = 7_000_000;
 const ROUNDING_STEP = amount('50');
+const DEFAULT_THRESHOLD_AMOUNT = amount(String(DEFAULT_UNNAMED_THRESHOLD_PYG));
 const ROUNDING_DECIMALS = 4;
 const QUANTITY_INTEGER_DIGITS = 10;
 const DIGITS = { integer: 15, decimals: 8 };
@@ -76,6 +77,7 @@ export function validateInvoiceDraft(
 ): ValidationError[] {
   const errors: ValidationError[] = [];
   let total = Decimal.zero();
+  const state = { priceOverflow: false };
 
   if (draft.items.length === 0) {
     errors.push({
@@ -116,9 +118,9 @@ export function validateInvoiceDraft(
         rule: 'unit-price-precision',
         message: 'Unit price allows up to 15 integer and 8 decimal digits',
       });
-      // Keep the pre-decimal contract: an amount beyond the column is also an amount-range error.
-      const parsed = Decimal.parse(item.unitPrice);
-      if (!parsed.ok && parsed.reason === 'too-many-integer-digits') {
+      // Keep the pre-decimal contract: a price beyond the column is also an amount-range error.
+      if (Math.abs(item.unitPrice) > MAX_AMOUNT_PYG) {
+        state.priceOverflow = true;
         errors.push({
           field: `${path}.total`,
           rule: 'amount-range',
@@ -175,7 +177,7 @@ export function validateInvoiceDraft(
   });
 
   // Lines are non-negative, so the running total only grows: checking once at the end is enough.
-  const totalInRange = fitsAmount(total);
+  const totalInRange = fitsAmount(total) && !state.priceOverflow;
   if (!totalInRange) {
     errors.push({
       field: 'total',
@@ -195,7 +197,7 @@ export function validateInvoiceDraft(
     }
   }
   const threshold = config.unnamedThresholdPyg ?? DEFAULT_UNNAMED_THRESHOLD_PYG;
-  const thresholdAmount = parseAmount(threshold) ?? Decimal.zero();
+  const thresholdAmount = parseAmount(threshold) ?? DEFAULT_THRESHOLD_AMOUNT;
   // D208c / 1321 (NT 024): F014 >= threshold. Muestras medicas (D011=13) exemption is out of scope.
   if (draft.receiver.kind === 'unnamed' && net.compare(thresholdAmount) >= 0) {
     errors.push({

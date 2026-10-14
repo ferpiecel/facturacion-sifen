@@ -48,7 +48,7 @@ lotes in process), plan v1.1 §8.1, backlog HU-E6-01/02/03.
         `InvoiceXmlContext` (issuer profile, establishment, point, timbrado, numbering from the document row,
         receiver data and line codes from `payload`; the establishment contact is a known gap, ADR-0012
         note in `invoice-xml.ts`); `markSigned` is one tenant transaction (`UPDATE ... WHERE status =
-        'accepted'`, guard 0025). `CscSource` picks the lowest slot of the tenant's CSCs for the
+    'accepted'`, guard 0025). `CscSource` picks the lowest slot of the tenant's CSCs for the
         environment (decision to confirm).
 - [ ] **S5 — Pipeline worker.** Redis/BullMQ are not in the repo yet (no `bullmq`/`ioredis` dependency,
       no Redis service in compose or CI), so the orchestration is built first as plain application code that
@@ -65,7 +65,7 @@ lotes in process), plan v1.1 §8.1, backlog HU-E6-01/02/03.
         issuer RUC, due `sent` lotes, and `nextRequestId` (per tenant and environment).
   - [x] **S5c — End-to-end test** (`transmission-cycle.integration.spec.ts`): pglite + real Drizzle
         adapters + real Tips signing + `FakeSifenGateway`; `accepted -> signed -> queued -> submitted ->
-        approved`, then a further run is a no-op (no resend, no requery).
+    approved`, then a further run is a no-op (no resend, no requery).
   - [ ] **S5d — BullMQ infrastructure.** Add `bullmq` + `ioredis`, a Redis 7 service (compose, CI,
         `.env.example`: `REDIS_URL`), `QueueModule`, and a `TenantAwareProcessor` base (ADR-0006: the job
         carries `tenantId`, the processor opens the tenant context, `SET LOCAL` per transaction).
@@ -132,7 +132,6 @@ lotes in process), plan v1.1 §8.1, backlog HU-E6-01/02/03.
   one `xml-crypto` already uses) and `xml2js` -> 0.6.2. The sifen-tips, emission and transmission signing
   specs pass with them (signature, QR and strict XSD checks).
 - Open debt: `node-forge` <= 1.4.0 (high, GHSA-86w9-cpqp-85rv: RSA PKCS#1 v1.5 signature
-  *verification* accepts extra nested data) has no patched release yet. It is a direct dependency of
-  `apps/api` and of xmlsign. The code only parses `.p12` files and *signs*; re-check when a fixed
+  _verification_ accepts extra nested data) has no patched release yet. It is a direct dependency of
+  `apps/api` and of xmlsign. The code only parses `.p12` files and _signs_; re-check when a fixed
   release exists.
-

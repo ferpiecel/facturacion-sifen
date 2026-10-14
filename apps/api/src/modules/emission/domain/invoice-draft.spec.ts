@@ -185,6 +185,21 @@ describe('validateInvoiceDraft', () => {
     });
   });
 
+  it('falls back to the default threshold when the configured one is unusable', () => {
+    const at = (price: number) =>
+      draft({
+        receiver: { kind: 'unnamed' },
+        operationType: 'B2C',
+        items: [{ quantity: 1, unitPrice: price, vatRate: 10 }],
+      });
+    for (const unnamedThresholdPyg of [Number.NaN, 1e20]) {
+      expect(rules(at(7_000_000), { unnamedThresholdPyg })).toContain(
+        'unnamed-receiver-over-threshold',
+      );
+      expect(rules(at(6_999_950), { unnamedThresholdPyg })).toEqual([]);
+    }
+  });
+
   it('rejects an unknown department (cDepEmi)', () => {
     expect(validateInvoiceDraft(draft({ location: { departmentCode: 99 } }), {})).toEqual([
       expect.objectContaining({ field: 'location.departmentCode', rule: 'department-code' }),

@@ -959,6 +959,12 @@ export const documents = pgTable(
     issuedAt: timestamp('issued_at', { withTimezone: true }).notNull(),
     totalAmount: numeric('total_amount', { precision: 23, scale: 8 }).notNull(),
     currency: char('currency', { length: 3 }).notNull().default('PYG'),
+    /**
+     * CDC of the document this one is associated to (`gCamDEAsoc/dCdCDERef`, HU-E7-01, ADR-0019): the FE
+     * a credit note credits. Set on insert, immutable, never on an FE. That the target exists and is an FE
+     * is a domain rule, not a foreign key: the CDC may belong to a document the platform did not issue.
+     */
+    associatedCdc: char('associated_cdc', { length: 44 }),
     /** The request body as received. */
     payload: jsonb('payload').notNull(),
     /** Final signed DE XML (signature and QR included), set once when the document is signed. */
@@ -1032,6 +1038,17 @@ export const documents = pgTable(
     check('documents_idempotency_key_format', sql`${table.idempotencyKey} ~ '^[!-~]{1,255}$'`),
     check('documents_idempotency_hash_format', sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`),
     check('documents_cdc_format', sql`${table.cdc} ~ '^[0-9]{44}$'`),
+    check('documents_associated_cdc_format', sql`${table.associatedCdc} ~ '^[0-9]{44}$'`),
+    check('documents_associated_cdc_not_self', sql`${table.associatedCdc} <> ${table.cdc}`),
+    // An FE (iTiDE 1) is never associated to another document.
+    check(
+      'documents_associated_cdc_not_invoice',
+      sql`${table.documentType} <> 1 OR ${table.associatedCdc} IS NULL`,
+    ),
+    // Lookup of the credits of an FE (the 2417 sum), always scoped by tenant and environment.
+    index('documents_associated_cdc_idx')
+      .on(table.tenantId, table.environment, table.associatedCdc)
+      .where(sql`${table.associatedCdc} IS NOT NULL`),
     check('documents_security_code_format', sql`${table.securityCode} ~ '^[0-9]{9}$'`),
     check('documents_number_range', sql`${table.number} BETWEEN 1 AND 9999999`),
     // iTiDE (C002) range: 1..8.

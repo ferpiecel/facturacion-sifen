@@ -29,10 +29,11 @@ describe('emission ports type contract', () => {
     }>();
   });
 
-  it('FacturaPocInput is a domain-free params/data envelope', () => {
+  it('FacturaPocInput is a domain-free params/data envelope with optional builder options', () => {
     expectTypeOf<FacturaPocInput>().toEqualTypeOf<{
       readonly params: Readonly<Record<string, unknown>>;
       readonly data: Readonly<Record<string, unknown>>;
+      readonly config?: Readonly<Record<string, unknown>>;
     }>();
   });
 

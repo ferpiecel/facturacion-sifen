@@ -1,4 +1,3 @@
-import { invoiceTotals } from '../domain/invoice-totals.js';
 import type { DeXmlBuilder, FacturaPocInput } from '@sifen/sifen-gateway';
 import { validateXml } from '@sifen/sifen-xsd';
 import {
@@ -15,7 +14,13 @@ import { getDepartmentDescription } from '../../fiscal-config/domain/department.
 import { formatRuc } from '../../fiscal-config/domain/ruc.js';
 import type { Timbrado } from '../../fiscal-config/domain/timbrado.js';
 import { buildCdc } from '../domain/cdc.js';
-import { validateInvoiceDraft, type InvoiceDraft } from '../domain/invoice-draft.js';
+import { Decimal } from '../domain/decimal.js';
+import {
+  validateInvoiceDraft,
+  type InvoiceDraft,
+  type ValidationConfig,
+} from '../domain/invoice-draft.js';
+import { invoiceTotals, lineTotal, parseAmount } from '../domain/invoice-totals.js';
 
 /** The draft, the XSD check or the XML post-processing cannot produce a valid document. */
 export class InvoiceXmlError extends Error {
@@ -153,9 +158,33 @@ export function asuncionTimestamp(instant: Date): string {
 }
 
 /**
- * Maps the draft and its fiscal context to the xmlgen input (params + data).
- * PYG amounts are integers: validateInvoiceDraft rejects any fractional line total
- * (MT group F, no decimals in Guaranies) before this mapper runs. */
+ * xmlgen options for documents whose amounts carry decimals (ADR-0018): keep 8 decimals in item
+ * totals and subtotals instead of rounding to integers, and leave the 50 Gs rounding to
+ * `finalizeDecimalAmounts` (xmlgen's SEDECO rounding only understands integers). Never sent for
+ * integer documents, so their XML does not change.
+ */
+const DECIMAL_XMLGEN_OPTIONS = {
+  pygDecimals: 8,
+  pygTaxDecimals: 8,
+  redondeoSedeco: false,
+} as const;
+
+/** True when a line total or the rounding is not a whole number of guaranies. */
+function hasDecimalAmounts(draft: InvoiceDraft): boolean {
+  const roundingDecimals = parseAmount(draft.roundingPyg)?.decimalPlaces() ?? 0;
+  return (
+    roundingDecimals > 0 || draft.items.some((item) => (lineTotal(item)?.decimalPlaces() ?? 0) > 0)
+  );
+}
+
+/** Whole numbers keep going as `number` (same bytes as before); the rest as plain strings. */
+const plainOrNumber = (value: number): number | string =>
+  Number.isInteger(value) ? value : (parseAmount(value)?.toString() ?? value);
+
+/**
+ * Maps the draft and its fiscal context to the xmlgen input (params + data). The draft has been
+ * validated (amounts are exact decimals, integers unless `allowDecimals`) before this runs.
+ */
 export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext): FacturaPocInput {
   const { issuer, establishment: est } = ctx;
   const content = resolveIssuerDocumentContent(
@@ -236,8 +265,8 @@ export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext
         codigo: ctx.lines[i]?.code,
         descripcion: i === 0 ? content.firstItemDescription : ctx.lines[i]?.description,
         unidadMedida: ctx.lines[i]?.unitCode,
-        cantidad: item.quantity,
-        precioUnitario: item.unitPrice,
+        cantidad: plainOrNumber(item.quantity),
+        precioUnitario: plainOrNumber(item.unitPrice),
         cambio: 0,
         descuento: 0,
         anticipo: 0,
@@ -248,7 +277,24 @@ export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext
         iva: item.vatRate,
       })),
     },
+    ...(hasDecimalAmounts(draft) ? { config: DECIMAL_XMLGEN_OPTIONS } : {}),
   };
+}
+
+/**
+ * Decimal documents only: sets dRedon and dTotGralOpe from the validated totals and rewrites any
+ * exponent number xmlgen printed (`1e-7`) as a plain decimal, which the XSD requires.
+ */
+function finalizeDecimalAmounts(xml: string, draft: InvoiceDraft): string {
+  const { net } = invoiceTotals(draft);
+  const rounding = parseAmount(draft.roundingPyg)?.toString() ?? '0';
+  return xml
+    .replace(/<dRedon>[^<]*<\/dRedon>/, `<dRedon>${rounding}</dRedon>`)
+    .replace(/<dTotGralOpe>[^<]*<\/dTotGralOpe>/, `<dTotGralOpe>${net.toString()}</dTotGralOpe>`)
+    .replace(/(<d[A-Za-z0-9]+>)(-?\d+(?:\.\d+)?e[+-]?\d+)(<\/)/gi, (whole, open, text, close) => {
+      const plain = Decimal.parse(Number(text));
+      return plain.ok ? `${String(open)}${plain.value.toString()}${String(close)}` : whole;
+    });
 }
 
 /** The one libxml2 error an unsigned, otherwise valid rDE produces (verified in the spec). */
@@ -265,16 +311,18 @@ export async function generateInvoiceXml(
   builder: DeXmlBuilder,
   draft: InvoiceDraft,
   ctx: InvoiceXmlContext,
+  validation: ValidationConfig = {},
 ): Promise<{ xml: string; cdc: string }> {
-  const draftErrors = validateInvoiceDraft(draft, {});
+  const draftErrors = validateInvoiceDraft(draft, validation);
   if (draftErrors.length > 0) {
     throw new InvoiceXmlError(draftErrors.map((e) => `${e.field} (${e.rule})`).join(', '));
   }
   // xmlgen emits an empty cTipReg when the regime is unknown; the XSD makes it optional (MT 7.2.4: no empty tags).
-  const xml = (await builder.buildParaSifen(mapInvoiceToXmlInput(draft, ctx))).replace(
+  const built = (await builder.buildParaSifen(mapInvoiceToXmlInput(draft, ctx))).replace(
     /<cTipReg><\/cTipReg>|<cTipReg\/>/,
     '',
   );
+  const xml = hasDecimalAmounts(draft) ? finalizeDecimalAmounts(built, draft) : built;
 
   const { errors } = validateXml(xml, 'siRecepDE');
   const [only] = errors;

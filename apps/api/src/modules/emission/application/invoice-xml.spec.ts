@@ -92,6 +92,58 @@ function namedReceiver(ctx: InvoiceXmlContext): XmlReceiver {
 const MISSING_SIGNATURE =
   "Element '{http://ekuatia.set.gov.py/sifen/xsd}rDE': Missing child element(s). Expected is ( {http://www.w3.org/2000/09/xmldsig#}Signature ).";
 
+describe('generateInvoiceXml with decimal amounts (HU-E5-09)', () => {
+  const decimals = { allowDecimals: true };
+  const withItems = (items: InvoiceDraft['items'], roundingPyg: number): InvoiceDraft => ({
+    ...draft,
+    items,
+    roundingPyg,
+  });
+  const text = (xml: string, tag: string) => new RegExp(`<${tag}>([^<]*)</${tag}>`).exec(xml)?.[1];
+
+  it('builds XSD-valid XML with exact totals for 2.3 x 100', async () => {
+    const d = withItems([{ quantity: 2.3, unitPrice: 100, vatRate: 10 }], 30);
+    const { xml } = await generateInvoiceXml(builder, d, context('production'), decimals);
+
+    expect(text(xml, 'dCantProSer')).toBe('2.3');
+    expect(text(xml, 'dTotBruOpeItem')).toBe('230');
+    expect(text(xml, 'dTotOpeItem')).toBe('230');
+    expect(text(xml, 'dTotOpe')).toBe('230');
+    expect(text(xml, 'dRedon')).toBe('30');
+    expect(text(xml, 'dTotGralOpe')).toBe('200');
+    expect(text(xml, 'dMonTiPag')).toBe('200.0000');
+  });
+
+  it('keeps the fractional rounding and the exact decimal item total for 0.5 x 1001', async () => {
+    const d = withItems([{ quantity: 0.5, unitPrice: 1001, vatRate: 5 }], 0.5);
+    const { xml } = await generateInvoiceXml(builder, d, context('production'), decimals);
+
+    expect(text(xml, 'dTotBruOpeItem')).toBe('500.5');
+    expect(text(xml, 'dSub5')).toBe('500.5');
+    expect(text(xml, 'dRedon')).toBe('0.5');
+    expect(text(xml, 'dTotGralOpe')).toBe('500');
+  });
+
+  it('prints decimal prices and quantities as plain strings, never with an exponent', async () => {
+    const d = withItems(
+      [
+        { quantity: 0.00000001, unitPrice: 1_000_000, vatRate: 10 },
+        { quantity: 1, unitPrice: 12_345.6789, vatRate: 0 },
+      ],
+      45.6889,
+    );
+    const { xml } = await generateInvoiceXml(builder, d, context('production'), decimals);
+
+    expect(text(xml, 'dCantProSer')).toBe('0.00000001');
+    expect(xml).not.toMatch(/<d\w+>-?[\d.]+e[+-]?\d+</i);
+  });
+
+  it('still rejects decimals when the validation config does not allow them', async () => {
+    const d = withItems([{ quantity: 2.3, unitPrice: 100.5, vatRate: 10 }], 0);
+    await expect(generateInvoiceXml(builder, d, context('test'))).rejects.toThrow(/pyg-integer/);
+  });
+});
+
 describe('generateInvoiceXml', () => {
   it('builds XSD-valid XML (siRecepDE) whose DE Id is the CDC of the numbering results', async () => {
     const { xml, cdc } = await generateInvoiceXml(builder, draft, context('production'));

@@ -111,7 +111,7 @@ describe('validateInvoiceDraft', () => {
         expect.objectContaining({
           field: 'operationType',
           rule: 'operation-type-not-supported',
-          message: expect.stringContaining('no está soportado'),
+          message: 'El tipo de operación ' + operationType + ' no está soportado todavía',
         }),
       ]);
     });
@@ -129,7 +129,7 @@ describe('validateInvoiceDraft', () => {
         expect.objectContaining({
           rule: 'public-entity-requires-b2g',
           sifenCode: '1332',
-          message: expect.stringContaining('no se puede facturar'),
+          message: expect.stringMatching(/no se puede facturar/) as string,
         }),
       ]);
     });

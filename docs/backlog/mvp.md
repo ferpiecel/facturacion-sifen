@@ -167,6 +167,7 @@ Recomendación del líder técnico: candidatos a v1.0, no en el MVP.
 | Obligaciones afectadas RG90 (`gOblAfe`, D030–D032) | Grupo opcional (0-11) sin caso de uso confirmado en el MVP | NT 018, NT 022 |
 | WS consulta masiva de RUC | No lo exige la batería mínima de homologación | NT 011 |
 | RUC fusionado (`dRucFus`, H018) | Campo de uso opcional, sin escenario del MVP que lo requiera | NT 023 |
+| B2G (venta a entidad pública) y B2F (exportación) | Pospuestos por el PO el 2026-10-14; B2F depende de multimoneda | D202 |
 
 ---
 

@@ -1,21 +1,18 @@
 # HU-E10-01 — KuDE en PDF de inmediato
 
 ## Objective
-
 Integrators get the KuDE (PDF) of a signed invoice immediately after signing: QR >= 25 mm, mandatory
 fields of Manual Tecnico v150 chapter 13.
 
 ## Source of truth
-
 - MT v150 section 13: 13.3 title ("KuDE de Factura Electronica"), 13.4.1-13.4.4 field groups, 13.8.1 QR
-  > = 25 mm wide (22 mm content + 3 mm quiet zone), CDC printed in 11 groups of 4 (13.4.4, section 10).
+  >= 25 mm wide (22 mm content + 3 mm quiet zone), CDC printed in 11 groups of 4 (13.4.4, section 10).
 - The legend wording lives in MT figure images (no extractable text); wording taken from the SIFEN
   reference KuDE: "Consulte la validez de esta Factura Electronica con el numero de CDC impreso abajo en:
   https://ekuatia.set.gov.py/consultas". Test URL: /consultas-test/.
 - Plan v1.0 chose `@react-pdf/renderer` or Puppeteer; superseded here by pdfkit (see decisions).
 
 ## Decisions
-
 - pdfkit 0.20.2 (MIT, maintained, standard Helvetica font, no font files, no browser) over pdf-lib 1.17.1
   (MIT, unmaintained since 2022) and react-pdf/Puppeteer (heavy: React or Chromium in the API image).
 - qrcode 1.5.4 (MIT) renders the existing `dCarQR` URL to PNG; the URL is never rebuilt.
@@ -25,7 +22,6 @@ fields of Manual Tecnico v150 chapter 13.
 - No migrations needed in any slice (PDFs are rendered on demand; storing them is a later decision).
 
 ## Tasks (<= 400 lines each, one PR each, chained)
-
 - [x] S1a Deps + KudeInvoice model, formatting helpers (CDC groups, PYG, dates) and KudeRenderer port.
       Branch `feat/hu-e10-01-kude-pdf`.
 - [x] S1b pdfkit A4 renderer: header (emitter, stamp, document number), general data, receiver, items
@@ -38,6 +34,5 @@ fields of Manual Tecnico v150 chapter 13.
 - [ ] S4 (F2, HU-E10-02, out of scope) carta/cinta formats and the other 4 document types.
 
 ## Progress
-
 S1a-S1c implemented (renderer complete for FE/A4). Next: S2.
 Full slice-1 implementation was 696 lines, so it was split into S1a-S1c (each under 400).

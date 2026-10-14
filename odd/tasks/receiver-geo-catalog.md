@@ -50,16 +50,16 @@ Out: Nota de Remision address rules, emission of other document types, transport
 
 ## Technical decisions (to record in ADR-0017)
 
-| Decision                                                                                                         | Rationale                                                             |
-| ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| Keep the current flat field names; make address fields optional with conditional rules                           | No breaking rename for integrators already coding against the OpenAPI |
-| Address block is all or nothing: address + house number, then department and city unless B2F                     | Mirrors D213/D218/D219/D223                                           |
-| B2F requires address and rejects department and city                                                             | NT 014 (4478) and Manual D219/D223                                    |
-| Catalog is vendored data in the repo, not fetched at runtime                                                     | Deterministic validation, no external dependency on the portal        |
-| Department description stays resolved by the platform; district and city descriptions are validated, not trusted | SIFEN rejects mismatches (1325, 1329)                                 |
-| Read endpoints are `GET /v1/geo/departments`, `/districts?departmentCode=`, `/cities?districtCode=`              | Filtered by parent, so no endpoint returns the full city list         |
-| Open: scope required by the catalog endpoints (none beyond a valid key vs `documents:read`)                      | Decide in the ADR                                                     |
-| Open: dataset location (`packages/sifen-xsd/vendor` vs a new module of `fiscal-config`)                          | Decide in the ADR                                                     |
+| Decision | Rationale |
+|---|---|
+| Keep the current flat field names; make address fields optional with conditional rules | No breaking rename for integrators already coding against the OpenAPI |
+| Address block is all or nothing: address + house number, then department and city unless B2F | Mirrors D213/D218/D219/D223 |
+| B2F requires address and rejects department and city | NT 014 (4478) and Manual D219/D223 |
+| Catalog is vendored data in the repo, not fetched at runtime | Deterministic validation, no external dependency on the portal |
+| Department description stays resolved by the platform; district and city descriptions are validated, not trusted | SIFEN rejects mismatches (1325, 1329) |
+| Read endpoints are `GET /v1/geo/departments`, `/districts?departmentCode=`, `/cities?districtCode=` | Filtered by parent, so no endpoint returns the full city list |
+| Open: scope required by the catalog endpoints (none beyond a valid key vs `documents:read`) | Decide in the ADR |
+| Open: dataset location (`packages/sifen-xsd/vendor` vs a new module of `fiscal-config`) | Decide in the ADR |
 
 ## Tasks
 
@@ -75,13 +75,13 @@ Out: Nota de Remision address rules, emission of other document types, transport
 
 ## PR slices (chained, each about 400 changed lines or less)
 
-| PR  | Content                                                   | Depends on |
-| --- | --------------------------------------------------------- | ---------- |
-| A   | T1 (ADR) + T2 + T3: contract alignment, no catalog needed | none       |
-| B   | T4: vendored catalog, checksum test, source note          | T0, A      |
-| C   | T5: catalog validation                                    | B          |
-| D   | T6: read endpoints                                        | B          |
-| E   | T7: docs                                                  | A, C, D    |
+| PR | Content | Depends on |
+|---|---|---|
+| A | T1 (ADR) + T2 + T3: contract alignment, no catalog needed | none |
+| B | T4: vendored catalog, checksum test, source note | T0, A |
+| C | T5: catalog validation | B |
+| D | T6: read endpoints | B |
+| E | T7: docs | A, C, D |
 
 A can start immediately. B to D wait for T0. The vendored dataset in B is generated data and is declared as
 such in the PR description.

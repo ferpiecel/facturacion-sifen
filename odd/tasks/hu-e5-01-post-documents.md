@@ -18,19 +18,19 @@ E6); the document is stored as `accepted` until they exist.
 ## Slices
 
 - [ ] **S1 — `documents` table (db).** Migration 0021 with FORCE RLS `tenant_isolation`,
-      `platform_admin_all`, grants (no DELETE), immutable-identity trigger, unique CDC and unique
-      number per sequence; manual rollback; schema + `TENANT_TABLES`; db tests.
-      Acceptance: RLS isolates tenants; duplicate CDC/number rejected; identity columns immutable;
-      RLS drift check green.
+  `platform_admin_all`, grants (no DELETE), immutable-identity trigger, unique CDC and unique
+  number per sequence; manual rollback; schema + `TENANT_TABLES`; db tests.
+  Acceptance: RLS isolates tenants; duplicate CDC/number rejected; identity columns immutable;
+  RLS drift check green.
 - [ ] **S2 — `AcceptInvoice` application service (api).** In one tenant transaction: validate
-      the draft, `nextDocumentNumber`, `generateSecurityCode`, `buildCdc`, insert `documents` row
-      (`accepted`), `recordAudit`. Returns `{ documentId, cdc }`. Acceptance: validation errors
-      persist nothing and burn no number; rollback is gapless; CDC parses back to the assigned parts.
+  the draft, `nextDocumentNumber`, `generateSecurityCode`, `buildCdc`, insert `documents` row
+  (`accepted`), `recordAudit`. Returns `{ documentId, cdc }`. Acceptance: validation errors
+  persist nothing and burn no number; rollback is gapless; CDC parses back to the assigned parts.
 - [ ] **S3 — HTTP endpoint (api).** `POST /v1/documents` with Zod body, API-key auth, tenant
-      context, `202 { document_id, cdc }`, 422 on validation errors. Acceptance: e2e happy path,
-      401 without key, 422 with rule list, tenant isolation.
+  context, `202 { document_id, cdc }`, 422 on validation errors. Acceptance: e2e happy path,
+  401 without key, 422 with rule list, tenant isolation.
 - [ ] **S4 — Latency and docs.** p95 < 1.5 s check on the accept path (no network I/O inside the
-      numbering transaction), OpenAPI/docs update, backlog traceability.
+  numbering transaction), OpenAPI/docs update, backlog traceability.
 
 ## Open questions
 

@@ -26,7 +26,7 @@ Never commit real certificates; tests use `apps/api/test/support/test-pki.ts`.
       memory, tenant RLS scope, AAD = tenant/kind/environment/version/fingerprint), `loadTrustedRoots`
       (PEM bundle from `PSC_TRUSTED_ROOTS_PATH`, fail closed when absent/empty).
 - [x] **C — `feat/hu-e3-01-certificate-add-cli`: `certificate:add`.** `--tenant --env --p12 <path>
-    --password -` (password read from stdin, never argv), `--replace`; invalid certificates refused
+      --password -` (password read from stdin, never argv), `--replace`; invalid certificates refused
       with every validator reason; docs in the README "Operación" section.
 
 ## Decisions

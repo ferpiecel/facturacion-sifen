@@ -1,6 +1,6 @@
 import type { DeXmlBuilder, LoadedCertificate, XmlSigner } from '@sifen/sifen-gateway';
 import { validateXml } from '@sifen/sifen-xsd';
-import type { InvoiceDraft } from '../domain/invoice-draft.js';
+import type { InvoiceDraft, ValidationConfig } from '../domain/invoice-draft.js';
 import {
   fromAsuncionTimestamp,
   generateInvoiceXml,
@@ -51,7 +51,8 @@ export async function buildSignedInvoice(
   draft: InvoiceDraft,
   ctx: InvoiceXmlContext,
   material: LoadedCertificate,
+  validation: ValidationConfig = {},
 ): Promise<SignedInvoiceXml & { cdc: string }> {
-  const { xml, cdc } = await generateInvoiceXml(ports.builder, draft, ctx);
+  const { xml, cdc } = await generateInvoiceXml(ports.builder, draft, ctx, validation);
   return { ...(await signInvoiceXml(ports.signer, xml, material)), cdc };
 }

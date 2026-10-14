@@ -15,4 +15,16 @@ describe('TipsDeXmlBuilder', () => {
     expect(generateXMLDE).toHaveBeenCalledWith({ a: 1 }, { b: 2 });
     expect(result).toBe('<rDE/>');
   });
+
+  it('passes the xmlgen options only when the input carries them', async () => {
+    generateXMLDE.mockClear();
+    generateXMLDE.mockResolvedValue('<rDE/>');
+    const builder = new TipsDeXmlBuilder();
+
+    await builder.buildParaSifen({ params: {}, data: {}, config: { pygDecimals: 8 } });
+    await builder.buildParaSifen({ params: {}, data: {} });
+
+    expect(generateXMLDE).toHaveBeenNthCalledWith(1, {}, {}, { pygDecimals: 8 });
+    expect(generateXMLDE).toHaveBeenNthCalledWith(2, {}, {});
+  });
 });

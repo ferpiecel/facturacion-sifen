@@ -34,6 +34,8 @@ export interface QrConfig {
 export interface FacturaPocInput {
   readonly params: Readonly<Record<string, unknown>>;
   readonly data: Readonly<Record<string, unknown>>;
+  /** Builder options (for xmlgen: decimals and rounding). Omitted means the builder defaults. */
+  readonly config?: Readonly<Record<string, unknown>>;
 }
 
 /** Builds a signable FE XML document from PoC-level DE data. */

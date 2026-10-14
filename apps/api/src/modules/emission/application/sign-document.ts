@@ -1,5 +1,6 @@
 import type { DeXmlBuilder, QrGenerator, XmlSigner } from '@sifen/sifen-gateway';
 import { addQrToSignedInvoice } from './invoice-qr.js';
+import type { ValidationConfig } from '../domain/invoice-draft.js';
 import { signInvoiceXml } from './invoice-signing.js';
 import { generateInvoiceXml } from './invoice-xml.js';
 import type { CertificateSource, CscSource, SigningStore } from './ports/signing.port.js';
@@ -41,6 +42,8 @@ export interface SignDocumentDeps {
   readonly builder: DeXmlBuilder;
   readonly signer: XmlSigner;
   readonly qr: QrGenerator;
+  /** The same validation config the API accepted the draft with, so the worker never rejects it. */
+  readonly validation?: ValidationConfig;
 }
 
 export type SignDocumentResult =
@@ -89,6 +92,7 @@ export class SignDocument {
         this.deps.builder,
         document.draft,
         document.context,
+        this.deps.validation,
       );
       if (unsigned.cdc !== document.cdc) throw new SigningMismatchError();
       const signed = await signInvoiceXml(this.deps.signer, unsigned.xml, {

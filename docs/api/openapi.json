@@ -12,8 +12,8 @@
         "tags": [
           "Documents"
         ],
-        "summary": "Accept an invoice (FE) for emission",
-        "description": "Returns 202 once the document is persisted with its CDC; signing and transmission to SIFEN are asynchronous. Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.",
+        "summary": "Accept an invoice (FE) or a credit note (NCE) for emission",
+        "description": "The body is an FE unless `type` is `NCE` (credit note associated to an approved FE; its receiver is taken from that FE). Credit notes are validated but answer 422 `document-type-not-supported` until their acceptance is enabled. Returns 202 once the document is persisted with its CDC; signing and transmission to SIFEN are asynchronous. Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.",
         "security": [
           {
             "apiKey": []
@@ -39,7 +39,14 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateDocumentRequest"
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/CreateDocumentRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CreateCreditNoteRequest"
+                  }
+                ]
               }
             }
           }
@@ -369,6 +376,181 @@
           },
           "500": {
             "description": "The KuDE could not be generated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/geo/departments": {
+      "get": {
+        "operationId": "listGeoDepartments",
+        "tags": [
+          "Geography"
+        ],
+        "summary": "Departments of the DNIT geographic table (Tabla 2.1)",
+        "description": "Public reference data: any valid API key works, no scope is needed (ADR-0017).",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "All departments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeoDepartmentList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/geo/districts": {
+      "get": {
+        "operationId": "listGeoDistricts",
+        "tags": [
+          "Geography"
+        ],
+        "summary": "Districts of one department",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "departmentCode",
+            "in": "query",
+            "required": true,
+            "description": "Department code, as listed by the geography endpoints",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 99999
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The districts of the department",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeoDistrictList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "departmentCode missing or not a code of 1 to 5 digits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The department is not in the table",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/geo/cities": {
+      "get": {
+        "operationId": "listGeoCities",
+        "tags": [
+          "Geography"
+        ],
+        "summary": "Cities of one district",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "districtCode",
+            "in": "query",
+            "required": true,
+            "description": "District code, as listed by the geography endpoints",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 99999
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The cities of the district",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GeoCityList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "districtCode missing or not a code of 1 to 5 digits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The district is not in the table",
             "content": {
               "application/json": {
                 "schema": {
@@ -858,7 +1040,7 @@
       "apiKey": {
         "type": "http",
         "scheme": "bearer",
-        "description": "API key. Each route needs the scope named in `x-required-scopes` (`documents:read`, `documents:write`, `webhooks:read`, `webhooks:write`)."
+        "description": "API key. Each route needs the scope named in `x-required-scopes` (`documents:read`, `documents:write`, `webhooks:read`, `webhooks:write`); the `/v1/geo` routes need only a valid key."
       }
     },
     "schemas": {
@@ -919,6 +1101,10 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
         "properties": {
+          "type": {
+            "type": "string",
+            "const": "FE"
+          },
           "establishment": {
             "type": "string",
             "pattern": "^\\d{3}$"
@@ -1071,6 +1257,94 @@
           "expeditionPoint",
           "operationType",
           "receiver",
+          "items"
+        ]
+      },
+      "CreateCreditNoteRequest": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "NCE"
+          },
+          "establishment": {
+            "type": "string",
+            "pattern": "^\\d{3}$"
+          },
+          "expeditionPoint": {
+            "type": "string",
+            "pattern": "^\\d{3}$"
+          },
+          "associatedCdc": {
+            "type": "string",
+            "pattern": "^[0-9]{44}$"
+          },
+          "reasonCode": {
+            "type": "number"
+          },
+          "items": {
+            "maxItems": 999,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "maxLength": 50
+                },
+                "description": {
+                  "type": "string",
+                  "maxLength": 2000
+                },
+                "unitCode": {
+                  "type": "number"
+                },
+                "quantity": {
+                  "type": "number"
+                },
+                "unitPrice": {
+                  "type": "number"
+                },
+                "vatRate": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "code",
+                "description",
+                "unitCode",
+                "quantity",
+                "unitPrice",
+                "vatRate"
+              ]
+            }
+          },
+          "roundingPyg": {
+            "default": 0,
+            "type": "number"
+          },
+          "currency": {
+            "default": "PYG",
+            "type": "string",
+            "const": "PYG"
+          },
+          "receiver": {
+            "not": {}
+          },
+          "operationType": {
+            "not": {}
+          },
+          "location": {
+            "not": {}
+          }
+        },
+        "required": [
+          "type",
+          "establishment",
+          "expeditionPoint",
+          "associatedCdc",
+          "reasonCode",
           "items"
         ]
       },
@@ -1404,6 +1678,92 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "GeoDepartmentList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "code",
+                "name"
+              ],
+              "properties": {
+                "code": {
+                  "type": "integer"
+                },
+                "name": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "GeoDistrictList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "code",
+                "departmentCode",
+                "name"
+              ],
+              "properties": {
+                "code": {
+                  "type": "integer"
+                },
+                "departmentCode": {
+                  "type": "integer"
+                },
+                "name": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "GeoCityList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "code",
+                "districtCode",
+                "name"
+              ],
+              "properties": {
+                "code": {
+                  "type": "integer"
+                },
+                "districtCode": {
+                  "type": "integer"
+                },
+                "name": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       },

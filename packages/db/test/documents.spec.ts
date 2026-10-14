@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { DatabaseHandle } from '../src/client.js';
 import {
   documents,
@@ -580,5 +580,90 @@ describe('documents', () => {
     expect(await causeOf(db.update(documents).set({ requestHash: 'b'.repeat(64) }))).toContain(
       'immutable',
     );
+  });
+
+  /** Spec: HU-E7-01 (ADR-0019). The CDC of the FE a credit note is associated to. */
+  describe('associated CDC', () => {
+    const CDC_NCE = '05800695631001001000000112026010111234567893';
+
+    it('is null by default and set for a credit note', async () => {
+      const { db, a, setupA, doc } = await seed();
+      const [fe] = await db.insert(documents).values(doc(a, setupA)).returning();
+      expect(fe.associatedCdc).toBeNull();
+      const [nce] = await db
+        .insert(documents)
+        .values(
+          doc(a, setupA, {
+            documentType: 5,
+            cdc: CDC_NCE,
+            number: 2,
+            associatedCdc: CDC_A,
+          }),
+        )
+        .returning();
+      expect(nce.associatedCdc).toBe(CDC_A);
+    });
+
+    it('rejects a malformed value, a self reference and an invoice with an association', async () => {
+      const { db, a, setupA, doc } = await seed();
+      const nce = (overrides: Partial<typeof documents.$inferInsert>) =>
+        doc(a, setupA, { documentType: 5, cdc: CDC_NCE, number: 2, ...overrides });
+      expect(await causeOf(db.insert(documents).values(nce({ associatedCdc: '123' })))).toContain(
+        'documents_associated_cdc_format',
+      );
+      expect(
+        await causeOf(db.insert(documents).values(nce({ associatedCdc: 'a'.repeat(44) }))),
+      ).toContain('documents_associated_cdc_format');
+      expect(await causeOf(db.insert(documents).values(nce({ associatedCdc: CDC_NCE })))).toContain(
+        'documents_associated_cdc_not_self',
+      );
+      expect(
+        await causeOf(db.insert(documents).values(doc(a, setupA, { associatedCdc: CDC_B }))),
+      ).toContain('documents_associated_cdc_not_invoice');
+    });
+
+    it('is immutable once the document exists', async () => {
+      const { db, a, setupA, doc } = await seed();
+      await db
+        .insert(documents)
+        .values(doc(a, setupA, { documentType: 5, cdc: CDC_NCE, associatedCdc: CDC_A }));
+      expect(await causeOf(db.update(documents).set({ associatedCdc: CDC_B }))).toContain(
+        'associated_cdc is immutable',
+      );
+      expect(await causeOf(db.update(documents).set({ associatedCdc: null }))).toContain(
+        'associated_cdc is immutable',
+      );
+      const [row] = await db.update(documents).set({ status: 'signed' }).returning();
+      expect(row.associatedCdc).toBe(CDC_A);
+    });
+
+    it('is found by tenant, environment and associated CDC, and never across tenants', async () => {
+      const { db, a, b, setupA, setupB, doc } = await seed();
+      await db
+        .insert(documents)
+        .values(doc(a, setupA, { documentType: 5, cdc: CDC_NCE, associatedCdc: CDC_A }));
+      await db
+        .insert(documents)
+        .values(doc(b, setupB, { documentType: 5, cdc: CDC_B, associatedCdc: CDC_A }));
+      const credits = (tenantId: string) =>
+        withTenantTransaction(db, tenantId, (tx) =>
+          tx
+            .select({ cdc: documents.cdc })
+            .from(documents)
+            .where(eq(documents.associatedCdc, CDC_A)),
+        );
+      expect(await credits(a)).toEqual([{ cdc: CDC_NCE }]);
+      expect(await credits(b)).toEqual([{ cdc: CDC_B }]);
+    });
+
+    it('has a partial index for the credit sum lookup', async () => {
+      const { db } = await seed();
+      const result = await db.execute(
+        sql`SELECT indexdef FROM pg_indexes WHERE indexname = 'documents_associated_cdc_idx'`,
+      );
+      const def = (result as { rows: { indexdef: string }[] }).rows[0].indexdef;
+      expect(def).toContain('(tenant_id, environment, associated_cdc)');
+      expect(def).toContain('WHERE');
+    });
   });
 });

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { DOCUMENT_STATUSES } from '@sifen/db';
 import { createDocumentSchema } from '../../emission/infrastructure/http/create-document.request.js';
+import { createCreditNoteSchema } from '../../emission/infrastructure/http/credit-note.request.js';
 import { WEBHOOK_EVENT_TYPES } from '../../webhooks/domain/webhook-event.js';
 
 /**
@@ -34,6 +35,34 @@ const idParam = (what: string) => ({
   schema: { type: 'string', format: 'uuid' },
 });
 
+const geoCodeParam = (name: string, what: string) => ({
+  name,
+  in: 'query',
+  required: true,
+  description: `${what}, as listed by the geography endpoints`,
+  schema: { type: 'integer', minimum: 1, maximum: 99999 },
+});
+
+/** `{ items: [{ code, [parent], name }] }` of the geography endpoints. */
+const geoList = (parent?: string) => ({
+  type: 'object',
+  required: ['items'],
+  properties: {
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['code', ...(parent ? [parent] : []), 'name'],
+        properties: {
+          code: { type: 'integer' },
+          ...(parent ? { [parent]: { type: 'integer' } } : {}),
+          name: { type: 'string' },
+        },
+      },
+    },
+  },
+});
+
 const secured = (scopes: string[]) => ({
   security: [{ apiKey: [] }],
   'x-required-scopes': scopes,
@@ -58,8 +87,10 @@ export function buildOpenApiDocument() {
         post: {
           operationId: 'createDocument',
           tags: ['Documents'],
-          summary: 'Accept an invoice (FE) for emission',
+          summary: 'Accept an invoice (FE) or a credit note (NCE) for emission',
           description:
+            'The body is an FE unless `type` is `NCE` (credit note associated to an approved FE; its receiver is taken from that FE). ' +
+            'Credit notes are validated but answer 422 `document-type-not-supported` until their acceptance is enabled. ' +
             'Returns 202 once the document is persisted with its CDC; signing and transmission to SIFEN are asynchronous. ' +
             'Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.',
           ...secured(['documents:write']),
@@ -74,7 +105,11 @@ export function buildOpenApiDocument() {
           ],
           requestBody: {
             required: true,
-            content: { 'application/json': { schema: ref('CreateDocumentRequest') } },
+            content: {
+              'application/json': {
+                schema: { oneOf: [ref('CreateDocumentRequest'), ref('CreateCreditNoteRequest')] },
+              },
+            },
           },
           responses: {
             '202': json('Accepted', ref('DocumentAccepted')),
@@ -143,6 +178,50 @@ export function buildOpenApiDocument() {
             '404': NOT_FOUND,
             '409': problem('The document is not signed yet'),
             '500': problem('The KuDE could not be generated'),
+          },
+        },
+      },
+      '/v1/geo/departments': {
+        get: {
+          operationId: 'listGeoDepartments',
+          tags: ['Geography'],
+          summary: 'Departments of the DNIT geographic table (Tabla 2.1)',
+          description:
+            'Public reference data: any valid API key works, no scope is needed (ADR-0017).',
+          security: [{ apiKey: [] }],
+          responses: {
+            '200': json('All departments', ref('GeoDepartmentList')),
+            '401': UNAUTHORIZED,
+          },
+        },
+      },
+      '/v1/geo/districts': {
+        get: {
+          operationId: 'listGeoDistricts',
+          tags: ['Geography'],
+          summary: 'Districts of one department',
+          security: [{ apiKey: [] }],
+          parameters: [geoCodeParam('departmentCode', 'Department code')],
+          responses: {
+            '200': json('The districts of the department', ref('GeoDistrictList')),
+            '400': problem('departmentCode missing or not a code of 1 to 5 digits'),
+            '401': UNAUTHORIZED,
+            '404': problem('The department is not in the table'),
+          },
+        },
+      },
+      '/v1/geo/cities': {
+        get: {
+          operationId: 'listGeoCities',
+          tags: ['Geography'],
+          summary: 'Cities of one district',
+          security: [{ apiKey: [] }],
+          parameters: [geoCodeParam('districtCode', 'District code')],
+          responses: {
+            '200': json('The cities of the district', ref('GeoCityList')),
+            '400': problem('districtCode missing or not a code of 1 to 5 digits'),
+            '401': UNAUTHORIZED,
+            '404': problem('The district is not in the table'),
           },
         },
       },
@@ -267,7 +346,7 @@ export function buildOpenApiDocument() {
           type: 'http',
           scheme: 'bearer',
           description:
-            'API key. Each route needs the scope named in `x-required-scopes` (`documents:read`, `documents:write`, `webhooks:read`, `webhooks:write`).',
+            'API key. Each route needs the scope named in `x-required-scopes` (`documents:read`, `documents:write`, `webhooks:read`, `webhooks:write`); the `/v1/geo` routes need only a valid key.',
         },
       },
       schemas: {
@@ -297,6 +376,10 @@ export function buildOpenApiDocument() {
           },
         },
         CreateDocumentRequest: z.toJSONSchema(createDocumentSchema, {
+          io: 'input',
+          unrepresentable: 'any',
+        }),
+        CreateCreditNoteRequest: z.toJSONSchema(createCreditNoteSchema, {
           io: 'input',
           unrepresentable: 'any',
         }),
@@ -417,6 +500,9 @@ export function buildOpenApiDocument() {
             created_at: dateTime,
           },
         },
+        GeoDepartmentList: geoList(),
+        GeoDistrictList: geoList('departmentCode'),
+        GeoCityList: geoList('districtCode'),
         WebhookDeliveryPage: {
           type: 'object',
           required: ['items', 'next_cursor'],

@@ -54,8 +54,19 @@ export interface CreditNoteDraft {
   roundingPyg: number;
 }
 
-/** Fields of the invoice rules that the credit note shares. */
-const SHARED_FIELDS = /^(items|total|roundingPyg)(\.|\[|$)/;
+/** The invoice rules the credit note reuses (items, totals, rounding); an explicit allowlist, not a field pattern. */
+const SHARED_RULES: ReadonlySet<string> = new Set([
+  'items-required',
+  'quantity-positive',
+  'quantity-precision',
+  'unit-price-non-negative',
+  'unit-price-precision',
+  'vat-rate',
+  'line-total-precision',
+  'amount-range',
+  'pyg-integer',
+  'rounding-multiple-of-50',
+]);
 
 /** H004d / 2417: the credits of an FE, this one included, must not exceed its F014. */
 export function creditNoteSumRule(
@@ -147,17 +158,17 @@ export function validateCreditNoteDraft(
   }
 
   const itemErrors = validateInvoiceDraft(toInvoiceShape(draft, invoice), config).filter((e) =>
-    SHARED_FIELDS.test(e.field),
+    SHARED_RULES.has(e.rule),
   );
   errors.push(...itemErrors);
 
   if (creditable && invoice && itemErrors.length === 0) {
-    const invoiceTotal = Decimal.parse(invoice.totalAmount);
-    const credited = Decimal.parse(invoice.creditedAmount);
-    if (invoiceTotal.ok && credited.ok) {
-      const sum = creditNoteSumRule(invoiceTotal.value, credited.value, invoiceTotals(draft).net);
-      if (sum) errors.push(sum);
-    }
+    const sum = creditNoteSumRule(
+      readAmount(invoice.totalAmount, 'totalAmount'),
+      readAmount(invoice.creditedAmount, 'creditedAmount'),
+      invoiceTotals(draft).net,
+    );
+    if (sum) errors.push(sum);
   }
   return errors;
 }
@@ -174,4 +185,11 @@ function toInvoiceShape(
     roundingPyg: draft.roundingPyg,
     location: invoice?.location ?? {},
   };
+}
+
+/** The stored amounts come from our own rows: an unreadable one is a defect, never a skipped rule. */
+function readAmount(text: string, name: string): Decimal {
+  const parsed = Decimal.parse(text);
+  if (!parsed.ok) throw new Error(`Associated invoice ${name} is not a readable amount: ${text}`);
+  return parsed.value;
 }

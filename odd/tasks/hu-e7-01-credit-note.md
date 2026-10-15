@@ -181,7 +181,7 @@ an FE not issued by the platform; foreign currency and exchange rate (`multi-cur
 - [x] T3 (done in PR B: migration `0046_documents_associated_cdc`, with a separate immutability trigger and extra CHECKs) Migration `0046` (or next free): `documents.associated_cdc` with CHECK and index, rollback script, Drizzle schema, RLS coverage test stays green (no new table), `db-postgres` run.
 - [x] T4 (PR C1, `credit-note-draft.ts`; takes the FE facts as input, lookups stay in slice D) Domain: `credit-note-draft` types, reasons table, `validateCreditNoteDraft` (items and rounding reuse the invoice rules, unnamed receiver 1331), pure `creditNoteSumRule` and currency rule over `Decimal`. Tests first.
 - [x] T5 (PR C2, `credit-note.request.ts`; the controller answers 422 `document-type-not-supported` until slice D) Request contract: `type` discriminator, NCE schema, mapping to the use case input, backward compatibility test with an old FE body, OpenAPI regeneration.
-- [ ] T6 Application and persistence: `acceptCreditNote` use case and `AcceptanceUnit` port methods (`findAssociatedInvoice` with lock, `sumCreditNotes`), Drizzle implementation, numbering type 5, CDC `05`, audit action, idempotency, all checks before `nextNumber`. Concurrency test (two simultaneous NCEs).
+- [x] T6 (PRs D1 and D2: use case, port methods, Drizzle unit, `associated_cdc`, controller behind a gate, signing store hold) Application and persistence: `acceptCreditNote` use case and `AcceptanceUnit` port methods (`findAssociatedInvoice` with lock, `sumCreditNotes`), Drizzle implementation, numbering type 5, CDC `05`, audit action, idempotency, all checks before `nextNumber`. Concurrency test (two simultaneous NCEs).
 - [ ] T7 Signing path: signing store dispatches on type, builds the NCE context (reason, associated CDC, receiver from the FE), `invoice-xml.ts` credit-note branch (D8), CDC type from input, XSD check, QR unchanged. FE byte-identical test.
 - [ ] T8 KuDE: reader supports `iTiDE` 5, model and renderer title and associated document block, `gCamCond` optional; golden text assertions as the FE ones.
 - [ ] T9 Transmission and events: test that NCE documents form their own lotes and are sent; webhook payloads and portal listing show `NCE`; no code change expected, confirm.
@@ -301,3 +301,20 @@ Closed in ADR-0019 (technical, tech lead): D1 same endpoint with a `type` discri
 - 2439 is unreachable by construction (lookup per tenant, one issuer per tenant): a foreign FE is "not found" (2403).
 - Slice D must make `drizzle-signing-store` re-parse the stored payload by document type (`parseDocumentRequest`),
   or an NCE payload fails with `SigningDataIncompleteError`. Slice D also owns reading `type: "FE"` payloads.
+
+### Slice D evidence (2026-10-15)
+
+- Route: T6 inline by the writer, in two PRs (D1 use case and persistence; D2 controller, module gate, signing hold).
+- RED: `drizzle-credit-note-acceptance.spec.ts` failed first with "Cannot find module" (no use case); the e2e
+  `credit notes enabled` cases answered 422 `document-type-not-supported`; the signing store case failed on the
+  missing `DocumentTypeNotSignableError`. The transmission-cycle list was extended together with the set (no separate RED).
+- Gate decision: the API must not accept an NCE the worker cannot sign (XML is slice E). `CREDIT_NOTES_ENABLED` is
+  a provider token fixed to `false` in `EmissionModule`; the controller answers 422 `document-type-not-supported`
+  while it is off, and the e2e suite turns it on with `overrideProvider`. Slice E flips it and removes the gate.
+  Defence in depth: if an NCE row ever reaches the worker, `drizzle-signing-store` throws
+  `DocumentTypeNotSignableError` and the cycle holds it as `signing:DocumentTypeNotSignableError` (no retry loop).
+- Concurrency: `findAssociatedInvoice` takes `FOR NO KEY UPDATE` on the FE row before `sumCreditNotes`, so a second NCE
+  waits and then sees the first. PGlite is single-connection and serializes transactions, so the race test proves
+  the logic (exactly one of two 600k credits on a 1M FE is accepted, number 1, no gap) but not the row lock itself;
+  that needs a real Postgres (not run here).
+- Slice E must replace the gate and the hold: re-parse the stored payload by document type and build the NCE XML.

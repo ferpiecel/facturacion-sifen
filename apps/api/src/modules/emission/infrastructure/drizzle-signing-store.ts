@@ -18,6 +18,7 @@ import { createRuc } from '../../fiscal-config/domain/ruc.js';
 import { createTimbrado } from '../../fiscal-config/domain/timbrado.js';
 import {
   EstablishmentContactMissingError,
+  DocumentTypeNotSignableError,
   SigningDataIncompleteError,
   type NotAcceptedDocument,
   type SignableDocument,
@@ -110,6 +111,10 @@ export function createDrizzleSigningStore({
           // Nothing to sign: do not touch the configuration or parse the payload again.
           if (document.status !== 'accepted') {
             return { documentId: document.id, status: document.status };
+          }
+          // Only an FE has an XML builder today; an NCE waits (held) for HU-E7-01 slice E.
+          if (document.documentType !== 1) {
+            throw new DocumentTypeNotSignableError(document.documentType);
           }
           const tenant = first(
             await tx

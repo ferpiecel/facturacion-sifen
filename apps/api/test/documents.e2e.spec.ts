@@ -14,6 +14,7 @@ import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTenant, issueApiKey } from '../src/cli/commands.js';
 import { createHttpAdapter } from '../src/bootstrap/http.js';
+import { CREDIT_NOTES_ENABLED } from '../src/modules/emission/emission.tokens.js';
 import { AppModule } from '../src/app.module.js';
 import { DATABASE, DATABASE_HANDLE } from '../src/modules/database/database.module.js';
 import { parseCdc } from '../src/modules/emission/domain/cdc.js';
@@ -93,16 +94,24 @@ describe('POST /v1/documents (e2e)', () => {
     const seeded = await seedTenant('Acme SA', true);
     tenantId = seeded.id;
     bearer = seeded.formattedKey;
+    app = await buildApp(false);
+  });
+
+  /** `creditNotes` turns on the NCE acceptance gate (HU-E7-01, until the worker can sign them). */
+  async function buildApp(creditNotes: boolean) {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(DATABASE_HANDLE)
       .useValue(handle)
       .overrideProvider(DATABASE)
       .useValue(handle.db)
+      .overrideProvider(CREDIT_NOTES_ENABLED)
+      .useValue(creditNotes)
       .compile();
-    app = moduleRef.createNestApplication<NestFastifyApplication>(createHttpAdapter());
-    await app.init();
-    await app.getHttpAdapter().getInstance().ready();
-  });
+    const created = moduleRef.createNestApplication<NestFastifyApplication>(createHttpAdapter());
+    await created.init();
+    await created.getHttpAdapter().getInstance().ready();
+    return created;
+  }
 
   afterEach(async () => {
     await app.close();
@@ -178,6 +187,68 @@ describe('POST /v1/documents (e2e)', () => {
       expect.objectContaining({ rule: 'document-type-not-supported' }),
     ]);
     expect(await handle.db.select().from(documents)).toHaveLength(0);
+  });
+
+  describe('credit notes enabled', () => {
+    beforeEach(async () => {
+      // The first app is not closed: closing it would close the shared database handle.
+      app = await buildApp(true);
+    });
+
+    const nce = (cdc: string) => ({
+      type: 'NCE',
+      establishment: '001',
+      expeditionPoint: '002',
+      associatedCdc: cdc,
+      reasonCode: 2,
+      items: [{ ...LINE, quantity: 1, unitPrice: 50_000, vatRate: 10 }],
+    });
+
+    it('accepts an NCE of an approved FE with 202, a 05 CDC and its own number', async () => {
+      const fe = (await post(BODY)).json<{ document_id: string; cdc: string }>();
+      for (const status of ['signed', 'submitted', 'approved']) {
+        await handle.db.update(documents).set({ status }).where(eq(documents.id, fe.document_id));
+      }
+
+      const response = await post(nce(fe.cdc));
+
+      expect(response.statusCode).toBe(202);
+      const { document_id: id, cdc } = response.json<{ document_id: string; cdc: string }>();
+      expect(cdc).toMatch(/^05\d{42}$/);
+      const [row] = await handle.db.select().from(documents).where(eq(documents.id, id));
+      expect(row).toMatchObject({
+        documentType: 5,
+        number: 1,
+        associatedCdc: fe.cdc,
+        status: 'accepted',
+      });
+    });
+
+    it('answers 422 with the credit note rule when the FE is not approved yet, burning no number', async () => {
+      const fe = (await post(BODY)).json<{ cdc: string }>();
+
+      const response = await post(nce(fe.cdc));
+
+      expect(response.statusCode).toBe(422);
+      expect(response.json<{ errors: Array<{ rule: string }> }>().errors).toEqual([
+        expect.objectContaining({ rule: 'associated-document-not-approved' }),
+      ]);
+      expect(
+        (await handle.db.select().from(documents)).filter((d) => d.documentType === 5),
+      ).toEqual([]);
+    });
+
+    it('replays an NCE with the same Idempotency-Key and refuses another body with 409', async () => {
+      const fe = (await post(BODY)).json<{ document_id: string; cdc: string }>();
+      for (const status of ['signed', 'submitted', 'approved']) {
+        await handle.db.update(documents).set({ status }).where(eq(documents.id, fe.document_id));
+      }
+      const first = await post(nce(fe.cdc), bearer, 'nce-key');
+      const again = await post(nce(fe.cdc), bearer, 'nce-key');
+      expect(again.json()).toEqual(first.json());
+      const other = { ...nce(fe.cdc), reasonCode: 3 };
+      expect((await post(other, bearer, 'nce-key')).statusCode).toBe(409);
+    });
   });
 
   it('rejects a request without a valid API key with 401', async () => {

@@ -361,9 +361,10 @@ describe('portal auth over HTTP (HU-E1-07 S5, with MFA enrolment)', () => {
       expect((await c.send('POST', '/auth/mfa/confirm', { body: { code: '12345' } })).status).toBe(
         400,
       );
-      const confirm = await c.send('POST', '/auth/mfa/confirm', {
-        body: { code: totpAt(secretBytes, Date.now()) },
-      });
+      // One code, reused below: re-deriving it from the clock after a 30 s step boundary would
+      // yield the next step, which the replay guard (rightly) accepts.
+      const firstCode = totpAt(secretBytes, Date.now());
+      const confirm = await c.send('POST', '/auth/mfa/confirm', { body: { code: firstCode } });
       expect(confirm.status).toBe(200);
       expect(confirm.headers['cache-control']).toBe('no-store');
       const codes = confirm.body.recoveryCodes as string[];
@@ -389,10 +390,9 @@ describe('portal auth over HTTP (HU-E1-07 S5, with MFA enrolment)', () => {
       await again.send('POST', '/auth/login', {
         body: { email: 'flow@example.com', password: PASSWORD },
       });
-      expect(
-        (await again.send('POST', '/auth/mfa', { body: { code: totpAt(secretBytes, Date.now()) } }))
-          .status,
-      ).toBe(401);
+      expect((await again.send('POST', '/auth/mfa', { body: { code: firstCode } })).status).toBe(
+        401,
+      );
       expect((await again.send('POST', '/auth/mfa', { body: { code: codes[0] } })).status).toBe(
         200,
       );

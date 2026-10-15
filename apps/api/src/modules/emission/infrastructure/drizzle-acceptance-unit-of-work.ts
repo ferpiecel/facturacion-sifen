@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, isNull, lte, or } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull, lte, notInArray, or, sql } from 'drizzle-orm';
 import {
   documents,
   nextDocumentNumber,
@@ -13,11 +13,13 @@ import {
 } from '@sifen/db';
 import { recordAudit } from '../../audit/infrastructure/record-audit.js';
 import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
+import { InvoiceValidationError } from '../application/accept-invoice.js';
 import {
   IdempotencyKeyCollisionError,
   type AcceptanceUnit,
   type AcceptanceUnitOfWork,
 } from '../application/ports/acceptance-unit-of-work.port.js';
+import { parseCreateDocument, toInvoiceDraft } from './http/create-document.request.js';
 
 const IDEMPOTENCY_CONSTRAINT = 'documents_tenant_idempotency_key_key';
 
@@ -97,6 +99,59 @@ function createUnit(tx: TenantTx, tenantId: string): AcceptanceUnit {
         establishmentId: point.establishmentId,
         expeditionPointId: point.pointId,
       };
+    },
+    async findAssociatedInvoice(cdc, environment) {
+      const row = await tx
+        .select()
+        .from(documents)
+        .where(
+          and(
+            eq(documents.tenantId, tenantId),
+            eq(documents.environment, environment),
+            eq(documents.cdc, cdc),
+            eq(documents.documentType, 1),
+          ),
+        )
+        .for('no key update')
+        .then(first);
+      if (!row) return null;
+      const body = parseCreateDocument(row.payload);
+      if (!body.ok) {
+        // A historical payload that no longer parses must not surface as a 500 (HU-E7-01).
+        throw new InvoiceValidationError([
+          {
+            field: 'associatedCdc',
+            rule: 'associated-document-unreadable',
+            message: 'The associated invoice data cannot be read to issue a credit note',
+          },
+        ]);
+      }
+      const draft = toInvoiceDraft(body.value);
+      return {
+        receiver: draft.receiver,
+        operationType: draft.operationType,
+        location: draft.location,
+        status: row.status,
+        currency: row.currency,
+        totalAmount: row.totalAmount,
+        receiverRuc: row.receiverRuc,
+      };
+    },
+    async sumCreditNotes(cdc, environment) {
+      const row = await tx
+        .select({ total: sql<string | null>`sum(${documents.totalAmount})` })
+        .from(documents)
+        .where(
+          and(
+            eq(documents.tenantId, tenantId),
+            eq(documents.environment, environment),
+            eq(documents.associatedCdc, cdc),
+            eq(documents.documentType, 5),
+            notInArray(documents.status, ['cancelled', 'number_voided']),
+          ),
+        )
+        .then(first);
+      return row?.total ?? '0';
     },
     nextNumber: (issuer, documentType) =>
       nextDocumentNumber(tx, {

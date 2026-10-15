@@ -16,6 +16,7 @@ import {
 import { buildCdc } from '../domain/cdc.js';
 import { validateInvoiceDraft } from '../domain/invoice-draft.js';
 import {
+  DocumentTypeNotSignableError,
   EstablishmentContactMissingError,
   SigningDataIncompleteError,
   type NotAcceptedDocument,
@@ -80,7 +81,9 @@ describe('DrizzleSigningStore', () => {
   let otherTenantId: string;
   let documentId: string;
 
-  async function seed(options: { contact?: boolean; payload?: unknown } = {}) {
+  async function seed(
+    options: { contact?: boolean; payload?: unknown; documentType?: number } = {},
+  ) {
     handle = createPgliteDatabase();
     await handle.migrate();
     const { db } = handle;
@@ -133,7 +136,7 @@ describe('DrizzleSigningStore', () => {
         tenantId,
         environment: 'test',
         cdc: CDC,
-        documentType: 1,
+        documentType: options.documentType ?? 1,
         timbradoId: timbrado.id,
         establishmentId: est.id,
         expeditionPointId: point.id,
@@ -264,6 +267,16 @@ describe('DrizzleSigningStore', () => {
       documentId,
       status: 'signed',
     });
+  });
+
+  it('refuses to sign a document of a type it cannot build yet, naming the type, not the payload', async () => {
+    // HU-E7-01: an NCE must be held with a distinct reason until slice E, never fail as an incomplete FE.
+    await seed({ documentType: 5, payload: { type: 'NCE', reasonCode: 2 } });
+    const error = await storeFor(tenantId)
+      .load(tenantId, documentId)
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(DocumentTypeNotSignableError);
+    expect((error as DocumentTypeNotSignableError).documentType).toBe(5);
   });
 
   it('names the establishment when it has no phone or email', async () => {

@@ -290,8 +290,9 @@ function validateReceiverAddress(draft: InvoiceDraft, errors: ValidationError[])
     });
   }
 
-  // Legacy clients always sent the department with an unnamed receiver: it is ignored, never
-  // rejected and never informed in the XML.
+  // Legacy clients always sent the department with an unnamed receiver: it still has to be a
+  // valid code (checked above, as before), but no address rule applies and it is never informed
+  // in the XML.
   if (draft.receiver.kind === 'unnamed' && !isB2f) return;
 
   if (address === undefined) {

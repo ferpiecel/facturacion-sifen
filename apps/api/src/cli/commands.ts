@@ -17,10 +17,13 @@ import {
 } from '@sifen/db';
 import { recordAudit } from '../modules/audit/infrastructure/record-audit.js';
 import type { TenantEnvironment } from '../modules/fiscal-config/domain/document-environment.js';
-import type {
-  Establishment,
-  EstablishmentContact,
+import {
+  InvalidEstablishmentError,
+  type Establishment,
+  type EstablishmentContact,
 } from '../modules/fiscal-config/domain/establishment.js';
+import { validateEstablishmentGeography } from '../modules/fiscal-config/domain/establishment-geography.js';
+import type { GeoCatalog } from '../modules/geo/domain/geo-catalog.js';
 import type { ExpeditionPoint } from '../modules/fiscal-config/domain/expedition-point.js';
 import type { FiscalProfile } from '../modules/fiscal-config/domain/fiscal-profile.js';
 import { formatRuc } from '../modules/fiscal-config/domain/ruc.js';
@@ -199,6 +202,8 @@ export async function setFiscalProfile(
 export interface AddEstablishmentParams {
   tenantId: string;
   establishment: Establishment;
+  /** When given, the address must exist and nest in the DNIT catalog (xmlgen writes the issuer text from it). */
+  geoCatalog?: GeoCatalog;
 }
 
 export interface AddEstablishmentResult {
@@ -216,7 +221,9 @@ export async function addEstablishment(
   db: Database,
   params: AddEstablishmentParams,
 ): Promise<AddEstablishmentResult> {
-  const { tenantId, establishment } = params;
+  const { tenantId, establishment, geoCatalog } = params;
+  const geography = geoCatalog ? validateEstablishmentGeography(establishment, geoCatalog) : [];
+  if (geography.length > 0) throw new InvalidEstablishmentError(geography.join('; '));
 
   return db.transaction(async (tx) => {
     const found = await tx.select({ id: tenants.id }).from(tenants).where(eq(tenants.id, tenantId));

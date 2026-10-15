@@ -36,7 +36,7 @@ const BODY = {
   },
   items: [{ ...LINE, quantity: 1, unitPrice: 110_000, vatRate: 10 }],
   roundingPyg: 0,
-  location: { departmentCode: 11 },
+  location: { departmentCode: 1 },
 };
 
 /** Spec: HU-E5-07. `GET /v1/documents/{id}` and `?cdc=` through the real pipeline. */

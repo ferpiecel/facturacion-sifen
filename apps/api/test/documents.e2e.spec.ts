@@ -39,7 +39,7 @@ const BODY = {
   },
   items: [{ ...LINE, quantity: 1, unitPrice: 110_000, vatRate: 10 }],
   roundingPyg: 0,
-  location: { departmentCode: 11 },
+  location: { departmentCode: 1 },
 };
 
 /** Spec: HU-E5-01 (S3). `POST /v1/documents` through the real pipeline (guard, tenancy, pglite). */
@@ -361,7 +361,7 @@ describe('POST /v1/documents (e2e)', () => {
       ...BODY,
       operationType: 'B2C',
       receiver: { kind: 'unnamed' },
-      location: { departmentCode: 11 },
+      location: { departmentCode: 1 },
     });
 
     expect(response.statusCode).toBe(202);

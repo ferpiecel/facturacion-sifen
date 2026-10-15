@@ -5,7 +5,7 @@ import type {
   CertificateSource,
   CscSource,
 } from '../modules/emission/application/ports/signing.port.js';
-import { emissionValidationConfig } from '../modules/emission/emission-validation-config.js';
+import { signingValidationConfig } from '../modules/emission/emission-validation-config.js';
 import { SignDocument } from '../modules/emission/application/sign-document.js';
 import { createDrizzleSigningStore } from '../modules/emission/infrastructure/drizzle-signing-store.js';
 import { ResendPreflight } from '../modules/transmission/application/resend-preflight.js';
@@ -69,7 +69,7 @@ export function createTenantCycleFactory({
         builder: new TipsDeXmlBuilder(),
         signer: new TipsXmlSigner(),
         qr: new TipsQrGenerator(),
-        validation: emissionValidationConfig(),
+        validation: signingValidationConfig(),
       }),
       assembler: new LoteAssembler({
         store: createDrizzleLoteAssemblyStore({ db, tenantId, now }),

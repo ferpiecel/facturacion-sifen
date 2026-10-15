@@ -4,40 +4,22 @@ import {
   auditLog,
   createPgliteDatabase,
   documents,
-  tenantEstablishments,
-  tenantExpeditionPoints,
-  tenantFiscalProfiles,
   tenants,
-  tenantTimbrados,
   withTenantTransaction,
   type DatabaseHandle,
 } from '@sifen/db';
-import { createAcceptInvoice } from '../application/accept-invoice.js';
 import {
   createAcceptCreditNote,
   type AcceptCreditNoteInput,
 } from '../application/accept-credit-note.js';
 import { InvoiceValidationError } from '../application/accept-invoice.js';
 import { parseCdc } from '../domain/cdc.js';
+import {
+  acceptInvoiceWithStatus,
+  seedIssuer,
+} from '../../../../test/support/credit-note-fixture.js';
 import { createDrizzleAcceptanceUnitOfWork } from './drizzle-acceptance-unit-of-work.js';
-import { parseCreateDocument, toAcceptInvoiceInput } from './http/create-document.request.js';
 
-const FE_BODY = {
-  establishment: '001',
-  expeditionPoint: '002',
-  operationType: 'B2B',
-  receiver: { kind: 'named', ruc: '80069563-1', name: 'Cliente SA' },
-  items: [
-    {
-      code: 'A-001',
-      description: 'Servicio',
-      unitCode: 77,
-      quantity: 1,
-      unitPrice: 1_000_000,
-      vatRate: 10,
-    },
-  ],
-};
 const ITEM = { quantity: 1, unitPrice: 400_000, vatRate: 10 as const };
 
 /** Spec: HU-E7-01 T6 (ADR-0019). Acceptance of an NCE against a real (pglite) database. */
@@ -56,57 +38,8 @@ describe('AcceptCreditNote with the Drizzle unit of work', () => {
       now: () => new Date('2026-03-06T01:30:00Z'),
     });
 
-  async function seedTenant(id: string) {
-    await handle.db.insert(tenantFiscalProfiles).values({
-      tenantId: id,
-      rucBase: '80069563',
-      rucDv: 1,
-      legalName: 'Empresa SA',
-      taxpayerType: 'persona_juridica',
-    });
-    const [est] = await handle.db
-      .insert(tenantEstablishments)
-      .values({
-        tenantId: id,
-        code: '001',
-        address: 'Av. Mariscal Lopez 123',
-        houseNumber: '123',
-        departmentCode: '11',
-        cityCode: '3432',
-        cityDescription: 'Asuncion',
-      })
-      .returning();
-    await handle.db
-      .insert(tenantExpeditionPoints)
-      .values({ tenantId: id, establishmentId: est.id, code: '002' });
-    await handle.db
-      .insert(tenantTimbrados)
-      .values({ tenantId: id, number: '22222222', validFrom: '2026-01-01' });
-  }
-
-  /** The FE goes through the real use case, then SIFEN's answer is simulated by moving its status forward. */
-  async function acceptedInvoice(owner: string, status = 'approved') {
-    const parsed = parseCreateDocument(FE_BODY);
-    if (!parsed.ok) throw new Error('fixture');
-    const accepted = await createAcceptInvoice({
-      unitOfWork: createDrizzleAcceptanceUnitOfWork(handle.db),
-      now: () => new Date('2026-03-05T12:00:00Z'),
-    })(
-      toAcceptInvoiceInput(parsed.value, {
-        tenantId: owner,
-        actor: { type: 'api_key', id: 'k' },
-        payload: parsed.value,
-        idempotencyKey: `fe-${String(++keySeq)}`,
-      }),
-    );
-    for (const step of ['signed', 'submitted', status]) {
-      await handle.db
-        .update(documents)
-        .set({ status: step })
-        .where(eq(documents.id, accepted.documentId));
-    }
-    return accepted;
-  }
+  const acceptedInvoice = (owner: string, status = 'approved') =>
+    acceptInvoiceWithStatus(handle.db, owner, `fe-${String(++keySeq)}`, status);
 
   const credit = (overrides: Partial<AcceptCreditNoteInput> = {}): AcceptCreditNoteInput => {
     const draft = { associatedCdc: feCdc, reasonCode: 2, items: [ITEM], roundingPyg: 0 };
@@ -142,8 +75,8 @@ describe('AcceptCreditNote with the Drizzle unit of work', () => {
       .returning();
     tenantId = a.id;
     otherTenantId = b.id;
-    await seedTenant(tenantId);
-    await seedTenant(otherTenantId);
+    await seedIssuer(handle.db, tenantId);
+    await seedIssuer(handle.db, otherTenantId);
     const fe = await acceptedInvoice(tenantId);
     feCdc = fe.cdc;
     feId = fe.documentId;

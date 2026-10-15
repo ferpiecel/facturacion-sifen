@@ -102,6 +102,7 @@ Invariantes. Si un cambio no puede respetarlas, se frena y se consulta.
 - Runner: Vitest. Los `*.spec.ts` viven junto al código; los e2e, en `apps/*/test/` con `inject()` de Fastify.
 - Gate de cobertura: 85 % en líneas, ramas, funciones y sentencias, por paquete (`thresholds` en cada `vitest.config.ts`; entrada `coverage` de la matriz de `quality-gates`).
 - `packages/db`: PGlite por defecto; el job `db-postgres` corre la misma suite en un testcontainer `postgres:16` con `DB_TEST_DRIVER=postgres` (`pnpm --filter @sifen/db test:postgres`). Lo que depende de roles reales solo se prueba ahí.
+- `apps/api`: las pruebas `*.pg.spec.ts` (carreras con dos conexiones reales, p. ej. NCE concurrentes sobre una FE) arrancan su propio `postgres:16` y se omiten sin `DB_TEST_DRIVER=postgres`; `pnpm --filter @sifen/api test:postgres` (Docker) y el job `db-postgres` las corren.
 - Pruebas del worker con Redis real: `REDIS_URL=... pnpm --filter @sifen/api exec vitest run src/worker`; sin `REDIS_URL` se omiten y las corre el job `worker-redis`.
 - El CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) corre el job `quality-gates` (matriz: `format:check`, `lint`, `typecheck`, `depcruise`, `test`, `build`, `verify-vendor`, `coverage`) y los jobs `db-postgres` y `worker-redis`.
 - El test que compara `docs/api/openapi.json` con el código falla si el spec cambia sin regenerarse (`pnpm --filter @sifen/api openapi`).

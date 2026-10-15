@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "depcruise": "depcruise --config .dependency-cruiser.cjs src",
     "test": "vitest run",
+    "test:postgres": "DB_TEST_DRIVER=postgres vitest run .pg.spec.ts",
     "start": "node dist/main.js",
     "dev:seed": "node dist/cli/dev-seed.js",
     "start:dev": "env NODE_ENV=development PORTAL_ORIGIN=http://localhost:3001 node dist/main.js",
@@ -57,6 +58,7 @@
     "pdfjs-dist": "6.3.289",
     "typescript": "6.0.3",
     "unplugin-swc": "2.0.0",
+    "testcontainers": "12.1.0",
     "vitest": "5.0.1",
     "xml-crypto": "6.3.1"
   }

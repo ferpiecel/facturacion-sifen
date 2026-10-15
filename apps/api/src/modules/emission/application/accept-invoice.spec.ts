@@ -58,6 +58,9 @@ function setup(issuer: IssuerContext | null = ISSUER, validation = {}) {
     nextNumber,
     insertDocument,
     recordAudit,
+    // An FE never looks at an association (HU-E7-01).
+    findAssociatedInvoice: () => Promise.reject(new Error('an FE must not read an association')),
+    sumCreditNotes: () => Promise.reject(new Error('an FE must not sum credit notes')),
   };
   const run = vi.fn();
   const unitOfWork: AcceptanceUnitOfWork = {

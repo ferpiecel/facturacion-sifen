@@ -70,7 +70,7 @@ export interface AcceptedInvoice {
 }
 
 /** Calendar date in Paraguay (`YYYY-MM-DD`), used for the CDC and the timbrado validity. */
-function paraguayDate(instant: Date): string {
+export function paraguayDate(instant: Date): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: PARAGUAY_TIME_ZONE,
     year: 'numeric',

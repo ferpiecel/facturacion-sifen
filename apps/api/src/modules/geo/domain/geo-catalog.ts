@@ -26,6 +26,9 @@ export interface GeoCatalog {
   districtsOf(departmentCode: number): readonly GeoDistrict[] | undefined;
   /** `undefined` when the district does not exist. */
   citiesOf(districtCode: number): readonly GeoCity[] | undefined;
+  department(code: number): GeoDepartment | undefined;
+  district(code: number): GeoDistrict | undefined;
+  city(code: number): GeoCity | undefined;
 }
 
 function groupBy<T>(items: readonly T[], key: (item: T) => number): Map<number, T[]> {
@@ -38,11 +41,15 @@ function groupBy<T>(items: readonly T[], key: (item: T) => number): Map<number, 
 export function createGeoCatalog(data: GeoCatalogData): GeoCatalog {
   const districts = groupBy(data.districts, (d) => d.departmentCode);
   const cities = groupBy(data.cities, (c) => c.districtCode);
-  const departmentCodes = new Set(data.departments.map((d) => d.code));
-  const districtCodes = new Set(data.districts.map((d) => d.code));
+  const departmentByCode = new Map(data.departments.map((d) => [d.code, d]));
+  const districtByCode = new Map(data.districts.map((d) => [d.code, d]));
+  const cityByCode = new Map(data.cities.map((c) => [c.code, c]));
   return {
     departments: () => data.departments,
-    districtsOf: (code) => (departmentCodes.has(code) ? (districts.get(code) ?? []) : undefined),
-    citiesOf: (code) => (districtCodes.has(code) ? (cities.get(code) ?? []) : undefined),
+    districtsOf: (code) => (departmentByCode.has(code) ? (districts.get(code) ?? []) : undefined),
+    department: (code) => departmentByCode.get(code),
+    district: (code) => districtByCode.get(code),
+    city: (code) => cityByCode.get(code),
+    citiesOf: (code) => (districtByCode.has(code) ? (cities.get(code) ?? []) : undefined),
   };
 }

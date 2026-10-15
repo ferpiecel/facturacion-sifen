@@ -183,7 +183,15 @@ export function toInvoiceDraft(body: CreateDocumentBody): AcceptInvoiceInput['dr
                     ...(receiver.houseNumber === undefined
                       ? {}
                       : { houseNumber: receiver.houseNumber }),
-                    ...(receiver.cityCode === undefined ? {} : { cityCode: receiver.cityCode }),
+                    ...(receiver.districtCode === undefined
+                      ? {}
+                      : {
+                          districtCode: receiver.districtCode,
+                          districtDescription: receiver.districtDescription,
+                        }),
+                    ...(receiver.cityCode === undefined
+                      ? {}
+                      : { cityCode: receiver.cityCode, cityDescription: receiver.cityDescription }),
                   },
                 }),
           }

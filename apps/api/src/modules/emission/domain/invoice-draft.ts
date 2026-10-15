@@ -1,4 +1,5 @@
 import { DEPARTMENTS } from '../../fiscal-config/domain/department.js';
+import type { GeoCatalog } from '../../geo/domain/geo-catalog.js';
 import { Decimal } from './decimal.js';
 import { amount, fitsAmount, parseAmount } from './invoice-totals.js';
 
@@ -11,8 +12,13 @@ export interface DraftReceiverAddress {
   street: string;
   /** dNumCasRec (D218): mandatory when the address is informed. */
   houseNumber?: string;
+  /** cDisRec (D221) and dDesDisRec (D222): optional, informed together. */
+  districtCode?: number;
+  districtDescription?: string;
   /** cCiuRec (D223): mandatory when the address is informed, unless B2F. */
   cityCode?: number;
+  /** dDesCiuRec (D224): informed with the city. */
+  cityDescription?: string;
 }
 
 export type DraftReceiver =
@@ -47,6 +53,14 @@ export interface ValidationConfig {
    * before) until the XML, QR and KuDE handle decimals (T5 to T7); the tests run with it on.
    */
   allowDecimals?: boolean;
+  /** DNIT geographic table (HU-E5-08): used to check the receiver and to write the XML text. */
+  geoCatalog?: GeoCatalog;
+  /**
+   * Reject receiver geography that does not match `geoCatalog` (1325, 1329). Off where the
+   * document was accepted before these rules existed: it must still sign, and the XML carries the
+   * catalog text either way.
+   */
+  validateGeo?: boolean;
 }
 
 export interface ValidationError {
@@ -242,6 +256,9 @@ export function validateInvoiceDraft(
   }
 
   validateReceiverAddress(draft, errors);
+  if (config.geoCatalog && config.validateGeo) {
+    validateReceiverGeography(draft, config.geoCatalog, errors);
+  }
 
   return errors;
 }
@@ -335,5 +352,77 @@ function validateReceiverAddress(draft: InvoiceDraft, errors: ValidationError[])
       sifenCode: '1327',
       message: 'The receiver city is required when the address is informed',
     });
+  }
+}
+
+/** Codes exist and nest (city in district in department) and descriptions equal the table (1325, 1329). */
+function validateReceiverGeography(
+  draft: InvoiceDraft,
+  catalog: GeoCatalog,
+  errors: ValidationError[],
+): void {
+  const address = draft.receiver.kind === 'named' ? draft.receiver.address : undefined;
+  if (address === undefined) return;
+  const { departmentCode } = draft.location;
+  const district =
+    address.districtCode === undefined ? undefined : catalog.district(address.districtCode);
+  const city = address.cityCode === undefined ? undefined : catalog.city(address.cityCode);
+  const add = (field: string, rule: string, message: string, sifenCode?: string) => {
+    errors.push({ field, rule, message, ...(sifenCode === undefined ? {} : { sifenCode }) });
+  };
+
+  if (address.districtCode !== undefined && district === undefined) {
+    add(
+      'receiver.districtCode',
+      'receiver-district-unknown',
+      'The district is not in the DNIT table',
+    );
+  }
+  if (address.cityCode !== undefined && city === undefined) {
+    add('receiver.cityCode', 'receiver-city-unknown', 'The city is not in the DNIT table');
+  }
+  if (district && city && city.districtCode !== district.code) {
+    add(
+      'receiver.cityCode',
+      'receiver-city-not-in-district',
+      'The city does not belong to the district',
+    );
+  }
+  if (district && departmentCode !== undefined && district.departmentCode !== departmentCode) {
+    add(
+      'receiver.districtCode',
+      'receiver-district-not-in-department',
+      'The district does not belong to the department',
+    );
+  }
+  if (address.districtCode === undefined && city && departmentCode !== undefined) {
+    // xmlgen derives the district from the city, so the city must sit in the department.
+    if (catalog.district(city.districtCode)?.departmentCode !== departmentCode) {
+      add(
+        'receiver.cityCode',
+        'receiver-city-not-in-department',
+        'The city does not belong to the department',
+      );
+    }
+  }
+  if (
+    district &&
+    address.districtDescription !== undefined &&
+    address.districtDescription !== district.name
+  ) {
+    add(
+      'receiver.districtDescription',
+      'receiver-district-description-mismatch',
+      'The district description must be the one of the DNIT table for its code',
+      '1325',
+    );
+  }
+  if (city && address.cityDescription !== undefined && address.cityDescription !== city.name) {
+    add(
+      'receiver.cityDescription',
+      'receiver-city-description-mismatch',
+      'The city description must be the one of the DNIT table for its code',
+      '1329',
+    );
   }
 }

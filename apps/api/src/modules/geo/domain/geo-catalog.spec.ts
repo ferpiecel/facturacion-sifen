@@ -34,4 +34,15 @@ describe('createGeoCatalog', () => {
     expect(catalog.citiesOf(1)).toEqual([]);
     expect(catalog.citiesOf(99)).toBeUndefined();
   });
+
+  it('looks a single department, district or city up by code', () => {
+    expect(catalog.department(2)).toEqual({ code: 2, name: 'CONCEPCION' });
+    expect(catalog.district(3)).toEqual({ code: 3, departmentCode: 2, name: 'BELEN' });
+    expect(catalog.city(12)).toEqual({ code: 12, districtCode: 3, name: 'BELEN' });
+    expect([catalog.department(9), catalog.district(9), catalog.city(9)]).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
 });

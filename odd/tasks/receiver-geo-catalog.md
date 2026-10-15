@@ -68,7 +68,7 @@ Out: Nota de Remision address rules, emission of other document types, transport
 - [x] T2 Contract alignment: optional address block, conditional rules, B2F rules, `location.departmentCode` optional; domain tests first.
 - [x] T3 Confirm how the TIPS builder emits B2F and optional address; adjust `invoice-xml.ts` so `cDepRec` and `cCiuRec` are omitted for B2F and the receiver block omits absent fields. XSD check on the generated XML.
 - [x] T4 Vendor the catalog (generation script or reviewed conversion, checksum test, README entry) and remove the stale claim in `department.ts`.
-- [ ] T5 Catalog validation: district and city exist, city belongs to district, district belongs to department, descriptions match codes; new `ValidationError` rules with SIFEN codes.
+- [x] T5 Catalog validation: district and city exist, city belongs to district, district belongs to department, descriptions match codes; new `ValidationError` rules with SIFEN codes.
 - [x] T6 Read endpoints with OpenAPI regeneration (`pnpm --filter @sifen/api openapi`) and Fastify `inject()` e2e tests.
 - [ ] T7 Docs: update `docs/integracion/emision.md` (address optional, B2F, catalog endpoints), `docs/api`, and the PR descriptions.
 - [ ] T8 Operational check: confirm optional address and B2F with the Prevalidador and record the evidence.
@@ -138,4 +138,13 @@ such in the PR description.
 - Route: delegated direct, one writer (writer trigger: new module plus package loader, spec and OpenAPI). TDD strict, runner Vitest.
 - RED observed: `load-geo-catalog.spec.ts`, `geo-catalog.spec.ts` and `geo-query.spec.ts` failed on missing modules; `test/geo.e2e.spec.ts` 5 failed | 1 passed with `GeoModule` unwired; `openapi.spec.ts` 2 failed (undocumented routes) plus the checked-in `openapi.json` drift. GREEN after each.
 - Decisions: `GET /v1/geo/departments|districts|cities`, API key only (no scope, ADR-0017), `{ items: [...] }`; missing or malformed parent 400, unknown parent 404. Loader `loadGeoCatalog()` lives in `@sifen/sifen-xsd` next to the vendored data.
+
+## Slice C (T5) record
+
+- Route: delegated direct, one writer. TDD strict, runner Vitest. Split in two chained PRs (C1 acceptance rules, C2 XML).
+- Finding: `xmlgen`'s tables equal the November 2025 catalog except district 289 (xmlgen "PUERTO ADELA", DNIT "LAUREL"). `xmlgen` derives receiver department and district from the city (overwriting what is passed) and takes the issuer department/district/city text from its own table, never from the establishment. For documents whose codes nest in the catalog the XML is therefore byte-identical (golden hash `e12a73...cd66` unchanged); the only difference is district 289.
+- Rules (acceptance only, `validateGeo`): `receiver-district-unknown`, `receiver-city-unknown`, `receiver-city-not-in-district`, `receiver-district-not-in-department`, `receiver-city-not-in-department` (no district informed), `receiver-district-description-mismatch` (1325), `receiver-city-description-mismatch` (1329). Signing uses `signingValidationConfig()` (catalog text, no catalog checks) so documents accepted before these rules still sign; their department/district keep the value `xmlgen` derives.
+- Behaviour change: a receiver whose district is not in the informed department is now a 422. Test fixtures that sent department 11 with Asuncion's district/city now send department 1.
+- XML: `generateInvoiceXml` writes the catalog description for the code the XML carries (receiver and issuer) and, for validated drafts, fails on a code `xmlgen` changed (`cCiuRec is X but the validated code is Y`).
+- RED observed: `geo-catalog.spec.ts` lookups 1 failed; `invoice-draft-geo.spec.ts` 6 failed | 3 passed; `create-document.request.spec.ts` 1 failed; `invoice-xml.spec.ts` 3 failed (district 289 receiver, district 289 issuer, override detection) and 1 more for the legacy signing case; `documents-geo.e2e.spec.ts` 6 failed with the rules switched off.
 

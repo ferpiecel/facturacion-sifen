@@ -179,6 +179,26 @@ describe('AcceptCreditNote with the Drizzle unit of work', () => {
     expect(audit[0]).toMatchObject({ action: 'document.accepted' });
   });
 
+  it('answers a domain error, not a 500, when the FE payload cannot be read any more', async () => {
+    const [fe] = await handle.db.select().from(documents).where(eq(documents.id, feId));
+    const [broken] = await handle.db
+      .insert(documents)
+      .values({
+        ...fe,
+        id: undefined,
+        cdc: `01${'2'.repeat(42)}`,
+        number: 2,
+        idempotencyKey: 'fe-broken',
+        payload: { legacy: true },
+        status: 'approved',
+      })
+      .returning();
+    const draft = { associatedCdc: broken.cdc, reasonCode: 2, items: [ITEM], roundingPyg: 0 };
+    expect(await rulesOf(acceptCredit()(credit({ draft })))).toEqual([
+      'associated-document-unreadable',
+    ]);
+  });
+
   describe('refusals burn no number', () => {
     const nextNumberIsOne = async () => {
       const { cdc } = await acceptCredit()(credit());

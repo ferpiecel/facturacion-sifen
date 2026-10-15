@@ -13,6 +13,7 @@ import {
 } from '@sifen/db';
 import { recordAudit } from '../../audit/infrastructure/record-audit.js';
 import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
+import { InvoiceValidationError } from '../application/accept-invoice.js';
 import {
   IdempotencyKeyCollisionError,
   type AcceptanceUnit,
@@ -115,7 +116,16 @@ function createUnit(tx: TenantTx, tenantId: string): AcceptanceUnit {
         .then(first);
       if (!row) return null;
       const body = parseCreateDocument(row.payload);
-      if (!body.ok) throw new Error(`Stored invoice ${row.id} has an unreadable payload`);
+      if (!body.ok) {
+        // A historical payload that no longer parses must not surface as a 500 (HU-E7-01).
+        throw new InvoiceValidationError([
+          {
+            field: 'associatedCdc',
+            rule: 'associated-document-unreadable',
+            message: 'The associated invoice data cannot be read to issue a credit note',
+          },
+        ]);
+      }
       const draft = toInvoiceDraft(body.value);
       return {
         receiver: draft.receiver,

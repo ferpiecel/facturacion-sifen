@@ -80,6 +80,12 @@ export function createAcceptCreditNote(deps: AcceptCreditNoteDependencies) {
 
       const { associatedCdc } = input.draft;
       const invoice = await unit.findAssociatedInvoice(associatedCdc, issuer.environment);
+      // A parallel request with the same key may have committed while this one waited for the lock.
+      const replay = await unit.findByIdempotencyKey(input.idempotencyKey);
+      if (replay) {
+        if (replay.requestHash !== hash) throw new IdempotencyKeyReusedError();
+        return { documentId: replay.documentId, cdc: replay.cdc };
+      }
       const creditedAmount = invoice
         ? await unit.sumCreditNotes(associatedCdc, issuer.environment)
         : '0';

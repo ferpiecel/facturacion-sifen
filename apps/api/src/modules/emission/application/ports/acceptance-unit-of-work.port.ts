@@ -79,8 +79,10 @@ export interface AcceptanceUnit {
   resolveIssuer(query: IssuerQuery): Promise<IssuerContext | null>;
   /**
    * The tenant's FE with this CDC in `environment`, locked with `FOR NO KEY UPDATE` until the
-   * transaction ends so concurrent credit notes of the same FE are serialized (ADR-0019 D5), or null
-   * when there is none (another tenant's FE is none).
+   * transaction ends, or null when there is none (another tenant's FE is none). Concurrent credit
+   * notes of one FE serialize here (ADR-0019 D5). The lock does conflict with `createLote`'s
+   * `FOR UPDATE` on the same row, so a credit note waits while a lote is built over that FE; neither
+   * side takes another lock while holding this one, so there is no wait cycle (ADR-0019 addendum).
    */
   findAssociatedInvoice(
     cdc: string,

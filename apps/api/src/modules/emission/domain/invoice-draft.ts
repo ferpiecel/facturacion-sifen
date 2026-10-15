@@ -355,7 +355,21 @@ function validateReceiverAddress(draft: InvoiceDraft, errors: ValidationError[])
   }
 }
 
-/** Codes exist and nest (city in district in department) and descriptions equal the table (1325, 1329). */
+/** Case, accents and repeated spaces do not matter: the XML is written from the catalog text anyway. */
+const sameText = (a: string, b: string): boolean => normalizeText(a) === normalizeText(b);
+const normalizeText = (text: string): string =>
+  text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+/**
+ * Codes exist and nest (city in district in department) and descriptions equal the table (1325,
+ * 1329). The repo's norm sources define SIFEN codes only for the descriptions; unknown codes and
+ * nesting failures carry none (none is invented).
+ */
 function validateReceiverGeography(
   draft: InvoiceDraft,
   catalog: GeoCatalog,
@@ -408,7 +422,7 @@ function validateReceiverGeography(
   if (
     district &&
     address.districtDescription !== undefined &&
-    address.districtDescription !== district.name
+    !sameText(address.districtDescription, district.name)
   ) {
     add(
       'receiver.districtDescription',
@@ -417,7 +431,11 @@ function validateReceiverGeography(
       '1325',
     );
   }
-  if (city && address.cityDescription !== undefined && address.cityDescription !== city.name) {
+  if (
+    city &&
+    address.cityDescription !== undefined &&
+    !sameText(address.cityDescription, city.name)
+  ) {
     add(
       'receiver.cityDescription',
       'receiver-city-description-mismatch',

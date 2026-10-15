@@ -67,7 +67,7 @@ Receptor innominado (`kind: "unnamed"`): no lleva `ruc` ni `name`. Se rechaza si
 | `receiver.districtCode` y `receiver.cityCode` | Deben existir en la tabla oficial de la DNIT (Tabla 2.1, `GET /v1/geo/*`), la ciudad debe pertenecer al distrito y el distrito al departamento; si no, `422` con `receiver-district-unknown`, `receiver-city-unknown`, `receiver-city-not-in-district`, `receiver-district-not-in-department` o `receiver-city-not-in-department` | Enviar los códigos tal como los devuelven los endpoints de geografía |
 | `districtDescription` y `cityDescription` | Deben ser la descripción de la tabla para su código (`receiver-district-description-mismatch`, SIFEN 1325; `receiver-city-description-mismatch`, SIFEN 1329). Se comparan sin distinguir mayúsculas, acentos ni espacios repetidos: `Asunción` equivale a `ASUNCION`. El XML siempre lleva el texto oficial de la tabla | Enviar la descripción oficial, o el texto equivalente |
 
-Un código de distrito o ciudad inexistente, o una descripción que no corresponda, **pasa la validación de la plataforma** y puede ser rechazado luego por SIFEN. El departamento del emisor no se envía: sale del establecimiento configurado.
+Un código de distrito o ciudad inexistente o que no encaje en la jerarquía, o una descripción que no corresponda, se rechazan con `422` antes de consumir un número (reglas de la tabla anterior). El departamento del emisor no se envía: sale del establecimiento configurado.
 
 Departamentos (`cDepEmi`): 1 Capital, 2 Concepción, 3 San Pedro, 4 Cordillera, 5 Guairá, 6 Caaguazú, 7 Caazapá, 8 Itapúa, 9 Misiones, 10 Paraguarí, 11 Alto Paraná, 12 Central, 13 Ñeembucú, 14 Amambay, 15 Presidente Hayes, 16 Boquerón, 17 Alto Paraguay, 18 Canindeyú, 19 Chaco, 20 Nueva Asunción.
 
@@ -112,7 +112,7 @@ curl -X POST "$BASE_URL/v1/documents" \
       "houseNumber": "123",
       "districtCode": 145,
       "districtDescription": "Ciudad del Este",
-      "cityCode": 3316,
+      "cityCode": 3383,
       "cityDescription": "Ciudad del Este"
     },
     "items": [

@@ -38,7 +38,7 @@ Idempotency-Key: <valor único por documento>
 | `receiver` | objeto | Ver [Receptor](#receptor) |
 | `items` | array | De 1 a 999 ítems. Ver [Ítems](#ítems) |
 | `roundingPyg` | entero | De 0 a 49. Por defecto 0. Ver [Montos y redondeo](#montos-y-redondeo) |
-| `location.departmentCode` | entero | Opcional. Departamento **del receptor**, de la tabla de [códigos geográficos](#códigos-geográficos). Obligatorio cuando el receptor informa dirección, salvo en `B2F`, donde no debe informarse. Se ignora con un receptor innominado |
+| `location.departmentCode` | entero | Opcional. Departamento **del receptor**, de la tabla de [códigos geográficos](#códigos-geográficos). Obligatorio cuando el receptor informa dirección, salvo en `B2F`, donde no debe informarse. Con un receptor innominado no se usa en el XML, pero debe seguir siendo un código válido (uno inválido responde `422` con `department-code`) |
 | `currency` | string | Solo `PYG`. Por defecto `PYG` |
 
 ### Receptor
@@ -55,7 +55,7 @@ Receptor identificado (`kind: "named"`):
 | `districtCode` / `districtDescription` | Opcionales, siempre juntos. Código entero de 1 a 9999 y descripción de hasta 30 caracteres |
 | `cityCode` / `cityDescription` | Siempre juntos. Código entero de 1 a 99999 y descripción de hasta 30 caracteres. Con `address` son obligatorios salvo en `B2F`, donde no deben informarse (`receiver-city-required`, `receiver-city-not-allowed`) |
 
-Con `B2F` se rechaza `location.departmentCode` (`receiver-department-not-allowed`) y `cityCode`. Con otra operación y `address`, el departamento es obligatorio (`receiver-department-required`).
+`B2F` hoy se rechaza por completo (`operation-type-not-supported`, decisión de producto); las reglas siguientes quedan fijadas para cuando se habilite. Con `B2F` se rechaza `location.departmentCode` (`receiver-department-not-allowed`) y `cityCode`. Con otra operación y `address`, el departamento es obligatorio (`receiver-department-required`).
 
 Receptor innominado (`kind: "unnamed"`): no lleva `ruc` ni `name`. Se rechaza si el total neto es de 7.000.000 Gs o más.
 
@@ -63,13 +63,37 @@ Receptor innominado (`kind: "unnamed"`): no lleva `ruc` ni `name`. Se rechaza si
 
 | Dato | Qué valida la plataforma | Qué debe hacer su sistema |
 |---|---|---|
-| `location.departmentCode` | Debe estar en la tabla oficial de 20 departamentos; si no, responde `422` con `rule: "department-code"`. La descripción la completa la plataforma | Enviar el código del departamento del receptor cuando informe dirección (no en `B2F`) |
+| `location.departmentCode` | Debe estar en la tabla de departamentos de SIFEN (`Departamentos_v141.xsd`); si no, responde `422` con `rule: "department-code"`. La descripción la completa la plataforma | Enviar el código del departamento del receptor cuando informe dirección (no en `B2F`) |
 | `receiver.districtCode` y `receiver.cityCode` | Deben existir en la tabla oficial de la DNIT (Tabla 2.1, `GET /v1/geo/*`), la ciudad debe pertenecer al distrito y el distrito al departamento; si no, `422` con `receiver-district-unknown`, `receiver-city-unknown`, `receiver-city-not-in-district`, `receiver-district-not-in-department` o `receiver-city-not-in-department` | Enviar los códigos tal como los devuelven los endpoints de geografía |
 | `districtDescription` y `cityDescription` | Deben ser la descripción de la tabla para su código (`receiver-district-description-mismatch`, SIFEN 1325; `receiver-city-description-mismatch`, SIFEN 1329). Se comparan sin distinguir mayúsculas, acentos ni espacios repetidos: `Asunción` equivale a `ASUNCION`. El XML siempre lleva el texto oficial de la tabla | Enviar la descripción oficial, o el texto equivalente |
 
 Un código de distrito o ciudad inexistente o que no encaje en la jerarquía, o una descripción que no corresponda, se rechazan con `422` antes de consumir un número (reglas de la tabla anterior). El departamento del emisor no se envía: sale del establecimiento configurado.
 
+La tabla geográfica oficial de la DNIT (basada en el código geográfico del INE 2022) tiene 18 departamentos. Los códigos 19 (Chaco) y 20 (Nueva Asunción) son entradas históricas de `Departamentos_v141.xsd` sin distritos ni ciudades: una dirección de receptor en esos departamentos no se puede validar y responde `422`, y `GET /v1/geo/districts?departmentCode=19` responde `404`.
+
 Departamentos (`cDepEmi`): 1 Capital, 2 Concepción, 3 San Pedro, 4 Cordillera, 5 Guairá, 6 Caaguazú, 7 Caazapá, 8 Itapúa, 9 Misiones, 10 Paraguarí, 11 Alto Paraná, 12 Central, 13 Ñeembucú, 14 Amambay, 15 Presidente Hayes, 16 Boquerón, 17 Alto Paraguay, 18 Canindeyú, 19 Chaco, 20 Nueva Asunción.
+
+### Consultar los códigos geográficos
+
+Los códigos y descripciones válidos salen de la tabla oficial de la DNIT (Tabla 2.1) y se consultan con una API key válida, sin scope adicional. Cada lista se filtra por el padre; ningún endpoint devuelve la tabla completa de ciudades.
+
+| Ruta | Devuelve | Errores |
+|---|---|---|
+| `GET /v1/geo/departments` | Los 18 departamentos | `401` |
+| `GET /v1/geo/districts?departmentCode=11` | Los distritos de un departamento | `400` si falta o no es un código; `404` si no existe |
+| `GET /v1/geo/cities?districtCode=145` | Las ciudades de un distrito | `400` si falta o no es un código; `404` si no existe |
+
+```bash
+curl -s 'https://api.example.com/v1/geo/cities?districtCode=145' -H 'Authorization: Bearer sk_live_...'
+```
+
+```json
+{ "items": [{ "code": 3383, "districtCode": 145, "name": "CIUDAD DEL ESTE" }] }
+```
+
+La respuesta real trae todas las ciudades del distrito; arriba se muestra una.
+
+Los registros llevan el departamento (`departmentCode`) en los distritos y el distrito (`districtCode`) en las ciudades. El campo `name` es el texto que va en `districtDescription` y `cityDescription`.
 
 ### Ítems
 

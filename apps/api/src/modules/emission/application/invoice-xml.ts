@@ -13,6 +13,7 @@ import {
 import { getDepartmentDescription } from '../../fiscal-config/domain/department.js';
 import { formatRuc } from '../../fiscal-config/domain/ruc.js';
 import type { Timbrado } from '../../fiscal-config/domain/timbrado.js';
+import type { GeoCatalog } from '../../geo/domain/geo-catalog.js';
 import { buildCdc } from '../domain/cdc.js';
 import { Decimal } from '../domain/decimal.js';
 import {
@@ -344,9 +345,141 @@ function finalizeDecimalAmounts(xml: string, draft: InvoiceDraft): string {
     });
 }
 
+interface GeoExpectation {
+  codeTag: string;
+  descriptionTag: string;
+  /** The validated code; with `strict` the XML must carry exactly this one. */
+  code: number | undefined;
+  nameOf: (code: number) => string | undefined;
+}
+
+/**
+ * xmlgen looks the department, district and city text up in its own table and derives the
+ * department and district from the city. Here the XML is held to the DNIT catalog: the
+ * description is the catalog's for the code the XML carries and, when `strict` (the draft was
+ * validated against the catalog), a code other than the validated one is an override and fails.
+ */
+function patchGeoGroup(
+  xml: string,
+  group: string,
+  expectations: GeoExpectation[],
+  strict: boolean,
+): string {
+  const block = new RegExp(`<${group}>[\\s\\S]*?</${group}>`).exec(xml);
+  if (block === null) return xml;
+  let patched = block[0];
+  for (const { codeTag, descriptionTag, code, nameOf } of expectations) {
+    const pair = new RegExp(
+      `<${codeTag}>(\\d+)</${codeTag}><${descriptionTag}>([^<]*)</${descriptionTag}>`,
+    );
+    const found = pair.exec(patched);
+    if (found === null) continue;
+    const carried = Number(found[1]);
+    if (strict && code !== undefined && carried !== code) {
+      throw new InvoiceXmlError(
+        `${codeTag} is ${found[1]} but the validated code is ${String(code)}`,
+      );
+    }
+    const name = nameOf(carried);
+    if (name !== undefined && unescapeXmlText(found[2]) !== name) {
+      // A function replacement: the text is literal, `$&`-style patterns must not be interpreted.
+      patched = patched.replace(
+        pair,
+        () =>
+          `<${codeTag}>${found[1]}</${codeTag}><${descriptionTag}>${escapeText(name)}</${descriptionTag}>`,
+      );
+    }
+  }
+  return xml.replace(block[0], () => patched);
+}
+
+function geoExpectations(
+  suffix: 'Rec' | 'Emi',
+  codes: { department?: number; district?: number; city?: number },
+  catalog: GeoCatalog,
+): GeoExpectation[] {
+  const parts: [string, number | undefined, GeoExpectation['nameOf']][] = [
+    ['Dep', codes.department, (c) => catalog.department(c)?.name],
+    ['Dis', codes.district, (c) => catalog.district(c)?.name],
+    ['Ciu', codes.city, (c) => catalog.city(c)?.name],
+  ];
+  return parts.map(([part, code, nameOf]) => ({
+    codeTag: `c${part}${suffix}`,
+    descriptionTag: `dDes${part}${suffix}`,
+    code,
+    nameOf,
+  }));
+}
+
+function applyCatalogGeography(
+  xml: string,
+  draft: InvoiceDraft,
+  ctx: InvoiceXmlContext,
+  validation: ValidationConfig & { geoCatalog: GeoCatalog },
+): string {
+  const { geoCatalog: catalog } = validation;
+  const strict = validation.validateGeo === true;
+  const { establishment: est } = ctx;
+  const issued = patchGeoGroup(
+    xml,
+    'gEmis',
+    geoExpectations(
+      'Emi',
+      {
+        department: est.departmentCode,
+        district: est.districtCode === null ? undefined : Number(est.districtCode),
+        city: Number(est.cityCode),
+      },
+      catalog,
+    ),
+    strict,
+  );
+  const address = draft.receiver.kind === 'named' ? draft.receiver.address : undefined;
+  if (address === undefined) return issued;
+  // The district falls back to the city's, which is what xmlgen derives when it is not informed.
+  const district =
+    address.districtCode ??
+    (address.cityCode === undefined ? undefined : catalog.city(address.cityCode)?.districtCode);
+  return patchGeoGroup(
+    issued,
+    'gDatRec',
+    geoExpectations(
+      'Rec',
+      { department: draft.location.departmentCode, district, city: address.cityCode },
+      catalog,
+    ),
+    strict,
+  );
+}
+
 /** The one libxml2 error an unsigned, otherwise valid rDE produces (verified in the spec). */
 const MISSING_SIGNATURE =
   "Element '{http://ekuatia.set.gov.py/sifen/xsd}rDE': Missing child element(s). Expected is ( {http://www.w3.org/2000/09/xmldsig#}Signature ).";
+
+/**
+ * xmlgen validates its input and crashes on a code missing from its tables. Both are deterministic
+ * data problems: they surface as an `InvoiceXmlError` (the document is held with a clear reason)
+ * instead of an opaque crash that would be retried forever.
+ */
+async function buildWithXmlgen(
+  builder: DeXmlBuilder,
+  input: ReturnType<typeof mapInvoiceToXmlInput>,
+): Promise<string> {
+  try {
+    return await builder.buildParaSifen(input);
+  } catch (error) {
+    // xmlgen reads `.descripcion` of the row it looks a code up by; a missing row is that TypeError.
+    // Any other TypeError is a bug and propagates unchanged.
+    if (error instanceof TypeError) {
+      if (!/reading 'descripcion'/.test(error.message)) throw error;
+      throw new InvoiceXmlError(
+        `a department, district or city code is not in the xmlgen geographic table (${error.message})`,
+      );
+    }
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new InvoiceXmlError(`xmlgen could not build the document: ${reason}`);
+  }
+}
 
 /**
  * Validates the draft, builds the DE through the `DeXmlBuilder` port, checks
@@ -365,11 +498,14 @@ export async function generateInvoiceXml(
     throw new InvoiceXmlError(draftErrors.map((e) => `${e.field} (${e.rule})`).join(', '));
   }
   // xmlgen emits an empty cTipReg when the regime is unknown; the XSD makes it optional (MT 7.2.4: no empty tags).
-  const built = (await builder.buildParaSifen(mapInvoiceToXmlInput(draft, ctx))).replace(
+  const built = (await buildWithXmlgen(builder, mapInvoiceToXmlInput(draft, ctx))).replace(
     /<cTipReg><\/cTipReg>|<cTipReg\/>/,
     '',
   );
-  const xml = hasDecimalAmounts(draft) ? finalizeDecimalAmounts(built, draft) : built;
+  const geoBuilt = validation.geoCatalog
+    ? applyCatalogGeography(built, draft, ctx, { ...validation, geoCatalog: validation.geoCatalog })
+    : built;
+  const xml = hasDecimalAmounts(draft) ? finalizeDecimalAmounts(geoBuilt, draft) : geoBuilt;
 
   const { errors } = validateXml(xml, 'siRecepDE');
   const [only] = errors;
@@ -416,7 +552,16 @@ export function toSifenXml(xml: string): string {
   return editFuFd(xml, (body) => body.replace(INF_ADIC, ''));
 }
 
-function escapeText(text: string): string {
+export function unescapeXmlText(text: string): string {
+  return text
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&apos;', "'")
+    .replaceAll('&amp;', '&');
+}
+
+export function escapeText(text: string): string {
   return text
     .replace(XML_ILLEGAL, '')
     .replaceAll('&', '&amp;')

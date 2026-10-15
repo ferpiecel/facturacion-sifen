@@ -98,7 +98,7 @@ describe('runOpsCommand (HU-E1-05)', () => {
     expect(output).toBe(`fiscal profile saved: ${tenantId} (RUC 4490207-7)`);
   });
 
-  it('establishment:add prints the new establishment id and code', async () => {
+  it('establishment:add refuses an address that does not nest in the DNIT catalog', async () => {
     handle = createPgliteDatabase();
     await handle.migrate();
     const { id: tenantId } = await createTenant(handle.db, 'Establishment Tenant');
@@ -110,6 +110,26 @@ describe('runOpsCommand (HU-E1-05)', () => {
       districtCode: '145',
       districtDescription: 'Ciudad del Este',
       cityCode: '3316',
+      cityDescription: 'Ciudad del Este',
+    });
+
+    await expect(
+      runOpsCommand(handle.db, { kind: 'establishment:add', tenantId, establishment }),
+    ).rejects.toThrow(/does not belong/);
+  });
+
+  it('establishment:add prints the new establishment id and code', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Establishment Tenant');
+    const establishment = createEstablishment({
+      code: '001',
+      address: 'Avda. Siempre Viva 123',
+      houseNumber: '123',
+      departmentCode: 11,
+      districtCode: '145',
+      districtDescription: 'Ciudad del Este',
+      cityCode: '3383',
       cityDescription: 'Ciudad del Este',
     });
 

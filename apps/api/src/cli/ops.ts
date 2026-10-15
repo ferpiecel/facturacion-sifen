@@ -7,6 +7,7 @@ import { CertificateVault } from '../modules/certificates/infrastructure/certifi
 import { loadTrustedRoots } from '../modules/certificates/infrastructure/trusted-roots.js';
 import { BoundedReadError, readBoundedFile } from './bounded-file.js';
 import { getOpsDatabaseUrl, OpsArgError, parseOpsArgs, type OpsCommand } from './args.js';
+import { emissionValidationConfig } from '../modules/emission/emission-validation-config.js';
 import {
   addEstablishment,
   addExpeditionPoint,
@@ -141,6 +142,7 @@ export async function runOpsCommand(
       const result = await addEstablishment(db, {
         tenantId: command.tenantId,
         establishment: command.establishment,
+        geoCatalog: emissionValidationConfig().geoCatalog,
       });
       return `establishment created: ${result.id} (code ${result.code})`;
     }

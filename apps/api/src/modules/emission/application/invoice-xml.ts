@@ -468,12 +468,16 @@ async function buildWithXmlgen(
   try {
     return await builder.buildParaSifen(input);
   } catch (error) {
+    // xmlgen reads `.descripcion` of the row it looks a code up by; a missing row is that TypeError.
+    // Any other TypeError is a bug and propagates unchanged.
+    if (error instanceof TypeError) {
+      if (!/reading 'descripcion'/.test(error.message)) throw error;
+      throw new InvoiceXmlError(
+        `a department, district or city code is not in the xmlgen geographic table (${error.message})`,
+      );
+    }
     const reason = error instanceof Error ? error.message : String(error);
-    throw new InvoiceXmlError(
-      error instanceof TypeError
-        ? `a department, district or city code is not in the xmlgen geographic table (${reason})`
-        : `xmlgen could not build the document: ${reason}`,
-    );
+    throw new InvoiceXmlError(`xmlgen could not build the document: ${reason}`);
   }
 }
 

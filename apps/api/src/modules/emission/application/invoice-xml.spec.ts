@@ -623,6 +623,13 @@ describe('geography in the XML carries the DNIT catalog, not the xmlgen table', 
     expect((error as Error).message).toMatch(/not in the xmlgen geographic table/);
   });
 
+  it('lets any other TypeError from xmlgen propagate unchanged', async () => {
+    const bug = new TypeError("Cannot read properties of undefined (reading 'length')");
+    const crashing = { buildParaSifen: () => Promise.reject(bug) };
+
+    await expect(generateInvoiceXml(crashing, draft, context('production'), geo)).rejects.toBe(bug);
+  });
+
   it('is lenient with the issuer codes when signing, strict when the draft was validated', async () => {
     const overridden = {
       buildParaSifen: async (input: Parameters<typeof builder.buildParaSifen>[0]) =>

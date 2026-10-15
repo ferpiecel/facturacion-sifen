@@ -147,4 +147,4 @@ such in the PR description.
 - Behaviour change: a receiver whose district is not in the informed department is now a 422. Test fixtures that sent department 11 with Asuncion's district/city now send department 1.
 - XML: `generateInvoiceXml` writes the catalog description for the code the XML carries (receiver and issuer) and, for validated drafts, fails on a code `xmlgen` changed (`cCiuRec is X but the validated code is Y`).
 - RED observed: `geo-catalog.spec.ts` lookups 1 failed; `invoice-draft-geo.spec.ts` 6 failed | 3 passed; `create-document.request.spec.ts` 1 failed; `invoice-xml.spec.ts` 3 failed (district 289 receiver, district 289 issuer, override detection) and 1 more for the legacy signing case; `documents-geo.e2e.spec.ts` 6 failed with the rules switched off.
-
+- Review fixes (C1): descriptions compare normalized (case, accents, spaces); only the description rules carry SIFEN codes (1325, 1329), because the norm sources in the repo define none for unknown codes or nesting.

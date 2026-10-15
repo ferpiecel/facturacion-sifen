@@ -1,3 +1,4 @@
+import { Decimal } from './decimal.js';
 import type { QrEnvironment } from './qr.js';
 
 /** MT v150 13.3: the KuDE denomination for an electronic invoice (FE). */
@@ -95,11 +96,21 @@ export function groupCdc(cdc: string): string {
 
 const thousands = (digits: string): string => digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 
-/** PYG amount with dot thousands separators; PYG has no decimals, so anything else is a bug upstream. */
+/**
+ * PYG amount with dot thousands separators. Whole amounts print exactly as before; decimal ones
+ * add a decimal comma (`1.234,5`), trimmed, never in exponent notation (HU-E5-09).
+ */
 export function formatPyg(amount: number): string {
-  if (!Number.isSafeInteger(amount))
-    throw new Error(`PYG amount must be a safe integer: ${String(amount)}`);
-  return `${amount < 0 ? '-' : ''}${thousands(String(Math.abs(amount)))}`;
+  if (Number.isInteger(amount)) {
+    if (!Number.isSafeInteger(amount))
+      throw new Error(`PYG amount must be a safe integer or an exact decimal: ${String(amount)}`);
+    return `${amount < 0 ? '-' : ''}${thousands(String(Math.abs(amount)))}`;
+  }
+  const parsed = Decimal.parse(amount);
+  if (!parsed.ok)
+    throw new Error(`PYG amount must be a safe integer or an exact decimal: ${String(amount)}`);
+  const [whole = '0', fraction = ''] = parsed.value.toString().replace('-', '').split('.');
+  return `${amount < 0 ? '-' : ''}${thousands(whole)},${fraction}`;
 }
 
 /** Quantity: dot thousands, decimal comma only when fractional; never exponent notation. */

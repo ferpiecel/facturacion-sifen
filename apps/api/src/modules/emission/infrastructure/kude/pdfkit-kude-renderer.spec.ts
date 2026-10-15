@@ -137,6 +137,20 @@ describe('PdfkitKudeRenderer (FE, A4)', () => {
     }
   });
 
+  it('prints decimal quantities, prices and totals with a decimal comma (HU-E5-09)', async () => {
+    const base = invoice([
+      { ...item(1), quantity: 2.5, unitPrice: 4940.2, total: 12350.5, vatRate: 10 },
+    ]);
+    const decimal: KudeInvoice = {
+      ...base,
+      totals: { ...base.totals, subtotal10: 12350.5, totalOperation: 12350.5, totalGs: 12350 },
+    };
+    const text = await pdfText(await renderer.render(decimal));
+    for (const expected of ['2,5', '4.940,2', '12.350,5', 'TOTAL EN GUARANÍES: 12.350']) {
+      expect(text).toContain(expected);
+    }
+  });
+
   it('prints the CDC in eleven groups of four and the consultation legend (MT 13.4.4)', async () => {
     const text = await pdfText(await renderer.render(invoice()));
     expect(text).toContain('0180 0695 6310 0100 1000 0006 1202 1112 9175 9571 4694');

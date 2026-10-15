@@ -145,11 +145,11 @@ describe('readKudeInvoice', () => {
     expect(() => readKudeInvoice(without(xml, tag))).toThrow(new RegExp(tag));
   });
 
-  it('fails closed on a missing CDC, no items, and non-integer PYG amounts', () => {
+  it('fails closed on a missing CDC, no items, and an amount that is not a number', () => {
     expect(() => readKudeInvoice(xml.replace(/ Id="\d{44}"/, ''))).toThrow(/CDC/);
     expect(() => readKudeInvoice(xml.replace(/<gCamItem>[\s\S]*<\/gCamItem>/, ''))).toThrow(/item/);
     expect(() =>
-      readKudeInvoice(xml.replace('<dSub10>10000</dSub10>', '<dSub10>1.5</dSub10>')),
+      readKudeInvoice(xml.replace('<dSub10>10000</dSub10>', '<dSub10>1,5</dSub10>')),
     ).toThrow(/dSub10/);
   });
 
@@ -188,5 +188,33 @@ describe('readKudeInvoice', () => {
   it('rejects foreign currencies explicitly (PYG-only MVP)', () => {
     const usd = xml.replace('<cMoneOpe>PYG</cMoneOpe>', '<cMoneOpe>USD</cMoneOpe>');
     expect(() => readKudeInvoice(usd)).toThrow(/cMoneOpe.*PYG/);
+  });
+});
+
+describe('readKudeInvoice with decimal amounts (HU-E5-09)', () => {
+  const decimal = (source: string) =>
+    source
+      .replace(/<dPUniProSer>[^<]*</, '<dPUniProSer>4940.2<')
+      .replace(/<dCantProSer>[^<]*</, '<dCantProSer>2.5<')
+      .replace(/<dTotOpeItem>[^<]*</, '<dTotOpeItem>12350.5<')
+      .replace(/<dTotGralOpe>[^<]*</, '<dTotGralOpe>12350<')
+      .replace(/<dSub10>[^<]*</, '<dSub10>12350.5<');
+
+  it('reads decimal prices, quantities and totals exactly', () => {
+    const model = readKudeInvoice(decimal(xml));
+    expect(model.items[0]).toMatchObject({ quantity: 2.5, unitPrice: 4940.2, total: 12350.5 });
+    expect(model.totals).toMatchObject({ subtotal10: 12350.5, totalOperation: 12350 });
+  });
+
+  it('still rejects an amount a number cannot hold exactly', () => {
+    const lossy = xml.replace(/<dTotGralOpe>[^<]*</, '<dTotGralOpe>1.12345678901234567890123<');
+    expect(() => readKudeInvoice(lossy)).toThrow(KudeSourceError);
+    expect(() => readKudeInvoice(lossy)).toThrow(/dTotGralOpe/);
+  });
+
+  it('still rejects text that is not a number', () => {
+    expect(() => readKudeInvoice(xml.replace(/<dTotGralOpe>[^<]*</, '<dTotGralOpe>1e3<'))).toThrow(
+      /dTotGralOpe/,
+    );
   });
 });

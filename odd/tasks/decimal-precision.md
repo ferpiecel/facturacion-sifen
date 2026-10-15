@@ -73,8 +73,8 @@ Out: foreign currency, exchange rate (`dTiCamIt`), 50-centimos rounding, discoun
 - [x] T3 Domain `Decimal` value object (`apps/api/src/modules/emission/domain/decimal.ts`): parse, compare, add, multiply, scale checks, string output. Tests first, including `2.3 × 100`, `0.5 × 1001` and 15+8 digit bounds.
 - [x] T4 Draft validation and totals: replace `Number.isInteger` and `number` math in `invoice-draft.ts` and `accept-invoice.ts`; new rules for decimal places and ranges; keep the 50 Gs rounding rule.
 - [x] T5 XML and QR: format amounts as plain decimal strings (no exponent), item totals and `dTotOpe`/`dTotGralOpe`; XSD validation of generated XML; QR parameter formatting.
-- [ ] T6 Persistence and read: confirm `numeric(23,8)` round-trips, `trimDecimals` in `get-document.ts`, portal summary sums and KPIs; no migration expected, confirm.
-- [ ] T7 KuDE: print decimals when present (`formatPyg`, `formatQuantity`, reader `pyg()`), keep integer output identical.
+- [x] T6 Persistence and read: confirm `numeric(23,8)` round-trips, `trimDecimals` in `get-document.ts`, portal summary sums and KPIs; no migration expected, confirm.
+- [x] T7 KuDE: print decimals when present (`formatPyg`, `formatQuantity`, reader `pyg()`), keep integer output identical.
 - [ ] T8 API contract and docs: OpenAPI schema for the amount fields, regenerate (`pnpm --filter @sifen/api openapi`), update `docs/integracion/emision.md` (amounts and rounding section).
 - [ ] T9 End to end: accept, sign and XSD check with decimal quantities and prices; coverage thresholds hold.
 
@@ -192,9 +192,11 @@ PYG rounding (MT section F, SEDECO 347/2014): multiples of 50 Gs, example 107.43
 - T5 must propagate the same `ValidationConfig` (including `allowDecimals`) to `generateInvoiceXml` (`invoice-xml.ts:269` calls `validateInvoiceDraft(draft, {})`), so the worker never rejects a document the API accepted.
 - Golden rules: `invoice-draft.golden.spec.ts` pins the rule names main returned (recorded from a temporary worktree of b8ee5e7) and lists the intended changes.
 - Done: T5 (slice D1): xmlgen options for decimal documents, `ValidationConfig` propagated to `generateInvoiceXml`/`buildSignedInvoice`/`SignDocument`, plain decimal strings, `dRedon`/`dTotGralOpe` set from the validated totals, XML byte-equality golden test for integer documents, generate-sign-QR-XSD pipeline test for decimal documents. `allowDecimals` stays OFF; enabling it (env flag, `docs/configuracion.md`) is the final explicit step. ADR-0018 amended.
+- Done: T6 and T7 (slice D2): `numeric(23,8)` round-trip confirmed (no migration; the stored total is the net, always a whole multiple of 50 Gs, and the payload keeps the exact decimal numbers), `trimDecimals` and `addAmounts` covered with decimals; KuDE prints decimal amounts with a decimal comma (`formatPyg`), the reader accepts exact decimals, integer output is unchanged.
 - Review fixes on slice D: exponent rewrite limited to an allowlist of amount tags (a product code `1E5` is untouched), one `emissionValidationConfig()` shared by the API acceptance path and the worker signing path (equality test), provisional comment on `DECIMAL_XMLGEN_OPTIONS`, F-group equalities asserted in the pipeline test.
 - Debt H3 (slice E or when switching `allowDecimals` on): the KuDE model uses `number`, so an amount valid by ADR-0018 (up to 15 integer + 8 decimal digits) with more than about 15 significant digits, e.g. `123456789012.12345678`, cannot be printed: the reader fails closed with `KudeSourceError`. Either carry amounts as strings in the KuDE model or limit the accepted range when enabling the switch.
-- Next: T4 waits for the T1 open points; meanwhile see the note below. T1 needs access to a SIFEN test environment and a certificate;
+- Next: slice E (T8 contract and docs, T9 end to end) and the explicit switch for `allowDecimals`.
+- Earlier note: T4 waits for the T1 open points; meanwhile see the note below. T1 needs access to a SIFEN test environment and a certificate;
   T4 should not start before the T1 open points 1 and 2 are settled or an interim rule is accepted.
 
 ## Checks and evidence

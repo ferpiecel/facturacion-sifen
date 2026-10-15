@@ -382,13 +382,15 @@ function patchGeoGroup(
     }
     const name = nameOf(carried);
     if (name !== undefined && unescapeXmlText(found[2]) !== name) {
+      // A function replacement: the text is literal, `$&`-style patterns must not be interpreted.
       patched = patched.replace(
         pair,
-        `<${codeTag}>${found[1]}</${codeTag}><${descriptionTag}>${escapeText(name)}</${descriptionTag}>`,
+        () =>
+          `<${codeTag}>${found[1]}</${codeTag}><${descriptionTag}>${escapeText(name)}</${descriptionTag}>`,
       );
     }
   }
-  return xml.replace(block[0], patched);
+  return xml.replace(block[0], () => patched);
 }
 
 function geoExpectations(
@@ -430,7 +432,7 @@ function applyCatalogGeography(
       },
       catalog,
     ),
-    true,
+    strict,
   );
   const address = draft.receiver.kind === 'named' ? draft.receiver.address : undefined;
   if (address === undefined) return issued;
@@ -455,6 +457,27 @@ const MISSING_SIGNATURE =
   "Element '{http://ekuatia.set.gov.py/sifen/xsd}rDE': Missing child element(s). Expected is ( {http://www.w3.org/2000/09/xmldsig#}Signature ).";
 
 /**
+ * xmlgen validates its input and crashes on a code missing from its tables. Both are deterministic
+ * data problems: they surface as an `InvoiceXmlError` (the document is held with a clear reason)
+ * instead of an opaque crash that would be retried forever.
+ */
+async function buildWithXmlgen(
+  builder: DeXmlBuilder,
+  input: ReturnType<typeof mapInvoiceToXmlInput>,
+): Promise<string> {
+  try {
+    return await builder.buildParaSifen(input);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new InvoiceXmlError(
+      error instanceof TypeError
+        ? `a department, district or city code is not in the xmlgen geographic table (${reason})`
+        : `xmlgen could not build the document: ${reason}`,
+    );
+  }
+}
+
+/**
  * Validates the draft, builds the DE through the `DeXmlBuilder` port, checks
  * it against the siRecepDE XSD and verifies the Id attribute is the CDC of the
  * numbering results. The XML is not signed yet, so the only tolerated XSD error
@@ -471,7 +494,7 @@ export async function generateInvoiceXml(
     throw new InvoiceXmlError(draftErrors.map((e) => `${e.field} (${e.rule})`).join(', '));
   }
   // xmlgen emits an empty cTipReg when the regime is unknown; the XSD makes it optional (MT 7.2.4: no empty tags).
-  const built = (await builder.buildParaSifen(mapInvoiceToXmlInput(draft, ctx))).replace(
+  const built = (await buildWithXmlgen(builder, mapInvoiceToXmlInput(draft, ctx))).replace(
     /<cTipReg><\/cTipReg>|<cTipReg\/>/,
     '',
   );
@@ -525,7 +548,7 @@ export function toSifenXml(xml: string): string {
   return editFuFd(xml, (body) => body.replace(INF_ADIC, ''));
 }
 
-function unescapeXmlText(text: string): string {
+export function unescapeXmlText(text: string): string {
   return text
     .replaceAll('&lt;', '<')
     .replaceAll('&gt;', '>')
@@ -534,7 +557,7 @@ function unescapeXmlText(text: string): string {
     .replaceAll('&amp;', '&');
 }
 
-function escapeText(text: string): string {
+export function escapeText(text: string): string {
   return text
     .replace(XML_ILLEGAL, '')
     .replaceAll('&', '&amp;')

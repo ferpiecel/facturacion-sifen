@@ -15,7 +15,9 @@ import {
   generateInvoiceXml,
   InvoiceXmlError,
   mapInvoiceToXmlInput,
+  escapeText,
   toReceiverXml,
+  unescapeXmlText,
   toSifenXml,
   type InvoiceXmlContext,
   type XmlReceiver,
@@ -581,6 +583,68 @@ describe('geography in the XML carries the DNIT catalog, not the xmlgen table', 
 
     expect(xml).toContain('<cDepRec>1</cDepRec><dDesDepRec>CAPITAL</dDesDepRec>');
     expect(xml).toContain('<dDesCiuRec>ASUNCION (DISTRITO)</dDesCiuRec>');
+  });
+
+  it('holds a document whose establishment xmlgen cannot resolve with a clear, deterministic error', async () => {
+    const ctx: InvoiceXmlContext = {
+      ...context('production'),
+      establishment: createEstablishment({
+        code: '001',
+        address: 'Calle Falsa',
+        houseNumber: '123',
+        departmentCode: 1,
+        districtCode: '145',
+        districtDescription: 'CIUDAD DEL ESTE',
+        cityCode: '3383',
+        cityDescription: 'CIUDAD DEL ESTE',
+      }),
+    };
+
+    const signing = { ...geo, validateGeo: false };
+
+    await expect(generateInvoiceXml(builder, draft, ctx, signing)).rejects.toThrow(
+      /^Invalid invoice XML: xmlgen could not build the document: .*departamento/,
+    );
+  });
+
+  it('maps an xmlgen crash on a city missing from its table to an InvoiceXmlError', async () => {
+    const crashing = {
+      buildParaSifen: () =>
+        Promise.reject(
+          new TypeError("Cannot read properties of undefined (reading 'descripcion')"),
+        ),
+    };
+
+    const error = await generateInvoiceXml(crashing, draft, context('production'), geo).catch(
+      (e: unknown) => e,
+    );
+
+    expect(error).toBeInstanceOf(InvoiceXmlError);
+    expect((error as Error).message).toMatch(/not in the xmlgen geographic table/);
+  });
+
+  it('is lenient with the issuer codes when signing, strict when the draft was validated', async () => {
+    const overridden = {
+      buildParaSifen: async (input: Parameters<typeof builder.buildParaSifen>[0]) =>
+        (await builder.buildParaSifen(input)).replace(
+          '<cCiuEmi>3432</cCiuEmi>',
+          '<cCiuEmi>3383</cCiuEmi>',
+        ),
+    };
+
+    await expect(
+      generateInvoiceXml(overridden, draft, context('production'), { ...geo, validateGeo: false }),
+    ).resolves.toBeDefined();
+    await expect(generateInvoiceXml(overridden, draft, context('production'), geo)).rejects.toThrow(
+      /cCiuEmi/,
+    );
+  });
+
+  it('escapes and unescapes XML text as exact inverses', () => {
+    for (const text of ['A & B', "O'LEARY", '"q"', '<a>', '&amp;', '&lt;&gt;', 'plain ñ']) {
+      expect(unescapeXmlText(escapeText(text))).toBe(text);
+    }
+    expect(escapeText('&amp;')).toBe('&amp;amp;');
   });
 
   it('writes the catalog description of the issuer establishment too', async () => {

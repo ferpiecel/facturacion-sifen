@@ -4,40 +4,23 @@ import {
   auditLog,
   createPgliteDatabase,
   documents,
-  tenantEstablishments,
-  tenantExpeditionPoints,
-  tenantFiscalProfiles,
   tenants,
-  tenantTimbrados,
   withTenantTransaction,
   type DatabaseHandle,
 } from '@sifen/db';
-import { createAcceptInvoice, IdempotencyKeyReusedError } from '../application/accept-invoice.js';
+import { IdempotencyKeyReusedError } from '../application/accept-invoice.js';
 import {
   createAcceptCreditNote,
   type AcceptCreditNoteInput,
 } from '../application/accept-credit-note.js';
 import { InvoiceValidationError } from '../application/accept-invoice.js';
 import { parseCdc } from '../domain/cdc.js';
+import {
+  acceptInvoiceWithStatus,
+  seedIssuer,
+} from '../../../../test/support/credit-note-fixture.js';
 import { createDrizzleAcceptanceUnitOfWork } from './drizzle-acceptance-unit-of-work.js';
-import { parseCreateDocument, toAcceptInvoiceInput } from './http/create-document.request.js';
 
-const FE_BODY = {
-  establishment: '001',
-  expeditionPoint: '002',
-  operationType: 'B2B',
-  receiver: { kind: 'named', ruc: '80069563-1', name: 'Cliente SA' },
-  items: [
-    {
-      code: 'A-001',
-      description: 'Servicio',
-      unitCode: 77,
-      quantity: 1,
-      unitPrice: 1_000_000,
-      vatRate: 10,
-    },
-  ],
-};
 const ITEM = { quantity: 1, unitPrice: 400_000, vatRate: 10 as const };
 
 /** Spec: HU-E7-01 T6 (ADR-0019). Acceptance of an NCE against a real (pglite) database. */
@@ -56,52 +39,8 @@ describe('AcceptCreditNote with the Drizzle unit of work', () => {
       now: () => new Date('2026-03-06T01:30:00Z'),
     });
 
-  async function seedTenant(id: string) {
-    await handle.db.insert(tenantFiscalProfiles).values({
-      tenantId: id,
-      rucBase: '80069563',
-      rucDv: 1,
-      legalName: 'Empresa SA',
-      taxpayerType: 'persona_juridica',
-    });
-    const [est] = await handle.db
-      .insert(tenantEstablishments)
-      .values({
-        tenantId: id,
-        code: '001',
-        address: 'Av. Mariscal Lopez 123',
-        houseNumber: '123',
-        departmentCode: '11',
-        cityCode: '3432',
-        cityDescription: 'Asuncion',
-      })
-      .returning();
-    await handle.db
-      .insert(tenantExpeditionPoints)
-      .values({ tenantId: id, establishmentId: est.id, code: '002' });
-    await handle.db
-      .insert(tenantTimbrados)
-      .values({ tenantId: id, number: '22222222', validFrom: '2026-01-01' });
-  }
-
-  /** The FE goes through the real use case, then SIFEN's answer is simulated by moving its status forward. */
-  async function acceptedInvoice(owner: string, status = 'approved') {
-    const parsed = parseCreateDocument(FE_BODY);
-    if (!parsed.ok) throw new Error('fixture');
-    const accepted = await createAcceptInvoice({
-      unitOfWork: createDrizzleAcceptanceUnitOfWork(handle.db),
-      now: () => new Date('2026-03-05T12:00:00Z'),
-    })(
-      toAcceptInvoiceInput(parsed.value, {
-        tenantId: owner,
-        actor: { type: 'api_key', id: 'k' },
-        payload: parsed.value,
-        idempotencyKey: `fe-${String(++keySeq)}`,
-      }),
-    );
-    await advance(accepted.documentId, status);
-    return accepted;
-  }
+  const acceptedInvoice = (owner: string, status = 'approved') =>
+    acceptInvoiceWithStatus(handle.db, owner, `fe-${String(++keySeq)}`, status);
 
   async function advance(id: string, status: string) {
     const path: Record<string, string[]> = {
@@ -150,8 +89,8 @@ describe('AcceptCreditNote with the Drizzle unit of work', () => {
       .returning();
     tenantId = a.id;
     otherTenantId = b.id;
-    await seedTenant(tenantId);
-    await seedTenant(otherTenantId);
+    await seedIssuer(handle.db, tenantId);
+    await seedIssuer(handle.db, otherTenantId);
     const fe = await acceptedInvoice(tenantId);
     feCdc = fe.cdc;
     feId = fe.documentId;
@@ -249,6 +188,26 @@ describe('AcceptCreditNote with the Drizzle unit of work', () => {
       ]);
       await nextNumberIsOne();
     });
+  });
+
+  it('answers a domain error, not a 500, when the FE payload cannot be read any more', async () => {
+    const [fe] = await handle.db.select().from(documents).where(eq(documents.id, feId));
+    const [broken] = await handle.db
+      .insert(documents)
+      .values({
+        ...fe,
+        id: undefined,
+        cdc: `01${'2'.repeat(42)}`,
+        number: 2,
+        idempotencyKey: 'fe-broken',
+        payload: { legacy: true },
+        status: 'approved',
+      })
+      .returning();
+    const draft = { associatedCdc: broken.cdc, reasonCode: 2, items: [ITEM], roundingPyg: 0 };
+    expect(await rulesOf(acceptCredit()(credit({ draft })))).toEqual([
+      'associated-document-unreadable',
+    ]);
   });
 
   describe('sum of credits (2417)', () => {

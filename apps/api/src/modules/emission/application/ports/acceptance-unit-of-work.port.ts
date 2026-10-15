@@ -1,3 +1,4 @@
+import type { AssociatedInvoiceFacts } from '../../domain/credit-note-draft.js';
 import type { AuditEntry } from '../../../audit/application/ports/record-audit.port.js';
 
 /** Everything the emitter side of a document needs, resolved server-side for one tenant. */
@@ -37,6 +38,8 @@ export interface NewDocument {
   totalAmount: string;
   currency: string;
   payload: unknown;
+  /** CDC of the FE a credit note credits (ADR-0019 D4); absent for an FE. */
+  associatedCdc?: string;
   /** `Idempotency-Key` of the request, unique per tenant. */
   idempotencyKey: string;
   /** sha-256 of the canonical validated body. */
@@ -62,12 +65,32 @@ export class IdempotencyKeyCollisionError extends Error {
   }
 }
 
+/** The FE a credit note is associated to, as the tenant stored it. */
+export interface AssociatedInvoice extends Omit<AssociatedInvoiceFacts, 'creditedAmount'> {
+  /** The FE's `receiver_ruc`, copied to the credit note (the receiver is the FE's, ADR-0019 D3). */
+  receiverRuc: string | null;
+}
+
 /** Operations that must share one tenant transaction. */
 export interface AcceptanceUnit {
   /** The document an earlier request with this key created, or null. */
   findByIdempotencyKey(key: string): Promise<StoredAcceptance | null>;
   /** The tenant's issuer setup, or null when the point or a valid timbrado does not exist. */
   resolveIssuer(query: IssuerQuery): Promise<IssuerContext | null>;
+  /**
+   * The tenant's FE with this CDC in `environment`, locked with `FOR NO KEY UPDATE` until the
+   * transaction ends so concurrent credit notes of the same FE are serialized (ADR-0019 D5), or null
+   * when there is none (another tenant's FE is none).
+   */
+  findAssociatedInvoice(
+    cdc: string,
+    environment: IssuerContext['environment'],
+  ): Promise<AssociatedInvoice | null>;
+  /**
+   * Sum of F014 of the credit notes of that FE that still count: every status except `cancelled` and
+   * `number_voided` (a rejected NCE is resent with the same CDC). Exact decimal text.
+   */
+  sumCreditNotes(cdc: string, environment: IssuerContext['environment']): Promise<string>;
   nextNumber(
     issuer: IssuerContext,
     documentType: number,

@@ -52,6 +52,7 @@ export interface HeldDocument {
  */
 const DETERMINISTIC_SIGNING_ERRORS: ReadonlySet<string> = new Set([
   'SigningDataIncompleteError',
+  'DocumentTypeNotSignableError',
   'EstablishmentContactMissingError',
   'CscNotConfiguredError',
   'DocumentEnvironmentMismatchError',

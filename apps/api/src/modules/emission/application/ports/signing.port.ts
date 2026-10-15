@@ -71,6 +71,17 @@ export class SigningDataIncompleteError extends Error {
   }
 }
 
+/**
+ * The document's type has no XML builder yet (an NCE until HU-E7-01 slice E). Deterministic: the
+ * worker parks the document with this reason instead of retrying or parsing it as an FE.
+ */
+export class DocumentTypeNotSignableError extends Error {
+  constructor(readonly documentType: number) {
+    super(`documents of type ${String(documentType)} cannot be signed yet`);
+    this.name = 'DocumentTypeNotSignableError';
+  }
+}
+
 /** gEmis requires dTelEmi and dEmailE; the document's establishment has none (see `establishment:contact`). */
 export class EstablishmentContactMissingError extends Error {
   constructor(readonly establishmentCode: string) {

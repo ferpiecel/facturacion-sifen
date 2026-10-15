@@ -63,7 +63,7 @@ export async function seedIssuer(db: Database, tenantId: string): Promise<void> 
 
 /**
  * The FE goes through the real use case, then SIFEN's answer is simulated by moving its status
- * forward (signed, submitted, `status`).
+ * forward to `status`.
  */
 export async function acceptInvoiceWithStatus(
   db: Database,
@@ -84,7 +84,11 @@ export async function acceptInvoiceWithStatus(
       idempotencyKey: key,
     }),
   );
-  for (const step of ['signed', 'submitted', status]) {
+  const path: Record<string, string[]> = {
+    signed: ['signed'],
+    cancelled: ['signed', 'submitted', 'approved', 'cancelled'],
+  };
+  for (const step of path[status] ?? ['signed', 'submitted', status]) {
     await db.update(documents).set({ status: step }).where(eq(documents.id, accepted.documentId));
   }
   return accepted;

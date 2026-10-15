@@ -64,8 +64,8 @@ Receptor innominado (`kind: "unnamed"`): no lleva `ruc` ni `name`. Se rechaza si
 | Dato | Qué valida la plataforma | Qué debe hacer su sistema |
 |---|---|---|
 | `location.departmentCode` | Debe estar en la tabla oficial de 20 departamentos; si no, responde `422` con `rule: "department-code"`. La descripción la completa la plataforma | Enviar el código del departamento del receptor cuando informe dirección (no en `B2F`) |
-| `receiver.districtCode` y `receiver.cityCode` | Solo el formato (entero dentro del rango). **No se cruzan contra la tabla oficial de distritos y ciudades** ni entre sí, porque esa tabla aún no está cargada en la plataforma | Enviar los códigos y descripciones **tal como figuran en las tablas de la DNIT** (Manual Técnico v150, tablas 2.1 y 2.2) |
-| `districtDescription` y `cityDescription` | Solo la longitud. Se copian al XML sin verificar | Enviar la descripción oficial que corresponde al código |
+| `receiver.districtCode` y `receiver.cityCode` | Deben existir en la tabla oficial de la DNIT (Tabla 2.1, `GET /v1/geo/*`), la ciudad debe pertenecer al distrito y el distrito al departamento; si no, `422` con `receiver-district-unknown`, `receiver-city-unknown`, `receiver-city-not-in-district`, `receiver-district-not-in-department` o `receiver-city-not-in-department` | Enviar los códigos tal como los devuelven los endpoints de geografía |
+| `districtDescription` y `cityDescription` | Deben ser la descripción de la tabla para su código (`receiver-district-description-mismatch`, SIFEN 1325; `receiver-city-description-mismatch`, SIFEN 1329). Se comparan sin distinguir mayúsculas, acentos ni espacios repetidos: `Asunción` equivale a `ASUNCION`. El XML siempre lleva el texto oficial de la tabla | Enviar la descripción oficial, o el texto equivalente |
 
 Un código de distrito o ciudad inexistente, o una descripción que no corresponda, **pasa la validación de la plataforma** y puede ser rechazado luego por SIFEN. El departamento del emisor no se envía: sale del establecimiento configurado.
 

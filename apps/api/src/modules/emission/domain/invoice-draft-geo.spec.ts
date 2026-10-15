@@ -87,6 +87,26 @@ describe('receiver geography against the DNIT catalog (1325, 1329)', () => {
     ]);
   });
 
+  it('compares descriptions ignoring case, accents and repeated spaces', () => {
+    const d = draft({
+      districtDescription: 'ciudad  DEL éste',
+      cityDescription: ' Ciudad del Este ',
+    });
+
+    expect(errors(d)).toEqual([]);
+  });
+
+  it('gives a SIFEN code only where the norm defines one (descriptions); the rest have none', () => {
+    const found = errors(draft({ cityCode: 1, districtCode: 9999, cityDescription: 'OTRA' }));
+
+    expect(found.map((e) => [e.rule, e.sifenCode])).toEqual(
+      expect.arrayContaining([
+        ['receiver-district-unknown', undefined],
+        ['receiver-city-description-mismatch', '1329'],
+      ]),
+    );
+  });
+
   it('checks the district of a B2F receiver, which carries neither department nor city', () => {
     const b2f = {
       ...draft({ cityCode: undefined, cityDescription: undefined }, {} as never),

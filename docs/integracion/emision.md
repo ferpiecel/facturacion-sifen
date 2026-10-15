@@ -55,7 +55,7 @@ Receptor identificado (`kind: "named"`):
 | `districtCode` / `districtDescription` | Opcionales, siempre juntos. Código entero de 1 a 9999 y descripción de hasta 30 caracteres |
 | `cityCode` / `cityDescription` | Siempre juntos. Código entero de 1 a 99999 y descripción de hasta 30 caracteres. Con `address` son obligatorios salvo en `B2F`, donde no deben informarse (`receiver-city-required`, `receiver-city-not-allowed`) |
 
-Con `B2F` se rechaza `location.departmentCode` (`receiver-department-not-allowed`) y `cityCode`. Con otra operación y `address`, el departamento es obligatorio (`receiver-department-required`).
+`B2F` hoy se rechaza por completo (`operation-type-not-supported`, decisión de producto); las reglas siguientes quedan fijadas para cuando se habilite. Con `B2F` se rechaza `location.departmentCode` (`receiver-department-not-allowed`) y `cityCode`. Con otra operación y `address`, el departamento es obligatorio (`receiver-department-required`).
 
 Receptor innominado (`kind: "unnamed"`): no lleva `ruc` ni `name`. Se rechaza si el total neto es de 7.000.000 Gs o más.
 
@@ -70,6 +70,26 @@ Receptor innominado (`kind: "unnamed"`): no lleva `ruc` ni `name`. Se rechaza si
 Un código de distrito o ciudad inexistente o que no encaje en la jerarquía, o una descripción que no corresponda, se rechazan con `422` antes de consumir un número (reglas de la tabla anterior). El departamento del emisor no se envía: sale del establecimiento configurado.
 
 Departamentos (`cDepEmi`): 1 Capital, 2 Concepción, 3 San Pedro, 4 Cordillera, 5 Guairá, 6 Caaguazú, 7 Caazapá, 8 Itapúa, 9 Misiones, 10 Paraguarí, 11 Alto Paraná, 12 Central, 13 Ñeembucú, 14 Amambay, 15 Presidente Hayes, 16 Boquerón, 17 Alto Paraguay, 18 Canindeyú, 19 Chaco, 20 Nueva Asunción.
+
+### Consultar los códigos geográficos
+
+Los códigos y descripciones válidos salen de la tabla oficial de la DNIT (Tabla 2.1) y se consultan con una API key válida, sin scope adicional. Cada lista se filtra por el padre; ningún endpoint devuelve la tabla completa de ciudades.
+
+| Ruta | Devuelve | Errores |
+|---|---|---|
+| `GET /v1/geo/departments` | Los 18 departamentos | `401` |
+| `GET /v1/geo/districts?departmentCode=11` | Los distritos de un departamento | `400` si falta o no es un código; `404` si no existe |
+| `GET /v1/geo/cities?districtCode=145` | Las ciudades de un distrito | `400` si falta o no es un código; `404` si no existe |
+
+```bash
+curl -s 'https://api.example.com/v1/geo/cities?districtCode=145' -H 'Authorization: Bearer sk_live_...'
+```
+
+```json
+{ "items": [{ "code": 3383, "districtCode": 145, "name": "CIUDAD DEL ESTE" }, "..."] }
+```
+
+Los registros llevan el departamento (`departmentCode`) en los distritos y el distrito (`districtCode`) en las ciudades. El campo `name` es el texto que va en `districtDescription` y `cityDescription`.
 
 ### Ítems
 

@@ -47,7 +47,7 @@ const BODY = {
     },
   ],
   roundingPyg: 0,
-  location: { departmentCode: 11 },
+  location: { departmentCode: 1 },
 };
 
 /** Spec: HU-E10-01. `GET /v1/documents/{id}/kude` through the real pipeline. */

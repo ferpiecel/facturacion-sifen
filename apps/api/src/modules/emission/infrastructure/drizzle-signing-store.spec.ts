@@ -269,14 +269,14 @@ describe('DrizzleSigningStore', () => {
     });
   });
 
-  it('refuses to sign a document of a type it cannot build yet, naming the type, not the payload', async () => {
-    // HU-E7-01: an NCE must be held with a distinct reason until slice E, never fail as an incomplete FE.
-    await seed({ documentType: 5, payload: { type: 'NCE', reasonCode: 2 } });
+  it('holds a document of a type with no XML builder (an NDE), naming the type, not the payload', async () => {
+    // Only the FE (1) and the NCE (5) have a builder; any other type waits with its own reason.
+    await seed({ documentType: 4, payload: { type: 'NDE' } });
     const error = await storeFor(tenantId)
       .load(tenantId, documentId)
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(DocumentTypeNotSignableError);
-    expect((error as DocumentTypeNotSignableError).documentType).toBe(5);
+    expect((error as DocumentTypeNotSignableError).documentType).toBe(4);
   });
 
   it('names the establishment when it has no phone or email', async () => {

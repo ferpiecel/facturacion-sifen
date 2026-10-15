@@ -14,7 +14,6 @@ import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTenant, issueApiKey } from '../src/cli/commands.js';
 import { createHttpAdapter } from '../src/bootstrap/http.js';
-import { CREDIT_NOTES_ENABLED } from '../src/modules/emission/emission.tokens.js';
 import { AppModule } from '../src/app.module.js';
 import { DATABASE, DATABASE_HANDLE } from '../src/modules/database/database.module.js';
 import { parseCdc } from '../src/modules/emission/domain/cdc.js';
@@ -94,18 +93,15 @@ describe('POST /v1/documents (e2e)', () => {
     const seeded = await seedTenant('Acme SA', true);
     tenantId = seeded.id;
     bearer = seeded.formattedKey;
-    app = await buildApp(false);
+    app = await buildApp();
   });
 
-  /** `creditNotes` turns on the NCE acceptance gate (HU-E7-01, until the worker can sign them). */
-  async function buildApp(creditNotes: boolean) {
+  async function buildApp() {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(DATABASE_HANDLE)
       .useValue(handle)
       .overrideProvider(DATABASE)
       .useValue(handle.db)
-      .overrideProvider(CREDIT_NOTES_ENABLED)
-      .useValue(creditNotes)
       .compile();
     const created = moduleRef.createNestApplication<NestFastifyApplication>(createHttpAdapter());
     await created.init();
@@ -162,7 +158,7 @@ describe('POST /v1/documents (e2e)', () => {
     expect(await handle.db.select().from(documents)).toHaveLength(0);
   });
 
-  it('validates a credit note body, then refuses it until the use case lands (slice D)', async () => {
+  it('validates a credit note body, then refuses an FE that does not exist (2403)', async () => {
     const credit = {
       type: 'NCE',
       establishment: '001',
@@ -184,17 +180,12 @@ describe('POST /v1/documents (e2e)', () => {
     const valid = await post(credit);
     expect(valid.statusCode).toBe(422);
     expect(valid.json<{ errors: Array<{ rule: string }> }>().errors).toEqual([
-      expect.objectContaining({ rule: 'document-type-not-supported' }),
+      expect.objectContaining({ rule: 'associated-document-not-found', sifenCode: '2403' }),
     ]);
     expect(await handle.db.select().from(documents)).toHaveLength(0);
   });
 
-  describe('credit notes enabled', () => {
-    beforeEach(async () => {
-      // The first app is not closed: closing it would close the shared database handle.
-      app = await buildApp(true);
-    });
-
+  describe('credit notes', () => {
     const nce = (cdc: string) => ({
       type: 'NCE',
       establishment: '001',

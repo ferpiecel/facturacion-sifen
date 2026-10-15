@@ -10,6 +10,7 @@ import {
   tenantTimbrados,
   withTenantTransaction,
   type Database,
+  type TenantTx,
 } from '@sifen/db';
 import { createEstablishment } from '../../fiscal-config/domain/establishment.js';
 import { createExpeditionPoint } from '../../fiscal-config/domain/expedition-point.js';
@@ -26,6 +27,7 @@ import {
 } from '../application/ports/signing.port.js';
 import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
 import { parseCreateDocument, toInvoiceDraft } from './http/create-document.request.js';
+import { parseCreateCreditNote, toCreditNoteDraft } from './http/credit-note.request.js';
 import type { XmlReceiver } from '../application/invoice-xml.js';
 
 export interface DrizzleSigningStoreOptions {
@@ -87,7 +89,70 @@ function readPayload(payload: unknown): {
   return { draft: toInvoiceDraft(body), receiver, ...detail.data };
 }
 
+/**
+ * An NCE (HU-E7-01): its own items, rounding and reason come from its payload; the receiver,
+ * operation and location are the FE's (ADR-0019 D3), read from the FE's stored payload.
+ */
+function readCreditNotePayload(
+  payload: unknown,
+  invoicePayload: unknown,
+  associatedCdc: string,
+): ReturnType<typeof readPayload> & { creditNote: { associatedCdc: string; reasonCode: number } } {
+  const base = parseCreateCreditNote(payload);
+  if (!base.ok) throw new SigningDataIncompleteError(base.errors.map((e) => e.field));
+  const detail = xmlDetailSchema.safeParse(payload);
+  if (!detail.success) {
+    throw new SigningDataIncompleteError(detail.error.issues.map((i) => pathOf(i.path)));
+  }
+  const invoice = readPayload(invoicePayload);
+  const credit = toCreditNoteDraft(base.value);
+  return {
+    draft: {
+      receiver: invoice.draft.receiver,
+      operationType: invoice.draft.operationType,
+      location: invoice.draft.location,
+      items: credit.items,
+      roundingPyg: credit.roundingPyg,
+    },
+    receiver: invoice.receiver,
+    items: detail.data.items,
+    creditNote: { associatedCdc, reasonCode: credit.reasonCode },
+  };
+}
+
 const first = <T>(rows: T[]): T | undefined => rows.at(0);
+
+/** The XML data of an FE, or of an NCE together with the FE row it credits. */
+async function readDocument(
+  tx: TenantTx,
+  tenantId: string,
+  document: typeof documents.$inferSelect,
+): Promise<
+  ReturnType<typeof readPayload> & { creditNote?: { associatedCdc: string; reasonCode: number } }
+> {
+  if (document.documentType === 1) return readPayload(document.payload);
+  const { associatedCdc } = document;
+  const invoice =
+    associatedCdc === null
+      ? undefined
+      : first(
+          await tx
+            .select({ payload: documents.payload })
+            .from(documents)
+            .where(
+              and(
+                eq(documents.tenantId, tenantId),
+                eq(documents.environment, document.environment),
+                eq(documents.cdc, associatedCdc),
+                eq(documents.documentType, 1),
+              ),
+            ),
+        );
+  if (associatedCdc === null || invoice === undefined) {
+    throw new SigningDataIncompleteError(['associatedCdc']);
+  }
+  return readCreditNotePayload(document.payload, invoice.payload, associatedCdc);
+}
 
 /** `SigningStore` over `documents` and the tenant's fiscal configuration, as app_user under RLS. */
 export function createDrizzleSigningStore({
@@ -112,8 +177,8 @@ export function createDrizzleSigningStore({
           if (document.status !== 'accepted') {
             return { documentId: document.id, status: document.status };
           }
-          // Only an FE has an XML builder today; an NCE waits (held) for HU-E7-01 slice E.
-          if (document.documentType !== 1) {
+          // Only an FE (1) and an NCE (5) have an XML builder; any other type is held.
+          if (document.documentType !== 1 && document.documentType !== 5) {
             throw new DocumentTypeNotSignableError(document.documentType);
           }
           const tenant = first(
@@ -173,7 +238,8 @@ export function createDrizzleSigningStore({
             throw new EstablishmentContactMissingError(establishment.code);
           }
 
-          const { draft, receiver, items } = readPayload(document.payload);
+          const readable = await readDocument(tx, tenantId, document);
+          const { draft, receiver, items } = readable;
           const issuer = createFiscalProfile({
             ruc: createRuc(profile.rucBase, profile.rucDv),
             legalName: profile.legalName,
@@ -232,6 +298,7 @@ export function createDrizzleSigningStore({
               },
               issuedAt: document.issuedAt,
               ...(receiver === undefined ? {} : { receiver }),
+              ...(readable.creditNote === undefined ? {} : { creditNote: readable.creditNote }),
               lines: items.map((i) => ({
                 code: i.code,
                 description: i.description,

@@ -11,7 +11,7 @@ import {
 } from '../../../tenancy/infrastructure/tenancy-cls-store.js';
 import type { createAcceptInvoice } from '../../application/accept-invoice.js';
 import type { createAcceptCreditNote } from '../../application/accept-credit-note.js';
-import { ACCEPT_CREDIT_NOTE, ACCEPT_INVOICE, CREDIT_NOTES_ENABLED } from '../../emission.tokens.js';
+import { ACCEPT_CREDIT_NOTE, ACCEPT_INVOICE } from '../../emission.tokens.js';
 import { toAcceptInvoiceInput } from './create-document.request.js';
 import { parseDocumentRequest, toCreditNoteDraft } from './credit-note.request.js';
 import { parseIdempotencyKey } from './idempotency-key.js';
@@ -25,7 +25,6 @@ export class DocumentsController {
     private readonly acceptInvoice: ReturnType<typeof createAcceptInvoice>,
     @Inject(ACCEPT_CREDIT_NOTE)
     private readonly acceptCreditNote: ReturnType<typeof createAcceptCreditNote>,
-    @Inject(CREDIT_NOTES_ENABLED) private readonly creditNotesEnabled: boolean,
     private readonly cls: ClsService<TenancyClsStore & IdentityClsStore>,
   ) {}
 
@@ -43,16 +42,6 @@ export class DocumentsController {
     const parsed = parseDocumentRequest(body);
     if (!parsed.ok) {
       throw validationProblem(parsed.errors);
-    }
-    if (parsed.type === 'NCE' && !this.creditNotesEnabled) {
-      // Accepted only once the worker can sign a credit note (HU-E7-01 slice E).
-      throw validationProblem([
-        {
-          field: 'type',
-          rule: 'document-type-not-supported',
-          message: 'Credit notes (NCE) are not available yet',
-        },
-      ]);
     }
     try {
       const context = {

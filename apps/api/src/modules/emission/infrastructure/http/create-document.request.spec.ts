@@ -180,7 +180,14 @@ describe('toInvoiceDraft', () => {
     expect(draft.receiver).toEqual({
       kind: 'named',
       isPublicEntity: false,
-      address: { street: 'Av. Mariscal Lopez', houseNumber: '123', cityCode: 1 },
+      address: {
+        street: 'Av. Mariscal Lopez',
+        houseNumber: '123',
+        districtCode: 1,
+        districtDescription: 'ASUNCION (DISTRITO)',
+        cityCode: 1,
+        cityDescription: 'ASUNCION (DISTRITO)',
+      },
     });
     expect(draft.location).toEqual({ departmentCode: 11 });
   });

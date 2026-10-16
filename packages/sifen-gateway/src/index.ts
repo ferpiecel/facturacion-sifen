@@ -2,11 +2,16 @@ export { SIFEN_CODES } from './codes.ts';
 export type { SifenCode } from './codes.ts';
 export type {
   Ambiente,
+  CancellationEvent,
   DeXmlBuilder,
+  EventXmlBuilder,
   FacturaPocInput,
+  IssuerEvent,
+  IssuerEventBuildInput,
   LoadedCertificate,
   QrConfig,
   QrGenerator,
+  VoidingEvent,
   XmlSigner,
 } from './emission-ports.ts';
 export {

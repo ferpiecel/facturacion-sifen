@@ -12,7 +12,9 @@ import {
   formatQuantity,
   groupCdc,
   KUDE_CONSULT_URL,
+  KUDE_CREDIT_NOTE_TITLE,
   KUDE_TITLE,
+  documentNumberOfCdc,
   type KudeInvoice,
   type KudeItem,
 } from '../../domain/kude-model.js';
@@ -87,6 +89,9 @@ function cells(item: KudeItem): Record<(typeof COLUMNS)[number]['key'], string> 
   };
 }
 
+const titleOf = (invoice: KudeInvoice): string =>
+  invoice.creditNote ? KUDE_CREDIT_NOTE_TITLE : KUDE_TITLE;
+
 /** KuDE of an FE on A4 (MT v150 chapter 13, "Formato 1"), drawn with embedded Noto Sans. */
 export class PdfkitKudeRenderer implements KudeRenderer {
   async render(invoice: KudeInvoice): Promise<Uint8Array> {
@@ -108,7 +113,7 @@ export class PdfkitKudeRenderer implements KudeRenderer {
       margin: MARGIN,
       bufferPages: true,
       info: {
-        Title: `${KUDE_TITLE} ${formatDocumentNumber(invoice.establishment, invoice.point, invoice.documentNumber)}`,
+        Title: `${titleOf(invoice)} ${formatDocumentNumber(invoice.establishment, invoice.point, invoice.documentNumber)}`,
         Creator: 'facturacion-sifen',
         Producer: 'facturacion-sifen',
         CreationDate: created,
@@ -173,7 +178,7 @@ export class PdfkitKudeRenderer implements KudeRenderer {
   /** Draws the header and returns the y below its lowest block. */
   private header(doc: Doc, invoice: KudeInvoice, qr: { png: Buffer; size: number }): number {
     const { issuer, stamp } = invoice;
-    this.line(doc, KUDE_TITLE, MARGIN, MARGIN, {
+    this.line(doc, titleOf(invoice), MARGIN, MARGIN, {
       width: doc.page.width - 2 * MARGIN,
       align: 'center',
       bold: true,
@@ -201,7 +206,7 @@ export class PdfkitKudeRenderer implements KudeRenderer {
       stamp.validTo === undefined
         ? ''
         : `Fecha de Fin de Vigencia: ${formatDateDmy(stamp.validTo)}`,
-      `Factura Electrónica Nº ${documentNumber}`,
+      `${invoice.creditNote ? 'Nota de Crédito Electrónica' : 'Factura Electrónica'} Nº ${documentNumber}`,
     ].filter(Boolean);
     let middle = top;
     stampLines.forEach((text, i) => {
@@ -227,7 +232,9 @@ export class PdfkitKudeRenderer implements KudeRenderer {
     const rows: string[] = [
       [
         `Fecha y hora de emisión: ${invoice.issuedAt}`,
-        `Condición de Venta: ${invoice.operationCondition}`,
+        invoice.operationCondition === undefined
+          ? ''
+          : `Condición de Venta: ${invoice.operationCondition}`,
         invoice.installments === undefined ? '' : `Cuotas: ${String(invoice.installments)}`,
         `Moneda: ${invoice.currency}`,
         invoice.exchangeRate === undefined ? '' : `Tipo de Cambio: ${invoice.exchangeRate}`,
@@ -249,7 +256,17 @@ export class PdfkitKudeRenderer implements KudeRenderer {
     } else {
       rows.push('Nombre o Razón Social: Sin Nombre');
     }
-    rows.push(`Tipo de Operación: ${invoice.transactionType}`);
+    if (invoice.transactionType !== undefined) {
+      rows.push(`Tipo de Operación: ${invoice.transactionType}`);
+    }
+    if (invoice.creditNote) {
+      const { reason, associatedCdc } = invoice.creditNote;
+      rows.push(
+        `Motivo de Emisión: ${reason}`,
+        `Documento Asociado: Factura Electrónica Nº ${documentNumberOfCdc(associatedCdc)}`,
+        `CDC del documento asociado: ${groupCdc(associatedCdc)}`,
+      );
+    }
     let y = top;
     for (const text of rows) y = this.put(doc, text, MARGIN, y, { width });
     return y + 8;

@@ -191,10 +191,8 @@ describe('GET /v1/documents/{id}/kude (e2e)', () => {
     expect((await get(`/v1/documents/${id}/kude`, writeOnly)).statusCode).toBe(403);
   });
 
-  it('answers a clear 422, logged below error level, for a signed NCE whose KuDE does not exist yet', async () => {
-    const errors = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
-    const { document_id: id, cdc } = await create(writer);
-    const nce = await signedInvoiceWithQr((input) => {
+  const creditNoteXml = (cdc: string) =>
+    signedInvoiceWithQr((input) => {
       const data = Object.fromEntries(
         Object.entries(input.data).filter(([key]) => key !== 'factura' && key !== 'condicion'),
       );
@@ -208,9 +206,31 @@ describe('GET /v1/documents/{id}/kude (e2e)', () => {
         },
       };
     });
+
+  it('returns the KuDE PDF of a signed NCE with its title, reason and associated invoice', async () => {
+    const { document_id: id, cdc } = await create(writer);
     await handle.db
       .update(documents)
-      .set({ status: 'signed', signedXml: nce, signedAt: new Date() })
+      .set({ status: 'signed', signedXml: await creditNoteXml(cdc), signedAt: new Date() })
+      .where(eq(documents.id, id));
+
+    const response = await get(`/v1/documents/${id}/kude`, reader);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toBe('application/pdf');
+    const text = await pdfText(new Uint8Array(response.rawPayload));
+    expect(text).toContain('KuDE de Nota de Crédito Electrónica');
+    expect(text).toContain('Motivo de Emisión: Devolución');
+    expect(text).toContain('Documento Asociado: Factura Electrónica Nº');
+  });
+
+  it('answers a clear 422, logged below error level, for a signed type with no KuDE yet (an NDE)', async () => {
+    const errors = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const { document_id: id, cdc } = await create(writer);
+    const nde = (await creditNoteXml(cdc)).replace('<iTiDE>5</iTiDE>', '<iTiDE>6</iTiDE>');
+    await handle.db
+      .update(documents)
+      .set({ status: 'signed', signedXml: nde, signedAt: new Date() })
       .where(eq(documents.id, id));
 
     const response = await get(`/v1/documents/${id}/kude`, reader);

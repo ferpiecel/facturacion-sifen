@@ -291,7 +291,7 @@
         "tags": [
           "Documents"
         ],
-        "summary": "Download the KuDE (PDF), available once the document is signed",
+        "summary": "Download the KuDE (PDF) of an FE or an NCE, available once the document is signed",
         "security": [
           {
             "apiKey": []
@@ -366,6 +366,16 @@
           },
           "409": {
             "description": "The document is not signed yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The document type has no KuDE layout yet (an NDE, AFE or NRE)",
             "content": {
               "application/json": {
                 "schema": {

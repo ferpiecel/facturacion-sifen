@@ -67,6 +67,19 @@ describe('LoteBuilder', () => {
     expect(lote.add(doc(2, { type: '04' }))).toEqual({ accepted: false, reason: 'type-mismatch' });
   });
 
+  it('keeps a credit note (05) out of an FE lote and gives credit notes a lote of their own (HU-E7-01)', () => {
+    const invoices = builder();
+    invoices.add(doc(1));
+    expect(invoices.add(doc(2, { type: '05' }))).toEqual({
+      accepted: false,
+      reason: 'type-mismatch',
+    });
+    const credits = builder();
+    expect(credits.add(doc(3, { type: '05' }))).toEqual({ accepted: true });
+    expect(credits.add(doc(4, { type: '05' }))).toEqual({ accepted: true });
+    expect(credits.build()).toMatchObject({ documentType: '05' });
+  });
+
   it('rejects the 51st document', () => {
     const lote = builder();
     for (let n = 1; n <= MAX_LOTE_DOCUMENTS; n++) lote.add(doc(n));

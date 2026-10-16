@@ -50,10 +50,24 @@ describe('GET /portal/documents/:id/xml and /kude (HU-E12-02)', () => {
       .values([{ name: 'Acme SA' }, { name: 'Globex SA' }])
       .returning();
     const signed = () => ({ signedXml: xml, signedAt: new Date('2026-01-01T12:00:05Z') });
-    const rows = await seedDocuments(handle.db, acme.id, ['approved', 'accepted'], (i) =>
-      i === 0 ? signed() : {},
+    const creditNote = await signedInvoiceWithQr((input) => ({
+      ...input,
+      data: {
+        ...Object.fromEntries(
+          Object.entries(input.data).filter(([key]) => key !== 'factura' && key !== 'condicion'),
+        ),
+        tipoDocumento: 5,
+        notaCreditoDebito: { motivo: 2 },
+        documentoAsociado: { formato: 1, cdc: '01800695631001001000000112026010111234567891' },
+      },
+    }));
+    const rows = await seedDocuments(
+      handle.db,
+      acme.id,
+      ['approved', 'accepted', 'approved'],
+      (i) => (i === 0 ? signed() : i === 2 ? { ...signed(), signedXml: creditNote } : {}),
     );
-    [ids.signed, ids.unsigned] = rows.map((r) => r.id);
+    [ids.signed, ids.unsigned, ids.creditNote] = rows.map((r) => r.id);
     cdc = rows[0].cdc;
     [ids.foreign] = (await seedDocuments(handle.db, globex.id, ['approved'], signed)).map(
       (r) => r.id,
@@ -107,5 +121,12 @@ describe('GET /portal/documents/:id/xml and /kude (HU-E12-02)', () => {
     expect(res.headers['content-disposition']).toBe('inline; filename="kude-001-001-0000001.pdf"');
     expect(res.rawPayload.subarray(0, 5).toString()).toBe('%PDF-');
     expect((await get(`${ids.unsigned}/kude`)).statusCode).toBe(409);
+  });
+
+  it('renders the KuDE PDF of a signed credit note (HU-E7-01)', async () => {
+    const res = await get(`${ids.creditNote}/kude`);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.rawPayload.subarray(0, 5).toString()).toBe('%PDF-');
   });
 });

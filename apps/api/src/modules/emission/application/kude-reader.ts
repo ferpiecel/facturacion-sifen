@@ -99,10 +99,17 @@ function readItem(block: string): KudeItem {
   };
 }
 
+/** H004: the CDC of the associated FE, exactly 44 digits (the KuDE prints its number and groups). */
+function associatedCdc(group: string): string {
+  const cdc = required(group, 'dCdCDERef');
+  if (!/^\d{44}$/.test(cdc)) throw new KudeSourceError('dCdCDERef', 'is not a 44-digit CDC');
+  return cdc;
+}
+
 /**
  * Builds the KuDE model from the signed DE (with `dCarQR`). Nothing is recomputed: the VAT
  * liquidation and totals are the ones the XML carries (MT 13.2: the KuDE shows no data that
- * is not in the signed XML). FE only; `options.stampValidTo` supplies C009, which the DE
+ * is not in the signed XML). FE and NCE; `options.stampValidTo` supplies C009, which the DE
  * v150 XSD does not carry.
  */
 export function readKudeInvoice(xml: string, options: { stampValidTo?: string } = {}): KudeInvoice {
@@ -110,7 +117,10 @@ export function readKudeInvoice(xml: string, options: { stampValidTo?: string } 
   if (!cdc) throw new KudeSourceError('CDC (DE/@Id)', 'is missing');
   const timbrado = section(xml, 'gTimb');
   const documentTypeCode = required(timbrado, 'iTiDE');
-  if (documentTypeCode !== '1') throw new KudeDocumentTypeUnsupportedError(documentTypeCode);
+  if (documentTypeCode !== '1' && documentTypeCode !== '5') {
+    throw new KudeDocumentTypeUnsupportedError(documentTypeCode);
+  }
+  const isCreditNote = documentTypeCode === '5';
   const qrUrl = required(section(xml, 'gCamFuFD'), 'dCarQR');
   const environment = qrUrl.startsWith(qrBaseUrl('production'))
     ? 'production'
@@ -125,7 +135,7 @@ export function readKudeInvoice(xml: string, options: { stampValidTo?: string } 
   const totals = section(xml, 'gTotSub');
   const general = section(xml, 'gDatGralOpe');
   const operation = section(general, 'gOpeCom');
-  const condition = section(xml, 'gCamCond');
+  const condition = isCreditNote ? '' : section(xml, 'gCamCond');
   const currency = required(operation, 'cMoneOpe');
   if (currency !== 'PYG') {
     throw new KudeSourceError('cMoneOpe', `is ${currency}: only PYG KuDEs are supported`);
@@ -175,13 +185,21 @@ export function readKudeInvoice(xml: string, options: { stampValidTo?: string } 
     point: required(timbrado, 'dPunExp'),
     documentNumber: required(timbrado, 'dNumDoc'),
     issuedAt: required(general, 'dFeEmiDE'),
-    operationCondition: required(condition, 'dDCondOpe'),
+    operationCondition: isCreditNote ? undefined : required(condition, 'dDCondOpe'),
     installments:
       optional(condition, 'dCuotas') === undefined ? undefined : pyg(condition, 'dCuotas'),
     currency,
     exchangeRate: optional(operation, 'dTiCam'),
     receiver,
-    transactionType: required(operation, 'dDesTipTra'),
+    transactionType: isCreditNote ? undefined : required(operation, 'dDesTipTra'),
+    ...(isCreditNote
+      ? {
+          creditNote: {
+            reason: required(section(xml, 'gCamNCDE'), 'dDesMotEmi'),
+            associatedCdc: associatedCdc(section(xml, 'gCamDEAsoc')),
+          },
+        }
+      : {}),
     items,
     totals: {
       subtotalExempt: pyg(totals, 'dSubExe', 0) + pyg(totals, 'dSubExo', 0),

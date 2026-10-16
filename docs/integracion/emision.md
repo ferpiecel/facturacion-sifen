@@ -168,6 +168,49 @@ Respuesta `202`:
 { "document_id": "b3b8c2d6-0c1e-4c38-a5b4-6f2f9a1b7e10", "cdc": "01800695631001001000000712026101310000000019" }
 ```
 
+## Emitir una nota de crédito
+
+Una nota de crédito electrónica (NCE) acredita total o parcialmente una FE que usted ya emitió y que SIFEN **aprobó** (`approved` o `approved_with_observations`). Se envía al mismo `POST /v1/documents`, con `"type": "NCE"` y el mismo `Idempotency-Key`.
+
+| Campo | Descripción |
+|---|---|
+| `type` | `"NCE"` |
+| `establishment`, `expeditionPoint` | Como en la FE |
+| `associatedCdc` | CDC (44 dígitos) de la FE que se acredita |
+| `reasonCode` | Motivo, de 1 a 8: 1 Devolución y Ajuste de precios, 2 Devolución, 3 Descuento, 4 Bonificación, 5 Crédito incobrable, 6 Recupero de costo, 7 Recupero de gasto, 8 Ajuste de precio |
+| `items`, `roundingPyg` | Como en la FE; la nota acredita el total neto de estos ítems |
+
+No se envían `receiver`, `operationType` ni `location`: se toman de la FE asociada (enviarlos es un `422`). La suma de las notas de crédito de una FE no puede superar el total de la FE; una nota rechazada por SIFEN sigue contando (se reenvía con el mismo CDC), y solo una anulada (`cancelled`, `number_voided`) libera su crédito.
+
+```json
+{
+  "type": "NCE",
+  "establishment": "001",
+  "expeditionPoint": "002",
+  "associatedCdc": "01800695631001002000012312026010111234567891",
+  "reasonCode": 2,
+  "items": [
+    { "code": "A-001", "description": "Devolución de servicio", "unitCode": 77, "quantity": 1, "unitPrice": 400000, "vatRate": 10 }
+  ]
+}
+```
+
+La respuesta es la misma, `202 { "document_id", "cdc" }`, con un CDC que empieza en `05` y numeración propia. Reglas que responden `422` (sin consumir número):
+
+| `rule` | Código SIFEN | Causa |
+|---|---|---|
+| `associated-document-not-found` | 2403 | La FE no existe para su cuenta |
+| `associated-document-cancelled` | 2404 | La FE está cancelada o su número inutilizado |
+| `associated-document-not-invoice` | 2414 | El CDC no es de una FE |
+| `associated-document-not-approved` | - | La FE existe pero SIFEN todavía no la aprobó |
+| `associated-document-unreadable` | - | Los datos guardados de la FE no se pueden leer |
+| `credit-note-sum-exceeds-invoice` | 2417 | La suma de créditos supera el total de la FE |
+| `credit-note-currency-mismatch` | 2438 | Moneda distinta (hoy solo existe `PYG`) |
+| `credit-note-unnamed-receiver` | 1331 | La FE se emitió a un receptor innominado: no se puede acreditar |
+| `credit-note-reason` | 1452 | `reasonCode` fuera de 1 a 8 |
+
+El KuDE de una NCE (`GET /v1/documents/{id}/kude`) lleva el título "KuDE de Nota de Crédito Electrónica", el motivo y la FE asociada.
+
 ## Idempotencia
 
 `Idempotency-Key` es obligatorio. Reintentar con la **misma clave y el mismo cuerpo** devuelve la misma respuesta sin crear otro documento; la misma clave con otro cuerpo responde `409`. Genere una clave nueva por documento y reutilícela solo para reintentar ese mismo documento.
@@ -203,7 +246,7 @@ Los errores usan `{ "statusCode", "message" }`. El `422` agrega `errors[]` con `
 |---|---|
 | Por id | `GET /v1/documents/{id}` |
 | Por CDC | `GET /v1/documents?cdc=<44 dígitos>` |
-| KuDE (PDF) | `GET /v1/documents/{id}/kude`. Responde `409` hasta que el documento esté firmado |
+| KuDE (PDF) | `GET /v1/documents/{id}/kude`. Responde `409` hasta que el documento esté firmado y `422` si su tipo todavía no tiene KuDE (nota de débito, autofactura, remisión) |
 
 El documento incluye `number` (por ejemplo `001-002-0000007`), `status`, `environment`, `issued_at`, `totals.amount` (texto) y `totals.currency`, `receiver.ruc`, `sifen` (código y mensaje de SIFEN, `null` hasta la transmisión) y `urls.xml` / `urls.kude`.
 
@@ -215,6 +258,6 @@ Para conocer el resultado final no haga polling: registre un endpoint y use los 
 
 ## Alcance actual
 
-- Este endpoint emite **facturas electrónicas (FE)**. Otros tipos de documento no están disponibles por esta ruta.
+- Este endpoint emite **facturas electrónicas (FE)** y **notas de crédito electrónicas (NCE)**. Otros tipos de documento no están disponibles por esta ruta.
 - La condición de venta es contado, con un único pago en efectivo; no hay forma de expresar crédito ni otros medios de pago.
 - Solo moneda `PYG`.

@@ -1,4 +1,4 @@
--- On INSERT: an event belongs to the tenant's current environment, and so does the document it targets
+-- On INSERT: an event starts pending, belongs to the tenant's current environment, and so does the document it targets
 -- (the composite foreign key checks the tenant, not the environment).
 CREATE FUNCTION "issuer_events_insert_guard"() RETURNS trigger
 LANGUAGE plpgsql
@@ -8,6 +8,10 @@ DECLARE
   tenant_env public.tenant_environment;
   document_env public.tenant_environment;
 BEGIN
+  -- The state machine runs on UPDATE: an event may only be created at its start, never already signed, sent or answered.
+  IF NEW.status IS DISTINCT FROM 'pending' THEN
+    RAISE EXCEPTION 'issuer_events: an event starts pending';
+  END IF;
   SELECT t.environment INTO tenant_env FROM public.tenants t WHERE t.id = NEW.tenant_id;
   IF FOUND AND tenant_env IS DISTINCT FROM NEW.environment THEN
     RAISE EXCEPTION 'issuer_events: environment must match the tenant''s current environment';

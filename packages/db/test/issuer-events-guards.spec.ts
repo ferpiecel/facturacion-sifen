@@ -93,6 +93,73 @@ describe('issuer_events guards', () => {
       await answer('approved', '0600');
     });
 
+    it('lets an unanswered send be refused later too', async () => {
+      const { sign, send, answer } = await pendingRow();
+      await sign();
+      await send();
+      await answer('unknown', '0');
+      await answer('rejected', '4009');
+    });
+
+    it.each(['approved', 'rejected'])('freezes the answer once the event is %s', async (final) => {
+      const { db, row, sign, send, answer } = await pendingRow();
+      await sign();
+      await send();
+      await answer(final, final === 'approved' ? '0600' : '4009');
+      for (const change of [
+        { responseCode: '9999' },
+        { responseMessage: 'changed' },
+        { sifenProtocol: '1234567890' },
+        { respondedAt: new Date('2030-01-01T00:00:00Z') },
+      ]) {
+        const message = await causeOf(
+          db.update(issuerEvents).set(change).where(eq(issuerEvents.id, row.id)),
+        );
+        expect(message).toContain('an answered event is final');
+      }
+    });
+
+    it('makes signed_at, batch_d_id and send_attempted_at write-once', async () => {
+      const { db, row, sign, send } = await pendingRow();
+      await sign();
+      expect(
+        await causeOf(
+          db
+            .update(issuerEvents)
+            .set({ signedAt: new Date('2030-01-01T00:00:00Z') })
+            .where(eq(issuerEvents.id, row.id)),
+        ),
+      ).toContain('write-once');
+      await send();
+      expect(
+        await causeOf(
+          db.update(issuerEvents).set({ batchDId: 10n }).where(eq(issuerEvents.id, row.id)),
+        ),
+      ).toContain('write-once');
+      expect(
+        await causeOf(
+          db
+            .update(issuerEvents)
+            .set({ sendAttemptedAt: new Date('2030-01-01T00:00:00Z') })
+            .where(eq(issuerEvents.id, row.id)),
+        ),
+      ).toContain('write-once');
+    });
+
+    it('moves updated_at forward on every update', async () => {
+      const { db, row, sign, send } = await pendingRow();
+      const read = async () =>
+        (await db.select().from(issuerEvents).where(eq(issuerEvents.id, row.id)))[0].updatedAt;
+      const stamps = [await read()];
+      for (const step of [sign, send]) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        await step();
+        stamps.push(await read());
+      }
+      expect(stamps[1].getTime()).toBeGreaterThan(stamps[0].getTime());
+      expect(stamps[2].getTime()).toBeGreaterThan(stamps[1].getTime());
+    });
+
     it('requires a response code for an answered event and a batch id for a sent one', async () => {
       const { db, row, sign } = await pendingRow();
       await sign();
@@ -120,6 +187,39 @@ describe('issuer_events guards', () => {
         ).rejects.toThrow();
       }
     });
+  });
+
+  it.each([
+    [
+      'sending',
+      { signedXml: SIGNED_XML, signedAt: new Date(), batchDId: 1n, sendAttemptedAt: new Date() },
+    ],
+    [
+      'approved',
+      {
+        signedXml: SIGNED_XML,
+        signedAt: new Date(),
+        batchDId: 1n,
+        sendAttemptedAt: new Date(),
+        responseCode: '0600',
+        respondedAt: new Date(),
+      },
+    ],
+    ['signed', { signedXml: SIGNED_XML, signedAt: new Date() }],
+  ])('refuses to create an event already %s: it starts pending', async (status, fields) => {
+    const { db, cancel } = await seed();
+    const message = await causeOf(db.insert(issuerEvents).values(cancel({ status, ...fields })));
+    expect(message).toContain('an event starts pending');
+  });
+
+  it('refuses a pending event created with signing or send fields', async () => {
+    const { db, cancel } = await seed();
+    await expect(
+      db.insert(issuerEvents).values(cancel({ signedXml: SIGNED_XML, signedAt: new Date() })),
+    ).rejects.toThrow();
+    await expect(
+      db.insert(issuerEvents).values(cancel({ batchDId: 1n, sendAttemptedAt: new Date() })),
+    ).rejects.toThrow();
   });
 
   it('refuses an event outside the tenant environment, and a document of another environment', async () => {

@@ -26,7 +26,7 @@ CREATE TABLE "issuer_events" (
 	CONSTRAINT "issuer_events_subject" CHECK (("issuer_events"."kind" = 'voiding') = ("issuer_events"."void_range" IS NOT NULL) AND ("issuer_events"."kind" = 'voiding') = ("issuer_events"."document_id" IS NULL)),
 	CONSTRAINT "issuer_events_signed_pair" CHECK (("issuer_events"."signed_xml" IS NULL) = ("issuer_events"."signed_at" IS NULL) AND ("issuer_events"."status" = 'pending') = ("issuer_events"."signed_xml" IS NULL)),
 	CONSTRAINT "issuer_events_sent_pair" CHECK (("issuer_events"."status" IN ('pending', 'signed')) = ("issuer_events"."batch_d_id" IS NULL) AND ("issuer_events"."batch_d_id" IS NULL) = ("issuer_events"."send_attempted_at" IS NULL)),
-	CONSTRAINT "issuer_events_answered_pair" CHECK (("issuer_events"."status" IN ('approved', 'rejected')) = ("issuer_events"."response_code" IS NOT NULL AND "issuer_events"."responded_at" IS NOT NULL) OR "issuer_events"."status" = 'unknown')
+	CONSTRAINT "issuer_events_answered_pair" CHECK (("issuer_events"."response_code" IS NULL) = ("issuer_events"."responded_at" IS NULL) AND ("issuer_events"."status" = 'unknown' OR ("issuer_events"."status" IN ('approved', 'rejected')) = ("issuer_events"."response_code" IS NOT NULL)))
 );
 --> statement-breakpoint
 ALTER TABLE "issuer_events" ADD CONSTRAINT "issuer_events_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint

@@ -16,6 +16,8 @@ export const SIFEN_CODES = {
   LOTE_CONCLUIDO: '0362',
   /** Consulta extemporánea: lotes can be queried up to 48 h after sending (siResultLoteDE). */
   CONSULTA_EXTEMPORANEA: '0364',
+  /** Evento registrado correctamente (siRecepEvento, MT v150 BU01). */
+  EVENTO_REGISTRADO: '0600',
   /** Autorización del DE satisfactoria (siRecepDE, synchronous). */
   DE_AUTORIZADO: '0260',
   /**

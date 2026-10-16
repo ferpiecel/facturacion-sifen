@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { sha256Hex } from '../scripts/checksums.ts';
 import {
+  ROOT_FILES,
   assertXsdContent,
   diffClosure,
   mergeManifest,
@@ -107,5 +108,11 @@ describe('assertXsdContent', () => {
     expect(() => {
       assertXsdContent('a.xsd', Buffer.from('<html><body>Access denied</body></html>'));
     }).toThrow(/a\.xsd is not an XSD/);
+  });
+});
+
+describe('ROOT_FILES', () => {
+  it('lists the DE root and the event root, whose closures are fetched together', () => {
+    expect(ROOT_FILES).toEqual(['siRecepDE_v150.xsd', 'siRecepEvento_v150.xsd']);
   });
 });

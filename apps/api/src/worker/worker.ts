@@ -9,6 +9,9 @@ import {
   createCscSource,
 } from '../modules/emission/infrastructure/signing-sources.js';
 import {
+  createDeadlineWatchQueue,
+  createDeadlineWatchScheduleStore,
+  createDeadlineWatchWorker,
   createRedisConnection,
   createTenantScheduleStore,
   createTransmissionQueue,
@@ -27,6 +30,7 @@ import { createRedisTenantRunLock } from './tenant-run-lock.js';
 import { startTransmissionWorker } from './start-transmission-worker.js';
 import { createTenantCycleFactory } from './tenant-cycle-factory.js';
 import { TransmissionCycleProcessor, type WorkerLogger } from './transmission-cycle-processor.js';
+import { createDeadlineWatchProcessor } from './deadline-watch.processor.js';
 import {
   createWebhookDeliveryDeps,
   createWebhookDeliveryProcessor,
@@ -71,6 +75,7 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
   const connection = createRedisConnection(config.redisUrl, logger);
   const queue = createTransmissionQueue(connection, logger);
   const webhookQueue = createWebhookDeliveryQueue(connection, logger);
+  const deadlineQueue = createDeadlineWatchQueue(connection, logger);
 
   const certificateCache = new CachedCertificateVault(
     createCertificateVault(env, readBoundedFile),
@@ -102,6 +107,9 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
     ...createWebhookDeliveryDeps(env),
   });
 
+  // The deadline watch only reads documents and writes the outbox (HU-E6-07): no run lock, no SIFEN.
+  const processDeadlineWatch = createDeadlineWatchProcessor({ db: appHandle.db });
+
   const running = await startTransmissionWorker({
     cycleIntervalMs: config.cycleIntervalMs,
     reconcileEveryMs: RECONCILE_EVERY_MS,
@@ -126,6 +134,17 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
           logger,
         }),
     },
+    deadlineWatch: {
+      everyMs: config.deadlineWatchIntervalMs,
+      schedules: createDeadlineWatchScheduleStore(deadlineQueue),
+      createWorker: () =>
+        createDeadlineWatchWorker({
+          connection,
+          concurrency: config.concurrency,
+          process: (data) => processDeadlineWatch({ data }),
+          logger,
+        }),
+    },
     logger,
   });
   logger.info(`transmission worker started (cycle every ${String(config.cycleIntervalMs)} ms)`);
@@ -144,7 +163,7 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
           certificateCache.clear();
           return Promise.resolve();
         },
-        () => Promise.all([queue.close(), webhookQueue.close()]),
+        () => Promise.all([queue.close(), webhookQueue.close(), deadlineQueue.close()]),
         () => connection.quit(),
         () => Promise.all([appHandle.close(), platformHandle.close()]),
       ];

@@ -77,6 +77,32 @@ function withWebhooks(deps: ReturnType<typeof setup>['deps'], events: string[]) 
   };
 }
 
+function withDeadlineWatch(deps: ReturnType<typeof setup>['deps'], events: string[]) {
+  return {
+    ...deps,
+    deadlineWatch: {
+      everyMs: 300_000,
+      schedules: {
+        list: () => Promise.resolve(['a', 'gone']),
+        upsert: (id: string, every: number) => {
+          events.push(`dw-upsert:${id}:${String(every)}`);
+          return Promise.resolve();
+        },
+        remove: (id: string) => {
+          events.push(`dw-remove:${id}`);
+          return Promise.resolve();
+        },
+      } satisfies TenantScheduleStore,
+      createWorker: () => ({
+        close: () => {
+          events.push('deadline-worker-closed');
+          return Promise.resolve();
+        },
+      }),
+    },
+  };
+}
+
 /** Spec: HU-E6-02 (S5e). Worker lifecycle: schedule every tenant, keep schedules fresh, stop gracefully. */
 describe('startTransmissionWorker', () => {
   it('schedules every tenant at the cadence, starts the worker and reconciles periodically', async () => {
@@ -211,5 +237,36 @@ describe('startTransmissionWorker', () => {
     await expect(running.stop()).rejects.toThrow('close failed');
 
     expect(events).toContain('webhook-worker-closed');
+  });
+
+  /** Spec: HU-E6-07. The deadline watch queue is scheduled and closed with the others. */
+  it('schedules the deadline watch job per tenant and closes its worker on stop', async () => {
+    const { deps, events } = setup();
+    const running = await startTransmissionWorker(withDeadlineWatch(deps, events));
+    expect(events).toEqual([
+      'upsert:a:60000',
+      'upsert:b:60000',
+      'dw-upsert:a:300000',
+      'dw-upsert:b:300000',
+      'dw-remove:gone',
+      'interval:300000',
+    ]);
+
+    await running.stop();
+
+    expect(events).toContain('deadline-worker-closed');
+  });
+
+  it('keeps going when the deadline watch reconcile fails, logging only the error class', async () => {
+    const { deps, events, logs } = setup();
+    const failing = withDeadlineWatch(deps, events);
+    failing.deadlineWatch.schedules.list = () => Promise.reject(new Error('redis://u:pw@h'));
+
+    const running = await startTransmissionWorker(failing);
+    await running.stop();
+
+    expect(events.slice(0, 2)).toEqual(['upsert:a:60000', 'upsert:b:60000']);
+    expect(logs.join('\n')).toContain('deadline watch schedule reconcile failed: Error');
+    expect(logs.join('\n')).not.toContain('redis://');
   });
 });

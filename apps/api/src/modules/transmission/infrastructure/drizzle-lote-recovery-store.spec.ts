@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import {
   createPgliteDatabase,
@@ -17,6 +17,7 @@ import {
 } from '@sifen/db';
 import { seedWebhookEndpoint } from '../../../../test/support/document-seed.js';
 import { FakeSifenGateway, sifenScenarios } from '@sifen/sifen-gateway';
+import { recoverableInLote } from './recoverable-in-lote.js';
 import { RecoverLoteByCdc, type LoteRecoveryOutcome } from '../application/recover-lote-by-cdc.js';
 import {
   createDrizzleLoteRecoveryStore,
@@ -920,6 +921,38 @@ describe('DrizzleLoteRecoveryStore', () => {
       });
       expect(resent.resentAt).not.toBeNull();
       expect(warnings).toEqual([]);
+    });
+
+    it('stamps the resend after the lote it leaves, even when the database clock stepped back', async () => {
+      // Lote and stamp both read the database clock; a backward step (NTP, VM resync) must not
+      // leave the old lote "carrying" the document again, so the stamp is ordered after the lote.
+      const ahead = new Date(Date.now() + 3_600_000);
+      await handle.db.execute(sql`alter table lotes disable trigger user`);
+      try {
+        await handle.db.execute(sql`update lotes set created_at = ${ahead} where id = ${loteId}`);
+      } finally {
+        await handle.db.execute(sql`alter table lotes enable trigger user`);
+      }
+      await storeFor(tenantId).record(
+        loteId,
+        { resolutions: [], unresolved: [absent(CDC_B)] },
+        guard,
+      );
+      // Compared in SQL: the stamp is one microsecond past the lote, below a JS Date's resolution.
+      const ordered = (await handle.db.execute(
+        sql`select d.resent_at > l.created_at as after from documents d, lotes l where d.cdc = ${CDC_B} and l.id = ${loteId}`,
+      )) as { rows: Array<{ after: boolean }> };
+      expect(ordered.rows).toEqual([{ after: true }]);
+      // The outcome that matters: the document left the old lote (it no longer decides for it), is
+      // queued for the pre-send check and was not sent again.
+      const stillOwned = await withTenantTransaction(handle.db, tenantId, (tx) =>
+        tx
+          .select({ cdc: documents.cdc })
+          .from(documents)
+          .where(and(eq(documents.cdc, CDC_B), recoverableInLote(loteId))),
+      );
+      expect(stillOwned).toEqual([]);
+      expect(await readDoc(CDC_B)).toMatchObject({ status: 'queued', transmissionHold: null });
     });
 
     it('keeps the pre-send check 10 minutes after the recovery query (the 10 min minimum between queries)', async () => {

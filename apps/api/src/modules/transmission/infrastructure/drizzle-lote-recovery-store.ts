@@ -298,10 +298,13 @@ async function holdOrResend(
     const attempts = doc.attempts + 1;
     await tx
       .update(documents)
-      // `now()`: the stamp and the lote creation time share the database clock, which orders them.
+      // Database clock, so the stamp and the lote creation time are ordered. `greatest` keeps it
+      // after the lote it leaves: if the clock stepped back, `now()` alone would land before that
+      // lote and it would carry the document again. The subselect runs under RLS; if the lote is
+      // hidden it is NULL, `greatest` ignores it and the stamp falls back to `now()`.
       .set({
         status: 'queued',
-        resentAt: sql`now()`,
+        resentAt: sql`greatest(now(), (select l.created_at from lotes l where l.id = ${loteId}) + interval '1 microsecond')`,
         transmissionAttempts: attempts,
         // The pre-send check is a query too: at least 10 minutes after this one (Guía 2024).
         nextTransmissionAt: new Date(at.getTime() + RESEND_CHECK_DELAY_MS),

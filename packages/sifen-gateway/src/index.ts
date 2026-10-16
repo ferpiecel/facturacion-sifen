@@ -4,6 +4,7 @@ export type {
   Ambiente,
   CancellationEvent,
   DeXmlBuilder,
+  EventSigner,
   EventXmlBuilder,
   FacturaPocInput,
   IssuerEvent,

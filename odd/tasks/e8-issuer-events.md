@@ -83,7 +83,7 @@ HU-E8-05 are independent of each other, so they can run as parallel worktrees; H
 | E8-04 A1 | HU-E8-04 | `IssuerEvent` types, `EventXmlBuilder` port and `TipsEventXmlBuilder` (cancel and void; bare `gGroupGesEve` with our `Id`); nomination joins in E8-05 A (PR #267) | about 210 | none |
 | E8-04 A2 | HU-E8-04 | `EventSigner` port and `TipsEventSigner`; offline e2e that verifies the signatures inside the batch envelope (PR #269) | about 250 | A1 |
 | E8-04 A3 | HU-E8-04 | Vendor `siRecepEvento_v150.xsd` and its closure, add the `siRecepEvento` schema to `validateXml` | about 150 | A2 |
-| E8-04 B | HU-E8-04 | ADR-0020 and migration: `issuer_events` (one table, `kind` discriminator; tenant RLS, kind, document or range, event id sequence, signed XML, status, SIFEN answer) and `sifen_event_batches`; rollback; Drizzle schema; RLS coverage and guard tests | about 400 | A |
+| E8-04 B1 and B2 | HU-E8-04 | Migration 0047 `issuer_events` (one table, `kind` discriminator; tenant RLS, checks, one open event per document and kind; PR #272) and migration 0048 with the guard triggers plus ADR-0020 (PR #273). No batch table: the send is recorded on the event (`batch_d_id`) | about 385 + 260 | A2 |
 | E8-04 C | HU-E8-04 | Domain and use case: `EventBatcher` (at most 15, one issuer, no repeated `eventId` in a batch, with a test), `SendEventBatch` over `gateway.enviarEventos`, per-event response handling (0600, rejections keep SIFEN's code), no resend of an unanswered batch (recover like lotes), Drizzle store | about 400 | B |
 | E8-04 D | HU-E8-04 | Worker: events step in `TransmissionCycle`, sign-then-batch, audit entries, webhook events for event outcomes, `docs/operacion.md` section | about 300 | C |
 | E8-02 A | HU-E8-02 | Migration `documents.approved_at` (write-once, set when SIFEN approves; backfill from `updated_at` for approved rows is **not** safe, see decisions); settle code writes it; `dFecProc` parsed if the lote answer carries it | about 250 | E8-04 B |
@@ -107,7 +107,7 @@ planning PR is docs only.
 - [ ] T0 Evidence with the test environment: Prevalidador check of a signed cancel, void and nominate event; the 15-day void window; `approved_with_observations` cancel; `dVerFor` value; the motive length (MT 11.1.1 says free text of up to 150 characters for a void, the field tables say 5 to 500: until confirmed, the platform accepts 5 to 150 for a void); `rEve` carries no `dTiGDE` in xmlgen output. **Blocked on test-environment access and a certificate.**
 - [x] T1 HU-E8-04 A1 and A2: event ports and TIPS adapters (builder and signer), offline tests (PRs #267, #269). ADR-0020 moved to B; nomination builder to E8-05 A.
 - [ ] T1b HU-E8-04 A3: vendor the event XSD closure.
-- [ ] T2 HU-E8-04 B: events and batches migration, schema, rollback, RLS tests.
+- [x] T2 HU-E8-04 B1 and B2: `issuer_events` table, guards, rollback, RLS tests, ADR-0020 (PRs #272, #273).
 - [ ] T3 HU-E8-04 C: batcher, send use case, response handling, store.
 - [ ] T4 HU-E8-04 D: worker step, audit, webhooks for event outcomes, operations doc.
 - [ ] T5 HU-E8-02 A to C: `approved_at`, cancel rules and use case, endpoint and settlement.
@@ -131,8 +131,8 @@ planning PR is docs only.
 
 | # | Decision | Rationale |
 |---|---|---|
-| D1 | One table `sifen_events` for all issuer events, `kind` in (`cancellation`, `voiding`, `nomination`), nullable `document_id`, `range` jsonb for voids, `event_id` per (tenant, environment) from a counter like `dId`, status `pending / signed / sent / approved / rejected / unknown` | Plan v1.1 7.3; the response is keyed by `id`; E9 receiver events can reuse it later. **Open:** a separate table per kind is simpler to constrain but triples RLS surface. |
-| D2 | `sifen_event_batches` holds the send (`dId`, status, answer) and events point to it | Mirrors `lotes`: the same recovery rules apply to an unanswered send |
+| D1 | One table `issuer_events` for all issuer events, `kind` in (`cancellation`, `voiding`, `nomination`), nullable `document_id`, `void_range` jsonb for voids, `event_id` per (tenant, environment) from the `dId` counter, status `pending / signed / sending / approved / rejected / unknown` | Plan v1.1 7.3; the response is keyed by `id`; E9 receiver events can reuse it later. **Decided** (tech lead): one table. |
+| D2 | No batch table: an event records its send (`batch_d_id`, `send_attempted_at`) and events with the same `batch_d_id` travelled together | An event has no later query (SIFEN answers in the same call), so a batch has no state of its own (ADR-0020) |
 | D3 | The adapter returns the bare `gGroupGesEve` and sets `rEve/@Id` before signing; signing goes through a new `EventSigner` port (`TipsEventSigner`) | Library constraints above |
 | D4 | The 48 h / 168 h deadline is checked at command time over `documents.approved_at`, and re-checked when the batch is built (an event signed late is refused locally instead of costing a 4009) | Cheap, keeps the integrator's error synchronous |
 | D5 | `approved_at` is SIFEN's processing instant when the answer carries it (`dFecProc`, parsed as America/Asuncion time), else the settle time; write-once, only set with the transition into `approved` or `approved_with_observations`. Old rows have none: at cancel time the platform asks SIFEN (`consultarDE`) once, stamps the row, and applies a safety margin to the window | `updated_at` is not evidence. **Decided** (tech lead): lazy refresh at cancel time, no one-time backfill. |
@@ -196,6 +196,12 @@ and vendor them with a checksum in `packages/sifen-xsd` (blocks only the XSD che
 Decided by the tech lead (2026-10-16): **P2 (void deadline) is technical, not product:** when the 15-day window has passed with the timbrado still valid, warn, send anyway and show SIFEN's answer; D1 one `issuer_events` table with a type discriminator; D5 `dFecProc` parsed as Asunción time for new approvals, old rows refreshed lazily with `consultarDE` at cancel time with a safety margin; D9 decided in ADR-0021 when E8-01 starts; D10 no new scope for the MVP (existing write scope and the portal role matrix; the PO decides the roles).
 
 Closed here (technical): D2, D3, D4, D6, D7, D8, D11, D12. They are recorded in ADR-0020 by slice B.
+
+## Debt (from the re-review of #272 and #273)
+
+- F3: `event_id` is limited to 10 digits (MT GDE003) but comes from a 15-digit counter shared with the lote `dId`; past 9,999,999,999 the insert would fail on a check. Theoretical; the slice C allocator should raise a clear error.
+- F4: two voidings of the same or overlapping ranges are not detected by the table (no document). **E8-03** covers it in its range rules and `voided_number_ranges`.
+- F5: the `issuer_events` specs insert as the owner role; only the isolation and delete tests exercise `app_user`. Add an `app_user` insert and update case when the use case (slice C) exists.
 
 ## Progress and next step
 

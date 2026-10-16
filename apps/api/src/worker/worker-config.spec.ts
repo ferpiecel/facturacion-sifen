@@ -28,7 +28,20 @@ describe('loadWorkerConfig', () => {
       lockTtlMs: 300_000,
       certificateCacheTtlMs: 300_000,
       certificateCacheMaxEntries: 64,
+      deadlineWatchIntervalMs: 300_000,
     });
+  });
+
+  /** Spec: HU-E6-07. */
+  it('reads and bounds the deadline watch interval', () => {
+    expect(loadWorkerConfig({ ...base, DEADLINE_WATCH_INTERVAL_MS: '60000' })).toMatchObject({
+      deadlineWatchIntervalMs: 60_000,
+    });
+    for (const value of ['59999', '3600001', 'abc']) {
+      expect(() => loadWorkerConfig({ ...base, DEADLINE_WATCH_INTERVAL_MS: value })).toThrow(
+        new WorkerConfigError('DEADLINE_WATCH_INTERVAL_MS is out of range'),
+      );
+    }
   });
 
   it('reads and bounds the certificate cache settings (HU-E3-02)', () => {

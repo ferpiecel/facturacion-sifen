@@ -22,6 +22,12 @@ export interface StartTransmissionWorkerDeps {
     readonly schedules: TenantScheduleStore;
     readonly createWorker: () => { close(): Promise<void> };
   };
+  /** Deadline watch (HU-E6-07): same shape, its own queue and cadence. */
+  readonly deadlineWatch?: {
+    readonly everyMs: number;
+    readonly schedules: TenantScheduleStore;
+    readonly createWorker: () => { close(): Promise<void> };
+  };
   readonly logger: WorkerLogger;
   readonly timers?: {
     setInterval(fn: () => void, ms: number): NodeJS.Timeout;
@@ -52,37 +58,44 @@ export async function startTransmissionWorker(
     });
   // Webhook scheduling never blocks transmission (nor the other way round): its failure is logged
   // by error class and retried on the next tick, also at startup.
-  const reconcileWebhooks = async (refresh: boolean) => {
-    if (!deps.webhooks) return;
+  const reconcileAux = async (
+    label: string,
+    aux: { everyMs: number; schedules: TenantScheduleStore } | undefined,
+    refresh: boolean,
+  ) => {
+    if (!aux) return;
     try {
       await reconcileTenantSchedules({
         directory: deps.directory,
-        schedules: deps.webhooks.schedules,
-        everyMs: deps.webhooks.everyMs,
+        schedules: aux.schedules,
+        everyMs: aux.everyMs,
         refresh,
       });
     } catch (error: unknown) {
       const kind = error instanceof Error ? error.name : 'unknown error';
-      deps.logger.error(`webhook schedule reconcile failed: ${kind}`);
+      deps.logger.error(`${label} schedule reconcile failed: ${kind}`);
     }
   };
   const reconcile = async (refresh: boolean) => {
-    // Sequential so the schedules appear in a predictable order; the webhook step never throws.
+    // Sequential so the schedules appear in a predictable order; the auxiliary steps never throw.
     const transmission = await reconcileTransmission(refresh).then(
       () => undefined,
       (error: unknown) => ({ error }),
     );
-    await reconcileWebhooks(refresh);
+    await reconcileAux('webhook', deps.webhooks, refresh);
+    await reconcileAux('deadline watch', deps.deadlineWatch, refresh);
     if (transmission) throw transmission.error;
   };
 
   await reconcile(true);
   const worker = deps.createWorker(deps.process);
-  let webhookWorker: { close(): Promise<void> } | undefined;
+  const auxiliary: { close(): Promise<void> }[] = [];
   try {
-    webhookWorker = deps.webhooks?.createWorker();
+    for (const aux of [deps.webhooks, deps.deadlineWatch]) {
+      if (aux) auxiliary.push(aux.createWorker());
+    }
   } catch (error) {
-    await worker.close();
+    await Promise.allSettled([worker, ...auxiliary].map((w) => w.close()));
     throw error;
   }
   const timer = timers.setInterval(() => {
@@ -96,7 +109,7 @@ export async function startTransmissionWorker(
     async stop() {
       timers.clearInterval(timer);
       // Every close runs even if one fails; the first failure is rethrown afterwards.
-      const closes = await Promise.allSettled([worker.close(), webhookWorker?.close()]);
+      const closes = await Promise.allSettled([worker.close(), ...auxiliary.map((w) => w.close())]);
       const failed = closes.find((result) => result.status === 'rejected');
       if (failed) throw failed.reason;
     },

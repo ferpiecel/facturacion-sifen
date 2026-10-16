@@ -1,3 +1,5 @@
+import { DEFAULT_DEADLINE_WATCH_EVERY_MS } from './deadline-watch.processor.js';
+
 /** Invalid or missing environment for the worker. Messages never carry the offending value (REDIS_URL holds a password). */
 export class WorkerConfigError extends Error {
   override name = 'WorkerConfigError';
@@ -15,6 +17,8 @@ export interface WorkerConfig {
   readonly certificateCacheTtlMs: number;
   /** Most (tenant, environment) certificates held in memory at once. */
   readonly certificateCacheMaxEntries: number;
+  /** How often each tenant's 72 h deadline watch runs (HU-E6-07). */
+  readonly deadlineWatchIntervalMs: number;
 }
 
 function integer(
@@ -53,5 +57,12 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv): WorkerConfig {
     lockTtlMs: integer(env, 'TENANT_RUN_LOCK_TTL_MS', 300_000, 10_000, 3_600_000),
     certificateCacheTtlMs: integer(env, 'CERTIFICATE_CACHE_TTL_MS', 300_000, 1_000, 900_000),
     certificateCacheMaxEntries: integer(env, 'CERTIFICATE_CACHE_MAX_ENTRIES', 64, 1, 1_000),
+    deadlineWatchIntervalMs: integer(
+      env,
+      'DEADLINE_WATCH_INTERVAL_MS',
+      DEFAULT_DEADLINE_WATCH_EVERY_MS,
+      60_000,
+      3_600_000,
+    ),
   };
 }

@@ -15,8 +15,8 @@ Modo TDD: estricto (`openspec/config.yaml`), runner Vitest. Ruta: delegada (un e
 ## Tareas
 
 - [x] T1 (PR 1, #268) Constante compartida, id/payload del evento y caso de uso, con tests (RED observado, verify OK).
-- [ ] T1b (PR 2) Store Drizzle, outbox de advertencias y processor por tenant, con tests sobre PGlite.
-- [ ] T2 (PR 3) Cola BullMQ, schedules por tenant, cableado del worker, config, test con Redis y documentación.
+- [x] T1b (PR 2, #270) Store Drizzle, outbox de advertencias y processor por tenant, con tests sobre PGlite.
+- [x] T2 (PR 3) Cola BullMQ, schedules por tenant, cableado del worker, config, test con Redis y documentación.
 
 ## Verificación
 

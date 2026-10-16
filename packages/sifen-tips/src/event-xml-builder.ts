@@ -21,12 +21,47 @@ const EVENT_GROUP = /<gGroupGesEve[\s\S]*<\/gGroupGesEve>/;
 /** The library hardcodes this identifier; it is replaced before signing. */
 const LIBRARY_EVENT_ID = '<rEve Id="1">';
 
-function dataFor(event: IssuerEvent, signedAt: Date | undefined): EventData {
-  const common = signedAt ? { fechaFirmaDigital: signedAt.toISOString() } : {};
+/** SIFEN reads dates as Paraguay time (UTC-3 all year since October 2024) and the format carries no zone. */
+const ASUNCION = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Asuncion',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+});
+
+/**
+ * `AAAA-MM-DDThh:mm:ss` of the instant in Asunción, whatever the zone of the process. xmlgen formats the date it
+ * is given with the local getters of the process, so it receives a zone-less string that reads the same there.
+ */
+export function asuncionWallClock(instant: Date): string {
+  const part = (type: string): string =>
+    ASUNCION.formatToParts(instant).find((p) => p.type === type)?.value ?? '';
+  return `${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}:${part('second')}`;
+}
+
+/** MT 11.1.1: a voiding covers up to 1000 numbers (4067) and its end is after its start (4068). */
+const MAX_VOIDED_NUMBERS = 1000;
+
+function assertVoidingRange(event: Extract<IssuerEvent, { kind: 'voiding' }>): void {
+  if (!(event.to > event.from)) {
+    throw new RangeError('The end of a voiding range must be after its start (4068)');
+  }
+  if (event.to - event.from + 1 > MAX_VOIDED_NUMBERS) {
+    throw new RangeError(`A voiding covers at most ${String(MAX_VOIDED_NUMBERS)} numbers (4067)`);
+  }
+}
+
+function dataFor(event: IssuerEvent, signedAt: Date): EventData {
+  const common = { fechaFirmaDigital: asuncionWallClock(signedAt) };
   switch (event.kind) {
     case 'cancellation':
       return { ...common, cdc: event.cdc, motivo: event.reason };
     case 'voiding':
+      assertVoidingRange(event);
       return {
         ...common,
         timbrado: event.timbrado,
@@ -52,7 +87,7 @@ export class TipsEventXmlBuilder implements EventXmlBuilder {
       throw new RangeError('The event id is a whole number of 1 to 10 digits');
     }
     const params = { version: EVENT_FORMAT_VERSION };
-    const data = dataFor(input.event, input.signedAt);
+    const data = dataFor(input.event, input.signedAt ?? new Date());
     const envelope =
       input.event.kind === 'cancellation'
         ? await xmlgenApi.generateXMLEventoCancelacion(ENVELOPE_DID, params, data)

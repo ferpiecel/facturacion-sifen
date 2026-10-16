@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import PDFDocument from 'pdfkit';
 import { describe, expect, it, vi } from 'vitest';
 import type { KudeInvoice, KudeItem } from '../../domain/kude-model.js';
@@ -189,6 +190,13 @@ describe('PdfkitKudeRenderer (FE, A4)', () => {
     expect(first.equals(second)).toBe(true);
     // 2026-01-02 10:15:30 in Asunción (UTC-3 all year since 2024-10) = 13:15:30Z
     expect(first.toString('latin1')).toContain('(D:20260102131530Z)');
+  });
+
+  it('keeps the FE KuDE byte-identical (HU-E7-01 golden, measured before the NCE layout existed)', async () => {
+    const pdf = Buffer.from(await renderer.render(invoice()));
+    expect(createHash('sha256').update(pdf).digest('hex')).toBe(
+      '3b652efa66170b5fa4f089b9b30db56bc28207b3587adbd4bbee0f9b4673829b',
+    );
   });
 
   it('embeds a Unicode font: accents, guaraní and ₲ survive, unsupported glyphs become "?"', async () => {

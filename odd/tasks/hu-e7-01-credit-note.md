@@ -183,9 +183,9 @@ an FE not issued by the platform; foreign currency and exchange rate (`multi-cur
 - [x] T5 (PR C2, `credit-note.request.ts`; the controller answers 422 `document-type-not-supported` until slice D) Request contract: `type` discriminator, NCE schema, mapping to the use case input, backward compatibility test with an old FE body, OpenAPI regeneration.
 - [x] T6 (PRs D1 and D2: use case, port methods, Drizzle unit, `associated_cdc`, controller behind a gate, signing store hold) Application and persistence: `acceptCreditNote` use case and `AcceptanceUnit` port methods (`findAssociatedInvoice` with lock, `sumCreditNotes`), Drizzle implementation, numbering type 5, CDC `05`, audit action, idempotency, all checks before `nextNumber`. Concurrency test (two simultaneous NCEs).
 - [x] T7 (PR E: `ctx.creditNote` in `invoice-xml.ts`, store dispatch by type, gate removed; QR unchanged) Signing path: signing store dispatches on type, builds the NCE context (reason, associated CDC, receiver from the FE), `invoice-xml.ts` credit-note branch (D8), CDC type from input, XSD check, QR unchanged. FE byte-identical test.
-- [ ] T8 KuDE: reader supports `iTiDE` 5, model and renderer title and associated document block, `gCamCond` optional; golden text assertions as the FE ones.
-- [ ] T9 Transmission and events: test that NCE documents form their own lotes and are sent; webhook payloads and portal listing show `NCE`; no code change expected, confirm.
-- [ ] T10 Docs: `docs/integracion/emision.md` section on NCE (contract, reasons, errors 2417 and 2438, innominado limit), `docs/api/openapi.json`, backlog and roadmap status.
+- [x] T8 (PR F: reader, model and renderer for iTiDE 5; the FE PDF hash is pinned) KuDE: reader supports `iTiDE` 5, model and renderer title and associated document block, `gCamCond` optional; golden text assertions as the FE ones.
+- [x] T9 (PR F: lote-builder test; no code change was needed) Transmission and events: test that NCE documents form their own lotes and are sent; webhook payloads and portal listing show `NCE`; no code change expected, confirm.
+- [x] T10 (PR F: `docs/integracion/emision.md`, OpenAPI regenerated) Docs: `docs/integracion/emision.md` section on NCE (contract, reasons, errors 2417 and 2438, innominado limit), `docs/api/openapi.json`, backlog and roadmap status.
 - [ ] T11 End to end and battery: FE accepted and approved (simulator) then partial NCE (202, signed); second NCE over the limit (422 rule 2417, no number consumed); then the Guía de Pruebas battery of 5 approved and 5 rejected NCE on both web services. **The battery is blocked on environment access**; the "rejected" cases need a dev/test-only path that bypasses local pre-checks (decided in ADR-0019).
 
 ## PR slices (chained, each about 400 changed lines or less)
@@ -337,3 +337,16 @@ Closed in ADR-0019 (technical, tech lead): D1 same endpoint with a `type` discri
   500; hold tests for a missing FE, an unreadable FE payload and an invalid NCE payload; 1331 re-checked in the XML
   generator. FE byte identity is held by the unchanged `invoice-xml.golden.spec.ts` hashes.
 
+### Slice F evidence and close (2026-10-16)
+
+- Route: T8 to T10 inline by the writer (one PR, about 400 lines with tests).
+- KuDE content (T0 uncertainty): MT v150 13.3 fixes the title "KuDE de Nota de Crédito Electrónica"; Gráfica N° 10 (the NCE
+  layout) is an image the text extraction cannot read, and 13.5 calls the graphics "referential". The NT notes add nothing for
+  the NCE KuDE. The layout follows the FE one, minus condition and transaction type, plus the reason (E402), the associated
+  FE number and its CDC in groups of four. Confirm it against Gráfica N° 10 and the Prevalidador before homologation.
+- RED: the NCE KuDE specs failed (iTiDE 5 unsupported, no title or reason); the FE PDF is pinned by a SHA-256 golden measured
+  on `main` before the change and unchanged after. `KudeDocumentTypeUnsupportedError` stays for types 6, 7 and 8 (422, warn).
+- Closing state: T1 to T10 done and verified in CI-equivalent runs per PR. **T0 and T11 stay open**: Prevalidador
+  confirmation (FE with observations as associated, NCE without D011/E600, the timbrado per type, Gráfica N° 10) and the
+  Guía de Pruebas battery (5 approved and 5 rejected NCE on both services, plus the dev-only path of ADR-0019 P4) need the
+  test environment and a certificate.

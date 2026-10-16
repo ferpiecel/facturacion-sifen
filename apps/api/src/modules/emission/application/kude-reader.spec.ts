@@ -153,8 +153,8 @@ describe('readKudeInvoice', () => {
     ).toThrow(/dSub10/);
   });
 
-  it('rejects documents that are not an FE', () => {
-    expect(() => readKudeInvoice(xml.replace('<iTiDE>1</iTiDE>', '<iTiDE>5</iTiDE>'))).toThrow(
+  it('rejects documents that are neither an FE nor an NCE (an NDE has no layout yet)', () => {
+    expect(() => readKudeInvoice(xml.replace('<iTiDE>1</iTiDE>', '<iTiDE>6</iTiDE>'))).toThrow(
       /unsupported/,
     );
   });

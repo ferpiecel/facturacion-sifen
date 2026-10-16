@@ -164,7 +164,8 @@ export function buildOpenApiDocument() {
         get: {
           operationId: 'downloadKude',
           tags: ['Documents'],
-          summary: 'Download the KuDE (PDF), available once the document is signed',
+          summary:
+            'Download the KuDE (PDF) of an FE or an NCE, available once the document is signed',
           ...secured(['documents:read']),
           parameters: [idParam('Document')],
           responses: {
@@ -177,6 +178,7 @@ export function buildOpenApiDocument() {
             '403': FORBIDDEN,
             '404': NOT_FOUND,
             '409': problem('The document is not signed yet'),
+            '422': problem('The document type has no KuDE layout yet (an NDE, AFE or NRE)'),
             '500': problem('The KuDE could not be generated'),
           },
         },

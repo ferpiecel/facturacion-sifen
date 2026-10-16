@@ -120,6 +120,8 @@ describe('issuer_events', () => {
       ['unknown with a pair (the reason it is unknown)', { status: 'unknown', ...sent, ...answer }],
     ])('accepts %s', async (_name, row) => {
       const { db, cancel } = await seed();
+      // The checks alone are under test here: the insert guard (0048) only lets an event start pending.
+      await db.execute(sql`set session_replication_role = replica`);
       await db.insert(issuerEvents).values(cancel(row));
     });
   });

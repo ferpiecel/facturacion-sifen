@@ -75,6 +75,33 @@ El helper de referencia es `verifyWebhookSignature` (`apps/api/src/modules/webho
 `document.cancelled`, `document.number_voided`, `document.transmission_deadline_warning`,
 `document.notification.delivered`, `document.notification.failed`. Un endpoint sin filtro recibe todos.
 
+### `document.transmission_deadline_warning`
+
+SIFEN da 72 h desde la firma para transmitir un documento (ADR-0008). Mientras un documento siga `signed`,
+`queued` o `submitted`, se emite este evento **una vez** al cumplirse las 48 h y **una vez** al cumplirse las 66 h
+desde la firma. Un documento aprobado, rechazado o cancelado, o ya vencido, no genera avisos.
+
+```json
+{
+  "id": "evt_...",
+  "type": "document.transmission_deadline_warning",
+  "created_at": "2026-10-04T12:00:00.000Z",
+  "tenant_id": "tnt_...",
+  "data": {
+    "document_id": "doc_...",
+    "cdc": "...",
+    "threshold_hours": 66,
+    "transmission_deadline": "2026-10-04T18:00:00.000Z",
+    "hours_remaining": 6
+  }
+}
+```
+
+`hours_remaining` va redondeado a una décima de hora. El `id` es determinista por documento y umbral, así que la
+deduplicación por `id` descarta cualquier repetición. El worker revisa cada `DEADLINE_WATCH_INTERVAL_MS`
+(5 min por defecto): el aviso puede llegar con ese retraso. Un documento que ya pasó las 66 h cuando el worker lo
+ve por primera vez recibe los dos avisos.
+
 ## Garantía de entrega: al menos una vez
 
 Los eventos se entregan **al menos una vez**, no exactamente una: si su receptor responde `2xx` pero la

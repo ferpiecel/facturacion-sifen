@@ -1,6 +1,8 @@
 import { SIFEN_CODES } from '../codes.ts';
 import type {
   SifenConsDE,
+  SifenEventosResult,
+  SifenResultadoEvento,
   SifenLoteReceipt,
   SifenLoteResult,
   SifenProtocoloDE,
@@ -79,5 +81,18 @@ export function rucCertificadoSinPermiso(): SifenConsDE {
     dCodRes: SIFEN_CODES.RUC_CERTIFICADO_SIN_PERMISO,
     dMsgRes: 'RUC del certificado sin permiso para consultar el DE',
     xmlDE: null,
+  };
+}
+
+/**
+ * Builds a `siRecepEvento` response with one result per event. The schema has no lote-level code, so the
+ * headline is the first message of the first result (as `parseEventos` does).
+ */
+export function eventosProcesados(resultados: readonly SifenResultadoEvento[]): SifenEventosResult {
+  const first = resultados.at(0)?.mensajes.at(0);
+  return {
+    dCodRes: first?.dCodRes ?? SIFEN_CODES.EVENTO_REGISTRADO,
+    dMsgRes: first?.dMsgRes ?? 'Evento registrado correctamente',
+    resultados: [...resultados],
   };
 }

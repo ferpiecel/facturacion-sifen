@@ -15,6 +15,7 @@ describe('SIFEN_CODES', () => {
       CDC_INEXISTENTE: '0420',
       RUC_CERTIFICADO_SIN_PERMISO: '0421',
       XML_MALFORMADO: '0160',
+      EVENTO_REGISTRADO: '0600',
     });
   });
 });

@@ -61,3 +61,28 @@ export function documentEventData(source: DocumentEventSource): Record<string, u
     ...(messages.length > 0 ? { sifen_messages: messages } : {}),
   };
 }
+
+export interface DeadlineWarningSource {
+  readonly documentId: string;
+  readonly cdc: string;
+  readonly thresholdHours: number;
+  readonly deadline: Date;
+  readonly hoursRemaining: number;
+}
+
+/** HU-E6-07: deterministic per (document, threshold), so the outbox's UNIQUE key dedupes the warning. */
+export function deadlineWarningEventId(documentId: string, thresholdHours: number): string {
+  const key = `${documentId}:document.transmission_deadline_warning:${String(thresholdHours)}`;
+  return `evt_${createHash('sha256').update(key).digest('hex').slice(0, 32)}`;
+}
+
+/** Identifiers and the time left only: no XML, receiver or amounts. */
+export function deadlineWarningData(source: DeadlineWarningSource): Record<string, unknown> {
+  return {
+    document_id: source.documentId,
+    cdc: source.cdc,
+    threshold_hours: source.thresholdHours,
+    transmission_deadline: source.deadline.toISOString(),
+    hours_remaining: source.hoursRemaining,
+  };
+}

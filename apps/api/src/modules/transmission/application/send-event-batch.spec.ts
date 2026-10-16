@@ -2,6 +2,8 @@ import { FakeSifenGateway, SifenTimeoutError, sifenScenarios } from '@sifen/sife
 import { describe, expect, it } from 'vitest';
 import { DuplicateEventIdError } from '../domain/event-batch.js';
 import {
+  ALREADY_PROCESSED_CODES,
+  LOCAL_XSD_CODE,
   SendEventBatch,
   type EventBatchStore,
   type EventOutcome,
@@ -17,6 +19,7 @@ const event = (n: number): PendingEvent => ({
 class InMemoryEventStore implements EventBatchStore {
   readonly claims: { ids: readonly string[]; dId: bigint }[] = [];
   readonly outcomes = new Map<string, EventOutcome>();
+  readonly rejectedUnsent = new Map<string, { code: string; message: string }>();
 
   constructor(
     private readonly signed: readonly PendingEvent[],
@@ -32,6 +35,11 @@ class InMemoryEventStore implements EventBatchStore {
     return Promise.resolve(
       this.signed.filter((e) => ids.includes(e.id) && !this.takenByAnother.has(e.id)),
     );
+  }
+
+  rejectUnsent(rejections: ReadonlyMap<string, { code: string; message: string }>) {
+    for (const [id, rejection] of rejections) this.rejectedUnsent.set(id, rejection);
+    return Promise.resolve();
   }
 
   record(outcomes: ReadonlyMap<string, EventOutcome>) {
@@ -148,7 +156,7 @@ describe('SendEventBatch', () => {
     expect(gateway.callsTo('enviarEventos')).toEqual([]);
   });
 
-  it('rejects locally an event that does not validate against the XSD, and sends the others', async () => {
+  it('rejects locally, before claiming, an event that fails the XSD, and sends the others', async () => {
     const { gateway, store, send } = setup([event(1), event(2)], {
       validate: (xml) =>
         xml.includes('>1<')
@@ -159,26 +167,93 @@ describe('SendEventBatch', () => {
 
     const result = await send.execute();
 
+    expect(store.claims).toEqual([{ ids: ['row-2'], dId: 77n }]);
     expect(gateway.callsTo('enviarEventos')[0]?.[0].eventos).toEqual([
       '<gGroupGesEve>2</gGroupGesEve>',
     ]);
-    expect(store.outcomes.get('row-1')).toEqual({
-      status: 'rejected',
-      code: 'XSD',
+    expect(store.rejectedUnsent.get('row-1')).toEqual({
+      code: LOCAL_XSD_CODE,
       message: "Element 'x': not expected",
     });
+    expect(store.outcomes.has('row-1')).toBe(false);
     expect(result).toEqual({ status: 'sent', approved: 1, rejected: 1, unknown: 0 });
   });
 
-  it('does not call SIFEN when every event fails validation', async () => {
+  it('marks a local rejection with a code SIFEN never uses', () => {
+    expect(LOCAL_XSD_CODE).toBe('LOC-XSD');
+    expect(LOCAL_XSD_CODE.length).toBeLessThanOrEqual(8);
+  });
+
+  it('claims and sends nothing when every event fails validation', async () => {
     const { gateway, store, send } = setup([event(1)], {
       validate: () => ({ valid: false, errors: [{ message: 'bad' }] }),
     });
 
-    await send.execute();
+    const result = await send.execute();
 
+    expect(store.claims).toEqual([]);
     expect(gateway.callsTo('enviarEventos')).toEqual([]);
-    expect(store.outcomes.get('row-1')).toMatchObject({ status: 'rejected', code: 'XSD' });
+    expect(store.rejectedUnsent.get('row-1')).toEqual({ code: LOCAL_XSD_CODE, message: 'bad' });
+    expect(result).toEqual({ status: 'sent', approved: 0, rejected: 1, unknown: 0 });
+  });
+
+  it('skips an event whose validation throws: it stays signed, never claimed, and the rest go', async () => {
+    const { gateway, store, send } = setup([event(1), event(2)], {
+      validate: (xml) => {
+        if (xml.includes('>1<')) throw new Error('libxml failed');
+        return valid();
+      },
+    });
+    gateway.enqueue('enviarEventos', sifenScenarios.eventosProcesados([ok('2')]));
+
+    const result = await send.execute();
+
+    expect(store.claims[0]?.ids).toEqual(['row-2']);
+    expect(store.rejectedUnsent.size).toBe(0);
+    expect(result).toEqual({ status: 'sent', approved: 1, rejected: 0, unknown: 0 });
+  });
+
+  describe('reading the answer of an event', () => {
+    const answer = (dEstRes: string, ...codes: string[]) => ({
+      id: '1',
+      dEstRes,
+      mensajes: codes.map((dCodRes) => ({ dCodRes, dMsgRes: `m${dCodRes}` })),
+    });
+
+    it.each([
+      ['0600 after another message', answer('Aprobado', '0001', '0600'), 'approved', '0600'],
+      [
+        'approved with an observation',
+        answer('Aprobado con observación', '0600'),
+        'approved',
+        '0600',
+      ],
+      [
+        '4003, the cancellation SIFEN already holds',
+        answer('Rechazado', '4003'),
+        'approved',
+        '4003',
+      ],
+      ['4453, the nomination SIFEN already holds', answer('Rechazado', '4453'), 'approved', '4453'],
+      ['a refusal with several messages', answer('Rechazado', '4009', '4010'), 'rejected', '4009'],
+      ['0600 under a Rechazado state', answer('Rechazado', '0600'), 'unknown', undefined],
+      ['an approval without 0600', answer('Aprobado', '4009'), 'unknown', undefined],
+      ['an answer without messages', answer('Aprobado'), 'unknown', undefined],
+      ['a state it does not know', answer('Pendiente', '0600'), 'unknown', undefined],
+    ])('settles %s', async (_name, result, status, code) => {
+      const { gateway, store, send } = setup([event(1)]);
+      gateway.enqueue('enviarEventos', sifenScenarios.eventosProcesados([result]));
+
+      await send.execute();
+
+      const outcome = store.outcomes.get('row-1');
+      expect(outcome?.status).toBe(status);
+      if (code) expect(outcome).toMatchObject({ code });
+    });
+
+    it('lists the codes that mean SIFEN already holds the effect, provisionally', () => {
+      expect([...ALREADY_PROCESSED_CODES]).toEqual(['4003', '4453']);
+    });
   });
 
   it('sends only what it claimed when another worker took some events', async () => {

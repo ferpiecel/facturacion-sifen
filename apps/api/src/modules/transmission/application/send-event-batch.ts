@@ -2,6 +2,20 @@ import { SIFEN_CODES, type SifenGateway } from '@sifen/sifen-gateway';
 import { MAX_EVENTS_PER_BATCH, selectEventBatch, type SignedEvent } from '../domain/event-batch.js';
 
 export type PendingEvent = SignedEvent;
+
+/**
+ * `response_code` of an event rejected here, before it was sent (ADR-0020). SIFEN codes are 4 digits, so a
+ * `LOC-` prefix never collides with one; whoever settles an event tells a local refusal from SIFEN's by it.
+ */
+export const LOCAL_XSD_CODE = 'LOC-XSD';
+
+/**
+ * Codes that mean SIFEN already holds the effect of the event (4003 same cancellation requested again, 4453
+ * same nomination): an idempotent success, settled as approved with the real code so the open event keeps
+ * the partial unique index. PROVISIONAL until T0 confirms the list with the Prevalidador; the voiding
+ * counterpart (4066) is left out because it also answers a partial overlap.
+ */
+export const ALREADY_PROCESSED_CODES: ReadonlySet<string> = new Set(['4003', '4453']);
 /** What SIFEN (or its silence) told us about one sent event; the store settles the row with it (ADR-0020). */
 export type EventOutcome =
   | { readonly status: 'approved'; readonly code: string; readonly message: string }
@@ -13,6 +27,8 @@ export type EventOutcome =
 export interface EventBatchStore {
   /** Signed events of the tenant's current environment, oldest first (at most `limit`). */
   signedEvents(limit: number): Promise<readonly PendingEvent[]>;
+  /** Settles events that failed the XSD as rejected without sending them: no batch id, a local code. */
+  rejectUnsent(rejections: ReadonlyMap<string, { code: string; message: string }>): Promise<void>;
   /** Atomically moves `signed -> sending` with the send's `dId`; returns those actually claimed. */
   claim(ids: readonly string[], dId: bigint): Promise<readonly PendingEvent[]>;
   record(outcomes: ReadonlyMap<string, EventOutcome>): Promise<void>;
@@ -54,34 +70,44 @@ export class SendEventBatch {
     const batch = selectEventBatch(candidates);
     if (batch.length === 0) return { status: 'empty' };
 
-    const dId = await this.deps.nextRequestId();
-    const claimed = await this.deps.store.claim(
-      batch.map((event) => event.id),
-      dId,
-    );
-    if (claimed.length === 0) return { status: 'empty' };
-
-    const outcomes = new Map<string, EventOutcome>();
-    const toSend: PendingEvent[] = [];
-    for (const event of claimed) {
-      const check = this.deps.validate(event.signedXml);
-      if (check.valid) toSend.push(event);
-      else {
-        const message = check.errors[0]?.message ?? 'The event does not match siRecepEvento';
-        outcomes.set(event.id, { status: 'rejected', code: 'XSD', message });
+    // Validate before claiming: an event that cannot be sent never gets a batch id. A validator that
+    // throws proves nothing about the event, so it stays signed for the next run.
+    const valid: PendingEvent[] = [];
+    const refused = new Map<string, { code: string; message: string }>();
+    for (const event of batch) {
+      try {
+        const check = this.deps.validate(event.signedXml);
+        if (check.valid) valid.push(event);
+        else {
+          const message = check.errors.at(0)?.message ?? 'The event does not match siRecepEvento';
+          refused.set(event.id, { code: LOCAL_XSD_CODE, message });
+        }
+      } catch {
+        continue;
       }
     }
-    if (toSend.length > 0) {
-      for (const [id, outcome] of await this.dispatch(dId, toSend)) outcomes.set(id, outcome);
-    }
+    if (refused.size > 0) await this.deps.store.rejectUnsent(refused);
 
-    await this.deps.store.record(outcomes);
+    const outcomes = new Map<string, EventOutcome>();
+    if (valid.length > 0) {
+      const dId = await this.deps.nextRequestId();
+      const claimed = await this.deps.store.claim(
+        valid.map((event) => event.id),
+        dId,
+      );
+      if (claimed.length > 0) {
+        for (const [id, outcome] of await this.dispatch(dId, claimed)) outcomes.set(id, outcome);
+        await this.deps.store.record(outcomes);
+      }
+    }
+    if (outcomes.size === 0 && refused.size === 0) return { status: 'empty' };
+
     const count = (status: EventOutcome['status']): number =>
       [...outcomes.values()].filter((outcome) => outcome.status === status).length;
     return {
       status: 'sent',
       approved: count('approved'),
-      rejected: count('rejected'),
+      rejected: count('rejected') + refused.size,
       unknown: count('unknown'),
     };
   }
@@ -98,11 +124,11 @@ export class SendEventBatch {
       });
       const byId = new Map(answer.resultados.map((result) => [result.id, result]));
       for (const event of events) {
-        const message = byId.get(event.eventId.toString())?.mensajes[0];
+        const result = byId.get(event.eventId.toString());
         outcomes.set(
           event.id,
-          message
-            ? interpret(message)
+          result
+            ? interpret(result)
             : { status: 'unknown', reason: 'The answer holds no result for this event' },
         );
       }
@@ -114,9 +140,29 @@ export class SendEventBatch {
   }
 }
 
-function interpret(message: { dCodRes: string; dMsgRes: string }): EventOutcome {
-  const outcome = { code: message.dCodRes, message: message.dMsgRes };
-  return message.dCodRes === SIFEN_CODES.EVENTO_REGISTRADO
-    ? { status: 'approved', ...outcome }
-    : { status: 'rejected', ...outcome };
+/** Reads the state (`dEstRes`) and every message of one event's result; a contradiction is not guessed at. */
+function interpret(result: {
+  dEstRes: string;
+  mensajes: readonly { dCodRes: string; dMsgRes: string }[];
+}): EventOutcome {
+  const state = result.dEstRes.trim().toLowerCase();
+  const unknown = (reason: string): EventOutcome => ({ status: 'unknown', reason });
+  if (result.mensajes.length === 0) return unknown('The result of the event carries no message');
+
+  const already = result.mensajes.find((m) => ALREADY_PROCESSED_CODES.has(m.dCodRes));
+  if (already) return { status: 'approved', code: already.dCodRes, message: already.dMsgRes };
+
+  const registered = result.mensajes.find((m) => m.dCodRes === SIFEN_CODES.EVENTO_REGISTRADO);
+  if (state.startsWith('aprobado')) {
+    return registered
+      ? { status: 'approved', code: registered.dCodRes, message: registered.dMsgRes }
+      : unknown(`Approved without ${SIFEN_CODES.EVENTO_REGISTRADO}`);
+  }
+  if (state === 'rechazado') {
+    const first = result.mensajes[0];
+    return registered
+      ? unknown(`Rejected with ${SIFEN_CODES.EVENTO_REGISTRADO}`)
+      : { status: 'rejected', code: first.dCodRes, message: first.dMsgRes };
+  }
+  return unknown(`Unknown result state "${result.dEstRes}"`);
 }

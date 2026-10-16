@@ -556,11 +556,19 @@ describe('geography in the XML carries the DNIT catalog, not the xmlgen table', 
         cityDescription: "YBY YA'U",
       },
     };
-    const without = await generateInvoiceXml(builder, apostrophe, ctx, { validateGeo: false });
+    // dFecFirma is the wall clock to the second: pin it so a second boundary between the two
+    // generations cannot change the bytes.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-30T13:00:05Z'));
+    try {
+      const without = await generateInvoiceXml(builder, apostrophe, ctx, { validateGeo: false });
 
-    const withCatalog = await generateInvoiceXml(builder, apostrophe, ctx, geo);
+      const withCatalog = await generateInvoiceXml(builder, apostrophe, ctx, geo);
 
-    expect(withCatalog.xml).toBe(without.xml);
+      expect(withCatalog.xml).toBe(without.xml);
+    } finally {
+      vi.useRealTimers();
+    }
   }, 20_000);
 
   it('still signs an earlier accepted document whose department disagrees with its city', async () => {

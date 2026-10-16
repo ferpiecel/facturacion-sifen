@@ -80,8 +80,10 @@ HU-E8-05 are independent of each other, so they can run as parallel worktrees; H
 
 | PR | Story | Content | Estimated size | Depends on |
 |---|---|---|---|---|
-| E8-04 A | HU-E8-04 | Event ports and TIPS adapters: `EventXmlBuilder` (cancel, void, nominate; bare `gGroupGesEve` with our `Id`), `EventSigner`; offline tests including a signature check; draft ADR-0020 (event storage and batching) | about 350 | none |
-| E8-04 B | HU-E8-04 | Migration: `sifen_events` (tenant RLS, kind, document or range, event id sequence, signed XML, status, SIFEN answer) and `sifen_event_batches`; rollback; Drizzle schema; RLS coverage and guard tests | about 400 | A |
+| E8-04 A1 | HU-E8-04 | `IssuerEvent` types, `EventXmlBuilder` port and `TipsEventXmlBuilder` (cancel and void; bare `gGroupGesEve` with our `Id`); nomination joins in E8-05 A (PR #267) | about 210 | none |
+| E8-04 A2 | HU-E8-04 | `EventSigner` port and `TipsEventSigner`; offline e2e that verifies the signatures inside the batch envelope (PR #269) | about 250 | A1 |
+| E8-04 A3 | HU-E8-04 | Vendor `siRecepEvento_v150.xsd` and its closure, add the `siRecepEvento` schema to `validateXml` | about 150 | A2 |
+| E8-04 B | HU-E8-04 | ADR-0020 and migration: `issuer_events` (one table, `kind` discriminator; tenant RLS, kind, document or range, event id sequence, signed XML, status, SIFEN answer) and `sifen_event_batches`; rollback; Drizzle schema; RLS coverage and guard tests | about 400 | A |
 | E8-04 C | HU-E8-04 | Domain and use case: `EventBatcher` (at most 15, one issuer), `SendEventBatch` over `gateway.enviarEventos`, per-event response handling (0600, rejections keep SIFEN's code), no resend of an unanswered batch (recover like lotes), Drizzle store | about 400 | B |
 | E8-04 D | HU-E8-04 | Worker: events step in `TransmissionCycle`, sign-then-batch, audit entries, webhook events for event outcomes, `docs/operacion.md` section | about 300 | C |
 | E8-02 A | HU-E8-02 | Migration `documents.approved_at` (write-once, set when SIFEN approves; backfill from `updated_at` for approved rows is **not** safe, see decisions); settle code writes it; `dFecProc` parsed if the lote answer carries it | about 250 | E8-04 B |
@@ -103,7 +105,8 @@ planning PR is docs only.
 ## Tasks
 
 - [ ] T0 Evidence with the test environment: Prevalidador check of a signed cancel, void and nominate event; the 15-day void window; `approved_with_observations` cancel; `dVerFor` value. **Blocked on test-environment access and a certificate.**
-- [ ] T1 HU-E8-04 A: event ports and TIPS adapters (builder and signer), offline tests, draft ADR-0020.
+- [x] T1 HU-E8-04 A1 and A2: event ports and TIPS adapters (builder and signer), offline tests (PRs #267, #269). ADR-0020 moved to B; nomination builder to E8-05 A.
+- [ ] T1b HU-E8-04 A3: vendor the event XSD closure.
 - [ ] T2 HU-E8-04 B: events and batches migration, schema, rollback, RLS tests.
 - [ ] T3 HU-E8-04 C: batcher, send use case, response handling, store.
 - [ ] T4 HU-E8-04 D: worker step, audit, webhooks for event outcomes, operations doc.
@@ -191,13 +194,16 @@ D1 one table versus one per kind; D5 backfill of `approved_at` for rows approved
 blocks E8-01 B); D10 a dedicated scope. The event XSD is also missing: obtain `siRecepEvento_v150.xsd` and `resRecepEvento_v150.xsd` from the DNIT package
 and vendor them with a checksum in `packages/sifen-xsd` (blocks only the XSD check of slice A, not the adapters).
 
-Closed here (technical): D2, D3, D4, D6, D7, D8, D11, D12. They are recorded in ADR-0020 by slice A.
+Decided by the tech lead (2026-10-16): D1 one `issuer_events` table with a type discriminator; D5 backfill of `approved_at` by an ops CLI over `consultarDE` (E8-02 A), new approvals stamped from `dFecProc`; D9 decided in ADR-0021 when E8-01 starts; D10 no new scope for the MVP (existing write scope and the portal role matrix; the PO decides the roles).
+
+Closed here (technical): D2, D3, D4, D6, D7, D8, D11, D12. They are recorded in ADR-0020 by slice B.
 
 ## Progress and next step
 
 - Done: gap analysis over the transmission module, the gateway port and SOAP layer, `packages/sifen-tips`, the installed `xmlgen` and `xmlsign`, the document guards and
   statuses, the webhook mapping, the MT v150 (9.5, 11 and 6.5, Table K), NT 014, 015, 025 and 027, and plan v1.1.
-- Next: HU-E8-04 A (event adapters and ADR-0020) in its own chained PR. It needs no product answer.
+- Done: HU-E8-04 A1 and A2 (#267, #269). The event XSD is obtainable from `ekuatia.set.gov.py` (`siRecepEvento_v150.xsd` includes `Evento_v150.xsd`); `resRecepEvento_v150.xsd` is not published under that name (404).
+- Next: HU-E8-04 B (ADR-0020 and the `issuer_events` migration), then A3 (XSD vendoring).
 
 ## Checks and evidence
 

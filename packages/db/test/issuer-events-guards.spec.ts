@@ -212,6 +212,52 @@ describe('issuer_events guards', () => {
     expect(message).toContain('an event starts pending');
   });
 
+  describe('local rejection of an event that was never sent', () => {
+    const rejectLocally = (code: string) => ({
+      status: 'rejected',
+      responseCode: code,
+      responseMessage: 'not valid',
+      respondedAt: new Date(),
+    });
+
+    async function signedRow() {
+      const ctx = await seed();
+      const [row] = await ctx.db.insert(issuerEvents).values(ctx.cancel()).returning();
+      await ctx.db
+        .update(issuerEvents)
+        .set({ status: 'signed', signedXml: SIGNED_XML, signedAt: new Date() })
+        .where(eq(issuerEvents.id, row.id));
+      return { ...ctx, row };
+    }
+
+    it('lets a signed event be rejected with a LOC- code and no batch id', async () => {
+      const { db, row } = await signedRow();
+      await db
+        .update(issuerEvents)
+        .set(rejectLocally('LOC-XSD'))
+        .where(eq(issuerEvents.id, row.id));
+      const [after] = await db.select().from(issuerEvents).where(eq(issuerEvents.id, row.id));
+      expect(after).toMatchObject({ status: 'rejected', batchDId: null, sendAttemptedAt: null });
+    });
+
+    it('refuses the same without a LOC- code: a signed event cannot be rejected as if SIFEN had', async () => {
+      const { db, row } = await signedRow();
+      await expect(
+        db.update(issuerEvents).set(rejectLocally('4009')).where(eq(issuerEvents.id, row.id)),
+      ).rejects.toThrow();
+    });
+
+    it('refuses a sent event without a batch id even with a LOC- code', async () => {
+      const { db, row } = await signedRow();
+      await expect(
+        db
+          .update(issuerEvents)
+          .set({ ...rejectLocally('LOC-XSD'), status: 'sending' })
+          .where(eq(issuerEvents.id, row.id)),
+      ).rejects.toThrow();
+    });
+  });
+
   it('refuses a pending event created with signing or send fields', async () => {
     const { db, cancel } = await seed();
     await expect(

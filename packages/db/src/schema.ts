@@ -1234,7 +1234,8 @@ export const issuerEvents = pgTable(
     ),
     check(
       'issuer_events_sent_pair',
-      sql`(${table.status} IN ('pending', 'signed')) = (${table.batchDId} IS NULL) AND (${table.batchDId} IS NULL) = (${table.sendAttemptedAt} IS NULL)`,
+      // A sent event has a batch id. The one exception is an event rejected locally before it was sent (a `LOC-` code).
+      sql`((${table.status} IN ('pending', 'signed')) = (${table.batchDId} IS NULL) OR (${table.status} = 'rejected' AND ${table.batchDId} IS NULL AND ${table.responseCode} LIKE 'LOC-%')) AND (${table.batchDId} IS NULL) = (${table.sendAttemptedAt} IS NULL)`,
     ),
     check(
       'issuer_events_answered_pair',

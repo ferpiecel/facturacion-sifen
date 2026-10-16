@@ -21,3 +21,4 @@
 | [0017](0017-direccion-del-receptor-y-catalogo-geografico.md) | Dirección del receptor y propiedad del catálogo geográfico | Aceptado |
 | [0018](0018-precision-decimal-en-montos-y-cantidades.md) | Precisión decimal exacta en montos y cantidades | Aceptado |
 | [0019](0019-nota-de-credito-asociada-a-una-factura.md) | Nota de crédito electrónica asociada a una factura | Aceptado |
+| [0020](0020-eventos-del-emisor-almacenamiento-y-lotes.md) | Eventos del emisor, almacenamiento y envío en lotes | Aceptado |

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { IssuerEventBuildInput } from '@sifen/sifen-gateway';
 import { TipsEventXmlBuilder } from './event-xml-builder.ts';
 
@@ -23,6 +23,14 @@ const voiding = (): IssuerEventBuildInput => ({
     reason: 'Numeros que no se usaron',
   },
 });
+
+const voidingRange = (from: number, to: number): IssuerEventBuildInput => {
+  const base = voiding();
+  return {
+    ...base,
+    event: { ...(base.event as Extract<typeof base.event, { kind: 'voiding' }>), from, to },
+  };
+};
 
 describe('TipsEventXmlBuilder', () => {
   const builder = new TipsEventXmlBuilder();
@@ -70,10 +78,62 @@ describe('TipsEventXmlBuilder', () => {
     expect(await builder.build(withSeries)).toContain('<dSerieNum>AB</dSerieNum>');
   });
 
-  it('uses the signing instant it is given', async () => {
-    const xml = await builder.build(cancellation({ signedAt: new Date(2026, 9, 16, 8, 5, 9) }));
+  describe('the signing instant (dFecFirma) is Asunción wall-clock time, whatever the host zone', () => {
+    const original = process.env.TZ;
+    afterEach(() => {
+      if (original === undefined) delete process.env.TZ;
+      else process.env.TZ = original;
+    });
 
-    expect(xml).toContain('<dFecFirma>2026-10-16T08:05:09</dFecFirma>');
+    it.each(['UTC', 'America/Asuncion', 'Asia/Tokyo', 'America/New_York'])(
+      'with TZ=%s',
+      async (zone) => {
+        process.env.TZ = zone;
+
+        const xml = await builder.build(
+          cancellation({ signedAt: new Date('2026-10-16T12:05:09Z') }),
+        );
+
+        // Paraguay has been on UTC-3 all year since October 2024.
+        expect(xml).toContain('<dFecFirma>2026-10-16T09:05:09</dFecFirma>');
+      },
+    );
+
+    it('crosses midnight with the right date', async () => {
+      process.env.TZ = 'UTC';
+
+      const xml = await builder.build(cancellation({ signedAt: new Date('2026-10-17T01:30:00Z') }));
+
+      expect(xml).toContain('<dFecFirma>2026-10-16T22:30:00</dFecFirma>');
+    });
+
+    it('uses the current time in Asunción when no instant is given', async () => {
+      process.env.TZ = 'UTC';
+      vi.useFakeTimers({ now: new Date('2026-10-16T03:00:00Z') });
+      try {
+        expect(await builder.build(cancellation())).toContain(
+          '<dFecFirma>2026-10-16T00:00:00</dFecFirma>',
+        );
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  it('refuses a voiding whose end is not after its start (4068)', async () => {
+    for (const [from, to] of [
+      [5, 5],
+      [6, 5],
+    ] as const) {
+      await expect(builder.build(voidingRange(from, to))).rejects.toThrow(RangeError);
+    }
+  });
+
+  it('refuses a voiding of more than 1000 numbers (4067) and accepts exactly 1000', async () => {
+    await expect(builder.build(voidingRange(1, 1001))).rejects.toThrow(RangeError);
+    await expect(builder.build(voidingRange(1, 1000))).resolves.toContain(
+      '<dNumFin>0001000</dNumFin>',
+    );
   });
 
   it.each([0, -1, 1.5, 10_000_000_000, Number.NaN])('refuses the event id %s', async (eventId) => {

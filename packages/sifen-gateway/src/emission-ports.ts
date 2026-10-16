@@ -60,7 +60,7 @@ export interface CancellationEvent {
   readonly reason: string;
 }
 
-/** Voiding of a range of numbers (MT 11.5.1, `rGeVeInu`; at most 1000 numbers, a rule the caller owns). */
+/** Voiding of a range of numbers (MT 11.5.1, `rGeVeInu`; at most 1000 numbers and `to` after `from`, enforced by the builder). */
 export interface VoidingEvent {
   readonly kind: 'voiding';
   readonly timbrado: string;

@@ -330,6 +330,13 @@
       "when": 1792003473498,
       "tag": "0046_documents_associated_cdc",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1792153253427,
+      "tag": "0047_issuer_events",
+      "breakpoints": true
     }
   ]
 }

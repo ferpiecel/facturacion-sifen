@@ -84,7 +84,9 @@ HU-E8-05 are independent of each other, so they can run as parallel worktrees; H
 | E8-04 A2 | HU-E8-04 | `EventSigner` port and `TipsEventSigner`; offline e2e that verifies the signatures inside the batch envelope (PR #269) | about 250 | A1 |
 | E8-04 A3 | HU-E8-04 | Vendor `siRecepEvento_v150.xsd` and its closure, add the `siRecepEvento` schema to `validateXml` | about 150 | A2 |
 | E8-04 B1 and B2 | HU-E8-04 | Migration 0047 `issuer_events` (one table, `kind` discriminator; tenant RLS, checks, one open event per document and kind; PR #272) and migration 0048 with the guard triggers plus ADR-0020 (PR #273). No batch table: the send is recorded on the event (`batch_d_id`) | about 385 + 260 | A2 |
-| E8-04 C | HU-E8-04 | Domain and use case: `EventBatcher` (at most 15, one issuer, no repeated `eventId` in a batch, with a test), `SendEventBatch` over `gateway.enviarEventos`, per-event response handling (0600, rejections keep SIFEN's code), no resend of an unanswered batch (recover like lotes), Drizzle store | about 400 | B |
+| E8-04 A3 | HU-E8-04 | Vendored `siRecepEvento` XSD closure, `validateXml` schema, 0600 code and `eventosProcesados` scenario (PR #274) | about 130 + vendored | none |
+| E8-04 C1 | HU-E8-04 | `selectEventBatch` (at most 15, no repeated `eventId`) and `SendEventBatch`: validate before claiming, claim, one `enviarEventos`, settle each event by its own answer (PR #275) | about 400 | A3 |
+| E8-04 C2 | HU-E8-04 | Drizzle `EventBatchStore` over `issuer_events`, local rejection of XSD-invalid events (migration 0049), `siRecepEvento` validator (PR #276) | about 450 | C1 |
 | E8-04 D | HU-E8-04 | Worker: events step in `TransmissionCycle`, sign-then-batch, audit entries, webhook events for event outcomes, `docs/operacion.md` section | about 300 | C |
 | E8-02 A | HU-E8-02 | Migration `documents.approved_at` (write-once, set when SIFEN approves; backfill from `updated_at` for approved rows is **not** safe, see decisions); settle code writes it; `dFecProc` parsed if the lote answer carries it | about 250 | E8-04 B |
 | E8-02 B | HU-E8-02 | Domain rules and use case: status, 48 h / 168 h deadline, one open cancel, live associated DTEs refused; enqueue a signed cancel event | about 400 | E8-02 A, E8-04 C |
@@ -108,7 +110,7 @@ planning PR is docs only.
 - [x] T1 HU-E8-04 A1 and A2: event ports and TIPS adapters (builder and signer), offline tests (PRs #267, #269). ADR-0020 moved to B; nomination builder to E8-05 A.
 - [ ] T1b HU-E8-04 A3: vendor the event XSD closure.
 - [x] T2 HU-E8-04 B1 and B2: `issuer_events` table, guards, rollback, RLS tests, ADR-0020 (PRs #272, #273).
-- [ ] T3 HU-E8-04 C: batcher, send use case, response handling, store.
+- [x] T3 HU-E8-04 C1 and C2 (with A3): XSD, batcher, send use case, response handling, store (PRs #274, #275, #276). Evidence in "Slice C evidence".
 - [ ] T4 HU-E8-04 D: worker step, audit, webhooks for event outcomes, operations doc.
 - [ ] T5 HU-E8-02 A to C: `approved_at`, cancel rules and use case, endpoint and settlement.
 - [ ] T6 HU-E8-03 A to C: voided ranges, inutilize endpoint, deadline alert.
@@ -196,6 +198,22 @@ and vendor them with a checksum in `packages/sifen-xsd` (blocks only the XSD che
 Decided by the tech lead (2026-10-16): **P2 (void deadline) is technical, not product:** when the 15-day window has passed with the timbrado still valid, warn, send anyway and show SIFEN's answer; D1 one `issuer_events` table with a type discriminator; D5 `dFecProc` parsed as Asunción time for new approvals, old rows refreshed lazily with `consultarDE` at cancel time with a safety margin; D9 decided in ADR-0021 when E8-01 starts; D10 no new scope for the MVP (existing write scope and the portal role matrix; the PO decides the roles).
 
 Closed here (technical): D2, D3, D4, D6, D7, D8, D11, D12. They are recorded in ADR-0020 by slice B.
+
+## Requirements for slice D (from the review of #275 and #276)
+
+Hard requirements, not debt:
+
+- **F1, orphan `sending` rows.** A crash after the claim, or after `enviarEventos` and before `record`, leaves an event `sending`, and the two cases look the same. Slice D treats a `sending` row older than an age threshold as `unknown`, with a conditional UPDATE (`WHERE status = 'sending' AND send_attempted_at < cutoff`). `record` is retried once and the event ids are logged (ids only, never XML). `sending` and `unknown` are resolved by **querying SIFEN**, never by resending.
+- **F3, whole-call failures.** A rejection of the whole call (`parseEventos` finds no `gResProcEVe`) or a SOAP fault becomes `unknown` and is then resolved by the same query. Slice D should tell "never left" (connection refused before writing) from "left without an answer".
+- **F2, provisional `already processed` codes.** SIFEN answers 4003 (same cancellation requested again) and 4453 (same nomination) when it already holds the effect. `SendEventBatch` settles them as `approved` with the real code, never `rejected`: a final `rejected` frees the partial unique index and would allow a duplicate. The voiding counterpart (4066, "number already voided") is **not** in the set because it also answers a partial overlap. The set (`ALREADY_PROCESSED_CODES`) is **provisional pending T0** (Prevalidador); ADR-0020 says so.
+- **F5, concurrency.** The claim is a conditional UPDATE, but PGlite has one connection: add a `*.pg.spec.ts` with two real connections claiming the same rows before slice D closes.
+
+## Slice C evidence (2026-10-16)
+
+- Route: T3 inline by the writer, in three PRs (A3 XSD, C1 use case, C2 persistence).
+- A3 RED: `ROOT_FILES` and the two `siRecepEvento` cases failed (3), then 45 pass in `sifen-xsd`; a real signed cancellation and voiding validate against the vendored XSD (e2e in `sifen-tips`), which also shows xmlgen's missing `dTiGDE` is accepted by the schema.
+- C1 RED: "Cannot find module ../domain/event-batch.js". Review fixes, RED first: the result is read from `dEstRes` and every message, with the provisional already-processed set; validation runs before the claim; a local rejection uses the code `LOC-XSD` (`response_code` is `varchar(8)`, so the `LOCAL-XSD` suggested in the review does not fit) and never gets a batch id; a validator that throws leaves the event `signed`.
+- C2 RED: "Cannot find module ./drizzle-event-batch-store.js". Review fixes: the claim re-checks the tenant's current environment; the namespace is not inserted twice; migration 0049 lets a `signed` event be rejected locally (a `LOC-` code, no batch id).
 
 ## Debt (from the re-review of #272 and #273)
 

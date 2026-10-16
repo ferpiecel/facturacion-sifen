@@ -1,6 +1,11 @@
 import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import {
+  DEADLINE_WATCH_QUEUE,
+  deadlineWatchJob,
+  type DeadlineWatchJobData,
+} from './deadline-watch.processor.js';
+import {
   WEBHOOK_DELIVERY_QUEUE,
   webhookDeliveryJob,
   type WebhookDeliveryJobData,
@@ -180,5 +185,58 @@ export function createWebhookDeliveryWorker({
     { connection, concurrency, ...(prefix === undefined ? {} : { prefix }) },
   );
   if (logger) logQueueErrors(worker, 'webhook delivery worker', logger);
+  return worker;
+}
+
+const deadlineJob: TenantJob = (tenantId) => {
+  const { name, data } = deadlineWatchJob(tenantId);
+  return { name, data };
+};
+
+/** The `deadline-watch` schedules (HU-E6-07): same per-tenant scheduler keys, on their own queue. */
+export function createDeadlineWatchScheduleStore(queue: ScheduleQueue): TenantScheduleStore {
+  return createTenantScheduleStore(queue, deadlineJob);
+}
+
+/** The `deadline-watch` queue, with its errors routed to the logger. */
+export function createDeadlineWatchQueue(
+  connection: Redis,
+  logger: QueueLogger,
+  prefix?: string,
+): Queue<DeadlineWatchJobData> {
+  const queue = new Queue<DeadlineWatchJobData>(DEADLINE_WATCH_QUEUE, {
+    connection,
+    ...(prefix === undefined ? {} : { prefix }),
+  });
+  logQueueErrors(queue, 'deadline watch queue', logger);
+  return queue;
+}
+
+export interface DeadlineWatchWorkerOptions {
+  readonly connection: Redis;
+  readonly concurrency: number;
+  readonly process: (data: DeadlineWatchJobData) => Promise<unknown>;
+  readonly prefix?: string;
+  readonly logger?: QueueLogger;
+}
+
+/** The DeadlineWatchWorker (HU-E6-07): runs each tenant's repeatable watch job. */
+export function createDeadlineWatchWorker({
+  connection,
+  concurrency,
+  process,
+  prefix,
+  logger,
+}: DeadlineWatchWorkerOptions): Worker<DeadlineWatchJobData> {
+  const worker = new Worker<DeadlineWatchJobData>(
+    DEADLINE_WATCH_QUEUE,
+    (job) => process(job.data),
+    {
+      connection,
+      concurrency,
+      ...(prefix === undefined ? {} : { prefix }),
+    },
+  );
+  if (logger) logQueueErrors(worker, 'deadline watch worker', logger);
   return worker;
 }

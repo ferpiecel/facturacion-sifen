@@ -2,6 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { Queue } from 'bullmq';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  createDeadlineWatchQueue,
+  createDeadlineWatchScheduleStore,
+  createDeadlineWatchWorker,
   createRedisConnection,
   createTenantScheduleStore,
   createTransmissionWorker,
@@ -157,5 +160,34 @@ describe.skipIf(!REDIS_URL)('BullMQ transmission queue (real Redis)', () => {
     await until(() => seen.length >= 2);
 
     expect(new Set(seen)).toEqual(new Set(['t1']));
+  });
+
+  /** Spec: HU-E6-07. The `deadline-watch` queue is its own and delivers one repeatable job per tenant. */
+  it('keeps one deadline watch schedule per tenant and runs its job with the tenant id', async () => {
+    const { prefix, connection } = open();
+    const queue = createDeadlineWatchQueue(connection, { error: () => undefined }, prefix);
+    cleanup.push(() => queue.close());
+    const store = createDeadlineWatchScheduleStore(queue);
+    const seen: string[] = [];
+    const worker = createDeadlineWatchWorker({
+      connection,
+      prefix,
+      concurrency: 2,
+      process: (data) => {
+        seen.push(data.tenantId);
+        return Promise.resolve();
+      },
+    });
+    cleanup.push(() => worker.close());
+
+    await store.upsert('t1', 100);
+    await store.upsert('t1', 100); // idempotent: still one
+    await store.upsert('t2', 100);
+    expect([...(await store.list())].sort()).toEqual(['t1', 't2']);
+    await until(() => seen.length >= 4);
+    expect(new Set(seen)).toEqual(new Set(['t1', 't2']));
+
+    await store.remove('t1');
+    expect(await store.list()).toEqual(['t2']);
   });
 });

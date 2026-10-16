@@ -37,6 +37,9 @@ export class TipsEventSigner implements EventSigner {
     if (!eventXml.startsWith('<gGroupGesEve')) {
       throw new Error('Only a bare gGroupGesEve event can be signed');
     }
+    if (eventXml.split('<gGroupGesEve').length !== 2) {
+      throw new Error('Exactly one gGroupGesEve event can be signed at a time');
+    }
     const dir = await mkdtemp(join(tmpdir(), 'sifen-cert-'));
     const p12Path = join(dir, `${randomUUID()}.p12`);
     try {

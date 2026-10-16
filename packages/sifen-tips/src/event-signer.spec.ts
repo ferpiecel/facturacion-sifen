@@ -57,6 +57,11 @@ describe('TipsEventSigner', () => {
     expect(signXMLEvento).not.toHaveBeenCalled();
   });
 
+  it('refuses input that holds more than one event group, and signs nothing', async () => {
+    await expect(new TipsEventSigner().sign(EVENT + EVENT, cert)).rejects.toThrow(/exactly one/i);
+    expect(signXMLEvento).not.toHaveBeenCalled();
+  });
+
   it('deletes the ephemeral cert directory after a successful and a failed sign', async () => {
     signXMLEvento.mockImplementation((xml: string) => Promise.resolve(echoSigned(xml)));
     await new TipsEventSigner().sign(EVENT, cert);

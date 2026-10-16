@@ -1154,6 +1154,97 @@ export const loteDocuments = pgTable(
   ],
 );
 
+export const ISSUER_EVENT_KINDS = ['cancellation', 'voiding', 'nomination'] as const;
+export const ISSUER_EVENT_STATUSES = [
+  'pending',
+  'signed',
+  'sending',
+  'approved',
+  'rejected',
+  'unknown',
+] as const;
+
+/**
+ * Events the issuer sends to `siRecepEvento` (HU-E8-04, ADR-0020): one table, typed by `kind`. A
+ * cancellation or nomination points at a document; a voiding carries its number range. `event_id` is
+ * the `rEve/@Id` SIFEN echoes in its answer (from the tenant's `dId` counter). The signed XML is
+ * write-once; an answered event is final. A refused event may be requested again, an open one may not.
+ * Rows are never deleted.
+ */
+export const issuerEvents = pgTable(
+  'issuer_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    environment: tenantEnvironment('environment').notNull(),
+    kind: varchar('kind', { length: 16 }).notNull(),
+    /** `rEve/@Id`, 1 to 10 digits, unique per tenant and environment. */
+    eventId: bigint('event_id', { mode: 'bigint' }).notNull(),
+    documentId: uuid('document_id'),
+    /** `{ timbrado, establishment, point, from, to, type, series? }` of a voiding. */
+    voidRange: jsonb('void_range'),
+    /** `mOtEve`, 5 to 500 characters. */
+    reason: text('reason').notNull(),
+    status: varchar('status', { length: 16 }).notNull().default('pending'),
+    signedXml: text('signed_xml'),
+    signedAt: timestamp('signed_at', { withTimezone: true }),
+    /** `dId` of the `siRecepEvento` call that carries it (up to 15 events share one). */
+    batchDId: bigint('batch_d_id', { mode: 'bigint' }),
+    sendAttemptedAt: timestamp('send_attempted_at', { withTimezone: true }),
+    /** `dCodRes` and `dMsgRes` of this event's result; `dProtAut` when SIFEN gave one. */
+    responseCode: varchar('response_code', { length: 8 }),
+    responseMessage: text('response_message'),
+    sifenProtocol: varchar('sifen_protocol', { length: 16 }),
+    respondedAt: timestamp('responded_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('issuer_events_event_id_key').on(table.tenantId, table.environment, table.eventId),
+    foreignKey({
+      columns: [table.tenantId, table.documentId],
+      foreignColumns: [documents.tenantId, documents.id],
+      name: 'issuer_events_tenant_document_fk',
+    }),
+    uniqueIndex('issuer_events_open_idx')
+      .on(table.tenantId, table.documentId, table.kind)
+      .where(sql`${table.documentId} IS NOT NULL AND ${table.status} <> 'rejected'`),
+    index('issuer_events_to_send_idx')
+      .on(table.tenantId, table.environment, table.createdAt)
+      .where(sql`${table.status} = 'signed'`),
+    check(
+      'issuer_events_kind_valid',
+      sql`${table.kind} IN (${sql.raw(ISSUER_EVENT_KINDS.map((k) => `'${k}'`).join(', '))})`,
+    ),
+    check(
+      'issuer_events_status_valid',
+      sql`${table.status} IN (${sql.raw(ISSUER_EVENT_STATUSES.map((s) => `'${s}'`).join(', '))})`,
+    ),
+    check('issuer_events_event_id_range', sql`${table.eventId} BETWEEN 1 AND 9999999999`),
+    check('issuer_events_reason_length', sql`char_length(${table.reason}) BETWEEN 5 AND 500`),
+    check(
+      'issuer_events_subject',
+      sql`(${table.kind} = 'voiding') = (${table.voidRange} IS NOT NULL) AND (${table.kind} = 'voiding') = (${table.documentId} IS NULL)`,
+    ),
+    check(
+      'issuer_events_signed_pair',
+      sql`(${table.signedXml} IS NULL) = (${table.signedAt} IS NULL) AND (${table.status} = 'pending') = (${table.signedXml} IS NULL)`,
+    ),
+    check(
+      'issuer_events_sent_pair',
+      sql`(${table.status} IN ('pending', 'signed')) = (${table.batchDId} IS NULL) AND (${table.batchDId} IS NULL) = (${table.sendAttemptedAt} IS NULL)`,
+    ),
+    check(
+      'issuer_events_answered_pair',
+      // The answer comes as a pair. approved and rejected carry it; pending, signed and sending never do;
+      // unknown (an unanswered send) may carry it, as the reason it is unknown, or not.
+      sql`(${table.responseCode} IS NULL) = (${table.respondedAt} IS NULL) AND (${table.status} = 'unknown' OR (${table.status} IN ('approved', 'rejected')) = (${table.responseCode} IS NOT NULL))`,
+    ),
+  ],
+);
+
 /**
  * Every table that carries a `tenant_id` column and MUST be covered by
  * `FORCE ROW LEVEL SECURITY` plus a tenant-isolation policy. The
@@ -1164,6 +1255,7 @@ export const TENANT_TABLES = [
   'api_keys',
   'audit_log',
   'documents',
+  'issuer_events',
   'lote_documents',
   'lotes',
   'tenant_document_sequences',

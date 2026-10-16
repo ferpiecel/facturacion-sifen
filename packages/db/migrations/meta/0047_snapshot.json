@@ -1019,7 +1019,7 @@
         },
         "issuer_events_answered_pair": {
           "name": "issuer_events_answered_pair",
-          "value": "(\"issuer_events\".\"status\" IN ('approved', 'rejected')) = (\"issuer_events\".\"response_code\" IS NOT NULL AND \"issuer_events\".\"responded_at\" IS NOT NULL) OR \"issuer_events\".\"status\" = 'unknown'"
+          "value": "(\"issuer_events\".\"response_code\" IS NULL) = (\"issuer_events\".\"responded_at\" IS NULL) AND (\"issuer_events\".\"status\" = 'unknown' OR (\"issuer_events\".\"status\" IN ('approved', 'rejected')) = (\"issuer_events\".\"response_code\" IS NOT NULL))"
         }
       },
       "isRLSEnabled": false

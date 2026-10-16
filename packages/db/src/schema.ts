@@ -1238,7 +1238,9 @@ export const issuerEvents = pgTable(
     ),
     check(
       'issuer_events_answered_pair',
-      sql`(${table.status} IN ('approved', 'rejected')) = (${table.responseCode} IS NOT NULL AND ${table.respondedAt} IS NOT NULL) OR ${table.status} = 'unknown'`,
+      // The answer comes as a pair. approved and rejected carry it; pending, signed and sending never do;
+      // unknown (an unanswered send) may carry it, as the reason it is unknown, or not.
+      sql`(${table.responseCode} IS NULL) = (${table.respondedAt} IS NULL) AND (${table.status} = 'unknown' OR (${table.status} IN ('approved', 'rejected')) = (${table.responseCode} IS NOT NULL))`,
     ),
   ],
 );

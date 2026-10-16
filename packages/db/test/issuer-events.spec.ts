@@ -91,6 +91,39 @@ describe('issuer_events', () => {
     await db.insert(issuerEvents).values(cancel({ eventId: 3n }));
   });
 
+  describe('the answer of SIFEN', () => {
+    const at = new Date('2026-10-16T12:00:00Z');
+    const sent = { signedXml: SIGNED_XML, signedAt: at, batchDId: 5n, sendAttemptedAt: at };
+    const answer = { responseCode: '0600', respondedAt: at };
+
+    it.each([
+      ['pending with an answer', { status: 'pending', ...answer }],
+      [
+        'signed with an answer',
+        { status: 'signed', signedXml: SIGNED_XML, signedAt: at, ...answer },
+      ],
+      ['sending with only a response code', { status: 'sending', ...sent, responseCode: '4009' }],
+      ['sending with only a response instant', { status: 'sending', ...sent, respondedAt: at }],
+      ['approved without an answer', { status: 'approved', ...sent }],
+      ['approved with only a response code', { status: 'approved', ...sent, responseCode: '0600' }],
+      ['rejected with only a response instant', { status: 'rejected', ...sent, respondedAt: at }],
+      ['unknown with only a response code', { status: 'unknown', ...sent, responseCode: '0' }],
+    ])('refuses %s', async (_name, row) => {
+      const { db, cancel } = await seed();
+      await expect(db.insert(issuerEvents).values(cancel(row as never))).rejects.toThrow();
+    });
+
+    it.each([
+      ['approved', { status: 'approved', ...sent, ...answer }],
+      ['rejected', { status: 'rejected', ...sent, responseCode: '4009', respondedAt: at }],
+      ['unknown without an answer', { status: 'unknown', ...sent }],
+      ['unknown with a pair (the reason it is unknown)', { status: 'unknown', ...sent, ...answer }],
+    ])('accepts %s', async (_name, row) => {
+      const { db, cancel } = await seed();
+      await db.insert(issuerEvents).values(cancel(row));
+    });
+  });
+
   describe('tenant isolation', () => {
     it('isolates reads and writes by tenant through RLS', async () => {
       const { db, a, b, cancel } = await seed();

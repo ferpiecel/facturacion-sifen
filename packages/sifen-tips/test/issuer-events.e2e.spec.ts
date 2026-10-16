@@ -2,6 +2,7 @@ import forge from 'node-forge';
 import { SignedXml } from 'xml-crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { IssuerEvent, LoadedCertificate } from '@sifen/sifen-gateway';
+import { validateXml } from '@sifen/sifen-xsd';
 import { generateDevCertificate } from './support/dev-certificate.ts';
 import { getGuardCallCount, restoreNoSubprocessGuard } from './support/no-subprocess-guard.ts';
 
@@ -85,6 +86,17 @@ describe('Issuer events: TipsEventXmlBuilder + TipsEventSigner', () => {
   it('verifies once embedded in the batch envelope, one event and a mixed batch of two', () => {
     expect(allSignaturesVerify(batchOf(signedCancel), cert)).toBe(true);
     expect(allSignaturesVerify(batchOf(signedCancel, signedVoid), cert)).toBe(true);
+  });
+
+  it('validates against the vendored siRecepEvento schema, cancellation and voiding', () => {
+    for (const signed of [signedCancel, signedVoid]) {
+      const inNamespace = signed.replace('<gGroupGesEve ', `<gGroupGesEve xmlns="${SIFEN_NS}" `);
+
+      const result = validateXml(inNamespace, 'siRecepEvento');
+
+      expect(result.errors).toEqual([]);
+      expect(result.valid).toBe(true);
+    }
   });
 
   it('fails verification when the signed content is altered', () => {

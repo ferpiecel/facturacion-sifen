@@ -13,6 +13,17 @@ export class KudeSourceError extends Error {
   }
 }
 
+/** The signed document is of a type that has no KuDE layout yet (an NCE until HU-E7-01 slice F). */
+export class KudeDocumentTypeUnsupportedError extends KudeSourceError {
+  constructor(readonly documentTypeCode: string) {
+    super(
+      'iTiDE',
+      `unsupported: the KuDE of type ${documentTypeCode} documents does not exist yet`,
+    );
+    this.name = 'KudeDocumentTypeUnsupportedError';
+  }
+}
+
 const NAME = '(?:[\\w.-]+:)?';
 
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
@@ -98,8 +109,8 @@ export function readKudeInvoice(xml: string, options: { stampValidTo?: string } 
   const cdc = /<DE\b[^>]*\bId="(\d{44})"/.exec(xml)?.[1];
   if (!cdc) throw new KudeSourceError('CDC (DE/@Id)', 'is missing');
   const timbrado = section(xml, 'gTimb');
-  if (required(timbrado, 'iTiDE') !== '1')
-    throw new KudeSourceError('iTiDE', 'unsupported: only the FE KuDE exists');
+  const documentTypeCode = required(timbrado, 'iTiDE');
+  if (documentTypeCode !== '1') throw new KudeDocumentTypeUnsupportedError(documentTypeCode);
   const qrUrl = required(section(xml, 'gCamFuFD'), 'dCarQR');
   const environment = qrUrl.startsWith(qrBaseUrl('production'))
     ? 'production'

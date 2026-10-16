@@ -15,6 +15,7 @@ import { formatRuc } from '../../fiscal-config/domain/ruc.js';
 import type { Timbrado } from '../../fiscal-config/domain/timbrado.js';
 import type { GeoCatalog } from '../../geo/domain/geo-catalog.js';
 import { buildCdc } from '../domain/cdc.js';
+import { CREDIT_NOTE_REASONS } from '../domain/credit-note-draft.js';
 import { Decimal } from '../domain/decimal.js';
 import {
   validateInvoiceDraft,
@@ -63,7 +64,15 @@ export interface InvoiceXmlContext {
   lines: readonly { code: string; description: string; unitCode: number }[];
   /** Overrides the test literal (ADR-0012 D2). */
   testLiteral?: string;
+  /**
+   * Present when the document is an NCE (iTiDE 5, HU-E7-01): the FE it credits and the reason. The
+   * receiver, operation and location of the draft are the FE's (ADR-0019 D3).
+   */
+  creditNote?: { associatedCdc: string; reasonCode: number };
 }
+
+/** iTiDE of the document the context describes: 5 for an NCE, 1 for an FE. */
+const documentTypeOf = (ctx: InvoiceXmlContext): 1 | 5 => (ctx.creditNote ? 5 : 1);
 
 /**
  * D213-D223 for xmlgen, only for what is informed. B2F (D202 = 4) never carries department or
@@ -276,7 +285,7 @@ export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext
       ],
     },
     data: {
-      tipoDocumento: 1,
+      tipoDocumento: documentTypeOf(ctx),
       establecimiento: est.code,
       punto: ctx.point.code,
       numero: ctx.numbering.documentNumber,
@@ -304,11 +313,19 @@ export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext
               operationType,
               draft.operationType === 'B2F' ? undefined : departmentCode,
             ),
-      factura: { presencia: 1 },
-      condicion: {
-        tipo: 1,
-        entregas: [{ tipo: 1, monto: net.toString(), moneda: 'PYG', cambio: 0 }],
-      },
+      // An NCE carries neither gCamFE nor gCamCond (E010, E600) but the reason and the association.
+      ...(ctx.creditNote
+        ? {
+            notaCreditoDebito: { motivo: ctx.creditNote.reasonCode },
+            documentoAsociado: { formato: 1, cdc: ctx.creditNote.associatedCdc },
+          }
+        : {
+            factura: { presencia: 1 },
+            condicion: {
+              tipo: 1,
+              entregas: [{ tipo: 1, monto: net.toString(), moneda: 'PYG', cambio: 0 }],
+            },
+          }),
       items: draft.items.map((item, i) => ({
         codigo: ctx.lines[i]?.code,
         descripcion: i === 0 ? content.firstItemDescription : ctx.lines[i]?.description,
@@ -497,6 +514,13 @@ export async function generateInvoiceXml(
   if (draftErrors.length > 0) {
     throw new InvoiceXmlError(draftErrors.map((e) => `${e.field} (${e.rule})`).join(', '));
   }
+  if (ctx.creditNote && !Object.hasOwn(CREDIT_NOTE_REASONS, ctx.creditNote.reasonCode)) {
+    throw new InvoiceXmlError(`credit note reason ${String(ctx.creditNote.reasonCode)} (E401)`);
+  }
+  if (ctx.creditNote && draft.receiver.kind === 'unnamed') {
+    // Defence in depth: acceptance already refuses it (1331, NT 010).
+    throw new InvoiceXmlError('a credit note cannot go to an unnamed receiver (1331)');
+  }
   // xmlgen emits an empty cTipReg when the regime is unknown; the XSD makes it optional (MT 7.2.4: no empty tags).
   const built = (await buildWithXmlgen(builder, mapInvoiceToXmlInput(draft, ctx))).replace(
     /<cTipReg><\/cTipReg>|<cTipReg\/>/,
@@ -514,7 +538,7 @@ export async function generateInvoiceXml(
   }
 
   const cdc = buildCdc({
-    documentType: '01',
+    documentType: ctx.creditNote ? '05' : '01',
     rucBase: ctx.issuer.ruc.base,
     rucDv: ctx.issuer.ruc.dv,
     establishment: ctx.establishment.code,

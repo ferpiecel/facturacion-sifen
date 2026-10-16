@@ -7,6 +7,7 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
+  UnprocessableEntityException,
   Param,
   Query,
   StreamableFile,
@@ -19,7 +20,10 @@ import {
 } from '../../../tenancy/infrastructure/tenancy-cls-store.js';
 import type { createGetDocument } from '../../application/get-document.js';
 import type { createGetKude } from '../../application/get-kude.js';
-import { KudeSourceError } from '../../application/kude-reader.js';
+import {
+  KudeDocumentTypeUnsupportedError,
+  KudeSourceError,
+} from '../../application/kude-reader.js';
 import { GET_DOCUMENT, GET_KUDE } from '../../emission.tokens.js';
 import { parseCdcQuery, parseDocumentId } from './document-query.js';
 
@@ -47,6 +51,13 @@ export class DocumentQueryController {
     const documentId = parseDocumentId(id);
     const result = await this.getKude(this.cls.get(TENANT_ID_CLS_KEY), documentId).catch(
       (error: unknown) => {
+        if (error instanceof KudeDocumentTypeUnsupportedError) {
+          // Not a failure: the document is fine, its type has no KuDE layout yet.
+          this.logger.warn(`KuDE not available for document ${documentId}: type unsupported`);
+          throw new UnprocessableEntityException(
+            'The KuDE is not available for this document type yet',
+          );
+        }
         if (!(error instanceof KudeSourceError)) throw error;
         // Field name only: neither the XML nor its values reach the log or the response.
         this.logger.error(`KuDE not printable for document ${documentId}: ${error.field}`);

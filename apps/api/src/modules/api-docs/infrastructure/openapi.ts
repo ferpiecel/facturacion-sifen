@@ -90,7 +90,7 @@ export function buildOpenApiDocument() {
           summary: 'Accept an invoice (FE) or a credit note (NCE) for emission',
           description:
             'The body is an FE unless `type` is `NCE` (credit note associated to an approved FE; its receiver is taken from that FE). ' +
-            'Credit notes are validated but answer 422 `document-type-not-supported` until their acceptance is enabled. ' +
+            'A credit note answers 422 with the rule of the failed check (for example `credit-note-sum-exceeds-invoice`, 2417) before any number is used. ' +
             'Returns 202 once the document is persisted with its CDC; signing and transmission to SIFEN are asynchronous. ' +
             'Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.',
           ...secured(['documents:write']),

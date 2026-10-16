@@ -182,7 +182,7 @@ an FE not issued by the platform; foreign currency and exchange rate (`multi-cur
 - [x] T4 (PR C1, `credit-note-draft.ts`; takes the FE facts as input, lookups stay in slice D) Domain: `credit-note-draft` types, reasons table, `validateCreditNoteDraft` (items and rounding reuse the invoice rules, unnamed receiver 1331), pure `creditNoteSumRule` and currency rule over `Decimal`. Tests first.
 - [x] T5 (PR C2, `credit-note.request.ts`; the controller answers 422 `document-type-not-supported` until slice D) Request contract: `type` discriminator, NCE schema, mapping to the use case input, backward compatibility test with an old FE body, OpenAPI regeneration.
 - [x] T6 (PRs D1 and D2: use case, port methods, Drizzle unit, `associated_cdc`, controller behind a gate, signing store hold) Application and persistence: `acceptCreditNote` use case and `AcceptanceUnit` port methods (`findAssociatedInvoice` with lock, `sumCreditNotes`), Drizzle implementation, numbering type 5, CDC `05`, audit action, idempotency, all checks before `nextNumber`. Concurrency test (two simultaneous NCEs).
-- [ ] T7 Signing path: signing store dispatches on type, builds the NCE context (reason, associated CDC, receiver from the FE), `invoice-xml.ts` credit-note branch (D8), CDC type from input, XSD check, QR unchanged. FE byte-identical test.
+- [x] T7 (PR E: `ctx.creditNote` in `invoice-xml.ts`, store dispatch by type, gate removed; QR unchanged) Signing path: signing store dispatches on type, builds the NCE context (reason, associated CDC, receiver from the FE), `invoice-xml.ts` credit-note branch (D8), CDC type from input, XSD check, QR unchanged. FE byte-identical test.
 - [ ] T8 KuDE: reader supports `iTiDE` 5, model and renderer title and associated document block, `gCamCond` optional; golden text assertions as the FE ones.
 - [ ] T9 Transmission and events: test that NCE documents form their own lotes and are sent; webhook payloads and portal listing show `NCE`; no code change expected, confirm.
 - [ ] T10 Docs: `docs/integracion/emision.md` section on NCE (contract, reasons, errors 2417 and 2438, innominado limit), `docs/api/openapi.json`, backlog and roadmap status.
@@ -318,3 +318,22 @@ Closed in ADR-0019 (technical, tech lead): D1 same endpoint with a `type` discri
   the logic (exactly one of two 600k credits on a 1M FE is accepted, number 1, no gap) but not the row lock itself;
   that needs a real Postgres (not run here).
 - Slice E must replace the gate and the hold: re-parse the stored payload by document type and build the NCE XML.
+
+### Slice E evidence (2026-10-15)
+
+- Route: T7 inline by the writer. The NCE reuses the FE pipeline: `InvoiceXmlContext.creditNote` (reason and associated
+  CDC) switches `mapInvoiceToXmlInput` to type 5 (reason and association instead of `factura` and `condicion`, D8)
+  and the CDC cross-check to `05`; the store builds the draft from the NCE items plus the FE's receiver, operation
+  and location (D3). `tipoTransaccion` stays as is: xmlgen never emits `iTipTra` for type 5 (D9).
+- RED: `invoice-xml.credit-note.spec.ts` (type stayed 1, CDC `01`, no reason check) and `credit-note-signing.spec.ts`
+  (worker path threw `DocumentTypeNotSignableError`); the e2e NCE cases answered `document-type-not-supported` while the
+  gate was on. GREEN: the NCE XML validates against siRecepDE, signs with QR and is stored `signed`; the existing
+  golden FE tests are unchanged.
+- The `CREDIT_NOTES_ENABLED` gate is gone: NCE is live end to end. Types other than 1 and 5 are still held with
+  `DocumentTypeNotSignableError`.
+- KuDE: generated on demand from the signed XML (`GET /v1/documents/{id}/kude`), outside the signing and transmission
+  cycle, so its `iTiDE: unsupported` error for an NCE does not block either. Slice F adds the NCE KuDE.
+- Review fixes on PR E: the KuDE of an NCE answers 422 (`KudeDocumentTypeUnsupportedError`, warn level) instead of a
+  500; hold tests for a missing FE, an unreadable FE payload and an invalid NCE payload; 1331 re-checked in the XML
+  generator. FE byte identity is held by the unchanged `invoice-xml.golden.spec.ts` hashes.
+

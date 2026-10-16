@@ -50,7 +50,7 @@ export interface HeldDocument {
  * Errors that repeat for the same document until configuration or data change (HU-E5/E6): the
  * document is parked instead of retried. Matched by class name because some live in infrastructure.
  */
-const DETERMINISTIC_SIGNING_ERRORS: ReadonlySet<string> = new Set([
+export const DETERMINISTIC_SIGNING_ERRORS: ReadonlySet<string> = new Set([
   'SigningDataIncompleteError',
   'DocumentTypeNotSignableError',
   'EstablishmentContactMissingError',

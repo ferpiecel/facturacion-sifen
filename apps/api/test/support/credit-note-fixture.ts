@@ -49,8 +49,14 @@ export async function seedIssuer(db: Database, tenantId: string): Promise<void> 
       address: 'Av. Mariscal Lopez 123',
       houseNumber: '123',
       departmentCode: '11',
+      districtCode: '145',
+      districtDescription: 'CIUDAD DEL ESTE',
       cityCode: '3432',
-      cityDescription: 'Asuncion',
+      cityDescription: 'PUERTO PTE.STROESSNER (MUNIC)',
+      // The signing path needs the establishment contact (dTelEmi, dEmailE).
+      phone: '0973-000000',
+      email: 'emisor@test.com',
+      commercialName: 'Casa Matriz',
     })
     .returning();
   await db

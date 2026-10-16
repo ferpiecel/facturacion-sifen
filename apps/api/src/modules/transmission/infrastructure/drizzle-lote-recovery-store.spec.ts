@@ -922,6 +922,25 @@ describe('DrizzleLoteRecoveryStore', () => {
       expect(warnings).toEqual([]);
     });
 
+    it('stamps the resend after the lote it leaves, even when the database clock stepped back', async () => {
+      // Lote and stamp both read the database clock; a backward step (NTP, VM resync) must not
+      // leave the old lote "carrying" the document again, so the stamp is ordered after the lote.
+      const ahead = new Date(Date.now() + 3_600_000);
+      await handle.db.execute(sql`alter table lotes disable trigger user`);
+      await handle.db.execute(sql`update lotes set created_at = ${ahead} where id = ${loteId}`);
+      await handle.db.execute(sql`alter table lotes enable trigger user`);
+      await storeFor(tenantId).record(
+        loteId,
+        { resolutions: [], unresolved: [absent(CDC_B)] },
+        guard,
+      );
+      // Compared in SQL: the stamp is one microsecond past the lote, below a JS Date's resolution.
+      const ordered = (await handle.db.execute(
+        sql`select d.resent_at > l.created_at as after from documents d, lotes l where d.cdc = ${CDC_B} and l.id = ${loteId}`,
+      )) as { rows: Array<{ after: boolean }> };
+      expect(ordered.rows).toEqual([{ after: true }]);
+    });
+
     it('keeps the pre-send check 10 minutes after the recovery query (the 10 min minimum between queries)', async () => {
       await storeFor(tenantId).record(
         loteId,

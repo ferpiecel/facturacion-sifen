@@ -216,3 +216,7 @@ Route: one writer, inline per task. Strict TDD: each PR has a RED commit (failin
 Review fixes applied after PRs #156 to #160 (log counts, DE Id match, recovery transitions); the findings above are recorded as debt, not implemented.
 
 PRs 1 to 19 implemented and verified locally (tsc, lint, depcruise, vitest --coverage at each branch tip). Pending: T6.
+
+## Follow-up: monotonic lote order
+
+`stillCarries`, `recoverableInLote` and `assemble-lotes` order a resend against lotes by wall-clock time (`resent_at` vs `lotes.created_at`). PR #264 stamps `resent_at` after the lote it leaves, which fixes a backward clock step. It does not cover a NEW lote created with `created_at < resent_at` (database clock skew above about 10 min, the pre-send check delay): that lote would not count as carrying the document. Planned fix: a monotonic `lotes.seq` identity column and the seq of the lote the document leaves, so those comparisons stop depending on the clock (migration and backfill).

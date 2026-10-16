@@ -63,7 +63,7 @@ Precedence follows ADR-0012. Citations are to `docs/referencia/dnit/` (MT = Manu
 | DTEs associated to the document are cancelled from the last to the first | plan v1.1 2.2 and 8.3; backlog HU-E8-02 | Refuse when a live associated DTE exists (`associated_cdc` index, ADR-0019); the integrator cancels the NCE first |
 | Void: `rGeVeInu` with `dNumTim` (8), `dEst` (3), `dPunExp` (3), `dNumIn` (7), `dNumFin` (7), `iTiDE`, `mOtEve` 5 to 500, optional `dSerieNum` | MT 11.5.1 (GEI001 to GEI008) | Request validation and padding |
 | Void errors: 4065 DTE exists in the range, 4066 number already voided, **4067 more than 1000 numbers**, 4068 end not after start (the library accepts `desde = hasta`; the plan says `hasta > desde`: confirm, see decisions), 4052 to 4055 and 4060 timbrado, establishment, point, type | MT 11.6.2 | Pre-checks against our `documents` and the new voided-ranges table; the timbrado ones come from `fiscal-config` |
-| **Void deadline: the first 15 days of the following month, and until the end of the timbrado's validity**; the number must not exist in SIFEN | MT Table K, row 2; plan v1.1 2.2 | Deadline calculator and an alert (not a hard refusal: SIFEN decides, the date is config, see decisions) |
+| **Void deadline: the first 15 days of the following month, and until the end of the timbrado's validity**; the number must not exist in SIFEN | MT section 11, Tabla J (issuer events summary), row 2; plan v1.1 2.2 | Deadline calculator and an alert (not a hard refusal: SIFEN decides, the date is config, see decisions) |
 | Rejected DE: same CDC if the correction does not change any CDC field; otherwise void the number and issue a new DE | MT 6.5; plan v1.1 8.0 | The classifier compares the CDC components of the old and corrected payloads |
 | Nominate: one event per CDC (4453); the CDC must be an FE of the issuer (4454, 4468); the FE receiver must be unnamed, D208 = 5 (4469); fields by receiver nature (4456 to 4478) | NT 014 (validations), NT 015, NT 027 (identity document codes) | Pre-checks over `documents` and its stored payload |
 | NCE or NDE over a nominated FE must carry the nominated receiver (H004i, 2442) | NT 015 | Follow-up in the NCE rules once nominations are stored |
@@ -71,7 +71,7 @@ Precedence follows ADR-0012. Citations are to `docs/referencia/dnit/` (MT = Manu
 
 Gaps in the sources, to confirm and not assumed: whether the Prevalidador accepts the library's event structure as is (including `dVerFor`); whether
 `approved_with_observations` can be cancelled (we follow the plan: yes, it is an approval); whether the 15-day void window is enforced by SIFEN or only
-informative (MT Table K, "plazo del sistema"); the exact semantics of 4068 when the range has one number; the event XSD (not vendored).
+informative (MT Tabla J, "plazo del sistema"; Tabla K is the receiver-corrections table); the exact semantics of 4068 when the range has one number; the event XSD (not vendored).
 
 ## Dependency order and PR slices
 
@@ -84,7 +84,7 @@ HU-E8-05 are independent of each other, so they can run as parallel worktrees; H
 | E8-04 A2 | HU-E8-04 | `EventSigner` port and `TipsEventSigner`; offline e2e that verifies the signatures inside the batch envelope (PR #269) | about 250 | A1 |
 | E8-04 A3 | HU-E8-04 | Vendor `siRecepEvento_v150.xsd` and its closure, add the `siRecepEvento` schema to `validateXml` | about 150 | A2 |
 | E8-04 B | HU-E8-04 | ADR-0020 and migration: `issuer_events` (one table, `kind` discriminator; tenant RLS, kind, document or range, event id sequence, signed XML, status, SIFEN answer) and `sifen_event_batches`; rollback; Drizzle schema; RLS coverage and guard tests | about 400 | A |
-| E8-04 C | HU-E8-04 | Domain and use case: `EventBatcher` (at most 15, one issuer), `SendEventBatch` over `gateway.enviarEventos`, per-event response handling (0600, rejections keep SIFEN's code), no resend of an unanswered batch (recover like lotes), Drizzle store | about 400 | B |
+| E8-04 C | HU-E8-04 | Domain and use case: `EventBatcher` (at most 15, one issuer, no repeated `eventId` in a batch, with a test), `SendEventBatch` over `gateway.enviarEventos`, per-event response handling (0600, rejections keep SIFEN's code), no resend of an unanswered batch (recover like lotes), Drizzle store | about 400 | B |
 | E8-04 D | HU-E8-04 | Worker: events step in `TransmissionCycle`, sign-then-batch, audit entries, webhook events for event outcomes, `docs/operacion.md` section | about 300 | C |
 | E8-02 A | HU-E8-02 | Migration `documents.approved_at` (write-once, set when SIFEN approves; backfill from `updated_at` for approved rows is **not** safe, see decisions); settle code writes it; `dFecProc` parsed if the lote answer carries it | about 250 | E8-04 B |
 | E8-02 B | HU-E8-02 | Domain rules and use case: status, 48 h / 168 h deadline, one open cancel, live associated DTEs refused; enqueue a signed cancel event | about 400 | E8-02 A, E8-04 C |
@@ -104,7 +104,7 @@ planning PR is docs only.
 
 ## Tasks
 
-- [ ] T0 Evidence with the test environment: Prevalidador check of a signed cancel, void and nominate event; the 15-day void window; `approved_with_observations` cancel; `dVerFor` value. **Blocked on test-environment access and a certificate.**
+- [ ] T0 Evidence with the test environment: Prevalidador check of a signed cancel, void and nominate event; the 15-day void window; `approved_with_observations` cancel; `dVerFor` value; the motive length (MT 11.1.1 says free text of up to 150 characters for a void, the field tables say 5 to 500: until confirmed, the platform accepts 5 to 150 for a void); `rEve` carries no `dTiGDE` in xmlgen output. **Blocked on test-environment access and a certificate.**
 - [x] T1 HU-E8-04 A1 and A2: event ports and TIPS adapters (builder and signer), offline tests (PRs #267, #269). ADR-0020 moved to B; nomination builder to E8-05 A.
 - [ ] T1b HU-E8-04 A3: vendor the event XSD closure.
 - [ ] T2 HU-E8-04 B: events and batches migration, schema, rollback, RLS tests.
@@ -135,7 +135,7 @@ planning PR is docs only.
 | D2 | `sifen_event_batches` holds the send (`dId`, status, answer) and events point to it | Mirrors `lotes`: the same recovery rules apply to an unanswered send |
 | D3 | The adapter returns the bare `gGroupGesEve` and sets `rEve/@Id` before signing; signing goes through a new `EventSigner` port (`TipsEventSigner`) | Library constraints above |
 | D4 | The 48 h / 168 h deadline is checked at command time over `documents.approved_at`, and re-checked when the batch is built (an event signed late is refused locally instead of costing a 4009) | Cheap, keeps the integrator's error synchronous |
-| D5 | `approved_at` is SIFEN's processing instant when the answer carries it (`dFecProc`), else the settle time; write-once, only set with the transition into `approved` or `approved_with_observations`. Old rows have none: a cancel on them is refused with `approval-time-unknown` until an operator backfills from SIFEN (`consultarDE`) | `updated_at` is not evidence. **Open:** a one-time backfill by CLI using `consultarDE`. |
+| D5 | `approved_at` is SIFEN's processing instant when the answer carries it (`dFecProc`, parsed as America/Asuncion time), else the settle time; write-once, only set with the transition into `approved` or `approved_with_observations`. Old rows have none: at cancel time the platform asks SIFEN (`consultarDE`) once, stamps the row, and applies a safety margin to the window | `updated_at` is not evidence. **Decided** (tech lead): lazy refresh at cancel time, no one-time backfill. |
 | D6 | Cancel and void settle on 0600 only (`approved -> cancelled`, rejected or gap numbers -> voided); any other answer leaves the document as it was and keeps SIFEN's code on the event | SIFEN is the authority; local state follows the answer |
 | D7 | A cancel with a live associated DTE is refused (`has-live-associated-documents`), listing the CDCs, instead of cascading | The integrator keeps control of which fiscal documents are cancelled; plan says "exigir cancelar primero los asociados" |
 | D8 | Voided ranges are rows in `voided_number_ranges`; numbers that already have a rejected document move it to `number_voided`; the numbering allocator never reuses a number inside a recorded range | Gaps have no document row to carry a status |
@@ -186,7 +186,6 @@ conformity does not block it, associated DTEs from last to first, the 1000-numbe
 correction changes the CDC, and the nomination rules. What is **not** settled anywhere:
 
 - **P1 Who may cancel, void, correct and nominate.** The PRD lists portal roles (`owner`, `admin`, `emisor`, `lector`) and the API has one `documents:write` scope, but no document says which role may run a destructive fiscal action. Proposed default (not blocking slice A to D): owner, admin and emisor may; lector may not; one scope for API keys at first.
-- **P2 Void deadline behaviour.** When the 15-day window has passed (but the timbrado is still valid), do we refuse locally or let SIFEN decide and show its answer? The MT calls the end of validity "plazo del sistema" and does not say SIFEN refuses. Proposed default: warn, send, show SIFEN's answer. Blocks only E8-03 C.
 
 ### Technical decisions still open (tech lead, no product input needed)
 
@@ -194,7 +193,7 @@ D1 one table versus one per kind; D5 backfill of `approved_at` for rows approved
 blocks E8-01 B); D10 a dedicated scope. The event XSD is also missing: obtain `siRecepEvento_v150.xsd` and `resRecepEvento_v150.xsd` from the DNIT package
 and vendor them with a checksum in `packages/sifen-xsd` (blocks only the XSD check of slice A, not the adapters).
 
-Decided by the tech lead (2026-10-16): D1 one `issuer_events` table with a type discriminator; D5 backfill of `approved_at` by an ops CLI over `consultarDE` (E8-02 A), new approvals stamped from `dFecProc`; D9 decided in ADR-0021 when E8-01 starts; D10 no new scope for the MVP (existing write scope and the portal role matrix; the PO decides the roles).
+Decided by the tech lead (2026-10-16): **P2 (void deadline) is technical, not product:** when the 15-day window has passed with the timbrado still valid, warn, send anyway and show SIFEN's answer; D1 one `issuer_events` table with a type discriminator; D5 `dFecProc` parsed as Asunción time for new approvals, old rows refreshed lazily with `consultarDE` at cancel time with a safety margin; D9 decided in ADR-0021 when E8-01 starts; D10 no new scope for the MVP (existing write scope and the portal role matrix; the PO decides the roles).
 
 Closed here (technical): D2, D3, D4, D6, D7, D8, D11, D12. They are recorded in ADR-0020 by slice B.
 

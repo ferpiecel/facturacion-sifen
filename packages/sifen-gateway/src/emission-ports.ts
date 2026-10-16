@@ -52,3 +52,40 @@ export interface XmlSigner {
 export interface QrGenerator {
   addQr(signedXml: string, config: QrConfig): Promise<string>;
 }
+
+/** Cancellation of an approved DTE (MT 11.5.1, `rGeVeCan`; 5 to 500 characters of reason). */
+export interface CancellationEvent {
+  readonly kind: 'cancellation';
+  readonly cdc: string;
+  readonly reason: string;
+}
+
+/** Voiding of a range of numbers (MT 11.5.1, `rGeVeInu`; at most 1000 numbers, a rule the caller owns). */
+export interface VoidingEvent {
+  readonly kind: 'voiding';
+  readonly timbrado: string;
+  readonly establishment: string;
+  readonly expeditionPoint: string;
+  readonly from: number;
+  readonly to: number;
+  /** `iTiDE` of the voided numbers (1 to 8). */
+  readonly documentType: number;
+  readonly reason: string;
+  readonly series?: string;
+}
+
+/** Issuer events the platform sends to `siRecepEvento` (HU-E8-04). Nomination joins in HU-E8-05. */
+export type IssuerEvent = CancellationEvent | VoidingEvent;
+
+export interface IssuerEventBuildInput {
+  /** Our identifier of the event (`rEve/@Id`, 1 to 10 digits); SIFEN echoes it in its answer. */
+  readonly eventId: number;
+  readonly event: IssuerEvent;
+  /** `dFecFirma`; the builder uses the current time when omitted. */
+  readonly signedAt?: Date;
+}
+
+/** Builds the unsigned event group (`gGroupGesEve`): one event, no SOAP envelope. */
+export interface EventXmlBuilder {
+  build(input: IssuerEventBuildInput): Promise<string>;
+}

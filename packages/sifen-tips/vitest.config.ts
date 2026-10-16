@@ -1,6 +1,10 @@
 import { defineConfig } from 'vitest/config';
 
-const E2E_INCLUDE = ['test/poc-offline.e2e.spec.ts', 'test/nce-type5.e2e.spec.ts'];
+const E2E_INCLUDE = [
+  'test/poc-offline.e2e.spec.ts',
+  'test/nce-type5.e2e.spec.ts',
+  'test/issuer-events.e2e.spec.ts',
+];
 
 export default defineConfig({
   test: {

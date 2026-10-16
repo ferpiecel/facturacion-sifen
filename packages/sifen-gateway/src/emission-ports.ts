@@ -89,3 +89,11 @@ export interface IssuerEventBuildInput {
 export interface EventXmlBuilder {
   build(input: IssuerEventBuildInput): Promise<string>;
 }
+
+/**
+ * Signs one event group with the issuer's certificate and returns it signed, still as a bare
+ * `gGroupGesEve` ready to be one of up to 15 inside a `dEvReg`. Implementations MUST NOT spawn a JVM process.
+ */
+export interface EventSigner {
+  sign(eventXml: string, cert: LoadedCertificate): Promise<string>;
+}

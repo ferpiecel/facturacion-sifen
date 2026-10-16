@@ -140,9 +140,6 @@ export class PdfkitKudeRenderer implements KudeRenderer {
     return done;
   }
 
-  titleOf = (invoice: KudeInvoice): string =>
-    invoice.creditNote ? KUDE_CREDIT_NOTE_TITLE : KUDE_TITLE;
-
   /** One unwrapped line; shrinks the font until it fits `width` (amounts must never split). */
   private line(
     doc: Doc,

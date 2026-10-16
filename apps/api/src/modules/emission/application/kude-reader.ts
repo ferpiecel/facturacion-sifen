@@ -99,6 +99,13 @@ function readItem(block: string): KudeItem {
   };
 }
 
+/** H004: the CDC of the associated FE, exactly 44 digits (the KuDE prints its number and groups). */
+function associatedCdc(group: string): string {
+  const cdc = required(group, 'dCdCDERef');
+  if (!/^\d{44}$/.test(cdc)) throw new KudeSourceError('dCdCDERef', 'is not a 44-digit CDC');
+  return cdc;
+}
+
 /**
  * Builds the KuDE model from the signed DE (with `dCarQR`). Nothing is recomputed: the VAT
  * liquidation and totals are the ones the XML carries (MT 13.2: the KuDE shows no data that
@@ -189,7 +196,7 @@ export function readKudeInvoice(xml: string, options: { stampValidTo?: string } 
       ? {
           creditNote: {
             reason: required(section(xml, 'gCamNCDE'), 'dDesMotEmi'),
-            associatedCdc: required(section(xml, 'gCamDEAsoc'), 'dCdCDERef'),
+            associatedCdc: associatedCdc(section(xml, 'gCamDEAsoc')),
           },
         }
       : {}),

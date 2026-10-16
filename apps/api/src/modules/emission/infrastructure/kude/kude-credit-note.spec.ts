@@ -65,6 +65,17 @@ describe('KuDE of a credit note', () => {
     expect(() => readKudeInvoice(xml)).toThrow(KudeSourceError);
   });
 
+  it.each(['123', 'a'.repeat(44)])(
+    'refuses a malformed associated CDC (%s) with a KudeSourceError, not a plain Error',
+    async (bad) => {
+      const xml = (await creditNote()).replace(
+        /<dCdCDERef>[^<]*<\/dCdCDERef>/,
+        `<dCdCDERef>${bad}</dCdCDERef>`,
+      );
+      expect(() => readKudeInvoice(xml)).toThrow(KudeSourceError);
+    },
+  );
+
   it('still refuses the types that have no layout (an NDE)', async () => {
     const xml = (await creditNote()).replace('<iTiDE>5</iTiDE>', '<iTiDE>6</iTiDE>');
     expect(() => readKudeInvoice(xml)).toThrow(/unsupported/);

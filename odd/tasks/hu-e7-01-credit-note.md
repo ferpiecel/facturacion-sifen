@@ -333,3 +333,7 @@ Closed in ADR-0019 (technical, tech lead): D1 same endpoint with a `type` discri
   `DocumentTypeNotSignableError`.
 - KuDE: generated on demand from the signed XML (`GET /v1/documents/{id}/kude`), outside the signing and transmission
   cycle, so its `iTiDE: unsupported` error for an NCE does not block either. Slice F adds the NCE KuDE.
+- Review fixes on PR E: the KuDE of an NCE answers 422 (`KudeDocumentTypeUnsupportedError`, warn level) instead of a
+  500; hold tests for a missing FE, an unreadable FE payload and an invalid NCE payload; 1331 re-checked in the XML
+  generator. FE byte identity is held by the unchanged `invoice-xml.golden.spec.ts` hashes.
+

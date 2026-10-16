@@ -21,7 +21,10 @@ import {
   type PortalSession,
 } from '../../identity/infrastructure/http/session.guard.js';
 import type { createGetKude } from '../../emission/application/get-kude.js';
-import { KudeSourceError } from '../../emission/application/kude-reader.js';
+import {
+  KudeDocumentTypeUnsupportedError,
+  KudeSourceError,
+} from '../../emission/application/kude-reader.js';
 import type {
   createGetPortalDocument,
   createGetPortalXml,
@@ -101,6 +104,12 @@ export class PortalDocumentsController {
   async kude(@Param('id') id: string, @CurrentSession() session: PortalSession) {
     if (!UUID.test(id)) throw new NotFoundException('Document not found');
     const result = await this.getKude(tenantOf(session), id).catch((error: unknown) => {
+      if (error instanceof KudeDocumentTypeUnsupportedError) {
+        this.logger.warn(`KuDE not available for document ${id}: type unsupported`);
+        throw new UnprocessableEntityException(
+          'The KuDE is not available for this document type yet',
+        );
+      }
       if (!(error instanceof KudeSourceError)) throw error;
       // Field name only: neither the XML nor its values reach the log or the response.
       this.logger.error(`KuDE not printable for document ${id}: ${error.field}`);

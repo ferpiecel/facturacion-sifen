@@ -517,6 +517,10 @@ export async function generateInvoiceXml(
   if (ctx.creditNote && !Object.hasOwn(CREDIT_NOTE_REASONS, ctx.creditNote.reasonCode)) {
     throw new InvoiceXmlError(`credit note reason ${String(ctx.creditNote.reasonCode)} (E401)`);
   }
+  if (ctx.creditNote && draft.receiver.kind === 'unnamed') {
+    // Defence in depth: acceptance already refuses it (1331, NT 010).
+    throw new InvoiceXmlError('a credit note cannot go to an unnamed receiver (1331)');
+  }
   // xmlgen emits an empty cTipReg when the regime is unknown; the XSD makes it optional (MT 7.2.4: no empty tags).
   const built = (await buildWithXmlgen(builder, mapInvoiceToXmlInput(draft, ctx))).replace(
     /<cTipReg><\/cTipReg>|<cTipReg\/>/,

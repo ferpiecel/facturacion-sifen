@@ -76,4 +76,14 @@ describe('credit note XML', () => {
       }),
     ).rejects.toBeInstanceOf(InvoiceXmlError);
   });
+
+  it('refuses a credit note for an unnamed receiver (1331) even if acceptance let it through', async () => {
+    await expect(
+      generateInvoiceXml(
+        new TipsDeXmlBuilder(),
+        { ...draft, receiver: { kind: 'unnamed' }, operationType: 'B2C', location: {} },
+        ctx(),
+      ),
+    ).rejects.toThrow(/1331/);
+  });
 });

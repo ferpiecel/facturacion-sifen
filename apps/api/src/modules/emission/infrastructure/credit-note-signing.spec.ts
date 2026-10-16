@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { eq } from 'drizzle-orm';
 import {
   createPgliteDatabase,
   documents,
@@ -15,7 +16,12 @@ import {
   seedIssuer,
 } from '../../../../test/support/credit-note-fixture.js';
 import { createAcceptCreditNote } from '../application/accept-credit-note.js';
-import type { CertificateSource, CscSource } from '../application/ports/signing.port.js';
+import {
+  SigningDataIncompleteError,
+  type CertificateSource,
+  type CscSource,
+} from '../application/ports/signing.port.js';
+import { DETERMINISTIC_SIGNING_ERRORS } from '../../transmission/application/transmission-cycle.js';
 import { SignDocument } from '../application/sign-document.js';
 import { signingValidationConfig } from '../emission-validation-config.js';
 import { createDrizzleAcceptanceUnitOfWork } from './drizzle-acceptance-unit-of-work.js';
@@ -110,5 +116,58 @@ describe('signing an accepted credit note', () => {
     expect(xml).toContain(`<DE Id="${row?.cdc ?? ''}"`);
     expect(xml).toContain('<dCarQR>');
     expect(xml).not.toContain('<gCamCond>');
+  });
+
+  describe('a credit note that cannot be built is refused deterministically (held, never retried)', () => {
+    let copies = 0;
+    /** A second NCE row, cloned from the accepted one, with fields overridden. */
+    async function insertCredit(overrides: Partial<typeof documents.$inferInsert>) {
+      const [base] = await handle.db.select().from(documents).where(eq(documents.id, creditId));
+      copies += 1;
+      const [row] = await handle.db
+        .insert(documents)
+        .values({
+          ...base,
+          ...overrides,
+          id: undefined,
+          cdc: `05${String(copies).padStart(42, '7')}`,
+          number: 10 + copies,
+          idempotencyKey: `copy-${String(copies)}`,
+        })
+        .returning();
+      return row.id;
+    }
+    const refuses = (id: string) =>
+      expect(signer().execute({ tenantId, documentId: id })).rejects.toBeInstanceOf(
+        SigningDataIncompleteError,
+      );
+
+    it('when the associated FE is missing', async () => {
+      await refuses(await insertCredit({ associatedCdc: `01${'9'.repeat(42)}` }));
+    });
+
+    it('when the payload of the associated FE can no longer be read', async () => {
+      const [fe] = await handle.db.select().from(documents).where(eq(documents.cdc, feCdc));
+      const broken = await handle.db
+        .insert(documents)
+        .values({
+          ...fe,
+          id: undefined,
+          cdc: `01${'8'.repeat(42)}`,
+          number: 5,
+          idempotencyKey: 'broken-fe',
+          payload: { legacy: true },
+        })
+        .returning();
+      await refuses(await insertCredit({ associatedCdc: broken[0].cdc }));
+    });
+
+    it('when its own payload is invalid', async () => {
+      await refuses(await insertCredit({ payload: { type: 'NCE' } }));
+    });
+
+    it('and the transmission cycle parks that error without retrying', () => {
+      expect(DETERMINISTIC_SIGNING_ERRORS.has('SigningDataIncompleteError')).toBe(true);
+    });
   });
 });

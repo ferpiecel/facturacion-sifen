@@ -191,6 +191,38 @@ describe('GET /v1/documents/{id}/kude (e2e)', () => {
     expect((await get(`/v1/documents/${id}/kude`, writeOnly)).statusCode).toBe(403);
   });
 
+  it('answers a clear 422, logged below error level, for a signed NCE whose KuDE does not exist yet', async () => {
+    const errors = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const { document_id: id, cdc } = await create(writer);
+    const nce = await signedInvoiceWithQr((input) => {
+      const data = Object.fromEntries(
+        Object.entries(input.data).filter(([key]) => key !== 'factura' && key !== 'condicion'),
+      );
+      return {
+        ...input,
+        data: {
+          ...data,
+          tipoDocumento: 5,
+          notaCreditoDebito: { motivo: 2 },
+          documentoAsociado: { formato: 1, cdc },
+        },
+      };
+    });
+    await handle.db
+      .update(documents)
+      .set({ status: 'signed', signedXml: nce, signedAt: new Date() })
+      .where(eq(documents.id, id));
+
+    const response = await get(`/v1/documents/${id}/kude`, reader);
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json<{ message: string }>().message).toMatch(
+      /not available for this document type/i,
+    );
+    expect(errors).not.toHaveBeenCalled();
+    errors.mockRestore();
+  });
+
   it('answers a sanitized 500 and logs no XML when the stored XML cannot be printed', async () => {
     const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     const { document_id: id } = await create(writer);

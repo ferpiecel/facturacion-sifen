@@ -1,7 +1,6 @@
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { issuerEvents, tenants, withTenantTransaction, type Database } from '@sifen/db';
 import type { EventBatchStore, EventOutcome } from '../application/send-event-batch.js';
-
 export interface DrizzleEventBatchStoreOptions {
   readonly db: Database;
   readonly tenantId: string;
@@ -14,7 +13,7 @@ const toPending = (row: { id: string; eventId: bigint; signedXml: string | null 
   signedXml: row.signedXml ?? '',
 });
 
-/** `EventBatchStore` over `issuer_events`; every call runs as app_user inside the tenant's transaction (ADR-0020). */
+/** `EventBatchStore` over `issuer_events`, as app_user inside the tenant's transaction (ADR-0020). */
 export function createDrizzleEventBatchStore({
   db,
   tenantId,
@@ -30,7 +29,6 @@ export function createDrizzleEventBatchStore({
             signedXml: issuerEvents.signedXml,
           })
           .from(issuerEvents)
-          // Only the tenant's current environment: an event of a left one must not be sent.
           .innerJoin(
             tenants,
             and(
@@ -47,7 +45,6 @@ export function createDrizzleEventBatchStore({
 
     async claim(ids, dId) {
       if (ids.length === 0) return [];
-      // One atomic conditional UPDATE: only the worker that flips signed -> sending gets each event.
       const claimed = await withTenantTransaction(db, tenantId, (tx) =>
         tx
           .update(issuerEvents)
@@ -57,6 +54,7 @@ export function createDrizzleEventBatchStore({
               eq(issuerEvents.tenantId, tenantId),
               inArray(issuerEvents.id, [...ids]),
               eq(issuerEvents.status, 'signed'),
+              sql`exists (select 1 from ${tenants} where ${tenants.id} = ${issuerEvents.tenantId} and ${tenants.environment} = ${issuerEvents.environment})`,
             ),
           )
           .returning({
@@ -66,6 +64,30 @@ export function createDrizzleEventBatchStore({
           }),
       );
       return claimed.map(toPending);
+    },
+
+    async rejectUnsent(rejections) {
+      await withTenantTransaction(db, tenantId, async (tx) => {
+        for (const [id, rejection] of rejections) {
+          const updated = await tx
+            .update(issuerEvents)
+            .set({
+              status: 'rejected',
+              responseCode: rejection.code,
+              responseMessage: rejection.message,
+              respondedAt: now(),
+            })
+            .where(
+              and(
+                eq(issuerEvents.tenantId, tenantId),
+                eq(issuerEvents.id, id),
+                eq(issuerEvents.status, 'signed'),
+              ),
+            )
+            .returning({ id: issuerEvents.id });
+          if (updated.length !== 1) throw new Error(`Event ${id} is not waiting to be sent`);
+        }
+      });
     },
 
     async record(outcomes: ReadonlyMap<string, EventOutcome>) {
@@ -87,12 +109,10 @@ export function createDrizzleEventBatchStore({
               and(
                 eq(issuerEvents.tenantId, tenantId),
                 eq(issuerEvents.id, id),
-                // `unknown` may still be answered later (ADR-0020).
                 inArray(issuerEvents.status, ['sending', 'unknown']),
               ),
             )
             .returning({ id: issuerEvents.id });
-          // Throwing rolls the whole transaction back: nothing is settled half way.
           if (updated.length !== 1) throw new Error(`Event ${id} is not being sent`);
         }
       });

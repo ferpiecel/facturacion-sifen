@@ -39,7 +39,6 @@ describe('DrizzleEventBatchStore', () => {
   const storeFor = (tenant: string) =>
     createDrizzleEventBatchStore({ db: handle.db, tenantId: tenant, now: () => NOW });
 
-  /** An event signed `minutesAgo` minutes before NOW, ready to send. */
   async function signedEvent(tenant: string, eventId: number, minutesAgo = 0) {
     const createdAt = new Date(NOW.getTime() - minutesAgo * 60_000);
     const [row] = await handle.db
@@ -109,6 +108,52 @@ describe('DrizzleEventBatchStore', () => {
     const foreign = await signedEvent(otherTenantId, 1);
 
     expect(await storeFor(tenantId).claim([foreign], 1n)).toEqual([]);
+  });
+
+  it('does not claim an event of an environment the tenant has left', async () => {
+    const id = await signedEvent(tenantId, 1);
+    await handle.db
+      .update(tenants)
+      .set({ environment: 'production' })
+      .where(eq(tenants.id, tenantId));
+
+    expect(await storeFor(tenantId).claim([id], 1n)).toEqual([]);
+    expect(await storeFor(tenantId).signedEvents(15)).toEqual([]);
+    expect((await read(id)).status).toBe('signed');
+  });
+
+  it('rejects unsent events locally: no batch id, no attempt, a local code', async () => {
+    const id = await signedEvent(tenantId, 1);
+
+    await storeFor(tenantId).rejectUnsent(
+      new Map([[id, { code: 'LOC-XSD', message: 'not valid' }]]),
+    );
+
+    expect(await read(id)).toMatchObject({
+      status: 'rejected',
+      responseCode: 'LOC-XSD',
+      responseMessage: 'not valid',
+      respondedAt: NOW,
+      batchDId: null,
+      sendAttemptedAt: null,
+    });
+  });
+
+  it('refuses a local rejection of an event that is no longer signed, and rejects none then', async () => {
+    const signed = await signedEvent(tenantId, 1);
+    const sending = await signedEvent(tenantId, 2);
+    await storeFor(tenantId).claim([sending], 4n);
+
+    await expect(
+      storeFor(tenantId).rejectUnsent(
+        new Map([
+          [signed, { code: 'LOC-XSD', message: 'x' }],
+          [sending, { code: 'LOC-XSD', message: 'x' }],
+        ]),
+      ),
+    ).rejects.toThrow(/not waiting/);
+
+    expect((await read(signed)).status).toBe('signed');
   });
 
   it('settles approved, rejected and unknown outcomes on the rows', async () => {

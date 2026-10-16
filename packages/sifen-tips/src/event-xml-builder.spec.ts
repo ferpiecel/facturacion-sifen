@@ -99,6 +99,15 @@ describe('TipsEventXmlBuilder', () => {
       },
     );
 
+    it('is UTC-3 in July too, as Paraguay has no daylight saving time since October 2024', async () => {
+      // A host with tzdata older than 2024b would answer 08:05:09 (UTC-4 in the southern winter).
+      process.env.TZ = 'UTC';
+
+      const xml = await builder.build(cancellation({ signedAt: new Date('2026-07-16T12:05:09Z') }));
+
+      expect(xml).toContain('<dFecFirma>2026-07-16T09:05:09</dFecFirma>');
+    });
+
     it('crosses midnight with the right date', async () => {
       process.env.TZ = 'UTC';
 

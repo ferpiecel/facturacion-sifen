@@ -65,4 +65,25 @@ describe('getKude', () => {
     await expect(getKude('t1', 'd1')).rejects.toThrow(KudeSourceError);
     expect(render).not.toHaveBeenCalled();
   });
+
+  it('renders the requested paper roll format and tells it apart in the file name', async () => {
+    const { getKude, render } = setup({
+      number: '001-002-0000007',
+      environment: 'test',
+      signedXml: xml,
+    });
+    expect(await getKude('t1', 'd1', 'ticket-58')).toEqual({
+      kind: 'ok',
+      pdf: PDF,
+      filename: 'kude-001-002-0000007-ticket-58.pdf',
+    });
+    expect(render.mock.calls[0]?.[1]).toBe('ticket-58');
+  });
+
+  it('keeps the letter file name when the format is letter', async () => {
+    const { getKude } = setup({ number: '001-002-0000007', environment: 'test', signedXml: xml });
+    expect(await getKude('t1', 'd1', 'letter')).toMatchObject({
+      filename: 'kude-001-002-0000007.pdf',
+    });
+  });
 });

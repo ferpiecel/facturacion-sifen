@@ -8,7 +8,9 @@ import {
   formatQuantity,
   groupCdc,
   KUDE_CONSULT_URL,
+  KUDE_CREDIT_NOTE_TITLE,
   KUDE_TITLE,
+  documentNumberOfCdc,
   type KudeInvoice,
   type KudeItem,
 } from '../../domain/kude-model.js';
@@ -23,15 +25,22 @@ const ROLLS: Record<TicketFormat, { widthMm: number; size: number; margin: numbe
   'ticket-80': { widthMm: 80, size: 8, margin: 8 },
   'ticket-58': { widthMm: 58, size: 7, margin: 8 },
 };
-/** Tear-off space under the last line, a page tall enough to measure, CDC groups per row. */
-const [TAIL, MEASURE_HEIGHT, CDC_GROUPS_PER_ROW] = [24, 200_000, 4];
+/** Blank space under the last line, so the printer can tear the paper. */
+const TAIL = 24;
+/** A page tall enough to lay out any realistic receipt before its real height is known. */
+const MEASURE_HEIGHT = 200_000;
+const CDC_GROUPS_PER_ROW = 4;
+
+const titleOf = (invoice: KudeInvoice): string =>
+  invoice.creditNote ? KUDE_CREDIT_NOTE_TITLE : KUDE_TITLE;
 
 const rateLabel = (rate: KudeItem['vatRate']): string => (rate === 0 ? 'Ex.' : `${String(rate)}%`);
 
 /**
  * KuDE on a paper roll (MT v150 13.6 "Formato 2", the format for restaurants and retail). One
  * continuous page exactly as wide as the roll and as tall as its content, single column, drawn
- * with embedded Noto Sans. FE only here; the credit note rows come in the next slice.
+ * with embedded Noto Sans. FE and NCE share the layout (same fields); NDE, AFE and NRE add their
+ * own rows in `documentRows` when they exist.
  */
 export class PdfkitTicketKudeRenderer {
   async render(invoice: KudeInvoice, format: TicketFormat = 'ticket-80'): Promise<Uint8Array> {
@@ -54,7 +63,7 @@ export class PdfkitTicketKudeRenderer {
       size: [roll.widthMm * PT_PER_MM, height],
       margin: 0,
       info: {
-        Title: `${KUDE_TITLE} ${formatDocumentNumber(invoice.establishment, invoice.point, invoice.documentNumber)}`,
+        Title: `${titleOf(invoice)} ${formatDocumentNumber(invoice.establishment, invoice.point, invoice.documentNumber)}`,
         Creator: 'facturacion-sifen',
         Producer: 'facturacion-sifen',
         CreationDate: created,
@@ -143,7 +152,7 @@ class Layout {
 
   private header(invoice: KudeInvoice): void {
     const { issuer, stamp } = invoice;
-    this.block(KUDE_TITLE, { align: 'center', bold: true, size: this.size + 1 });
+    this.block(titleOf(invoice), { align: 'center', bold: true, size: this.size + 1 });
     this.block(issuer.name, { align: 'center', bold: true });
     for (const text of [issuer.tradeName, issuer.activity, issuer.address, issuer.city]) {
       if (text) this.block(text, { align: 'center' });
@@ -154,7 +163,7 @@ class Layout {
     if (stamp.validTo !== undefined) {
       this.block(`Fin de Vigencia: ${formatDateDmy(stamp.validTo)}`, { align: 'center' });
     }
-    this.block('Factura Electrónica', {
+    this.block(invoice.creditNote ? 'Nota de Crédito Electrónica' : 'Factura Electrónica', {
       align: 'center',
       bold: true,
     });
@@ -182,6 +191,14 @@ class Layout {
       rows.push('Razón Social: Sin Nombre');
     }
     if (invoice.transactionType !== undefined) rows.push(`Operación: ${invoice.transactionType}`);
+    if (invoice.creditNote) {
+      const { reason, associatedCdc } = invoice.creditNote;
+      rows.push(
+        `Motivo: ${reason}`,
+        `Factura asociada: ${documentNumberOfCdc(associatedCdc)}`,
+        `CDC asociado: ${groupCdc(associatedCdc)}`,
+      );
+    }
     for (const row of rows) this.block(row);
   }
 

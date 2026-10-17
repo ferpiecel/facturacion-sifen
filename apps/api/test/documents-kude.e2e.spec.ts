@@ -12,7 +12,10 @@ import {
 } from '@sifen/db';
 import { eq } from 'drizzle-orm';
 import { signedInvoiceWithQr } from './support/signed-invoice.js';
-import { pdfText } from '../src/modules/emission/infrastructure/kude/pdf-inspect.test-helper.js';
+import {
+  pageSizes,
+  pdfText,
+} from '../src/modules/emission/infrastructure/kude/pdf-inspect.test-helper.js';
 import { Logger } from '@nestjs/common';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTenant, issueApiKey } from '../src/cli/commands.js';
@@ -158,6 +161,32 @@ describe('GET /v1/documents/{id}/kude (e2e)', () => {
     expect(await pdfText(new Uint8Array(response.rawPayload))).toContain(
       'KuDE de Factura Electrónica',
     );
+  });
+
+  it.each([
+    ['ticket-80', 80, 'kude-001-002-0000001-ticket-80.pdf'],
+    ['ticket-58', 58, 'kude-001-002-0000001-ticket-58.pdf'],
+  ])('returns the %s paper roll KuDE when `format` asks for it', async (format, mm, filename) => {
+    const { document_id: id } = await create(writer);
+    await sign(id);
+
+    const response = await get(`/v1/documents/${id}/kude?format=${format}`, reader);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-disposition']).toBe(`inline; filename="${filename}"`);
+    const [page] = await pageSizes(new Uint8Array(response.rawPayload));
+    expect(page?.w).toBeCloseTo((mm * 72) / 25.4, 1);
+  });
+
+  it('keeps the letter KuDE for `format=letter` and answers 400 for an unknown format', async () => {
+    const { document_id: id } = await create(writer);
+    await sign(id);
+
+    const letter = await get(`/v1/documents/${id}/kude?format=letter`, reader);
+    expect(letter.headers['content-disposition']).toBe(
+      'inline; filename="kude-001-002-0000001.pdf"',
+    );
+    expect((await get(`/v1/documents/${id}/kude?format=a5`, reader)).statusCode).toBe(400);
   });
 
   it('answers 409 while the document has no signed XML', async () => {

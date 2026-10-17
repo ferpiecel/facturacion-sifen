@@ -107,3 +107,14 @@ export function quietZoneRatio(image: QrImage): number {
   }
   return first / image.width;
 }
+
+/** Width and height in points of every page (MediaBox). */
+export async function pageSizes(pdf: Uint8Array): Promise<{ w: number; h: number }[]> {
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(pdf) }).promise;
+  const sizes: { w: number; h: number }[] = [];
+  for (let page = 1; page <= doc.numPages; page += 1) {
+    const [x0, y0, x1, y1] = (await doc.getPage(page)).view as [number, number, number, number];
+    sizes.push({ w: x1 - x0, h: y1 - y0 });
+  }
+  return sizes;
+}

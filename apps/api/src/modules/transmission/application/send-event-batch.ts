@@ -38,6 +38,8 @@ export interface SendEventBatchDeps {
   readonly gateway: Pick<SifenGateway, 'enviarEventos'>;
   readonly store: EventBatchStore;
   readonly nextRequestId: () => Promise<bigint>;
+  /** Where a record failure is reported (ids only, never XML). */
+  readonly logger?: { warn(message: string): void };
   /** Checks a signed event against `siRecepEvento` before it is sent. */
   readonly validate: (xml: string) => {
     readonly valid: boolean;
@@ -97,7 +99,7 @@ export class SendEventBatch {
       );
       if (claimed.length > 0) {
         for (const [id, outcome] of await this.dispatch(dId, claimed)) outcomes.set(id, outcome);
-        await this.deps.store.record(outcomes);
+        await this.recordOnce(outcomes);
       }
     }
     if (outcomes.size === 0 && refused.size === 0) return { status: 'empty' };
@@ -110,6 +112,31 @@ export class SendEventBatch {
       rejected: count('rejected') + refused.size,
       unknown: count('unknown'),
     };
+  }
+
+  /**
+   * The events were already sent, so a failed `record` is retried once (never a resend); if it fails again the
+   * error propagates, the ids are logged and the events stay `sending` for the sweep to turn into `unknown`.
+   */
+  private async recordOnce(outcomes: ReadonlyMap<string, EventOutcome>): Promise<void> {
+    try {
+      await this.deps.store.record(outcomes);
+    } catch (first) {
+      const ids = [...outcomes.keys()].join(', ');
+      const name = first instanceof Error ? first.name : 'unknown error';
+      this.deps.logger?.warn(
+        `Recording the outcome of events ${ids} failed (${name}); retrying once`,
+      );
+      try {
+        await this.deps.store.record(outcomes);
+      } catch (second) {
+        const again = second instanceof Error ? second.name : 'unknown error';
+        this.deps.logger?.warn(
+          `Recording events ${ids} failed again (${again}); left to the sweep`,
+        );
+        throw second;
+      }
+    }
   }
 
   private async dispatch(

@@ -6,7 +6,10 @@ import { createGetKude } from '../emission/application/get-kude.js';
 import { PdfkitKudeRenderer } from '../emission/infrastructure/kude/pdfkit-kude-renderer.js';
 import { createGetPortalDocument, createGetPortalXml } from './application/get-portal-document.js';
 import { createGetPortalSummary } from './application/get-portal-summary.js';
+import { createListAttentionDocuments } from './application/list-attention-documents.js';
 import { createListPortalDocuments } from './application/list-portal-documents.js';
+import { PortalAttentionController } from './infrastructure/portal-attention.controller.js';
+import { SqlPortalAttentionSource } from './infrastructure/sql-portal-attention-source.js';
 import { PortalDocumentsController } from './infrastructure/portal-documents.controller.js';
 import { PortalSummaryController } from './infrastructure/portal-summary.controller.js';
 import { SqlPortalDocumentSource } from './infrastructure/sql-portal-document-source.js';
@@ -15,6 +18,7 @@ import {
   GET_PORTAL_KUDE,
   GET_PORTAL_SUMMARY,
   GET_PORTAL_XML,
+  LIST_ATTENTION_DOCUMENTS,
   LIST_PORTAL_DOCUMENTS,
   PORTAL_CLOCK,
 } from './portal-documents.tokens.js';
@@ -31,10 +35,10 @@ function portalProvider(token: symbol, build: (source: SqlPortalDocumentSource) 
   };
 }
 
-/** HU-E12-01/02/03. Without a `DATABASE` the app still boots and the routes answer 503. */
+/** HU-E12-01/02/03/04. Without a `DATABASE` the app still boots and the routes answer 503. */
 @Module({
   imports: [PortalAuthModule],
-  controllers: [PortalDocumentsController, PortalSummaryController],
+  controllers: [PortalDocumentsController, PortalSummaryController, PortalAttentionController],
   providers: [
     { provide: PORTAL_CLOCK, useValue: () => new Date() },
     {
@@ -42,6 +46,14 @@ function portalProvider(token: symbol, build: (source: SqlPortalDocumentSource) 
       useFactory: (db: Database | null, now: () => Date) =>
         db
           ? createGetPortalSummary({ source: new SqlPortalSummarySource(db), now })
+          : () => Promise.reject(new ServiceUnavailableException()),
+      inject: [DATABASE, PORTAL_CLOCK],
+    },
+    {
+      provide: LIST_ATTENTION_DOCUMENTS,
+      useFactory: (db: Database | null, now: () => Date) =>
+        db
+          ? createListAttentionDocuments({ source: new SqlPortalAttentionSource(db), now })
           : () => Promise.reject(new ServiceUnavailableException()),
       inject: [DATABASE, PORTAL_CLOCK],
     },

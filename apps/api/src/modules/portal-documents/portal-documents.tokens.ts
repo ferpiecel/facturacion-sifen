@@ -15,3 +15,6 @@ export const GET_PORTAL_SUMMARY = Symbol('GetPortalSummary');
 
 /** Injection token for the clock (`() => Date`) the summary measures the 72 h window against; tests replace it. */
 export const PORTAL_CLOCK = Symbol('PortalClock');
+
+/** Injection token for the `listAttentionDocuments` application function (HU-E12-04). */
+export const LIST_ATTENTION_DOCUMENTS = Symbol('ListAttentionDocuments');

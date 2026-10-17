@@ -1,7 +1,11 @@
 import { render, screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import HomePage from './page';
+
+vi.mock('../../features/panel/recent-documents', () => ({
+  RecentDocuments: () => <section aria-label="Comprobantes recientes" />,
+}));
 
 describe('HomePage (Panel de Control)', () => {
   it('welcomes the user with the brand name in a single top-level heading', () => {
@@ -10,7 +14,7 @@ describe('HomePage (Panel de Control)', () => {
     expect(
       screen.getByRole('heading', { level: 1, name: '¡Bienvenido a SifenFlow!' }),
     ).toBeInTheDocument();
-    expect(screen.getByText('Datos de ejemplo')).toBeInTheDocument();
+    expect(screen.queryByText(/Datos de ejemplo/)).not.toBeInTheDocument();
   });
 
   it('shows the brand only as a logo, with no brand wordmark or DNIT tagline next to it', () => {
@@ -39,25 +43,18 @@ describe('HomePage (Panel de Control)', () => {
     expect(within(nav).getAllByRole('link')).toHaveLength(3);
   });
 
-  it('lists recent documents with status, 44-digit CDC and Guaraní amounts', () => {
-    render(<HomePage />);
-
-    const table = screen.getByRole('table');
-    const rows = within(table).getAllByRole('row');
-    expect(rows).toHaveLength(6);
-    expect(within(table).getAllByText('Aprobado SIFEN')).toHaveLength(5);
-    expect(within(table).getAllByRole('button', { name: 'Copiar CDC' })).toHaveLength(5);
-    expect(within(table).getByText('01-80012345-0...585')).toBeInTheDocument();
-    expect(within(table).getByText('₲ 12.850.000')).toBeInTheDocument();
-    expect(within(table).getByText('-₲ 650.000')).toHaveClass('text-error');
-  });
-
   it('labels icon-only controls for assistive technology', () => {
     render(<HomePage />);
 
     expect(screen.getByRole('button', { name: 'Notificaciones' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Cerrar sesión' })).toBeInTheDocument();
     expect(screen.getByRole('searchbox', { name: 'Buscar comprobantes' })).toBeInTheDocument();
+  });
+
+  it('hosts the recent documents section', () => {
+    render(<HomePage />);
+
+    expect(screen.getByRole('region', { name: 'Comprobantes recientes' })).toBeInTheDocument();
   });
 
   it('keeps the hero text readable over the whole gradient', () => {
@@ -67,17 +64,5 @@ describe('HomePage (Panel de Control)', () => {
     expect(hero).toHaveClass('to-primary-container');
     expect(hero?.className).not.toContain('surface-container-high');
     expect(screen.getByText(/Tu asistente inteligente/)).toHaveClass('text-white');
-  });
-
-  it('gives the documents table an accessible name, column scopes and a focusable scroll area', () => {
-    render(<HomePage />);
-
-    const table = screen.getByRole('table', { name: 'Comprobantes Electrónicos Recientes' });
-    for (const header of within(table).getAllByRole('columnheader')) {
-      expect(header).toHaveAttribute('scope', 'col');
-    }
-    const scroller = screen.getByRole('region', { name: 'Tabla de comprobantes recientes' });
-    expect(scroller).toHaveAttribute('tabindex', '0');
-    expect(scroller).toContainElement(table);
   });
 });

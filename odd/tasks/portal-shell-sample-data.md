@@ -5,7 +5,7 @@ Objetivo: el panel y el encabezado dejan de mostrar datos de ejemplo y usan la A
 ## Tareas
 
 - [x] T1 (PR 1) Empresa activa y rol del usuario desde `/auth/me` + `/auth/tenants` (contexto `IdentityProvider`).
-- [ ] T2 (PR 2) "Comprobantes recientes" con `GET /portal/documents?pageSize=5`.
+- [x] T2 (PR 2) "Comprobantes recientes" con `GET /portal/documents?pageSize=5`.
 
 ## Pendiente de API
 

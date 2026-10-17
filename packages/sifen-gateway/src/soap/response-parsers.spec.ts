@@ -3,6 +3,8 @@ import { SifenFaultError, SifenProtocolError } from '../errors.ts';
 import {
   CDC_A,
   DE_XML,
+  EVENTO_CANCELACION_XML,
+  consDEConEventosXml,
   consDEEncontradoXml,
   consDEInexistenteXml,
   consRUCEncontradoXml,
@@ -154,6 +156,16 @@ describe('parseConsultaDE', () => {
       dCodRes: '0422',
       dMsgRes: 'CDC encontrado',
       xmlDE: DE_XML,
+      eventos: [],
+    });
+  });
+
+  it('returns the events registered on the DTE, each as its exact source', () => {
+    expect(parseConsultaDE(consDEConEventosXml)).toEqual({
+      dCodRes: '0422',
+      dMsgRes: 'CDC encontrado',
+      xmlDE: DE_XML,
+      eventos: [EVENTO_CANCELACION_XML],
     });
   });
 
@@ -162,6 +174,7 @@ describe('parseConsultaDE', () => {
       dCodRes: '0420',
       dMsgRes: 'CDC inexistente',
       xmlDE: null,
+      eventos: [],
     });
   });
 });

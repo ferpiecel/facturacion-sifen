@@ -1387,6 +1387,73 @@ export const payments = pgTable(
   ],
 );
 
+export const INVOICE_SAAS_STATUSES = ['draft', 'issued', 'paid', 'void'] as const;
+
+/** Invoices of the SaaS itself to the tenant (not the tenant's own DE). One per subscription and month. */
+export const invoicesSaas = pgTable(
+  'invoices_saas',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    subscriptionId: uuid('subscription_id').notNull(),
+    period: date('period', { mode: 'string' }).notNull(),
+    amount: bigint('amount', { mode: 'number' }).notNull(),
+    currency: char('currency', { length: 3 }).notNull().default('PYG'),
+    status: text('status').notNull().default('draft'),
+    issuedAt: timestamp('issued_at', { withTimezone: true }),
+    pdfUrl: text('pdf_url'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'invoices_saas_subscription_fk',
+      columns: [table.tenantId, table.subscriptionId],
+      foreignColumns: [subscriptions.tenantId, subscriptions.id],
+    }),
+    unique('invoices_saas_subscription_period_key').on(table.subscriptionId, table.period),
+    check('invoices_saas_amount_nonneg', sql`${table.amount} >= 0`),
+    check(
+      'invoices_saas_period_first_day',
+      sql`${table.period} = date_trunc('month', ${table.period}::timestamp)::date`,
+    ),
+    check(
+      'invoices_saas_status_valid',
+      sql`${table.status} IN (${sqlList(INVOICE_SAAS_STATUSES)})`,
+    ),
+  ],
+);
+
+/**
+ * Usage per tenant and month (HU-E15-02). Incremented with a single
+ * `INSERT ... ON CONFLICT DO UPDATE`; a trigger forbids decrements.
+ */
+export const usageCounters = pgTable(
+  'usage_counters',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    period: date('period', { mode: 'string' }).notNull(),
+    documentsIssued: bigint('documents_issued', { mode: 'number' }).notNull().default(0),
+    apiCalls: bigint('api_calls', { mode: 'number' }).notNull().default(0),
+    notificationsSent: bigint('notifications_sent', { mode: 'number' }).notNull().default(0),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ name: 'usage_counters_pkey', columns: [table.tenantId, table.period] }),
+    check(
+      'usage_counters_period_first_day',
+      sql`${table.period} = date_trunc('month', ${table.period}::timestamp)::date`,
+    ),
+    check(
+      'usage_counters_nonneg',
+      sql`${table.documentsIssued} >= 0 AND ${table.apiCalls} >= 0 AND ${table.notificationsSent} >= 0`,
+    ),
+  ],
+);
+
 /**
  * Every table that carries a `tenant_id` column and MUST be covered by
  * `FORCE ROW LEVEL SECURITY` plus a tenant-isolation policy. The
@@ -1399,6 +1466,7 @@ export const TENANT_TABLES = [
   'documents',
   'issuer_events',
   'lote_documents',
+  'invoices_saas',
   'lotes',
   'payments',
   'subscriptions',
@@ -1413,6 +1481,7 @@ export const TENANT_TABLES = [
   'tenant_probe',
   'tenant_request_sequences',
   'tenant_timbrados',
+  'usage_counters',
   'webhook_deliveries',
   'webhook_endpoints',
 ] as const;

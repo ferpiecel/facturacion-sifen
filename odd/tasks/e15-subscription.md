@@ -20,7 +20,7 @@
 
 ## Tasks
 
-- [ ] T1 (PR 1, db) migration 0050: plans, subscriptions, payments, RLS, tests
-- [ ] T1b (PR 2, db) migration 0051: invoices_saas and usage_counters (increment-only trigger), tests
+- [x] T1 (PR 1, db) migration 0050: plans, subscriptions, payments, RLS, tests
+- [x] T1b (PR 2, db) migration 0051: invoices_saas and usage_counters (increment-only trigger), tests
 - [ ] T2 (PR 2, api) hexagonal `billing` module: domain, ports, Drizzle adapter, use cases (assign plan, record payment, record usage, get usage with 80 % warning)
 - [ ] T3 (PR 3, api) ops CLI `plan:create`, `plan:assign`, `payment:record`; usage hook on document acceptance

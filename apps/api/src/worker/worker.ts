@@ -35,6 +35,7 @@ import {
   createWebhookDeliveryDeps,
   createWebhookDeliveryProcessor,
 } from './webhook-delivery.processor.js';
+import { withCircuitBreaker } from './resilient-gateway.js';
 import { createWorkerGateway } from './worker-gateway.js';
 import { loadWorkerConfig, WorkerConfigError } from './worker-config.js';
 
@@ -65,7 +66,9 @@ function required(env: NodeJS.ProcessEnv, name: string): string {
 
 async function main(env: NodeJS.ProcessEnv): Promise<void> {
   const config = loadWorkerConfig(env);
-  const gateway = createWorkerGateway(env);
+  const baseGateway = createWorkerGateway(env);
+  // One circuit breaker per SIFEN endpoint, shared by every tenant (HU-E6-08).
+  const { gateway, sendPausedUntil } = withCircuitBreaker(baseGateway, { logger });
 
   // Tenant work runs as app_login/app_user under RLS; only the tenant listing uses platform_admin.
   const appHandle = createNodePostgresDatabase(required(env, 'DATABASE_URL'));
@@ -89,6 +92,7 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
     createCycle: createTenantCycleFactory({
       db: appHandle.db,
       gateway,
+      sendPausedUntil,
       certificates: createCertificateSource({
         db: appHandle.db,
         vault: certificateCache,
@@ -116,7 +120,7 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
     directory: createDrizzleTenantDirectory(platformHandle.db),
     schedules: createTenantScheduleStore(queue),
     process: guardSimulatorTenants({
-      simulator: gateway instanceof FakeSifenGateway,
+      simulator: baseGateway instanceof FakeSifenGateway,
       environments: createDrizzleTenantEnvironments(platformHandle.db),
       logger,
       process: (data: TransmissionJobData) => processor.process(data),

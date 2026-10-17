@@ -18,6 +18,11 @@ export interface LoteDispatchStore {
 export interface SendLoteDeps {
   readonly gateway: Pick<SifenGateway, 'enviarLote'>;
   readonly store: LoteDispatchStore;
+  /**
+   * When the send endpoint is paused by its circuit breaker, the instant it may be tried again;
+   * `null` when sending is allowed. Checked before the claim, so a paused endpoint leaves no trace.
+   */
+  readonly pausedUntil?: () => Date | null;
 }
 
 export interface SendLoteCommand {
@@ -26,12 +31,21 @@ export interface SendLoteCommand {
   readonly lote: Lote;
 }
 
-export type SendLoteResult = LoteDispatchOutcome | { readonly status: 'already-claimed' };
+/** The endpoint's circuit is open: nothing was claimed or sent; the lote stays `pending` until `retryAt`. */
+export interface LoteDeferred {
+  readonly status: 'deferred';
+  readonly retryAt: Date;
+}
+
+export type SendLoteResult =
+  LoteDispatchOutcome | LoteDeferred | { readonly status: 'already-claimed' };
 
 /**
  * Sends a built lote to SIFEN exactly once and records the outcome (plan 8.1, ADR-0007).
  * If `record` fails after the send, the error propagates and the lote stays `sending`;
  * HU-E6-04 recovers a stale `sending` lote as `unknown` by querying SIFEN. Never resent.
+ * An open circuit (HU-E6-08) defers before the claim: the lote stays `pending`. If the circuit opens
+ * between that check and the call, the refusal is recorded as `unknown` and recovered by CDC: safe, never resent.
  * @throws EmptyLoteError before anything is claimed or sent.
  */
 export class SendLote {
@@ -39,6 +53,8 @@ export class SendLote {
 
   async execute(command: SendLoteCommand): Promise<SendLoteResult> {
     if (command.lote.documents.length === 0) throw new EmptyLoteError();
+    const retryAt = this.deps.pausedUntil?.() ?? null;
+    if (retryAt) return { status: 'deferred', retryAt };
     if (!(await this.deps.store.claim(command.loteId))) return { status: 'already-claimed' };
 
     const outcome = await this.dispatch(command);

@@ -15,6 +15,7 @@ export {
   documents,
   fiscalTaxpayerType,
   LOTE_STATUSES,
+  issuerEvents,
   loteDocuments,
   lotes,
   partnerMemberships,

@@ -1246,6 +1246,102 @@ export const issuerEvents = pgTable(
   ],
 );
 
+export const SUBSCRIPTION_STATUSES = ['trialing', 'active', 'past_due', 'cancelled'] as const;
+
+/**
+ * SaaS plans (HU-E15-01). Platform-level catalog, no `tenant_id`: `app_user` reads it,
+ * only `platform_admin` writes it. Price and limits are nullable data (open product
+ * question P3), seeded through the ops CLI; a null limit means "not defined".
+ */
+export const plans = pgTable(
+  'plans',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    code: varchar('code', { length: 64 }).notNull().unique(),
+    name: varchar('name', { length: 255 }).notNull(),
+    currency: char('currency', { length: 3 }).notNull().default('PYG'),
+    monthlyPrice: bigint('monthly_price', { mode: 'number' }),
+    documentLimit: integer('document_limit'),
+    apiCallLimit: integer('api_call_limit'),
+    features: jsonb('features')
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    active: boolean('active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check('plans_code_format', sql`${table.code} ~ '^[a-z0-9]+(-[a-z0-9]+)*$'`),
+    check(
+      'plans_monthly_price_nonneg',
+      sql`${table.monthlyPrice} IS NULL OR ${table.monthlyPrice} >= 0`,
+    ),
+    check(
+      'plans_document_limit_nonneg',
+      sql`${table.documentLimit} IS NULL OR ${table.documentLimit} >= 0`,
+    ),
+    check(
+      'plans_api_call_limit_nonneg',
+      sql`${table.apiCallLimit} IS NULL OR ${table.apiCallLimit} >= 0`,
+    ),
+  ],
+);
+
+/** A tenant's plan over time; at most one non-cancelled row per tenant. Written by ops only. */
+export const subscriptions = pgTable(
+  'subscriptions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    planId: uuid('plan_id')
+      .notNull()
+      .references(() => plans.id),
+    status: text('status').notNull().default('active'),
+    startsAt: timestamp('starts_at', { withTimezone: true }).notNull().defaultNow(),
+    endsAt: timestamp('ends_at', { withTimezone: true }),
+    nextBillingAt: timestamp('next_billing_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('subscriptions_tenant_id_key').on(table.tenantId, table.id),
+    uniqueIndex('subscriptions_one_live_per_tenant')
+      .on(table.tenantId)
+      .where(sql`${table.status} <> 'cancelled'`),
+    check(
+      'subscriptions_status_valid',
+      sql`${table.status} IN (${sqlList(SUBSCRIPTION_STATUSES)})`,
+    ),
+  ],
+);
+
+/** Manual payments recorded by ops (no gateway before v1.0). Append-only. */
+export const payments = pgTable(
+  'payments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    subscriptionId: uuid('subscription_id').notNull(),
+    amount: bigint('amount', { mode: 'number' }).notNull(),
+    currency: char('currency', { length: 3 }).notNull().default('PYG'),
+    method: text('method').notNull().default('manual'),
+    reference: text('reference'),
+    paidAt: timestamp('paid_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'payments_subscription_fk',
+      columns: [table.tenantId, table.subscriptionId],
+      foreignColumns: [subscriptions.tenantId, subscriptions.id],
+    }),
+    check('payments_amount_positive', sql`${table.amount} > 0`),
+    check('payments_method_valid', sql`${table.method} IN ('manual')`),
+  ],
+);
+
 /**
  * Every table that carries a `tenant_id` column and MUST be covered by
  * `FORCE ROW LEVEL SECURITY` plus a tenant-isolation policy. The
@@ -1259,6 +1355,8 @@ export const TENANT_TABLES = [
   'issuer_events',
   'lote_documents',
   'lotes',
+  'payments',
+  'subscriptions',
   'tenant_document_sequences',
   'tenant_establishments',
   'tenant_expedition_points',

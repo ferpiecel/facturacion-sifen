@@ -66,3 +66,14 @@ export { SoapSifenGateway } from './soap/soap-sifen-gateway.ts';
 export type { SoapSifenGatewayOptions } from './soap/soap-sifen-gateway.ts';
 export { createSoapSifenGateway } from './soap/create-soap-gateway.ts';
 export type { CreateSoapSifenGatewayOptions } from './soap/create-soap-gateway.ts';
+export { CircuitBreaker } from './resilience/circuit-breaker.ts';
+export type {
+  Acquisition,
+  CircuitBreakerOptions,
+  CircuitState,
+} from './resilience/circuit-breaker.ts';
+export {
+  CircuitBreakerGateway,
+  SifenCircuitOpenError,
+} from './resilience/circuit-breaker-gateway.ts';
+export type { CircuitBreakerGatewayOptions } from './resilience/circuit-breaker-gateway.ts';

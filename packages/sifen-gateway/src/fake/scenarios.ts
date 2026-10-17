@@ -66,13 +66,23 @@ export function deAutorizado(dProtAut: string): SifenProtocoloDE {
 }
 
 /** Builds a `siConsDE` "CDC encontrado" (0422) response. */
-export function cdcEncontrado(xmlDE: string): SifenConsDE {
-  return { dCodRes: SIFEN_CODES.CDC_ENCONTRADO, dMsgRes: 'CDC encontrado', xmlDE };
+export function cdcEncontrado(xmlDE: string, eventos: readonly string[] = []): SifenConsDE {
+  return {
+    dCodRes: SIFEN_CODES.CDC_ENCONTRADO,
+    dMsgRes: 'CDC encontrado',
+    xmlDE,
+    eventos: [...eventos],
+  };
 }
 
 /** Builds a `siConsDE` "CDC inexistente" (0420) response. */
 export function cdcInexistente(): SifenConsDE {
-  return { dCodRes: SIFEN_CODES.CDC_INEXISTENTE, dMsgRes: 'CDC inexistente', xmlDE: null };
+  return {
+    dCodRes: SIFEN_CODES.CDC_INEXISTENTE,
+    dMsgRes: 'CDC inexistente',
+    xmlDE: null,
+    eventos: [],
+  };
 }
 
 /** Builds a `siConsDE` "RUC del certificado sin permiso" (0421) response, per MT Tabla G. */
@@ -81,6 +91,7 @@ export function rucCertificadoSinPermiso(): SifenConsDE {
     dCodRes: SIFEN_CODES.RUC_CERTIFICADO_SIN_PERMISO,
     dMsgRes: 'RUC del certificado sin permiso para consultar el DE',
     xmlDE: null,
+    eventos: [],
   };
 }
 

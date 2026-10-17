@@ -70,9 +70,7 @@ export function createListAttentionDocuments(deps: {
     });
 
     const items = rows.flatMap((row): AttentionItem[] => {
-      const deadline = row.signedAt
-        ? new Date(row.signedAt.getTime() + TRANSMISSION_WINDOW_MS)
-        : null;
+      const deadline = row.signedAt ? transmissionDeadline(row.signedAt) : null;
       const reasons = reasonsOf(row, deadline, now);
       if (reasons.length === 0) return [];
       return [
@@ -80,9 +78,7 @@ export function createListAttentionDocuments(deps: {
           ...toPortalDocumentItem(row),
           reasons,
           deadline: deadline?.toISOString() ?? null,
-          hoursRemaining: deadline
-            ? Math.max(0, Math.round((deadline.getTime() - now.getTime()) / 360_000) / 10)
-            : null,
+          hoursRemaining: deadline ? hoursRemaining(deadline, now) : null,
           hold: row.transmissionHold,
           rejectionReason: rejectionReasonOf(row.status, parseSifenMessages(row.sifenMessages)),
         },

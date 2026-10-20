@@ -3,7 +3,10 @@ import type { Lote } from '../domain/lote-builder.js';
 import type { LoteAssembler } from './assemble-lotes.js';
 import type { PollLoteResult } from './poll-lote-result.js';
 import type { RecoverLoteByCdc } from './recover-lote-by-cdc.js';
+import type { ResolveUnknownEvents, ResolveUnknownEventsResult } from './resolve-unknown-events.js';
+import type { SendEventBatch, SendEventBatchResult } from './send-event-batch.js';
 import type { SendLote } from './send-lote.js';
+import type { SignPendingEvent } from './sign-pending-event.js';
 
 /** A `pending` lote with the signed documents it carries, ready for `SendLote`. */
 export interface PendingLote {
@@ -64,7 +67,17 @@ export const DETERMINISTIC_SIGNING_ERRORS: ReadonlySet<string> = new Set([
   'SigningMismatchError',
 ]);
 
+/** The issuer-event steps of a tenant's cycle (HU-E8-04): sign, send in batches of up to 15, resolve the unknown. */
+export interface TransmissionCycleEvents {
+  /** `pending` events of the tenant's current environment, oldest first. */
+  pendingEventIds(limit: number): Promise<readonly string[]>;
+  readonly signer: Pick<SignPendingEvent, 'execute'>;
+  readonly sender: Pick<SendEventBatch, 'execute'>;
+  readonly resolver: Pick<ResolveUnknownEvents, 'execute'>;
+}
+
 export interface TransmissionCycleBatch {
+  readonly signEvent?: number;
   readonly sign?: number;
   readonly send?: number;
   readonly poll?: number;
@@ -81,6 +94,8 @@ export interface TransmissionCycleDeps {
   readonly poller: Pick<PollLoteResult, 'execute'>;
   readonly recoverer: Pick<RecoverLoteByCdc, 'execute'>;
   readonly batch?: TransmissionCycleBatch;
+  /** Absent: the cycle handles documents only. */
+  readonly events?: TransmissionCycleEvents;
   readonly now?: () => Date;
   /** A `pending` lote older than this is reported as stale (default 15 minutes). */
   readonly stalePendingAfterMs?: number;
@@ -89,7 +104,8 @@ export interface TransmissionCycleDeps {
   readonly logger?: { warn(message: string): void };
 }
 
-export type CycleStep = 'sign' | 'assemble' | 'send' | 'poll' | 'recover';
+export type CycleStep =
+  'sign' | 'assemble' | 'send' | 'poll' | 'recover' | 'sign-event' | 'send-event' | 'resolve-event';
 
 export interface CycleFailure {
   readonly step: CycleStep;
@@ -116,11 +132,25 @@ export interface CycleReport {
   readonly held: readonly HeldDocument[];
   /** `pending` lotes older than `stalePendingAfterMs`. */
   readonly stalePending: number;
+  /** What the issuer-event steps did; absent when the cycle has no events wired. */
+  readonly events?: {
+    readonly signed: number;
+    readonly signSkipped: number;
+    readonly send?: SendEventBatchResult;
+    readonly resolve?: ResolveUnknownEventsResult;
+  };
   /** Present when the run stopped early because its signal aborted (the tenant run lock was lost). */
   readonly aborted?: true;
 }
 
-const DEFAULT_BATCH = { sign: 50, send: 20, poll: 20, recover: 10, sweep: 100 } as const;
+const DEFAULT_BATCH = {
+  signEvent: 20,
+  sign: 50,
+  send: 20,
+  poll: 20,
+  recover: 10,
+  sweep: 100,
+} as const;
 const DEFAULT_STALE_PENDING_MS = 15 * 60_000;
 const DEFAULT_STALE_SENDING_MS = 30 * 60_000;
 const HELD_REPORT_LIMIT = 50;
@@ -153,6 +183,7 @@ export class TransmissionCycle {
     const sending = await this.sendPending();
     const polled = await this.pollDue();
     const recovered = await this.recoverDue();
+    const events = await this.runEvents();
     const held =
       (await this.guard('sign', undefined, () =>
         this.deps.store.heldDocuments(HELD_REPORT_LIMIT),
@@ -169,6 +200,7 @@ export class TransmissionCycle {
       polled,
       recovered,
       sweptSending,
+      ...(events ? { events } : {}),
       failures: this.failures,
       held,
       stalePending,
@@ -258,6 +290,27 @@ export class TransmissionCycle {
       if (result) recovered.push({ loteId, status: result.status });
     }
     return recovered;
+  }
+
+  /** Sign what is pending, send one batch, then look into the events that got no answer. */
+  private async runEvents(): Promise<CycleReport['events']> {
+    const wired = this.deps.events;
+    if (!wired) return undefined;
+    let signed = 0;
+    let signSkipped = 0;
+    const ids = await this.guard('sign-event', undefined, () =>
+      wired.pendingEventIds(this.batch.signEvent),
+    );
+    for (const eventId of ids ?? []) {
+      const result = await this.guard('sign-event', eventId, () =>
+        wired.signer.execute({ tenantId: this.deps.tenantId, eventId }),
+      );
+      if (result?.status === 'signed') signed += 1;
+      else if (result) signSkipped += 1;
+    }
+    const send = await this.guard('send-event', undefined, () => wired.sender.execute());
+    const resolve = await this.guard('resolve-event', undefined, () => wired.resolver.execute());
+    return { signed, signSkipped, ...(send ? { send } : {}), ...(resolve ? { resolve } : {}) };
   }
 
   private clock(): Date {

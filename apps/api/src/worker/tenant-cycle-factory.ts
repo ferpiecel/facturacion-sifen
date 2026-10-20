@@ -1,4 +1,10 @@
-import { TipsDeXmlBuilder, TipsQrGenerator, TipsXmlSigner } from '@sifen/sifen-tips';
+import {
+  TipsDeXmlBuilder,
+  TipsEventSigner,
+  TipsEventXmlBuilder,
+  TipsQrGenerator,
+  TipsXmlSigner,
+} from '@sifen/sifen-tips';
 import type { Database } from '@sifen/db';
 import { measureLoteMessage, type SifenGateway } from '@sifen/sifen-gateway';
 import type {
@@ -15,11 +21,18 @@ import {
   assertMaxQueries,
   RecoverLoteByCdc,
 } from '../modules/transmission/application/recover-lote-by-cdc.js';
+import { ResolveUnknownEvents } from '../modules/transmission/application/resolve-unknown-events.js';
+import { SendEventBatch } from '../modules/transmission/application/send-event-batch.js';
 import { SendLote } from '../modules/transmission/application/send-lote.js';
+import { SignPendingEvent } from '../modules/transmission/application/sign-pending-event.js';
 import {
   TransmissionCycle,
   type TransmissionCycleBatch,
 } from '../modules/transmission/application/transmission-cycle.js';
+import { createDrizzleEventBatchStore } from '../modules/transmission/infrastructure/drizzle-event-batch-store.js';
+import { createDrizzleEventRecoveryStore } from '../modules/transmission/infrastructure/drizzle-event-recovery-store.js';
+import { createDrizzleEventSigningStore } from '../modules/transmission/infrastructure/drizzle-event-signing-store.js';
+import { validateEventXml } from '../modules/transmission/infrastructure/event-xsd-validator.js';
 import { createDrizzleResendPreflightStore } from '../modules/transmission/infrastructure/drizzle-resend-preflight-store.js';
 import { createDrizzleLoteAssemblyStore } from '../modules/transmission/infrastructure/drizzle-lote-assembly-store.js';
 import { createDrizzleLoteDispatchStore } from '../modules/transmission/infrastructure/drizzle-lote-dispatch-store.js';
@@ -59,6 +72,7 @@ export function createTenantCycleFactory({
   assertMaxQueries(recoveryMaxQueries);
   return (tenantId) => {
     const store = createDrizzleTransmissionCycleStore({ db, tenantId, now });
+    const eventSigning = createDrizzleEventSigningStore({ db, tenantId });
     return new TransmissionCycle({
       tenantId,
       store,
@@ -98,6 +112,29 @@ export function createTenantCycleFactory({
         now,
         maxQueries: recoveryMaxQueries,
       }),
+      events: {
+        pendingEventIds: (limit) => eventSigning.pendingEventIds(limit),
+        signer: new SignPendingEvent({
+          store: eventSigning,
+          certificates,
+          builder: new TipsEventXmlBuilder(),
+          signer: new TipsEventSigner(),
+          now,
+        }),
+        sender: new SendEventBatch({
+          gateway,
+          store: createDrizzleEventBatchStore({ db, tenantId, now }),
+          nextRequestId: () => store.nextRequestId(),
+          validate: validateEventXml,
+          logger,
+        }),
+        resolver: new ResolveUnknownEvents({
+          gateway,
+          store: createDrizzleEventRecoveryStore({ db, tenantId, now }),
+          nextRequestId: () => store.nextRequestId(),
+          now,
+        }),
+      },
       now,
       logger,
       batch,

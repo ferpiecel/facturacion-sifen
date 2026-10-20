@@ -135,7 +135,7 @@ describe('parseCreateDebitNote', () => {
   const NDE = { ...NCE, type: 'NDE' };
 
   it('accepts a debit note and defaults the rounding and currency', () => {
-    const { roundingPyg: _omitted, ...withoutRounding } = NDE;
+    const withoutRounding = { ...NDE, roundingPyg: undefined };
     const result = parseCreateDebitNote(withoutRounding);
     expect(result).toMatchObject({
       ok: true,

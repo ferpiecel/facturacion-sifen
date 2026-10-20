@@ -43,6 +43,13 @@ export class EventNotFoundError extends Error {
   }
 }
 
+export class EventIdOutOfRangeError extends Error {
+  constructor() {
+    super('issuer event id is beyond the safe integer range');
+    this.name = 'EventIdOutOfRangeError';
+  }
+}
+
 export class EventEnvironmentMismatchError extends Error {
   constructor() {
     super('issuer event environment differs from the tenant environment');
@@ -108,7 +115,7 @@ function toIssuerEvent(event: EventToSign): IssuerEvent {
  * `pending`. The `.p12` only lives in memory and is zeroized however the run ends. The signing instant is
  * the one the event carries (`dFecFirma`, Asunción time).
  *
- * @throws EventNotFoundError, EventEnvironmentMismatchError, EventKindNotSignableError,
+ * @throws EventNotFoundError, EventIdOutOfRangeError, EventEnvironmentMismatchError, EventKindNotSignableError,
  *   EventDataIncompleteError, and the certificate source's typed errors.
  */
 export class SignPendingEvent {
@@ -125,13 +132,14 @@ export class SignPendingEvent {
     if (!event) throw new EventNotFoundError();
     if (event.status !== 'pending') return { status: 'skipped', eventStatus: event.status };
     if (event.environment !== event.tenantEnvironment) throw new EventEnvironmentMismatchError();
+    if (event.eventId > BigInt(Number.MAX_SAFE_INTEGER)) throw new EventIdOutOfRangeError();
     const issuerEvent = toIssuerEvent(event);
 
     const signedAt = (this.deps.now ?? (() => new Date()))();
     const certificate = await this.deps.certificates.open(tenantId, event.environment);
     try {
       const unsigned = await this.deps.builder.build({
-        eventId: event.eventId > BigInt(Number.MAX_SAFE_INTEGER) ? 0 : Number(event.eventId),
+        eventId: Number(event.eventId),
         event: issuerEvent,
         signedAt,
       });

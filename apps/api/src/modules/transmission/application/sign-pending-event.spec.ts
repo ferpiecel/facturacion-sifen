@@ -3,6 +3,7 @@ import type { EventSigner, EventXmlBuilder, IssuerEventBuildInput } from '@sifen
 import {
   EventDataIncompleteError,
   EventEnvironmentMismatchError,
+  EventIdOutOfRangeError,
   EventKindNotSignableError,
   EventNotFoundError,
   SignPendingEvent,
@@ -127,6 +128,13 @@ describe('SignPendingEvent', () => {
       reason: 'Error en los datos',
       series: 'AB',
     });
+  });
+
+  it('refuses an event id beyond the safe integer range instead of signing with another id', async () => {
+    const { sign } = setup([cancellation({ eventId: BigInt(Number.MAX_SAFE_INTEGER) + 1n })]);
+    await expect(sign.execute({ tenantId: 't', eventId: 'ev-1' })).rejects.toBeInstanceOf(
+      EventIdOutOfRangeError,
+    );
   });
 
   it('zeroizes the certificate however the run ends', async () => {

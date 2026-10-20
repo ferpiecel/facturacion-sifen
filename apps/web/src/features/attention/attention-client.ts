@@ -5,8 +5,18 @@
 import type { DocumentItem } from '../documents/documents-client';
 import { createPortalHttp, type Failure, type PortalHttpOptions } from '../documents/portal-http';
 
-export const ATTENTION_REASONS = ['overdue', 'held', 'rejected', 'due_soon'] as const;
+export const ATTENTION_REASONS = ['overdue', 'held', 'due_soon', 'rejected'] as const;
 export type AttentionReason = (typeof ATTENTION_REASONS)[number];
+
+/** Stable codes of why the pipeline stopped on a document (`GET /portal/attention`). */
+export const HOLD_CODES = [
+  'signing_failed',
+  'attempts_exhausted',
+  'recovery_unresolved',
+  'recovery_attempts_exhausted',
+  'unknown',
+] as const;
+export type HoldCode = (typeof HOLD_CODES)[number];
 
 export interface AttentionItem extends DocumentItem {
   /** Most urgent first. */
@@ -15,8 +25,7 @@ export interface AttentionItem extends DocumentItem {
   deadline: string | null;
   /** Hours left to the deadline, zero once it has passed. */
   hoursRemaining: number | null;
-  /** Plain code of why the pipeline stopped on the document. */
-  hold: string | null;
+  hold: HoldCode | null;
   /** SIFEN's own words for the rejection. */
   rejectionReason: string | null;
 }
@@ -53,7 +62,7 @@ const isItem = (item: unknown): item is AttentionItem =>
   item.reasons.every((r) => (ATTENTION_REASONS as readonly unknown[]).includes(r)) &&
   isNullable(item.deadline, 'string') &&
   isNullable(item.hoursRemaining, 'number') &&
-  isNullable(item.hold, 'string') &&
+  (item.hold === null || (HOLD_CODES as readonly unknown[]).includes(item.hold)) &&
   isNullable(item.rejectionReason, 'string');
 
 const isPage = (data: unknown): data is AttentionPage =>

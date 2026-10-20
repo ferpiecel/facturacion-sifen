@@ -46,5 +46,10 @@ describe('attention client', () => {
     expect(await setup(json({ items: 'x' })).client.get()).toEqual({ kind: 'unavailable' });
     const unknownReason = { ...ATTENTION, items: [{ ...ATTENTION.items[0], reasons: ['x'] }] };
     expect(await setup(json(unknownReason)).client.get()).toEqual({ kind: 'unavailable' });
+    const internalHold = {
+      ...ATTENTION,
+      items: [{ ...ATTENTION.items[0], hold: 'signing:SigningDataIncompleteError' }],
+    };
+    expect(await setup(json(internalHold)).client.get()).toEqual({ kind: 'unavailable' });
   });
 });

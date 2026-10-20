@@ -57,7 +57,7 @@ export const ATTENTION: AttentionPage = {
       reasons: ['held'],
       deadline: null,
       hoursRemaining: null,
-      hold: 'signing:SigningDataIncompleteError',
+      hold: 'signing_failed',
       rejectionReason: null,
     },
   ],

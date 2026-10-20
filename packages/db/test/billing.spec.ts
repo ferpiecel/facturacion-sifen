@@ -85,9 +85,48 @@ describe('billing tables', () => {
       await causeOf(
         db
           .insert(subscriptions)
-          .values({ tenantId: b, planId, status: 'cancelled', overagePrice: -1 }),
+          .values({
+            tenantId: b,
+            planId,
+            status: 'cancelled',
+            monthlyPrice: 1,
+            overagePrice: -1,
+            documentQuota: 1,
+          }),
       ),
     ).toContain('subscriptions_terms_nonneg');
+  });
+
+  it('requires the price snapshot to be all-null or all-set, and freezes it once set', async () => {
+    const { db, a, b, planId } = await seed();
+    expect(
+      await causeOf(
+        db.insert(subscriptions).values({ tenantId: b, planId, monthlyPrice: 1, overagePrice: 1 }),
+      ),
+    ).toContain('subscriptions_snapshot_complete');
+    const [row] = await db
+      .insert(subscriptions)
+      .values({ tenantId: a, planId, monthlyPrice: 99000, overagePrice: 500, documentQuota: 100 })
+      .returning();
+    for (const patch of [{ monthlyPrice: 1 }, { overagePrice: 1 }, { documentQuota: 1 }]) {
+      expect(
+        await causeOf(
+          db
+            .update(subscriptions)
+            .set(patch)
+            .where(sql`id = ${row.id}`),
+        ),
+      ).toContain('subscription price snapshot is immutable');
+    }
+    await db
+      .update(subscriptions)
+      .set({ status: 'past_due' })
+      .where(sql`id = ${row.id}`);
+    const [bare] = await db.insert(subscriptions).values({ tenantId: b, planId }).returning();
+    await db
+      .update(subscriptions)
+      .set({ monthlyPrice: 1, overagePrice: 1, documentQuota: 1 })
+      .where(sql`id = ${bare.id}`);
   });
 
   it('lets a tenant read plans but not write them', async () => {

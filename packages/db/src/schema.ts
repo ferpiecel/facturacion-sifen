@@ -1361,6 +1361,10 @@ export const subscriptions = pgTable(
       sql`coalesce(${table.monthlyPrice}, 0) >= 0 AND coalesce(${table.overagePrice}, 0) >= 0 AND coalesce(${table.documentQuota}, 0) >= 0`,
     ),
     check(
+      'subscriptions_snapshot_complete',
+      sql`(${table.monthlyPrice} IS NULL AND ${table.overagePrice} IS NULL AND ${table.documentQuota} IS NULL) OR (${table.monthlyPrice} IS NOT NULL AND ${table.overagePrice} IS NOT NULL AND ${table.documentQuota} IS NOT NULL)`,
+    ),
+    check(
       'subscriptions_status_valid',
       sql`${table.status} IN (${sqlList(SUBSCRIPTION_STATUSES)})`,
     ),

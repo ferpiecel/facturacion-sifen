@@ -1,6 +1,6 @@
 {
-  "id": "2b2265bf-ea45-4dd4-b734-7de66b0d2e09",
-  "prevId": "0e6ed255-1981-43b6-9a3b-2965c5f5f951",
+  "id": "9885347c-1c59-42aa-ad1e-ba30b3a0a9ad",
+  "prevId": "81cfe665-074a-4a4f-8bdf-e8e3c317c12e",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2014,6 +2014,10 @@
         "subscriptions_terms_nonneg": {
           "name": "subscriptions_terms_nonneg",
           "value": "coalesce(\"subscriptions\".\"monthly_price\", 0) >= 0 AND coalesce(\"subscriptions\".\"overage_price\", 0) >= 0 AND coalesce(\"subscriptions\".\"document_quota\", 0) >= 0"
+        },
+        "subscriptions_snapshot_complete": {
+          "name": "subscriptions_snapshot_complete",
+          "value": "(\"subscriptions\".\"monthly_price\" IS NULL AND \"subscriptions\".\"overage_price\" IS NULL AND \"subscriptions\".\"document_quota\" IS NULL) OR (\"subscriptions\".\"monthly_price\" IS NOT NULL AND \"subscriptions\".\"overage_price\" IS NOT NULL AND \"subscriptions\".\"document_quota\" IS NOT NULL)"
         },
         "subscriptions_status_valid": {
           "name": "subscriptions_status_valid",

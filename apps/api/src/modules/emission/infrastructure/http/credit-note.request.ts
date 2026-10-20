@@ -20,8 +20,7 @@ const fromInvoice = (field: string) =>
  * type or location: they come from the FE the credit note is associated to (2441 holds by construction).
  * Business rules (existence, state, sum, reasons) are checked later by the domain.
  */
-export const createCreditNoteSchema = z.object({
-  type: z.literal('NCE'),
+const noteFields = {
   establishment: code(3),
   expeditionPoint: code(3),
   /** H004 `dCdCDERef` (H002 = 1): CDC of the FE being credited, 44 digits. */
@@ -34,9 +33,15 @@ export const createCreditNoteSchema = z.object({
   receiver: fromInvoice('receiver'),
   operationType: fromInvoice('operationType'),
   location: fromInvoice('location'),
-});
+};
+
+export const createCreditNoteSchema = z.object({ type: z.literal('NCE'), ...noteFields });
+
+/** Body of `POST /v1/documents` for an NDE (`type: "NDE"`, iTiDE 6): the same fields as the NCE. */
+export const createDebitNoteSchema = z.object({ type: z.literal('NDE'), ...noteFields });
 
 export type CreateCreditNoteBody = z.infer<typeof createCreditNoteSchema>;
+export type CreateDebitNoteBody = z.infer<typeof createDebitNoteSchema>;
 
 export function parseCreateCreditNote(
   body: unknown,
@@ -46,8 +51,18 @@ export function parseCreateCreditNote(
   return { ok: false, errors: schemaErrors(parsed.error) };
 }
 
-/** The domain view of the body. */
-export function toCreditNoteDraft(body: CreateCreditNoteBody): CreditNoteDraft {
+export function parseCreateDebitNote(
+  body: unknown,
+): { ok: true; value: CreateDebitNoteBody } | { ok: false; errors: ValidationError[] } {
+  const parsed = createDebitNoteSchema.safeParse(body);
+  if (parsed.success) return { ok: true, value: parsed.data };
+  return { ok: false, errors: schemaErrors(parsed.error) };
+}
+
+/** The domain view of the body (an NCE or an NDE: the draft is the same). */
+export function toCreditNoteDraft(
+  body: CreateCreditNoteBody | CreateDebitNoteBody,
+): CreditNoteDraft {
   return {
     associatedCdc: body.associatedCdc,
     reasonCode: body.reasonCode,
@@ -59,11 +74,12 @@ export function toCreditNoteDraft(body: CreateCreditNoteBody): CreditNoteDraft {
 export type ParsedDocumentRequest =
   | { ok: true; type: 'FE'; value: CreateDocumentBody }
   | { ok: true; type: 'NCE'; value: CreateCreditNoteBody }
+  | { ok: true; type: 'NDE'; value: CreateDebitNoteBody }
   | { ok: false; errors: ValidationError[] };
 
 /**
  * Dispatches on the `type` discriminator (ADR-0019 D1): absent or `FE` is an invoice, exactly as
- * before; `NCE` is a credit note; anything else is a schema error on `type`.
+ * before; `NCE` is a credit note and `NDE` a debit note; anything else is a schema error on `type`.
  */
 export function parseDocumentRequest(body: unknown): ParsedDocumentRequest {
   const type =
@@ -74,10 +90,14 @@ export function parseDocumentRequest(body: unknown): ParsedDocumentRequest {
     const parsed = parseCreateCreditNote(body);
     return parsed.ok ? { ok: true, type: 'NCE', value: parsed.value } : parsed;
   }
+  if (type === 'NDE') {
+    const parsed = parseCreateDebitNote(body);
+    return parsed.ok ? { ok: true, type: 'NDE', value: parsed.value } : parsed;
+  }
   if (type !== undefined && type !== 'FE') {
     return {
       ok: false,
-      errors: [{ field: 'type', rule: 'schema', message: 'The type must be "FE" or "NCE"' }],
+      errors: [{ field: 'type', rule: 'schema', message: 'The type must be "FE", "NCE" or "NDE"' }],
     };
   }
   const parsed = parseCreateDocument(body);

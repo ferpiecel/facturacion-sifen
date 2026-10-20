@@ -149,7 +149,7 @@ describe('POST /v1/documents (e2e)', () => {
   });
 
   it('answers 422 for an unknown `type` without consuming a number', async () => {
-    const response = await post({ ...BODY, type: 'NDE' });
+    const response = await post({ ...BODY, type: 'AFE' });
 
     expect(response.statusCode).toBe(422);
     expect(response.json<{ errors: Array<{ field: string }> }>().errors).toEqual([

@@ -351,6 +351,20 @@
       "when": 1792172051812,
       "tag": "0049_issuer_events_local_rejection",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1792515829410,
+      "tag": "0050_billing_model",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1792518518925,
+      "tag": "0051_usage_counters_and_invoices",
+      "breakpoints": true
     }
   ]
 }

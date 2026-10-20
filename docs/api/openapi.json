@@ -300,6 +300,7 @@
         "x-required-scopes": [
           "documents:read"
         ],
+        "description": "Paper layout by `format`: `letter` (A4, default), `ticket-80` or `ticket-58` (paper roll of 80 or 58 mm, for thermal printers; MT v150 13.6).",
         "parameters": [
           {
             "name": "id",
@@ -309,6 +310,21 @@
             "schema": {
               "type": "string",
               "format": "uuid"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "description": "Paper layout of the KuDE",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "letter",
+                "ticket-80",
+                "ticket-58"
+              ],
+              "default": "letter"
             }
           }
         ],
@@ -325,7 +341,7 @@
             }
           },
           "400": {
-            "description": "id is not a UUID",
+            "description": "id is not a UUID or format is not a known layout",
             "content": {
               "application/json": {
                 "schema": {

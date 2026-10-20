@@ -167,13 +167,28 @@ export function buildOpenApiDocument() {
           summary:
             'Download the KuDE (PDF) of an FE or an NCE, available once the document is signed',
           ...secured(['documents:read']),
-          parameters: [idParam('Document')],
+          description:
+            'Paper layout by `format`: `letter` (A4, default), `ticket-80` or `ticket-58` (paper roll of 80 or 58 mm, for thermal printers; MT v150 13.6).',
+          parameters: [
+            idParam('Document'),
+            {
+              name: 'format',
+              in: 'query',
+              required: false,
+              description: 'Paper layout of the KuDE',
+              schema: {
+                type: 'string',
+                enum: ['letter', 'ticket-80', 'ticket-58'],
+                default: 'letter',
+              },
+            },
+          ],
           responses: {
             '200': {
               description: 'The KuDE',
               content: { 'application/pdf': { schema: { type: 'string', format: 'binary' } } },
             },
-            '400': problem('id is not a UUID'),
+            '400': problem('id is not a UUID or format is not a known layout'),
             '401': UNAUTHORIZED,
             '403': FORBIDDEN,
             '404': NOT_FOUND,

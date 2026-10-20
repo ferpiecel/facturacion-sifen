@@ -1,5 +1,10 @@
 import { buildCdc } from '../domain/cdc.js';
-import { validateCreditNoteDraft, type CreditNoteDraft } from '../domain/credit-note-draft.js';
+import {
+  validateCreditNoteDraft,
+  validateDebitNoteDraft,
+  type CreditNoteDraft,
+  type NoteKind,
+} from '../domain/credit-note-draft.js';
 import type { ValidationConfig } from '../domain/invoice-draft.js';
 import { invoiceTotals } from '../domain/invoice-totals.js';
 import { requestHash } from '../domain/request-hash.js';
@@ -17,7 +22,8 @@ import {
   type AcceptanceUnitOfWork,
 } from './ports/acceptance-unit-of-work.port.js';
 
-const CREDIT_NOTE_DOCUMENT_TYPE = 5; // iTiDE of an NCE
+/** iTiDE of each note: 5 for an NCE, 6 for an NDE. */
+const NOTE_DOCUMENT_TYPE: Record<NoteKind, number> = { credit: 5, debit: 6 };
 const NORMAL_EMISSION = 1; // iTipEmi
 
 export interface AcceptCreditNoteInput {
@@ -36,6 +42,8 @@ export interface AcceptCreditNoteDependencies {
   now?: () => Date;
   randomBytes?: RandomBytes;
   validation?: ValidationConfig;
+  /** `credit` (NCE, the default) or `debit` (NDE, HU-E7-02: no 2417 sum, type 6). */
+  kind?: NoteKind;
 }
 
 /**
@@ -49,6 +57,8 @@ export interface AcceptCreditNoteDependencies {
  */
 export function createAcceptCreditNote(deps: AcceptCreditNoteDependencies) {
   const now = deps.now ?? (() => new Date());
+  const kind = deps.kind ?? 'credit';
+  const documentType = NOTE_DOCUMENT_TYPE[kind];
 
   return async function acceptCreditNote(input: AcceptCreditNoteInput): Promise<AcceptedInvoice> {
     const hash = requestHash(input.payload);
@@ -86,20 +96,23 @@ export function createAcceptCreditNote(deps: AcceptCreditNoteDependencies) {
         if (replay.requestHash !== hash) throw new IdempotencyKeyReusedError();
         return { documentId: replay.documentId, cdc: replay.cdc };
       }
-      const creditedAmount = invoice
-        ? await unit.sumCreditNotes(associatedCdc, issuer.environment)
-        : '0';
-      const errors = validateCreditNoteDraft(
+      // Only credit notes count against the FE total (2417); a debit adds to it.
+      const creditedAmount =
+        invoice && kind === 'credit'
+          ? await unit.sumCreditNotes(associatedCdc, issuer.environment)
+          : '0';
+      const validate = kind === 'credit' ? validateCreditNoteDraft : validateDebitNoteDraft;
+      const errors = validate(
         input.draft,
         invoice ? { ...invoice, creditedAmount } : undefined,
         deps.validation ?? {},
       );
       if (errors.length > 0) throw new InvoiceValidationError(errors);
 
-      const { series, number } = await unit.nextNumber(issuer, CREDIT_NOTE_DOCUMENT_TYPE);
+      const { series, number } = await unit.nextNumber(issuer, documentType);
       const securityCode = generateSecurityCode(number, deps.randomBytes);
       const cdc = buildCdc({
-        documentType: String(CREDIT_NOTE_DOCUMENT_TYPE).padStart(2, '0'),
+        documentType: String(documentType).padStart(2, '0'),
         rucBase: issuer.rucBase,
         rucDv: issuer.rucDv,
         establishment: input.establishmentCode,
@@ -114,7 +127,7 @@ export function createAcceptCreditNote(deps: AcceptCreditNoteDependencies) {
       const { id } = await unit.insertDocument({
         environment: issuer.environment,
         cdc,
-        documentType: CREDIT_NOTE_DOCUMENT_TYPE,
+        documentType,
         timbradoId: issuer.timbradoId,
         establishmentId: issuer.establishmentId,
         expeditionPointId: issuer.expeditionPointId,
@@ -140,4 +153,9 @@ export function createAcceptCreditNote(deps: AcceptCreditNoteDependencies) {
       return { documentId: id, cdc };
     });
   }
+}
+
+/** Accepts an NDE (HU-E7-02): the NCE flow with type 6 and without the 2417 sum. */
+export function createAcceptDebitNote(deps: Omit<AcceptCreditNoteDependencies, 'kind'>) {
+  return createAcceptCreditNote({ ...deps, kind: 'debit' });
 }

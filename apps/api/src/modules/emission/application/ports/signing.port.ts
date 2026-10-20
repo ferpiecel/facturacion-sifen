@@ -72,7 +72,7 @@ export class SigningDataIncompleteError extends Error {
 }
 
 /**
- * The document's type has no XML builder (only the FE and the NCE have one; an NDE, AFE or NRE
+ * The document's type has no XML builder (only the FE, the NCE and the NDE have one; an AFE or NRE
  * waits for its story). Deterministic: the worker parks the document with this reason instead of
  * retrying or parsing it as an FE.
  */

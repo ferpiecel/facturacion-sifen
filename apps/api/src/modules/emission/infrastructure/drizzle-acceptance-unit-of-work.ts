@@ -12,6 +12,7 @@ import {
   type TenantTx,
 } from '@sifen/db';
 import { recordAudit } from '../../audit/infrastructure/record-audit.js';
+import { recordDocumentIssued } from '../../billing/infrastructure/record-document-issued.js';
 import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
 import { InvoiceValidationError } from '../application/accept-invoice.js';
 import {
@@ -170,6 +171,8 @@ function createUnit(tx: TenantTx, tenantId: string): AcceptanceUnit {
           .returning({ id: documents.id });
         // Transactional outbox: the document.created delivery commits with the document.
         await enqueueDocumentEvents(tx, { tenantId, documentIds: [row.id], at: new Date() });
+        // HU-E15-02: usage counter in the same transaction (count only; limits are not enforced in the MVP).
+        await recordDocumentIssued(tx, { tenantId, at: document.issuedAt });
         return { id: row.id };
       } catch (error) {
         if (isIdempotencyCollision(error)) throw new IdempotencyKeyCollisionError();

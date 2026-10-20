@@ -1261,6 +1261,8 @@ export const plans = pgTable(
     name: varchar('name', { length: 255 }).notNull(),
     currency: char('currency', { length: 3 }).notNull().default('PYG'),
     apiCallLimit: integer('api_call_limit'),
+    /** `direct` = monthly plan for a tenant; `partner` = per-document pricing through `plan_price_tiers`. */
+    audience: text('audience').notNull().default('direct'),
     features: jsonb('features')
       .notNull()
       .default(sql`'{}'::jsonb`),
@@ -1269,6 +1271,7 @@ export const plans = pgTable(
   },
   (table) => [
     check('plans_code_format', sql`${table.code} ~ '^[a-z0-9]+(-[a-z0-9]+)*$'`),
+    check('plans_audience_valid', sql`${table.audience} IN ('direct', 'partner')`),
     check(
       'plans_api_call_limit_nonneg',
       sql`${table.apiCallLimit} IS NULL OR ${table.apiCallLimit} >= 0`,
@@ -1339,6 +1342,10 @@ export const subscriptions = pgTable(
       .notNull()
       .references(() => plans.id),
     status: text('status').notNull().default('active'),
+    /** Terms copied from `plan_prices` when assigned: a later price change never rewrites them. */
+    monthlyPrice: bigint('monthly_price', { mode: 'number' }),
+    overagePrice: bigint('overage_price', { mode: 'number' }),
+    documentQuota: integer('document_quota'),
     startsAt: timestamp('starts_at', { withTimezone: true }).notNull().defaultNow(),
     endsAt: timestamp('ends_at', { withTimezone: true }),
     nextBillingAt: timestamp('next_billing_at', { withTimezone: true }),
@@ -1349,6 +1356,10 @@ export const subscriptions = pgTable(
     uniqueIndex('subscriptions_one_live_per_tenant')
       .on(table.tenantId)
       .where(sql`${table.status} <> 'cancelled'`),
+    check(
+      'subscriptions_terms_nonneg',
+      sql`coalesce(${table.monthlyPrice}, 0) >= 0 AND coalesce(${table.overagePrice}, 0) >= 0 AND coalesce(${table.documentQuota}, 0) >= 0`,
+    ),
     check(
       'subscriptions_status_valid',
       sql`${table.status} IN (${sqlList(SUBSCRIPTION_STATUSES)})`,

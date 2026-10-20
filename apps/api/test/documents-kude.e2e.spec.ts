@@ -175,7 +175,7 @@ describe('GET /v1/documents/{id}/kude (e2e)', () => {
     expect(response.statusCode).toBe(200);
     expect(response.headers['content-disposition']).toBe(`inline; filename="${filename}"`);
     const [page] = await pageSizes(new Uint8Array(response.rawPayload));
-    expect(page?.w).toBeCloseTo((mm * 72) / 25.4, 1);
+    expect(page.w).toBeCloseTo((mm * 72) / 25.4, 1);
   });
 
   it('keeps the letter KuDE for `format=letter` and answers 400 for an unknown format', async () => {

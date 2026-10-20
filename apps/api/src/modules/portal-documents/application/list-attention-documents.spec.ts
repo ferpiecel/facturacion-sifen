@@ -149,9 +149,9 @@ describe('createListAttentionDocuments (HU-E12-04)', () => {
       'over-early',
       'over-late',
       'held',
+      'soon',
       'rej-old',
       'rej-new',
-      'soon',
     ]);
   });
 

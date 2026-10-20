@@ -26,14 +26,15 @@ const number = sql<string>`${tenantEstablishments.code} || '-' || ${tenantExpedi
 const receiverName = sql<string>`coalesce(${documents.payload}->'receiver'->>'name', ${UNNAMED_RECEIVER})`;
 
 /**
- * Urgency of the first reason the application reports (overdue, held, rejected, due soon), so the `limit` cut
+ * Urgency of the first reason the application reports (overdue, held, due soon, rejected), so the `limit` cut
  * keeps the most urgent documents. Must follow `ATTENTION_REASONS`.
  */
 const urgencyRank = (query: AttentionQuery) => sql`case
   when ${statusIn(PENDING)} and ${documents.signedAt} < ${query.overdueBefore.toISOString()}::timestamptz then 0
   when ${documents.transmissionHold} is not null then 1
-  when ${documents.status} = 'rejected' then 2
-  else 3
+  when ${statusIn(PENDING)} and ${documents.signedAt} <= ${query.dueSoonBefore.toISOString()}::timestamptz then 2
+  when ${documents.status} = 'rejected' then 3
+  else 4
 end`;
 
 /**

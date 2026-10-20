@@ -118,6 +118,18 @@ describe('GET /portal/attention (HU-E12-04)', () => {
       })
       .returning();
     cdcOf.crowdedHeld = heldRow.cdc;
+    const [soonRow] = await handle.db
+      .insert(documents)
+      .values({
+        ...base,
+        id: undefined,
+        cdc: '0180069563100100100' + '00700' + '12026010111234567891',
+        number: 700,
+        status: 'queued',
+        ...signed(66),
+      })
+      .returning();
+    cdcOf.crowdedDueSoon = soonRow.cdc;
     await handle.db.insert(documents).values(
       Array.from({ length: 100 }, (_, n) => ({
         ...base,
@@ -167,21 +179,22 @@ describe('GET /portal/attention (HU-E12-04)', () => {
     expect(body.items.map((i) => [i.cdc, i.reasons])).toEqual([
       [cdcOf.overdue, ['overdue']],
       [cdcOf.held, ['held']],
-      [cdcOf.rejected, ['rejected']],
       [cdcOf['due-soon'], ['due_soon']],
+      [cdcOf.rejected, ['rejected']],
     ]);
     expect(body).toMatchObject({ total: 4, truncated: false });
-    expect(body.items[2].rejectionReason).toBe('RUC inexistente');
+    expect(body.items[3].rejectionReason).toBe('RUC inexistente');
   });
 
   it('keeps the most urgent documents when the list is cut at 100', async () => {
     const body = (await get(cookies.initech)).json<Body>();
 
     expect(body.items).toHaveLength(100);
-    expect(body.items.map((i) => i.cdc).slice(0, 2)).toEqual([
+    expect(body.items.map((i) => i.cdc).slice(0, 3)).toEqual([
       cdcOf.crowdedOverdue,
       cdcOf.crowdedHeld,
+      cdcOf.crowdedDueSoon,
     ]);
-    expect(body).toMatchObject({ total: 102, truncated: true });
+    expect(body).toMatchObject({ total: 103, truncated: true });
   });
 });

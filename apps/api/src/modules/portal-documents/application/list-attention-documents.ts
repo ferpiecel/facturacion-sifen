@@ -15,7 +15,7 @@ import type {
 export const ATTENTION_LIMIT = 100;
 
 /** Most urgent first; the order of the values is the order of the list. */
-export const ATTENTION_REASONS = ['overdue', 'held', 'rejected', 'due_soon'] as const;
+export const ATTENTION_REASONS = ['overdue', 'held', 'due_soon', 'rejected'] as const;
 export type AttentionReason = (typeof ATTENTION_REASONS)[number];
 
 export interface AttentionItem extends PortalDocumentItem {

@@ -16,6 +16,7 @@ import {
   type AttentionClient,
   type AttentionItem,
   type AttentionReason,
+  type HoldCode,
 } from './attention-client';
 
 /** Roles that may cancel, void, correct and nominate (PO decision); `lector` only reads. */
@@ -30,6 +31,14 @@ const REASONS: Record<AttentionReason, { label: string; tone: string }> = {
 
 const PLACEHOLDER =
   'rounded-lg bg-surface-container px-3 py-1.5 font-label-sm text-label-sm font-semibold text-outline disabled:cursor-not-allowed';
+
+const HOLDS: Record<HoldCode, string> = {
+  signing_failed: 'No se pudo firmar el documento',
+  attempts_exhausted: 'Se agotaron los intentos de envío',
+  recovery_unresolved: 'No se pudo confirmar el estado en SIFEN',
+  recovery_attempts_exhausted: 'Se agotaron los intentos de recuperación',
+  unknown: 'Retenido por una causa que soporte debe revisar',
+};
 
 function deadlineText(item: AttentionItem): string {
   if (item.deadline === null || item.hoursRemaining === null) return 'Sin firmar';
@@ -76,7 +85,9 @@ function Card({ item, canAct }: { item: AttentionItem; canAct: boolean }) {
           <span className="font-body-sm text-body-sm text-error">{item.rejectionReason}</span>
         )}
         {item.hold && (
-          <code className="font-code-sm text-code-sm text-on-surface-variant">{item.hold}</code>
+          <span className="font-body-sm text-body-sm text-on-surface-variant">
+            {HOLDS[item.hold]}
+          </span>
         )}
       </div>
       <div className="flex flex-col gap-space-xs sm:items-end">

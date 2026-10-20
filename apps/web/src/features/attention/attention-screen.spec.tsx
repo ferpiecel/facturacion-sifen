@@ -40,7 +40,7 @@ describe('AttentionScreen (HU-E12-04)', () => {
     expect(within(items[1]).getByText('RUC del receptor inexistente')).toBeInTheDocument();
     expect(within(items[1]).getByText('Vence en 20,5 h')).toBeInTheDocument();
     expect(within(items[2]).getByText('Retenido')).toBeInTheDocument();
-    expect(within(items[2]).getByText('signing:SigningDataIncompleteError')).toBeInTheDocument();
+    expect(within(items[2]).getByText('No se pudo firmar el documento')).toBeInTheDocument();
     expect(within(items[2]).getByText('Sin firmar')).toBeInTheDocument();
   });
 

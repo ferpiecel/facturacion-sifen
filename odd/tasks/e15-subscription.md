@@ -20,7 +20,10 @@
 
 ## Tasks
 
-- [x] T1 (PR 1, db) migration 0050: plans, subscriptions, payments, RLS, tests
-- [x] T1b (PR 2, db) migration 0051: invoices_saas and usage_counters (increment-only trigger), tests
-- [x] T2 (PR 2, api) hexagonal `billing` module: domain, ports, Drizzle adapter, use cases (assign plan, record payment, record usage, get usage with 80 % warning)
-- [ ] T3 (PR 3, api) ops CLI `plan:create`, `plan:assign`, `payment:record`; usage hook on document acceptance
+- [x] T1 migration 0050: plans, plan_prices (EXCLUDE), plan_price_tiers, subscriptions, payments (PR #284, merged as 88a5aa7)
+- [x] T2 migration 0051: invoices_saas and usage_counters with an increment-only trigger (PR #296: ea98231, 06223f0, 0bcf643)
+- [x] T3 count accepted documents in the acceptance transaction (PR 2/2 of the usage stream: 2e40aab rebuilt on main)
+- [ ] T4 migration 0052: plans.audience and subscription price snapshot (monthly_price, overage_price, document_quota); no tiers, no plans.overage_price
+- [ ] T5 ops `plan:*` and `plan:seed` reading and writing plan_prices (new row + close previous valid_to, never UPDATE of amounts); document btree_gist CREATE privilege in docs/operacion.md
+- [ ] T6 ops `subscription:assign`, `payment:record`, `usage:show` reading plan_prices
+- [ ] Follow-up: consider revoking UPDATE on plan_prices price columns from platform_admin; portal/API `GET /v1/usage`; SaaS invoice issuing (v1.0)

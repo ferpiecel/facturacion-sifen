@@ -18,7 +18,7 @@ y pequeños, patrón ya existente).
 
 ## Tareas
 
-- [x] T1 (PR 1) API `GET /portal/attention`: caso de uso, puerto, store SQL, controller, e2e.
+- [x] T1 (PRs 1 y 2) API `GET /portal/attention`: clasificación a2edea3, c8f6f61 (PR 1); endpoint, store SQL y e2e b35bf48 (PR 2, depende del PR 1). Dividido en dos por el límite de 400 líneas.
 - [ ] T2 (PR 2) Cliente web y pantalla `/accion-requerida` + entrada de navegación.
 - [ ] T3 (PR 3) Deuda: "Comprobantes recientes" con el listado real (pageSize 5) y encabezado con `/auth/me`.
 

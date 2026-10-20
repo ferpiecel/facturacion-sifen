@@ -21,10 +21,10 @@ Keep DEs safe while SIFEN is unreachable or a tenant is blocked, validate receiv
 
 - [x] E6-08 A (#282, merged; probe timeout, stale-call token and cap fixes in #286): `CircuitBreaker` state machine (closed, open, half-open; doubling cool-down capped below 72 h, exclusive: `maxOpenMs` of 72 h or more is rejected) in `packages/sifen-gateway` (this PR)
 - [x] E6-08 B (#286): `CircuitBreakerGateway` decorator, one breaker per endpoint, `SifenCircuitOpenError`, `pausedUntil`
-- [x] E6-08 C (#287, 60697f3; review fix 23b5d60): `SendLote` defers on an open circuit before claiming, the cycle stops sending, worker wiring and docs. Review fix: a refusal between the check and the call releases the claim to `pending` (no attempt, no `unknown`); migration 0051 allows `sending -> pending` only while clearing `send_attempted_at`
-- [x] E6-05 A (#290, 4a2d1c8): `ruc_blocks` table (append-only, RLS), migration 0052 (0050 and 0051 are taken by billing and the claim release)
-- [x] E6-05 B (#291, bc209f4; wording fix a60ede7): a 0301 that says the RUC is blocked (needs blocked/blocking plus RUC, issuer or duplicate send, per the Guia 2024) records the pause and requeues the documents without counting an attempt
-- [x] E6-05 C (4ba626b, no PR yet; must merge together with #291 because #291 alone only writes `ruc_blocks`): the cycle sends nothing while the pause lasts (fail closed); error alert and `sifen_ruc_block_total` log metric
+- [x] E6-08 C (#287, e810268; review fix dcff8dc): `SendLote` defers on an open circuit before claiming, the cycle stops sending, worker wiring and docs. Review fix: a refusal between the check and the call releases the claim to `pending` (no attempt, no `unknown`); migration 0052 allows `sending -> pending` only while clearing `send_attempted_at`
+- [x] E6-05 A (#290, 37ed24e): `ruc_blocks` table (append-only, RLS), migration 0053 (0050 to 0052 are taken by billing, usage counters and the claim release)
+- [x] E6-05 B (#291, a29a672; wording fix 733ac8b): a 0301 that says the RUC is blocked (needs blocked/blocking plus RUC, issuer or duplicate send, per the Guia 2024) records the pause and requeues the documents without counting an attempt
+- [x] E6-05 C (6977e73, #298; must merge together with #291 because #291 alone only writes `ruc_blocks`): the cycle sends nothing while the pause lasts (fail closed); error alert and `sifen_ruc_block_total` log metric
 - [ ] E6-09: `siConsRUC` lookup with cache and TTL; validate receivers
 - [ ] E6-06: sync transmission behind the tenant flag; 1264 falls back to the lote; `?wait=true` up to 30 s
 

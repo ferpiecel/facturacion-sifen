@@ -172,6 +172,34 @@ describe('PdfkitTicketKudeRenderer, credit note', () => {
   });
 });
 
+describe('PdfkitTicketKudeRenderer, debit note', () => {
+  it('prints the NDE title, reason and associated invoice', async () => {
+    const FE_CDC = '01800695631001002000012312026010111234567891';
+    const xml = await signedInvoiceWithQr((input: FacturaPocInput) => ({
+      ...input,
+      data: {
+        ...Object.fromEntries(
+          Object.entries(input.data).filter(([key]) => key !== 'factura' && key !== 'condicion'),
+        ),
+        tipoDocumento: 6,
+        notaCreditoDebito: { motivo: 2 },
+        documentoAsociado: { formato: 1, cdc: FE_CDC },
+      },
+    }));
+    const text = await pdfText(
+      await new PdfkitTicketKudeRenderer().render(readKudeInvoice(xml), 'ticket-58'),
+    );
+    for (const expected of [
+      'KuDE de Nota de Débito Electrónica',
+      'Devolución',
+      '001-002-0000123',
+    ]) {
+      expect(text).toContain(expected);
+    }
+    expect(text).not.toContain('Crédito');
+  });
+});
+
 describe('createKudeRenderer', () => {
   it('uses the letter layout by default and the ticket layout on request', async () => {
     const renderer = createKudeRenderer();

@@ -123,7 +123,7 @@ function createUnit(tx: TenantTx, tenantId: string): AcceptanceUnit {
           {
             field: 'associatedCdc',
             rule: 'associated-document-unreadable',
-            message: 'The associated invoice data cannot be read to issue a credit note',
+            message: 'The associated invoice data cannot be read to issue a credit or debit note',
           },
         ]);
       }

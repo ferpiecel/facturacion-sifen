@@ -211,6 +211,12 @@ La respuesta es la misma, `202 { "document_id", "cdc" }`, con un CDC que empieza
 
 El KuDE de una NCE (`GET /v1/documents/{id}/kude`) lleva el título "KuDE de Nota de Crédito Electrónica", el motivo y la FE asociada.
 
+## Emitir una nota de débito
+
+Una nota de débito electrónica (NDE) aumenta el valor de una FE que usted ya emitió y que SIFEN **aprobó**. Se envía al mismo `POST /v1/documents` con `"type": "NDE"`, los mismos campos que la NCE y el mismo `Idempotency-Key`. `reasonCode` va de 1 a 8 (misma tabla que la NCE). Como el débito suma al valor de la FE, no existe tope de suma (la regla 2417 aplica solo a créditos).
+
+La respuesta es `202 { "document_id", "cdc" }`, con un CDC que empieza en `06` y numeración propia. Las reglas `422` son las de la NCE salvo `credit-note-sum-exceeds-invoice`, y con prefijo `debit-note-` (`debit-note-currency-mismatch`, `debit-note-unnamed-receiver`, `debit-note-reason`). El KuDE (`GET /v1/documents/{id}/kude`) lleva el título "KuDE de Nota de Débito Electrónica", el motivo y la FE asociada.
+
 ## Idempotencia
 
 `Idempotency-Key` es obligatorio. Reintentar con la **misma clave y el mismo cuerpo** devuelve la misma respuesta sin crear otro documento; la misma clave con otro cuerpo responde `409`. Genere una clave nueva por documento y reutilícela solo para reintentar ese mismo documento.
@@ -258,6 +264,6 @@ Para conocer el resultado final no haga polling: registre un endpoint y use los 
 
 ## Alcance actual
 
-- Este endpoint emite **facturas electrónicas (FE)** y **notas de crédito electrónicas (NCE)**. Otros tipos de documento no están disponibles por esta ruta.
+- Este endpoint emite **facturas (FE)**, **notas de crédito (NCE)** y **notas de débito (NDE)** electrónicas. Otros tipos de documento no están disponibles por esta ruta.
 - La condición de venta es contado, con un único pago en efectivo; no hay forma de expresar crédito ni otros medios de pago.
 - Solo moneda `PYG`.

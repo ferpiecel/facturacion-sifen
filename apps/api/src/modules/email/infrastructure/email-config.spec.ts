@@ -9,7 +9,7 @@ const SMTP = {
 describe('loadEmailConfig', () => {
   it('is disabled outside production when nothing is configured', () => {
     expect(loadEmailConfig({ NODE_ENV: 'development' })).toEqual({ enabled: false });
-    expect(loadEmailConfig({})).toEqual({ enabled: false });
+    expect(loadEmailConfig({ NODE_ENV: 'test' })).toEqual({ enabled: false });
   });
 
   it('enables itself outside production when SMTP is configured', () => {
@@ -94,5 +94,23 @@ describe('loadEmailConfig', () => {
     expect(() =>
       loadEmailConfig({ NODE_ENV: 'production', ...SMTP, SMTP_ALLOW_PLAINTEXT: 'true' }),
     ).toThrow(/SMTP_ALLOW_PLAINTEXT/);
+  });
+
+  it('fails closed unless NODE_ENV is exactly development or test', () => {
+    for (const NODE_ENV of [undefined, 'staging', 'prod', 'Production']) {
+      expect(() => loadEmailConfig({ NODE_ENV })).toThrow(/SMTP_HOST is required/);
+    }
+    expect(loadEmailConfig({ NODE_ENV: undefined, EMAIL_ENABLED: 'false' })).toEqual({
+      enabled: false,
+    });
+  });
+
+  it('requires implicit TLS on port 465', () => {
+    expect(() => loadEmailConfig({ NODE_ENV: 'test', ...SMTP, SMTP_PORT: '465' })).toThrow(
+      /SMTP_SECURE/,
+    );
+    expect(
+      loadEmailConfig({ NODE_ENV: 'test', ...SMTP, SMTP_PORT: '465', SMTP_SECURE: 'true' }),
+    ).toMatchObject({ port: 465, secure: true });
   });
 });

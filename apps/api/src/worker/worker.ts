@@ -37,7 +37,7 @@ import {
 } from './webhook-delivery.processor.js';
 import { createWorkerGateway } from './worker-gateway.js';
 import { loadWorkerConfig, WorkerConfigError } from './worker-config.js';
-import { loadEmailConfig } from '../modules/email/infrastructure/email-config.js';
+import { EmailConfigError, loadEmailConfig } from '../modules/email/infrastructure/email-config.js';
 
 // Worker process entrypoint (ADR-0003: same code as the API, a different entrypoint): wiring of
 // env, Postgres, Redis and signals, exercised by the Redis integration job and the manual run in
@@ -205,7 +205,10 @@ const isMainModule =
 if (isMainModule) {
   main(process.env).catch((error: unknown) => {
     // Only the class and, for config errors, the fixed message: URLs and keys never reach the log.
-    const detail = error instanceof WorkerConfigError ? `: ${error.message}` : '';
+    const detail =
+      error instanceof WorkerConfigError || error instanceof EmailConfigError
+        ? `: ${error.message}`
+        : '';
     logger.error(
       `transmission worker failed to start (${error instanceof Error ? error.name : 'unknown error'})${detail}`,
     );

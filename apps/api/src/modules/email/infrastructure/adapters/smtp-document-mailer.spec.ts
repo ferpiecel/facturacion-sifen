@@ -94,4 +94,31 @@ describe('createSmtpDocumentMailer', () => {
     expect((error as MailerError).transient).toBe(transient);
     expect((error as MailerError).message).not.toContain('cliente@example.com');
   });
+
+  it.each([
+    'a@x.com, b@y.com',
+    'a@x.com;b@y.com',
+    'Bob <a@x.com>',
+    '"a,b"@x.com',
+    'a@x.com\r\nBcc: b@y.com',
+    'sin-arroba',
+  ])('refuses %j as recipient or Reply-To without sending', async (bad) => {
+    for (const email of [
+      { ...EMAIL, to: bad },
+      { ...EMAIL, replyTo: bad },
+    ]) {
+      const sendMail = vi.fn();
+      const transport: MailTransport = { sendMail };
+      const error = await createSmtpDocumentMailer(CONFIG, { transport })
+        .send(email)
+        .then(
+          () => undefined,
+          (e: unknown) => e,
+        );
+      expect(error).toBeInstanceOf(MailerError);
+      expect((error as MailerError).transient).toBe(false);
+      expect((error as MailerError).message).not.toContain('x.com');
+      expect(sendMail).not.toHaveBeenCalled();
+    }
+  });
 });

@@ -1,3 +1,5 @@
+import { isPlainEmailAddress } from '../domain/plain-email-address.js';
+
 /** Invalid email settings. Messages name the variable, never its value (credentials, addresses). */
 export class EmailConfigError extends Error {
   override name = 'EmailConfigError';
@@ -20,8 +22,6 @@ export type EmailConfig =
 
 type Env = Readonly<Record<string, string | undefined>>;
 
-const ADDRESS = /^[^\s@<>",;:\\]+@[^\s@<>",;:\\]+\.[^\s@<>",;:\\]+$/;
-
 function flag(env: Env, name: string): boolean | undefined {
   const raw = env[name];
   if (raw === undefined || raw === '') return undefined;
@@ -38,14 +38,15 @@ function flag(env: Env, name: string): boolean | undefined {
 export function loadEmailConfig(env: Env): EmailConfig {
   const requested = flag(env, 'EMAIL_ENABLED');
   if (requested === false) return { enabled: false };
-  const production = env.NODE_ENV === 'production';
+  // Fail closed: only an explicit development or test environment may run without SMTP.
+  const throwaway = env.NODE_ENV === 'development' || env.NODE_ENV === 'test';
   const host = env.SMTP_HOST ?? '';
-  if (!production && requested !== true && host === '') return { enabled: false };
+  if (throwaway && requested !== true && host === '') return { enabled: false };
 
   if (host === '') throw new EmailConfigError('SMTP_HOST is required');
   const fromAddress = env.EMAIL_FROM_ADDRESS ?? '';
   if (fromAddress === '') throw new EmailConfigError('EMAIL_FROM_ADDRESS is required');
-  if (!ADDRESS.test(fromAddress)) {
+  if (!isPlainEmailAddress(fromAddress)) {
     throw new EmailConfigError('EMAIL_FROM_ADDRESS must be a plain email address');
   }
 
@@ -56,8 +57,13 @@ export function loadEmailConfig(env: Env): EmailConfig {
   }
 
   const allowPlaintext = flag(env, 'SMTP_ALLOW_PLAINTEXT') ?? false;
-  if (allowPlaintext && !(env.NODE_ENV === 'development' || env.NODE_ENV === 'test')) {
+  if (allowPlaintext && !throwaway) {
     throw new EmailConfigError('SMTP_ALLOW_PLAINTEXT is only allowed with development or test');
+  }
+
+  const secure = flag(env, 'SMTP_SECURE') ?? false;
+  if (port === 465 && !secure) {
+    throw new EmailConfigError('SMTP_SECURE must be true with SMTP_PORT 465');
   }
 
   const user = env.SMTP_USER ?? '';
@@ -70,7 +76,7 @@ export function loadEmailConfig(env: Env): EmailConfig {
     enabled: true,
     host,
     port,
-    secure: flag(env, 'SMTP_SECURE') ?? false,
+    secure,
     allowPlaintext,
     ...(user === '' ? {} : { user, password }),
     fromAddress,

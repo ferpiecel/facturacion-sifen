@@ -4,6 +4,7 @@ import {
   type DocumentEmail,
   type DocumentMailer,
 } from '../../application/ports/document-mailer.port.js';
+import { isPlainEmailAddress } from '../../domain/plain-email-address.js';
 import type { EmailConfig } from '../email-config.js';
 
 /** The slice of a nodemailer transport the adapter uses; tests inject their own. */
@@ -48,12 +49,19 @@ export function createSmtpDocumentMailer(
     });
   return {
     send: async (email: DocumentEmail) => {
+      // One mailbox per field, validated here: a list in `to` would leak the invoice to others.
+      if (
+        !isPlainEmailAddress(email.to) ||
+        (email.replyTo !== undefined && !isPlainEmailAddress(email.replyTo))
+      ) {
+        throw new MailerError(false, 'SMTP send refused: INVALID_ADDRESS');
+      }
       try {
         await transport.sendMail({
           messageId: `<${email.messageId}>`,
           from: { name: oneLine(email.fromName), address: config.fromAddress },
-          to: email.to,
-          ...(email.replyTo === undefined ? {} : { replyTo: email.replyTo }),
+          to: { address: email.to },
+          ...(email.replyTo === undefined ? {} : { replyTo: { address: email.replyTo } }),
           subject: oneLine(email.subject),
           text: email.text,
           attachments: email.attachments.map((a) => ({

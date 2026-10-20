@@ -19,6 +19,7 @@ const idle: TransmissionCycleStore = {
   holdDocument: () => Promise.resolve(),
   heldDocuments: () => Promise.resolve([]),
   deferPendingLote: () => Promise.resolve(),
+  rucBlockedUntil: () => Promise.resolve(null),
   pendingOlderThan: () => Promise.resolve(0),
 };
 

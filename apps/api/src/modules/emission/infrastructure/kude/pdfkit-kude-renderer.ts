@@ -1,7 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { create as openFont } from 'fontkit';
 import PDFDocument from 'pdfkit';
-import QRCode from 'qrcode';
+import { fonts, renderQr, sanitize } from './kude-pdf-common.js';
 import type { KudeRenderer } from '../../application/ports/kude-renderer.port.js';
 import { fromAsuncionTimestamp } from '../../application/invoice-xml.js';
 import {
@@ -19,46 +17,9 @@ import {
   type KudeItem,
 } from '../../domain/kude-model.js';
 
-const PT_PER_MM = 72 / 25.4;
-/** MT v150 13.8.1: printed QR at least 25 mm wide, 22 mm of content plus the quiet zone. */
-const QR_CONTENT_MM = 24;
-/** Quiet zone per side, as a share of the QR content (about 12% of the printed width). */
-const QR_QUIET_SHARE = 0.16;
 const MARGIN = 36;
 const BOTTOM = 60;
 const FOOTER_BLOCK = 190;
-
-/** Noto Sans (SIL OFL 1.1, apps/api/assets/fonts): Latin, Guaraní tildes and the guaraní sign U+20B2. */
-const FONT_DIR = new URL('../../../../../assets/fonts/', import.meta.url);
-
-interface Fonts {
-  regular: Buffer;
-  bold: Buffer;
-  covers: (codePoint: number) => boolean;
-}
-
-let loaded: Fonts | undefined;
-function fonts(): Fonts {
-  if (loaded) return loaded;
-  const regular = readFileSync(new URL('NotoSans-Regular.ttf', FONT_DIR));
-  const bold = readFileSync(new URL('NotoSans-Bold.ttf', FONT_DIR));
-  const [r, b] = [openFont(regular), openFont(bold)] as const;
-  const covers = (cp: number) =>
-    'hasGlyphForCodePoint' in r &&
-    'hasGlyphForCodePoint' in b &&
-    r.hasGlyphForCodePoint(cp) &&
-    b.hasGlyphForCodePoint(cp);
-  loaded = { regular, bold, covers };
-  return loaded;
-}
-
-/** NFC, whitespace controls to spaces, and "?" for every code point the font cannot draw. */
-function sanitize(text: string): string {
-  const { covers } = fonts();
-  return Array.from(text.normalize('NFC').replace(/[\r\n\t]/g, ' '))
-    .map((char) => (covers(char.codePointAt(0) ?? 0) ? char : '?'))
-    .join('');
-}
 
 const COLUMNS = [
   { key: 'code', title: 'Cód.', width: 42, align: 'left', wrap: true },
@@ -96,17 +57,7 @@ const titleOf = (invoice: KudeInvoice): string =>
 export class PdfkitKudeRenderer implements KudeRenderer {
   async render(invoice: KudeInvoice): Promise<Uint8Array> {
     assertValidKudeInvoice(invoice);
-    const modules = QRCode.create(invoice.qrUrl, { errorCorrectionLevel: 'M' }).modules.size;
-    const quiet = Math.ceil(modules * QR_QUIET_SHARE);
-    const qr = {
-      png: await QRCode.toBuffer(invoice.qrUrl, {
-        type: 'png',
-        errorCorrectionLevel: 'M',
-        margin: quiet,
-        scale: 4,
-      }),
-      size: ((QR_CONTENT_MM * (modules + 2 * quiet)) / modules) * PT_PER_MM,
-    };
+    const qr = await renderQr(invoice);
     const created = fromAsuncionTimestamp(invoice.issuedAt);
     const doc = new PDFDocument({
       size: 'A4',

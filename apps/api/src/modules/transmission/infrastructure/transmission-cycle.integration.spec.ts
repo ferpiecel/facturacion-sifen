@@ -527,7 +527,7 @@ describe('TransmissionCycle end to end', () => {
 
   it('backs off after a 0301, retries when due and holds the document at the cap', async () => {
     const gateway = new FakeSifenGateway();
-    gateway.setDefault('enviarLote', sifenScenarios.loteNoEncolado('RUC bloqueado'));
+    gateway.setDefault('enviarLote', sifenScenarios.loteNoEncolado('Lote invalido'));
     const cycle = buildCycle(gateway);
 
     await cycle.run();
@@ -555,5 +555,32 @@ describe('TransmissionCycle end to end', () => {
     expect(last.held).toEqual([
       { documentId: (await readDocument()).id, reason: 'transmission:attempts-exhausted' },
     ]);
+  });
+
+  it('pauses the tenant after a 0301 that blocks the RUC and requeues the document after the pause', async () => {
+    const gateway = new FakeSifenGateway();
+    gateway.setDefault(
+      'enviarLote',
+      sifenScenarios.loteNoEncolado('RUC bloqueado por envio de lotes invalidos'),
+    );
+    const cycle = buildCycle(gateway);
+
+    const first = await cycle.run();
+    expect(first.rucBlocks).toBe(1);
+    // Not the document's fault: no attempt is counted and nothing is held.
+    expect(await readDocument()).toMatchObject({
+      status: 'queued',
+      transmissionAttempts: 0,
+      transmissionHold: null,
+      nextTransmissionAt: new Date(clock.getTime() + 30 * 60_000),
+    });
+
+    clock = new Date(clock.getTime() + 20 * 60_000);
+    expect(await cycle.run()).toMatchObject({ sent: [], rucBlocks: 0 });
+    expect(gateway.callsTo('enviarLote')).toHaveLength(1);
+
+    clock = new Date(clock.getTime() + 11 * 60_000);
+    await cycle.run();
+    expect(gateway.callsTo('enviarLote')).toHaveLength(2);
   });
 });

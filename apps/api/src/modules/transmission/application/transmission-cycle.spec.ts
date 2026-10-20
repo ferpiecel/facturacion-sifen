@@ -313,6 +313,22 @@ describe('TransmissionCycle', () => {
     expect(report.failures).toEqual([]);
   });
 
+  it('stops sending after a lote SIFEN refused because it blocked the RUC', async () => {
+    const { cycle, log } = setup({
+      pending: [
+        { loteId: 'l1', lote: lote() },
+        { loteId: 'l2', lote: lote() },
+      ],
+      send: () =>
+        Promise.resolve({ status: 'rejected', code: '0301', reason: 'x', rucBlocked: true }),
+    });
+
+    const report = await cycle.run();
+
+    expect(log.filter((entry) => entry.startsWith('send:'))).toEqual(['send:l1:1']);
+    expect(report).toMatchObject({ rucBlocks: 1, sendDeferred: 0, sent: [] });
+  });
+
   it('does not push a deferred lote behind the others', async () => {
     const { cycle, deferred } = setup({
       pending: [{ loteId: 'l1', lote: lote() }],
@@ -345,6 +361,7 @@ describe('TransmissionCycle', () => {
       assembled: 0,
       sendSkipped: 0,
       sendDeferred: 0,
+      rucBlocks: 0,
       sent: [],
       polled: [],
       recovered: [],

@@ -123,6 +123,8 @@ export interface CycleReport {
   readonly sendSkipped: number;
   /** Lotes left `pending` because the circuit of the send endpoint was open (HU-E6-08). */
   readonly sendDeferred: number;
+  /** Lotes SIFEN refused because it blocked the tenant's RUC; their documents wait out the pause (HU-E6-05). */
+  readonly rucBlocks: number;
   readonly sent: readonly { readonly loteId: string; readonly status: string }[];
   readonly polled: readonly { readonly loteId: string; readonly status: string }[];
   /** Lotes queried by CDC after 0364 or the 48 h window (HU-E6-04). */
@@ -249,6 +251,7 @@ export class TransmissionCycle {
     const sent: { loteId: string; status: string }[] = [];
     let sendSkipped = 0;
     let sendDeferred = 0;
+    let rucBlocks = 0;
     const pending = await this.guard('send', undefined, () =>
       this.deps.store.pendingLotes(this.batch.send),
     );
@@ -258,6 +261,8 @@ export class TransmissionCycle {
         sendDeferred += 1;
         continue;
       }
+      // A blocked RUC pauses every send of the tenant: more lotes now would prolong the block.
+      if (rucBlocks > 0) continue;
       const result = await this.guard('send', loteId, async () => {
         const dId = await this.deps.store.nextRequestId();
         return this.deps.sender.execute({ loteId, dId, lote });
@@ -266,9 +271,10 @@ export class TransmissionCycle {
         await this.guard('send', loteId, () => this.deps.store.deferPendingLote(loteId));
       } else if (result.status === 'already-claimed') sendSkipped += 1;
       else if (result.status === 'deferred') sendDeferred += 1;
+      else if (result.status === 'rejected' && result.rucBlocked) rucBlocks += 1;
       else sent.push({ loteId, status: result.status });
     }
-    return { sent, sendSkipped, sendDeferred };
+    return { sent, sendSkipped, sendDeferred, rucBlocks };
   }
 
   private async pollDue() {

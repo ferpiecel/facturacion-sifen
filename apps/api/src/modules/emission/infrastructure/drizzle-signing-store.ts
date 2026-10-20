@@ -27,7 +27,11 @@ import {
 } from '../application/ports/signing.port.js';
 import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
 import { parseCreateDocument, toInvoiceDraft } from './http/create-document.request.js';
-import { parseCreateCreditNote, toCreditNoteDraft } from './http/credit-note.request.js';
+import {
+  parseCreateCreditNote,
+  parseCreateDebitNote,
+  toCreditNoteDraft,
+} from './http/credit-note.request.js';
 import type { XmlReceiver } from '../application/invoice-xml.js';
 
 export interface DrizzleSigningStoreOptions {
@@ -89,16 +93,19 @@ function readPayload(payload: unknown): {
   return { draft: toInvoiceDraft(body), receiver, ...detail.data };
 }
 
+type NoteData = { associatedCdc: string; reasonCode: number };
+
 /**
- * An NCE (HU-E7-01): its own items, rounding and reason come from its payload; the receiver,
- * operation and location are the FE's (ADR-0019 D3), read from the FE's stored payload.
+ * An NCE (HU-E7-01) or NDE (HU-E7-02): its own items, rounding and reason come from its payload;
+ * the receiver, operation and location are the FE's (ADR-0019 D3), read from the FE's stored payload.
  */
-function readCreditNotePayload(
+function readNotePayload(
   payload: unknown,
   invoicePayload: unknown,
   associatedCdc: string,
-): ReturnType<typeof readPayload> & { creditNote: { associatedCdc: string; reasonCode: number } } {
-  const base = parseCreateCreditNote(payload);
+  kind: 'credit' | 'debit',
+): ReturnType<typeof readPayload> & { note: NoteData } {
+  const base = kind === 'credit' ? parseCreateCreditNote(payload) : parseCreateDebitNote(payload);
   if (!base.ok) throw new SigningDataIncompleteError(base.errors.map((e) => e.field));
   const detail = xmlDetailSchema.safeParse(payload);
   if (!detail.success) {
@@ -116,20 +123,18 @@ function readCreditNotePayload(
     },
     receiver: invoice.receiver,
     items: detail.data.items,
-    creditNote: { associatedCdc, reasonCode: credit.reasonCode },
+    note: { associatedCdc, reasonCode: credit.reasonCode },
   };
 }
 
 const first = <T>(rows: T[]): T | undefined => rows.at(0);
 
-/** The XML data of an FE, or of an NCE together with the FE row it credits. */
+/** The XML data of an FE, or of an NCE or NDE together with the FE row it is associated to. */
 async function readDocument(
   tx: TenantTx,
   tenantId: string,
   document: typeof documents.$inferSelect,
-): Promise<
-  ReturnType<typeof readPayload> & { creditNote?: { associatedCdc: string; reasonCode: number } }
-> {
+): Promise<ReturnType<typeof readPayload> & { note?: NoteData; noteKind?: 'credit' | 'debit' }> {
   if (document.documentType === 1) return readPayload(document.payload);
   const { associatedCdc } = document;
   const invoice =
@@ -151,7 +156,11 @@ async function readDocument(
   if (associatedCdc === null || invoice === undefined) {
     throw new SigningDataIncompleteError(['associatedCdc']);
   }
-  return readCreditNotePayload(document.payload, invoice.payload, associatedCdc);
+  const noteKind = document.documentType === 6 ? 'debit' : 'credit';
+  return {
+    ...readNotePayload(document.payload, invoice.payload, associatedCdc, noteKind),
+    noteKind,
+  };
 }
 
 /** `SigningStore` over `documents` and the tenant's fiscal configuration, as app_user under RLS. */
@@ -177,8 +186,8 @@ export function createDrizzleSigningStore({
           if (document.status !== 'accepted') {
             return { documentId: document.id, status: document.status };
           }
-          // Only an FE (1) and an NCE (5) have an XML builder; any other type is held.
-          if (document.documentType !== 1 && document.documentType !== 5) {
+          // Only an FE (1), an NCE (5) and an NDE (6) have an XML builder; any other type is held.
+          if (![1, 5, 6].includes(document.documentType)) {
             throw new DocumentTypeNotSignableError(document.documentType);
           }
           const tenant = first(
@@ -298,7 +307,11 @@ export function createDrizzleSigningStore({
               },
               issuedAt: document.issuedAt,
               ...(receiver === undefined ? {} : { receiver }),
-              ...(readable.creditNote === undefined ? {} : { creditNote: readable.creditNote }),
+              ...(readable.note === undefined
+                ? {}
+                : readable.noteKind === 'debit'
+                  ? { debitNote: readable.note }
+                  : { creditNote: readable.note }),
               lines: items.map((i) => ({
                 code: i.code,
                 description: i.description,

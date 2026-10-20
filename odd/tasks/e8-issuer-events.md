@@ -187,7 +187,7 @@ Checked first against the PRD (`docs/prd/prd.md`, RF-07 to RF-09, RF-27), the ba
 conformity does not block it, associated DTEs from last to first, the 1000-number limit and the 15-day void deadline, automatic void and reissue when a
 correction changes the CDC, and the nomination rules. What is **not** settled anywhere:
 
-- **P1 Who may cancel, void, correct and nominate.** The PRD lists portal roles (`owner`, `admin`, `emisor`, `lector`) and the API has one `documents:write` scope, but no document says which role may run a destructive fiscal action. Proposed default (not blocking slice A to D): owner, admin and emisor may; lector may not; one scope for API keys at first.
+- **P1 Who may cancel, void, correct and nominate: CLOSED (PO, 2026-10-17).** In the portal the roles `owner`, `admin` and `emisor` may; `lector` may not. For API keys the existing write scope is enough (D10). The E8 endpoints (E8-01, E8-02, E8-03, E8-05) must enforce it and test the `lector` refusal.
 
 ### Technical decisions still open (tech lead, no product input needed)
 

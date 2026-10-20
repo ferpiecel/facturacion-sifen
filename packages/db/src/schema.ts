@@ -1250,8 +1250,8 @@ export const SUBSCRIPTION_STATUSES = ['trialing', 'active', 'past_due', 'cancell
 
 /**
  * SaaS plans (HU-E15-01). Platform-level catalog, no `tenant_id`: `app_user` reads it,
- * only `platform_admin` writes it. Price and limits are nullable data (open product
- * question P3), seeded through the ops CLI; a null limit means "not defined".
+ * only `platform_admin` writes it. Prices and included documents are NOT columns here:
+ * they live in effective-dated `plan_prices` rows so a change is never retroactive.
  */
 export const plans = pgTable(
   'plans',
@@ -1260,8 +1260,6 @@ export const plans = pgTable(
     code: varchar('code', { length: 64 }).notNull().unique(),
     name: varchar('name', { length: 255 }).notNull(),
     currency: char('currency', { length: 3 }).notNull().default('PYG'),
-    monthlyPrice: bigint('monthly_price', { mode: 'number' }),
-    documentLimit: integer('document_limit'),
     apiCallLimit: integer('api_call_limit'),
     features: jsonb('features')
       .notNull()
@@ -1272,16 +1270,59 @@ export const plans = pgTable(
   (table) => [
     check('plans_code_format', sql`${table.code} ~ '^[a-z0-9]+(-[a-z0-9]+)*$'`),
     check(
-      'plans_monthly_price_nonneg',
-      sql`${table.monthlyPrice} IS NULL OR ${table.monthlyPrice} >= 0`,
-    ),
-    check(
-      'plans_document_limit_nonneg',
-      sql`${table.documentLimit} IS NULL OR ${table.documentLimit} >= 0`,
-    ),
-    check(
       'plans_api_call_limit_nonneg',
       sql`${table.apiCallLimit} IS NULL OR ${table.apiCallLimit} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * Effective-dated plan terms (HU-E15-01). A price change inserts a new row; history is kept.
+ * Validity is `[valid_from, valid_to]` (null `valid_to` = open); the migration adds an EXCLUDE
+ * constraint (btree_gist) that forbids overlapping validity per plan. Written by ops only.
+ */
+export const planPrices = pgTable(
+  'plan_prices',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    planId: uuid('plan_id')
+      .notNull()
+      .references(() => plans.id),
+    monthlyPrice: bigint('monthly_price', { mode: 'number' }).notNull(),
+    includedDocuments: integer('included_documents').notNull(),
+    overagePrice: bigint('overage_price', { mode: 'number' }).notNull(),
+    validFrom: date('valid_from').notNull(),
+    validTo: date('valid_to'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      'plan_prices_amounts_nonneg',
+      sql`${table.monthlyPrice} >= 0 AND ${table.includedDocuments} >= 0 AND ${table.overagePrice} >= 0`,
+    ),
+    check(
+      'plan_prices_valid_range',
+      sql`${table.validTo} IS NULL OR ${table.validTo} >= ${table.validFrom}`,
+    ),
+  ],
+);
+
+/** Partner volume tiers (M1): unit price per document from `from_documents` upward. */
+export const planPriceTiers = pgTable(
+  'plan_price_tiers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    planPriceId: uuid('plan_price_id')
+      .notNull()
+      .references(() => planPrices.id),
+    fromDocuments: integer('from_documents').notNull(),
+    unitPrice: bigint('unit_price', { mode: 'number' }).notNull(),
+  },
+  (table) => [
+    unique('plan_price_tiers_price_from_key').on(table.planPriceId, table.fromDocuments),
+    check(
+      'plan_price_tiers_amounts_nonneg',
+      sql`${table.fromDocuments} >= 0 AND ${table.unitPrice} >= 0`,
     ),
   ],
 );
@@ -1311,6 +1352,10 @@ export const subscriptions = pgTable(
     check(
       'subscriptions_status_valid',
       sql`${table.status} IN (${sqlList(SUBSCRIPTION_STATUSES)})`,
+    ),
+    check(
+      'subscriptions_period_valid',
+      sql`${table.endsAt} IS NULL OR ${table.endsAt} >= ${table.startsAt}`,
     ),
   ],
 );

@@ -6,6 +6,7 @@
 ## Decisions (technical)
 
 - D1 Plans are platform-level data (no `tenant_id`): `app_user` reads, only `platform_admin` writes. Values (price, limits) are rows seeded through the ops CLI, never constants in code.
+- D1b Prices are effective-dated: `plan_prices` (plan_id, monthly_price, included_documents, overage_price, valid_from, valid_to) with an EXCLUDE constraint (btree_gist) against overlapping validity per plan; partner volume tiers in `plan_price_tiers`. `plans` holds no price. Landed in PR 1 (migration 0050) after review of #284; the later pricing slices must build on it.
 - D2 Subscriptions, payments, invoices_saas and usage_counters are tenant-scoped under RLS. A tenant reads its own rows; only `platform_admin` (ops) writes plan data, subscriptions, payments, invoices.
 - D3 Payments are recorded manually by ops (`method = 'manual'`); `payment_methods`/gateway tokens wait for Bancard/Pagopar (v1.0).
 - D4 Usage counter: one row per (tenant, month), incremented with `INSERT ... ON CONFLICT DO UPDATE` (single atomic statement). A trigger forbids decrements.

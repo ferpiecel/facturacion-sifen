@@ -33,29 +33,24 @@ describe('billing tables', () => {
     const [a, b] = rows.map((row) => row.id);
     const [plan] = await handle.db
       .insert(plans)
-      .values({ code: 'starter', name: 'Starter', documentLimit: 300 })
+      .values({ code: 'starter', name: 'Starter' })
       .returning();
     return { db: handle.db, a, b, planId: plan.id };
   }
 
-  it('stores a plan with configurable price and limits (no defaults for the open product values)', async () => {
+  it('stores a plan without price: prices are effective-dated plan_prices rows', async () => {
     const { db } = await seed();
     const [row] = await db
       .insert(plans)
-      .values({ code: 'pro', name: 'Pro', monthlyPrice: 250000, documentLimit: 3000 })
+      .values({ code: 'pro', name: 'Pro', apiCallLimit: 3000 })
       .returning();
-    expect(row).toMatchObject({ currency: 'PYG', apiCallLimit: null, active: true, features: {} });
-    const [starter] = await db
-      .select()
-      .from(plans)
-      .where(sql`code = 'starter'`);
-    expect(starter.monthlyPrice).toBeNull();
+    expect(row).toMatchObject({ currency: 'PYG', apiCallLimit: 3000, active: true, features: {} });
     expect(await causeOf(db.insert(plans).values({ code: 'Bad Code', name: 'x' }))).toContain(
       'plans_code_format',
     );
     expect(
-      await causeOf(db.insert(plans).values({ code: 'neg', name: 'x', monthlyPrice: -1 })),
-    ).toContain('plans_monthly_price_nonneg');
+      await causeOf(db.insert(plans).values({ code: 'neg', name: 'x', apiCallLimit: -1 })),
+    ).toContain('plans_api_call_limit_nonneg');
   });
 
   it('lets a tenant read plans but not write them', async () => {

@@ -24,6 +24,11 @@ class InMemoryLoteStore implements LoteDispatchStore {
     return Promise.resolve(true);
   }
 
+  release(loteId: string): Promise<void> {
+    if (this.states.get(loteId) === 'sending') this.states.set(loteId, 'pending');
+    return Promise.resolve();
+  }
+
   record(loteId: string, outcome: LoteDispatchOutcome): Promise<void> {
     this.states.set(loteId, outcome.status);
     this.outcomes.set(loteId, outcome);
@@ -194,16 +199,21 @@ describe('SendLote', () => {
       expect(inner.callsTo('enviarLote')).toHaveLength(1);
     });
 
-    it('records unknown, never pending, if the circuit opens between the check and the call', async () => {
+    it('releases the claim and defers when the circuit refuses the call: nothing was sent', async () => {
       const inner = new FakeSifenGateway();
       inner.setDefault('enviarLote', new SifenTransportError('enviarLote'));
-      const gateway = new CircuitBreakerGateway(inner, { failureThreshold: 1 });
+      const gateway = new CircuitBreakerGateway(inner, {
+        failureThreshold: 1,
+        baseOpenMs: 60_000,
+        now: () => new Date('2026-10-01T00:00:00Z'),
+      });
       await gateway.enviarLote({ dId: 9n, des: ['<x/>'] }).catch(() => undefined);
       const store = new InMemoryLoteStore(['lote-1']);
       const send = new SendLote({ gateway, store, pausedUntil: () => null });
       const outcome = await send.execute({ loteId: 'lote-1', dId: 1n, lote });
-      expect(outcome.status).toBe('unknown');
-      expect(store.states.get('lote-1')).toBe('unknown');
+      expect(outcome).toEqual({ status: 'deferred', retryAt: new Date('2026-10-01T00:01:00Z') });
+      expect(store.states.get('lote-1')).toBe('pending');
+      expect(store.outcomes.has('lote-1')).toBe(false);
     });
   });
 });

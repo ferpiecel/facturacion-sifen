@@ -150,6 +150,22 @@ describe('DrizzleLoteDispatchStore', () => {
     });
   });
 
+  it('releases a claimed lote back to pending without a send attempt', async () => {
+    const store = storeFor(tenantId);
+    await store.claim(loteId);
+    await store.release(loteId);
+    expect(await readLote()).toMatchObject({ status: 'pending', sendAttemptedAt: null });
+    expect(await store.claim(loteId)).toBe(true);
+  });
+
+  it('does not release a lote that already has an outcome', async () => {
+    const store = storeFor(tenantId);
+    await store.claim(loteId);
+    await store.record(loteId, { status: 'unknown', reason: 'timed out' });
+    await store.release(loteId);
+    expect((await readLote()).status).toBe('unknown');
+  });
+
   it('lets only one of two concurrent claims win', async () => {
     const store = storeFor(tenantId);
     const results = await Promise.all([store.claim(loteId), store.claim(loteId)]);

@@ -19,10 +19,12 @@ Keep DEs safe while SIFEN is unreachable or a tenant is blocked, validate receiv
 
 ## Tasks
 
-- [ ] E6-08 A: `CircuitBreaker` state machine (closed, open, half-open; doubling cool-down capped below 72 h) in `packages/sifen-gateway` (this PR)
-- [ ] E6-08 B: `CircuitBreakerGateway` decorator, one breaker per endpoint, `SifenCircuitOpenError`, `pausedUntil`
-- [ ] E6-08 C: `SendLote` defers on an open circuit before claiming, the cycle stops sending, worker wiring and docs
-- [ ] E6-05: pause a blocked tenant by RUC and requeue with delay; metric and alert
+- [x] E6-08 A (#282): `CircuitBreaker` state machine (closed, open, half-open; doubling cool-down capped below 72 h) in `packages/sifen-gateway` (this PR)
+- [x] E6-08 B (#286): `CircuitBreakerGateway` decorator, one breaker per endpoint, `SifenCircuitOpenError`, `pausedUntil`
+- [x] E6-08 C (#287): `SendLote` defers on an open circuit before claiming, the cycle stops sending, worker wiring and docs
+- [x] E6-05 A: `ruc_blocks` table (append-only, RLS), migration 0050
+- [x] E6-05 B: a 0301 that says the RUC is blocked records the pause and requeues the documents without counting an attempt
+- [x] E6-05 C: the cycle sends nothing while the pause lasts (fail closed); error alert and `sifen_ruc_block_total` log metric
 - [ ] E6-09: `siConsRUC` lookup with cache and TTL; validate receivers
 - [ ] E6-06: sync transmission behind the tenant flag; 1264 falls back to the lote; `?wait=true` up to 30 s
 
@@ -32,4 +34,5 @@ Inline for every task: each slice is one focused module with its tests, read thr
 
 ## Progress and evidence
 
-(updated per task)
+- RED observed per slice (breaker module missing; `pausedUntil` 7 failures; `SendLote`/cycle 3 failures; ruc-block 9 failures; pause 8 failures).
+- `pnpm verify` runs through the pre-push hook; a first run died of SIGKILL (memory shared with other streams) and was repeated.

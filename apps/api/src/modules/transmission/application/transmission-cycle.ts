@@ -67,10 +67,19 @@ export const DETERMINISTIC_SIGNING_ERRORS: ReadonlySet<string> = new Set([
   'SigningMismatchError',
 ]);
 
+/** The event counterpart: signing errors that repeat until the event's own data or kind changes. */
+export const DETERMINISTIC_EVENT_SIGNING_ERRORS: ReadonlySet<string> = new Set([
+  'EventIdOutOfRangeError',
+  'EventDataIncompleteError',
+  'EventKindNotSignableError',
+]);
+
 /** The issuer-event steps of a tenant's cycle (HU-E8-04): sign, send in batches of up to 15, resolve the unknown. */
 export interface TransmissionCycleEvents {
   /** `pending` events of the tenant's current environment, oldest first. */
   pendingEventIds(limit: number): Promise<readonly string[]>;
+  /** Parks a pending event for an operator: it stops being listed, and keeps blocking a duplicate. */
+  holdEvent(eventId: string, reason: string): Promise<void>;
   readonly signer: Pick<SignPendingEvent, 'execute'>;
   readonly sender: Pick<SendEventBatch, 'execute'>;
   readonly resolver: Pick<ResolveUnknownEvents, 'execute'>;
@@ -305,8 +314,9 @@ export class TransmissionCycle {
       const result = await this.guard('sign-event', eventId, () =>
         wired.signer.execute({ tenantId: this.deps.tenantId, eventId }),
       );
-      if (result?.status === 'signed') signed += 1;
-      else if (result) signSkipped += 1;
+      if (result === undefined) await this.parkEventIfDeterministic(eventId);
+      else if (result.status === 'signed') signed += 1;
+      else signSkipped += 1;
     }
     const send = await this.guard('send-event', undefined, () => wired.sender.execute());
     const resolve = await this.guard('resolve-event', undefined, () => wired.resolver.execute());
@@ -322,6 +332,17 @@ export class TransmissionCycle {
     if (last?.id !== documentId || !DETERMINISTIC_SIGNING_ERRORS.has(last.error)) return;
     await this.guard('sign', documentId, () =>
       this.deps.store.holdDocument(documentId, `signing:${last.error}`),
+    );
+  }
+
+  private async parkEventIfDeterministic(eventId: string): Promise<void> {
+    const last = this.failures.at(-1);
+    const wired = this.deps.events;
+    if (!wired || last?.id !== eventId || !DETERMINISTIC_EVENT_SIGNING_ERRORS.has(last.error)) {
+      return;
+    }
+    await this.guard('sign-event', eventId, () =>
+      wired.holdEvent(eventId, `signing:${last.error}`),
     );
   }
 

@@ -8,6 +8,7 @@ export interface DrizzleEventBatchStoreOptions {
   readonly db: Database;
   readonly tenantId: string;
   readonly now?: () => Date;
+  readonly logger?: { warn(message: string): void };
 }
 
 const toPending = (row: { id: string; eventId: bigint; signedXml: string | null }) => ({
@@ -39,6 +40,7 @@ async function cancelDocument(
   tenantId: string,
   documentId: string,
   at: Date,
+  onSkipped: (status: string | undefined) => void,
 ): Promise<void> {
   const cancelled = await tx
     .update(documents)
@@ -52,7 +54,14 @@ async function cancelDocument(
     )
     .returning({ id: documents.id })
     .then((rows) => rows.at(0));
-  if (!cancelled) return;
+  if (!cancelled) {
+    const [current] = await tx
+      .select({ status: documents.status })
+      .from(documents)
+      .where(and(eq(documents.tenantId, tenantId), eq(documents.id, documentId)));
+    onSkipped(current?.status);
+    return;
+  }
   await recordAudit(tx, {
     actor: TRANSMISSION_WORKER_ACTOR,
     action: 'document.cancelled',
@@ -68,6 +77,7 @@ export function createDrizzleEventBatchStore({
   db,
   tenantId,
   now = () => new Date(),
+  logger,
 }: DrizzleEventBatchStoreOptions): EventBatchStore {
   return {
     async signedEvents(limit) {
@@ -177,7 +187,12 @@ export function createDrizzleEventBatchStore({
           );
           const [event] = updated;
           if (outcome.status === 'approved' && event.kind === 'cancellation' && event.documentId) {
-            await cancelDocument(tx, tenantId, event.documentId, now());
+            const documentId = event.documentId;
+            await cancelDocument(tx, tenantId, documentId, now(), (status) =>
+              logger?.warn(
+                `issuer event ${id} approved but document ${documentId} was not cancelled: status ${status ?? 'unknown'}`,
+              ),
+            );
           }
         }
       });

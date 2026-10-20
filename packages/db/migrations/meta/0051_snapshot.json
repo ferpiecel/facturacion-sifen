@@ -1,6 +1,6 @@
 {
-  "id": "ed8471d7-c557-44c9-bdf7-790240fc5e5d",
-  "prevId": "776baaf0-e62c-4cd2-a902-a5e121965abe",
+  "id": "0e6ed255-1981-43b6-9a3b-2965c5f5f951",
+  "prevId": "44a073e1-8f54-42dc-9285-0c95d47a8b55",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1631,6 +1631,158 @@
       },
       "isRLSEnabled": false
     },
+    "public.plan_price_tiers": {
+      "name": "plan_price_tiers",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "plan_price_id": {
+          "name": "plan_price_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "from_documents": {
+          "name": "from_documents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "unit_price": {
+          "name": "unit_price",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "plan_price_tiers_plan_price_id_plan_prices_id_fk": {
+          "name": "plan_price_tiers_plan_price_id_plan_prices_id_fk",
+          "tableFrom": "plan_price_tiers",
+          "tableTo": "plan_prices",
+          "columnsFrom": [
+            "plan_price_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "plan_price_tiers_price_from_key": {
+          "name": "plan_price_tiers_price_from_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "plan_price_id",
+            "from_documents"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "plan_price_tiers_amounts_nonneg": {
+          "name": "plan_price_tiers_amounts_nonneg",
+          "value": "\"plan_price_tiers\".\"from_documents\" >= 0 AND \"plan_price_tiers\".\"unit_price\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.plan_prices": {
+      "name": "plan_prices",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "plan_id": {
+          "name": "plan_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "monthly_price": {
+          "name": "monthly_price",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "included_documents": {
+          "name": "included_documents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "overage_price": {
+          "name": "overage_price",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valid_from": {
+          "name": "valid_from",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valid_to": {
+          "name": "valid_to",
+          "type": "date",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "plan_prices_plan_id_plans_id_fk": {
+          "name": "plan_prices_plan_id_plans_id_fk",
+          "tableFrom": "plan_prices",
+          "tableTo": "plans",
+          "columnsFrom": [
+            "plan_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "plan_prices_amounts_nonneg": {
+          "name": "plan_prices_amounts_nonneg",
+          "value": "\"plan_prices\".\"monthly_price\" >= 0 AND \"plan_prices\".\"included_documents\" >= 0 AND \"plan_prices\".\"overage_price\" >= 0"
+        },
+        "plan_prices_valid_range": {
+          "name": "plan_prices_valid_range",
+          "value": "\"plan_prices\".\"valid_to\" IS NULL OR \"plan_prices\".\"valid_to\" >= \"plan_prices\".\"valid_from\""
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.plans": {
       "name": "plans",
       "schema": "",
@@ -1660,18 +1812,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'PYG'"
-        },
-        "monthly_price": {
-          "name": "monthly_price",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "document_limit": {
-          "name": "document_limit",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
         },
         "api_call_limit": {
           "name": "api_call_limit",
@@ -1718,14 +1858,6 @@
         "plans_code_format": {
           "name": "plans_code_format",
           "value": "\"plans\".\"code\" ~ '^[a-z0-9]+(-[a-z0-9]+)*$'"
-        },
-        "plans_monthly_price_nonneg": {
-          "name": "plans_monthly_price_nonneg",
-          "value": "\"plans\".\"monthly_price\" IS NULL OR \"plans\".\"monthly_price\" >= 0"
-        },
-        "plans_document_limit_nonneg": {
-          "name": "plans_document_limit_nonneg",
-          "value": "\"plans\".\"document_limit\" IS NULL OR \"plans\".\"document_limit\" >= 0"
         },
         "plans_api_call_limit_nonneg": {
           "name": "plans_api_call_limit_nonneg",
@@ -1853,6 +1985,10 @@
         "subscriptions_status_valid": {
           "name": "subscriptions_status_valid",
           "value": "\"subscriptions\".\"status\" IN ('trialing', 'active', 'past_due', 'cancelled')"
+        },
+        "subscriptions_period_valid": {
+          "name": "subscriptions_period_valid",
+          "value": "\"subscriptions\".\"ends_at\" IS NULL OR \"subscriptions\".\"ends_at\" >= \"subscriptions\".\"starts_at\""
         }
       },
       "isRLSEnabled": false

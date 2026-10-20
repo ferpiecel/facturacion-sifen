@@ -94,14 +94,14 @@ export class CircuitBreakerGateway implements SifenGateway {
     if (!acquired.allowed) throw new SifenCircuitOpenError(operation, acquired.retryAt);
     try {
       const result = await call();
-      breaker.success();
+      breaker.success(acquired.token);
       return result;
     } catch (error) {
       if (error instanceof SifenTransportError || error instanceof SifenTimeoutError) {
-        breaker.failure();
+        breaker.failure(acquired.token);
       } else {
         // The endpoint answered (a fault, an unusable body) or the caller's request was invalid.
-        breaker.success();
+        breaker.success(acquired.token);
       }
       throw error;
     }

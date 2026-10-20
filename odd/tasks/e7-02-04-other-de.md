@@ -18,8 +18,6 @@ Let an integrator issue an NDE (`iTiDE` 6), an AFE (4) and an NRE (7) through `P
 | NDE (6) | Associated FE mandatory once (2400, 2415); reason E401 1..8 mandatory (1450); no D011, E600, E010, E900 | MT group H, E5, validations 240 to 252 |
 | NDE (6) | The 2417 sum rule names the credit notes only: it does not apply to a debit | MT validation 250 (H004d) |
 | NDE (6) | Same currency as the FE (2438), receiver not innominado (1331), F014 = F008 - F011 - F012 - F013 (2365) | MT validations 252, 223; NT 010, NT 023 |
-| AFE (4) | See the AFE slices below | MT groups D, E7, H |
-| NRE (7) | See the NRE slices below | MT groups E6, E9 |
 
 ## Slices (one PR each, chained as drafts when they depend on a PR not merged yet)
 
@@ -29,13 +27,9 @@ Let an integrator issue an NDE (`iTiDE` 6), an AFE (4) and an NRE (7) through `P
 - [ ] N2 request contract (`type: "NDE"`), XML mapping (iTiDE 6), signing store dispatch
 - [ ] N3 routing in the controller, KuDE, OpenAPI, guide, e2e
 
-### AFE
+### AFE and NRE
 
-- [ ] A1 to A4 to be detailed after the NDE (domain, contract, XML and signing, KuDE and e2e)
-
-### NRE
-
-- [ ] R1 to R5 to be detailed after the AFE (transport data has no amounts)
+- [ ] Detailed after the NDE (domain, contract, XML and signing, KuDE and e2e).
 
 ## Progress
 

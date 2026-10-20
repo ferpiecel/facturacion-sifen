@@ -256,6 +256,52 @@ describe('SendEventBatch', () => {
     });
   });
 
+  describe('when the outcome cannot be recorded', () => {
+    function failingRecord(failures: number) {
+      const ctx = setup([event(1), event(2)]);
+      const warnings: string[] = [];
+      let calls = 0;
+      const record = ctx.store.record.bind(ctx.store);
+      ctx.store.record = (outcomes) => {
+        calls += 1;
+        return calls <= failures ? Promise.reject(new Error('db down')) : record(outcomes);
+      };
+      const send = new SendEventBatch({
+        gateway: ctx.gateway,
+        store: ctx.store,
+        nextRequestId: () => Promise.resolve(77n),
+        validate: valid,
+        logger: { warn: (message) => warnings.push(message) },
+      });
+      ctx.gateway.enqueue('enviarEventos', sifenScenarios.eventosProcesados([ok('1'), ok('2')]));
+      return { ...ctx, send, warnings, calls: () => calls };
+    }
+
+    it('retries the record once, logging the event ids, and never sends again', async () => {
+      const { gateway, store, send, warnings, calls } = failingRecord(1);
+
+      const result = await send.execute();
+
+      expect(calls()).toBe(2);
+      expect(gateway.callsTo('enviarEventos')).toHaveLength(1);
+      expect(store.outcomes.size).toBe(2);
+      expect(result).toMatchObject({ approved: 2 });
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('row-1');
+      expect(warnings[0]).toContain('row-2');
+    });
+
+    it('rethrows when the retry fails too, leaving the events to the sweep, after logging their ids', async () => {
+      const { gateway, store, send, warnings } = failingRecord(2);
+
+      await expect(send.execute()).rejects.toThrow('db down');
+
+      expect(gateway.callsTo('enviarEventos')).toHaveLength(1);
+      expect(store.outcomes.size).toBe(0);
+      expect(warnings.at(-1)).toMatch(/row-1.*row-2/);
+    });
+  });
+
   it('sends only what it claimed when another worker took some events', async () => {
     const { gateway, store, send } = setup([event(1), event(2)], {
       takenByAnother: new Set(['row-1']),

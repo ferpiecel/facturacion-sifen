@@ -1,6 +1,9 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
-import { issuerEvents, tenants, withTenantTransaction, type Database } from '@sifen/db';
+import { documents, issuerEvents, tenants, withTenantTransaction, type Database } from '@sifen/db';
+import { recordAudit } from '../../audit/infrastructure/record-audit.js';
+import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
 import type { EventBatchStore, EventOutcome } from '../application/send-event-batch.js';
+import { TRANSMISSION_WORKER_ACTOR } from './transmission-audit-actor.js';
 export interface DrizzleEventBatchStoreOptions {
   readonly db: Database;
   readonly tenantId: string;
@@ -12,6 +15,53 @@ const toPending = (row: { id: string; eventId: bigint; signedXml: string | null 
   eventId: row.eventId,
   signedXml: row.signedXml ?? '',
 });
+
+type Tx = Parameters<Parameters<typeof withTenantTransaction>[2]>[0];
+
+/** One audit row per settled event (ADR-0020): ids and codes only, never the XML. */
+async function auditEvent(tx: Tx, id: string, status: string, code: string | null): Promise<void> {
+  await recordAudit(tx, {
+    actor: TRANSMISSION_WORKER_ACTOR,
+    action: `issuer_event.${status}`,
+    entity: { type: 'issuer_event', id },
+    before: null,
+    after: { status, responseCode: code },
+  });
+}
+
+/**
+ * SIFEN registered the cancellation: an approved document becomes `cancelled`, with its webhook queued in
+ * the same transaction. A document in any other state (already cancelled, a late approval race) is left
+ * alone: the event is settled either way.
+ */
+async function cancelDocument(
+  tx: Tx,
+  tenantId: string,
+  documentId: string,
+  at: Date,
+): Promise<void> {
+  const cancelled = await tx
+    .update(documents)
+    .set({ status: 'cancelled', updatedAt: at })
+    .where(
+      and(
+        eq(documents.tenantId, tenantId),
+        eq(documents.id, documentId),
+        inArray(documents.status, ['approved', 'approved_with_observations']),
+      ),
+    )
+    .returning({ id: documents.id })
+    .then((rows) => rows.at(0));
+  if (!cancelled) return;
+  await recordAudit(tx, {
+    actor: TRANSMISSION_WORKER_ACTOR,
+    action: 'document.cancelled',
+    entity: { type: 'document', id: documentId },
+    before: null,
+    after: { status: 'cancelled' },
+  });
+  await enqueueDocumentEvents(tx, { tenantId, documentIds: [documentId], at });
+}
 
 /** `EventBatchStore` over `issuer_events`, as app_user inside the tenant's transaction (ADR-0020). */
 export function createDrizzleEventBatchStore({
@@ -86,6 +136,7 @@ export function createDrizzleEventBatchStore({
             )
             .returning({ id: issuerEvents.id });
           if (updated.length !== 1) throw new Error(`Event ${id} is not waiting to be sent`);
+          await auditEvent(tx, id, 'rejected', rejection.code);
         }
       });
     },
@@ -112,8 +163,22 @@ export function createDrizzleEventBatchStore({
                 inArray(issuerEvents.status, ['sending', 'unknown']),
               ),
             )
-            .returning({ id: issuerEvents.id });
+            .returning({
+              id: issuerEvents.id,
+              kind: issuerEvents.kind,
+              documentId: issuerEvents.documentId,
+            });
           if (updated.length !== 1) throw new Error(`Event ${id} is not being sent`);
+          await auditEvent(
+            tx,
+            id,
+            outcome.status,
+            outcome.status === 'unknown' ? null : outcome.code,
+          );
+          const [event] = updated;
+          if (outcome.status === 'approved' && event.kind === 'cancellation' && event.documentId) {
+            await cancelDocument(tx, tenantId, event.documentId, now());
+          }
         }
       });
     },

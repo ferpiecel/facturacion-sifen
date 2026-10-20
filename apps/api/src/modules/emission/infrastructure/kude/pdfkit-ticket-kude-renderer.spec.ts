@@ -176,7 +176,7 @@ describe('createKudeRenderer', () => {
   it('uses the letter layout by default and the ticket layout on request', async () => {
     const renderer = createKudeRenderer();
     const width = async (format?: 'letter' | 'ticket-80') =>
-      (await pageSizes(await renderer.render(invoice(), format)))[0]?.w;
+      (await pageSizes(await renderer.render(invoice(), format))).map((page) => page.w)[0];
     expect(await width()).toBeCloseTo(595.28, 0);
     expect(await width('letter')).toBeCloseTo(595.28, 0);
     expect(await width('ticket-80')).toBeCloseTo(80 * MM, 1);

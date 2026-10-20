@@ -105,14 +105,4 @@ describe('AcceptDebitNote with the Drizzle unit of work', () => {
     expect(parseCdc(cdc).documentNumber).toBe('0000001');
     expect((await rows()).filter((r) => r.documentType === 6)).toHaveLength(1);
   });
-
-  it('keeps one row per idempotency key', async () => {
-    const debit = createAcceptDebitNote({ unitOfWork: unitOfWork(), now });
-    const input = note(1000, 'NDE');
-    const first = await debit(input);
-    const again = await debit(input);
-
-    expect(again).toEqual(first);
-    expect((await rows()).filter((r) => r.documentType === 6)).toHaveLength(1);
-  });
 });

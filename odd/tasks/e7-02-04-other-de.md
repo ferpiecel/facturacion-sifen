@@ -3,13 +3,11 @@
 - Feature: `e7-02-04-other-de` · Refs: HU-E7-02, HU-E7-03, HU-E7-04 (epic E7, RF-01)
 - Engram mirror: `odd/e7-02-04-other-de/tasks`
 - TDD: strict (source: `openspec/config.yaml`, `strict_tdd: true`) · runner: Vitest (`pnpm --filter @sifen/api exec vitest run`, thresholds 85%)
-- Delivery: `ask-on-risk`, `stacked-to-main`; each PR 400 changed lines or less (advisory heuristic, hard rule in CLAUDE.md).
 - Template: the NCE (HU-E7-01, `odd/tasks/hu-e7-01-credit-note.md`, ADR-0019). Same endpoint, `type` discriminator, same pipeline.
 
 ## Objective
 
-Let an integrator issue an NDE (`iTiDE` 6), an AFE (4) and an NRE (7) through `POST /v1/documents` with the same asynchronous flow as the FE
-(202, numbering, signing, QR, lote, webhooks, KuDE). FE and NCE output stays byte identical.
+Issue an NDE (`iTiDE` 6), an AFE (4) and an NRE (7) through `POST /v1/documents`, as the NCE does. FE and NCE output stays byte identical.
 
 ## Normative basis (MT v150, `docs/referencia/dnit/`)
 

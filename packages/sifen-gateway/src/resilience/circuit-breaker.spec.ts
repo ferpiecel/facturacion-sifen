@@ -18,7 +18,7 @@ describe('CircuitBreaker', () => {
     breaker.failure();
     breaker.failure();
     expect(breaker.state).toBe('closed');
-    expect(breaker.acquire()).toEqual({ allowed: true });
+    expect(breaker.acquire()).toMatchObject({ allowed: true });
   });
 
   it('opens at the threshold and refuses calls until the cool-down elapses', () => {
@@ -36,7 +36,7 @@ describe('CircuitBreaker', () => {
     const breaker = new CircuitBreaker({ ...options, now: c.now });
     for (let i = 0; i < 3; i += 1) breaker.failure();
     c.advance(1_000);
-    expect(breaker.acquire()).toEqual({ allowed: true });
+    expect(breaker.acquire()).toMatchObject({ allowed: true });
     expect(breaker.state).toBe('half-open');
     expect(breaker.acquire().allowed).toBe(false);
   });
@@ -49,7 +49,7 @@ describe('CircuitBreaker', () => {
     breaker.acquire();
     breaker.success();
     expect(breaker.state).toBe('closed');
-    expect(breaker.acquire()).toEqual({ allowed: true });
+    expect(breaker.acquire()).toMatchObject({ allowed: true });
   });
 
   it('doubles the cool-down on each failed probe up to the cap', () => {
@@ -106,6 +106,12 @@ describe('CircuitBreaker', () => {
     { baseOpenMs: 0 },
     { baseOpenMs: 5_000, maxOpenMs: 1_000 },
     { maxOpenMs: 73 * 60 * 60_000 },
+    { maxOpenMs: 72 * 60 * 60_000 },
+    { maxOpenMs: Number.POSITIVE_INFINITY },
+    { maxOpenMs: Number.NaN },
+    { baseOpenMs: Number.NaN },
+    { probeTimeoutMs: 0 },
+    { probeTimeoutMs: Number.POSITIVE_INFINITY },
   ])('rejects an invalid configuration %j', (override) => {
     expect(() => new CircuitBreaker({ ...options, ...override })).toThrow(RangeError);
   });
@@ -124,11 +130,74 @@ describe('CircuitBreaker', () => {
 
     it('keeps refusing while a probe is in flight', () => {
       const c = clock();
-      const breaker = new CircuitBreaker({ ...options, now: c.now });
+      const breaker = new CircuitBreaker({ ...options, probeTimeoutMs: 5_000, now: c.now });
       for (let i = 0; i < 3; i += 1) breaker.failure();
       c.advance(1_000);
       breaker.acquire();
-      expect(breaker.peek()).toEqual(new Date(1_000));
+      expect(breaker.peek()).toEqual(new Date(1_000 + 5_000));
+    });
+  });
+
+  describe('half-open probe', () => {
+    const probeOptions = { ...options, probeTimeoutMs: 5_000 };
+
+    it('refuses with a retryAt in the future while the probe is in flight', () => {
+      const c = clock();
+      const breaker = new CircuitBreaker({ ...probeOptions, now: c.now });
+      for (let i = 0; i < 3; i += 1) breaker.failure();
+      c.advance(1_000);
+      breaker.acquire();
+      expect(breaker.acquire()).toEqual({ allowed: false, retryAt: new Date(1_000 + 5_000) });
+    });
+
+    it('reopens with a doubled cool-down when the probe is never settled', () => {
+      const c = clock();
+      const breaker = new CircuitBreaker({ ...probeOptions, now: c.now });
+      for (let i = 0; i < 3; i += 1) breaker.failure();
+      c.advance(1_000);
+      breaker.acquire();
+      c.advance(5_000);
+      expect(breaker.acquire()).toEqual({ allowed: false, retryAt: new Date(6_000 + 2_000) });
+      expect(breaker.state).toBe('open');
+      c.advance(2_000);
+      expect(breaker.acquire()).toMatchObject({ allowed: true });
+    });
+
+    it('ignores the outcome of a call that started before the circuit opened', () => {
+      const c = clock();
+      const breaker = new CircuitBreaker({ ...probeOptions, now: c.now });
+      const straggler = breaker.acquire();
+      if (!straggler.allowed) throw new Error('expected a closed circuit to allow');
+      for (let i = 0; i < 3; i += 1) breaker.failure();
+      breaker.success(straggler.token);
+      expect(breaker.state).toBe('open');
+      c.advance(1_000);
+      const probe = breaker.acquire();
+      if (!probe.allowed) throw new Error('expected a probe');
+      breaker.success(straggler.token);
+      expect(breaker.state).toBe('half-open');
+      breaker.failure(straggler.token);
+      expect(breaker.state).toBe('half-open');
+      breaker.success(probe.token);
+      expect(breaker.state).toBe('closed');
+    });
+
+    it('keeps working when onStateChange throws', () => {
+      const c = clock();
+      const breaker = new CircuitBreaker({
+        ...probeOptions,
+        now: c.now,
+        onStateChange: () => {
+          throw new Error('boom');
+        },
+      });
+      for (let i = 0; i < 3; i += 1) breaker.failure();
+      c.advance(1_000);
+      const probe = breaker.acquire();
+      expect(probe).toMatchObject({ allowed: true });
+      expect(breaker.state).toBe('half-open');
+      breaker.failure();
+      expect(breaker.state).toBe('open');
     });
   });
 });

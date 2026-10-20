@@ -111,7 +111,7 @@ planning PR is docs only.
 - [ ] T1b HU-E8-04 A3: vendor the event XSD closure.
 - [x] T2 HU-E8-04 B1 and B2: `issuer_events` table, guards, rollback, RLS tests, ADR-0020 (PRs #272, #273).
 - [x] T3 HU-E8-04 C1 and C2 (with A3): XSD, batcher, send use case, response handling, store (PRs #274, #275, #276). Evidence in "Slice C evidence".
-- [ ] T4 HU-E8-04 D: worker step, audit, webhooks for event outcomes, operations doc.
+- [x] T4 HU-E8-04 D (PRs #279, #280, #281, #283, #285 and the cycle wiring, commits bc710be and 1527523): sign pending events, recovery by query, audit and settlement, event step in the cycle. The two-connection `claim` test (F5) stays open; see "Slice D evidence".
 - [ ] T5 HU-E8-02 A to C: `approved_at`, cancel rules and use case, endpoint and settlement.
 - [ ] T6 HU-E8-03 A to C: voided ranges, inutilize endpoint, deadline alert.
 - [ ] T7 HU-E8-05 A and B: nomination storage, rules, endpoint, NCE interplay.
@@ -214,6 +214,14 @@ Hard requirements, not debt:
 - A3 RED: `ROOT_FILES` and the two `siRecepEvento` cases failed (3), then 45 pass in `sifen-xsd`; a real signed cancellation and voiding validate against the vendored XSD (e2e in `sifen-tips`), which also shows xmlgen's missing `dTiGDE` is accepted by the schema.
 - C1 RED: "Cannot find module ../domain/event-batch.js". Review fixes, RED first: the result is read from `dEstRes` and every message, with the provisional already-processed set; validation runs before the claim; a local rejection uses the code `LOC-XSD` (`response_code` is `varchar(8)`, so the `LOCAL-XSD` suggested in the review does not fit) and never gets a batch id; a validator that throws leaves the event `signed`.
 - C2 RED: "Cannot find module ./drizzle-event-batch-store.js". Review fixes: the claim re-checks the tenant's current environment; the namespace is not inserted twice; migration 0049 lets a `signed` event be rejected locally (a `LOC-` code, no batch id).
+
+## Slice D evidence (2026-10-20)
+
+- Route: inline by the writer, in six PRs (#279 `SignPendingEvent`, #280 its store, #281 `ResolveUnknownEvents` plus `consultarDE` events, #283 its store, #285 settlement and the record retry, then the cycle wiring, which also refuses an event id beyond the safe integer range with a typed error instead of signing with id 0).
+- Honors the slice D requirements: orphan `sending` events become `unknown` with a conditional UPDATE and are resolved by QUERYING SIFEN (`consultarDE` lists the registered events), never by resending; `record` is retried once logging the ids; a whole-call failure is `unknown`; every outcome is audited and an approved cancellation moves its document to `cancelled` with the `document.cancelled` webhook in the same transaction.
+- RED observed on each step (missing modules, 5 settlement failures, 2 retry failures, 5 cycle failures, 2 end-to-end failures). The end-to-end test runs a tenant cycle over PGlite with the fake gateway, the real xmlgen/xmlsign adapters and the XSD check.
+- Open: F5 (a `*.pg.spec.ts` with two real connections claiming the same rows) and the voiding and nomination resolution by query (no document to ask about; E8-03 and E8-05).
+- Known limits: an event that always fails to sign (a nomination, which has no builder yet) is retried every cycle and reported as a failure; there is no hold column for events.
 
 ## Debt (from the re-review of #272 and #273)
 

@@ -19,7 +19,7 @@ Keep DEs safe while SIFEN is unreachable or a tenant is blocked, validate receiv
 
 ## Tasks
 
-- [x] E6-08 A (#282): `CircuitBreaker` state machine (closed, open, half-open; doubling cool-down capped below 72 h) in `packages/sifen-gateway` (this PR)
+- [x] E6-08 A (#282, merged; probe timeout, stale-call token and cap fixes in #286): `CircuitBreaker` state machine (closed, open, half-open; doubling cool-down capped below 72 h, exclusive: `maxOpenMs` of 72 h or more is rejected) in `packages/sifen-gateway` (this PR)
 - [x] E6-08 B (#286): `CircuitBreakerGateway` decorator, one breaker per endpoint, `SifenCircuitOpenError`, `pausedUntil`
 - [x] E6-08 C (#287): `SendLote` defers on an open circuit before claiming, the cycle stops sending, worker wiring and docs
 - [x] E6-05 A (#290, 1196132): `ruc_blocks` table (append-only, RLS), migration 0050

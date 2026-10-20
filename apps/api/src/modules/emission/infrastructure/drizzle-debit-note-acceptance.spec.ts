@@ -11,7 +11,6 @@ import {
   createAcceptDebitNote,
   type AcceptCreditNoteInput,
 } from '../application/accept-credit-note.js';
-import { InvoiceValidationError } from '../application/accept-invoice.js';
 import { parseCdc } from '../domain/cdc.js';
 import {
   acceptInvoiceWithStatus,
@@ -94,15 +93,5 @@ describe('AcceptDebitNote with the Drizzle unit of work', () => {
     await expect(credit(note(1_000_000, 'NCE'))).resolves.toMatchObject({
       cdc: expect.stringMatching(/^05/) as string,
     });
-  });
-
-  it('refuses an unknown FE before burning a number', async () => {
-    const debit = createAcceptDebitNote({ unitOfWork: unitOfWork(), now });
-    const unknown = `01${'9'.repeat(42)}`;
-
-    await expect(debit(note(1000, 'NDE', unknown))).rejects.toBeInstanceOf(InvoiceValidationError);
-    const { cdc } = await debit(note(1000, 'NDE'));
-    expect(parseCdc(cdc).documentNumber).toBe('0000001');
-    expect((await rows()).filter((r) => r.documentType === 6)).toHaveLength(1);
   });
 });

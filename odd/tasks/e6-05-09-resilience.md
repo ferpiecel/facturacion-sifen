@@ -22,9 +22,9 @@ Keep DEs safe while SIFEN is unreachable or a tenant is blocked, validate receiv
 - [x] E6-08 A (#282): `CircuitBreaker` state machine (closed, open, half-open; doubling cool-down capped below 72 h) in `packages/sifen-gateway` (this PR)
 - [x] E6-08 B (#286): `CircuitBreakerGateway` decorator, one breaker per endpoint, `SifenCircuitOpenError`, `pausedUntil`
 - [x] E6-08 C (#287): `SendLote` defers on an open circuit before claiming, the cycle stops sending, worker wiring and docs
-- [x] E6-05 A: `ruc_blocks` table (append-only, RLS), migration 0050
-- [x] E6-05 B: a 0301 that says the RUC is blocked records the pause and requeues the documents without counting an attempt
-- [x] E6-05 C: the cycle sends nothing while the pause lasts (fail closed); error alert and `sifen_ruc_block_total` log metric
+- [x] E6-05 A (#290, 1196132): `ruc_blocks` table (append-only, RLS), migration 0050
+- [x] E6-05 B (#291, 9e28d72): a 0301 that says the RUC is blocked records the pause and requeues the documents without counting an attempt
+- [x] E6-05 C (0bb77ca, no PR yet): the cycle sends nothing while the pause lasts (fail closed); error alert and `sifen_ruc_block_total` log metric
 - [ ] E6-09: `siConsRUC` lookup with cache and TTL; validate receivers
 - [ ] E6-06: sync transmission behind the tenant flag; 1264 falls back to the lote; `?wait=true` up to 30 s
 

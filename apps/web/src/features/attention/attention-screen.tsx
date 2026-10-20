@@ -40,10 +40,14 @@ const HOLDS: Record<HoldCode, string> = {
   unknown: 'Retenido por una causa que soporte debe revisar',
 };
 
-function deadlineText(item: AttentionItem): string {
+/** The 72 h window matters only while the document is overdue or due soon; a rejected one has no deadline. */
+function deadlineText(item: AttentionItem): string | null {
   if (item.deadline === null || item.hoursRemaining === null) return 'Sin firmar';
   if (item.reasons.includes('overdue')) return `Venció ${formatIssuedAt(item.deadline)}`;
-  return `Vence en ${String(item.hoursRemaining).replace('.', ',')} h`;
+  if (item.reasons.includes('due_soon')) {
+    return `Vence en ${String(item.hoursRemaining).replace('.', ',')} h`;
+  }
+  return null;
 }
 
 /** The corrective flows arrive with the cancellation and voiding stories (E8); until then they are placeholders. */
@@ -64,6 +68,7 @@ function CorrectiveActions({ item }: { item: AttentionItem }) {
 }
 
 function Card({ item, canAct }: { item: AttentionItem; canAct: boolean }) {
+  const deadline = deadlineText(item);
   return (
     <li className="flex flex-col gap-space-sm rounded-xl bg-surface-container-lowest p-space-md shadow-sm sm:flex-row sm:items-start sm:justify-between">
       <div className="flex min-w-0 flex-col gap-1">
@@ -91,9 +96,11 @@ function Card({ item, canAct }: { item: AttentionItem; canAct: boolean }) {
         )}
       </div>
       <div className="flex flex-col gap-space-xs sm:items-end">
-        <span className="font-code-sm text-code-sm font-semibold text-on-surface">
-          {deadlineText(item)}
-        </span>
+        {deadline !== null && (
+          <span className="font-code-sm text-code-sm font-semibold text-on-surface">
+            {deadline}
+          </span>
+        )}
         {item.currency === 'PYG' ? (
           <MoneyPYG amount={Number(item.total)} className="font-body-md text-on-surface" />
         ) : (

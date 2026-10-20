@@ -38,9 +38,30 @@ describe('AttentionScreen (HU-E12-04)', () => {
     expect(within(items[0]).getByText('Plazo de 72 h vencido')).toBeInTheDocument();
     expect(within(items[1]).getByText('Rechazado por SIFEN')).toBeInTheDocument();
     expect(within(items[1]).getByText('RUC del receptor inexistente')).toBeInTheDocument();
-    expect(within(items[1]).getByText('Vence en 20,5 h')).toBeInTheDocument();
+    expect(within(items[1]).queryByText(/Vence|Venció|Sin firmar/)).not.toBeInTheDocument();
     expect(within(items[2]).getByText('Retenido')).toBeInTheDocument();
     expect(within(items[2]).getByText('No se pudo firmar el documento')).toBeInTheDocument();
+    expect(within(items[2]).getByText('Sin firmar')).toBeInTheDocument();
+  });
+
+  it('shows the remaining window only for overdue and due-soon documents', async () => {
+    const [overdue, rejected, held] = ATTENTION.items;
+    const soon = {
+      ...overdue,
+      id: 'soon',
+      reasons: ['due_soon' as const],
+      deadline: '2026-10-21T12:00:00.000Z',
+      hoursRemaining: 5.5,
+    };
+    const staleRejected = { ...rejected, deadline: '2026-10-10T12:00:00.000Z', hoursRemaining: 0 };
+    const page = { ...ATTENTION, items: [soon, staleRejected, held] };
+    render(
+      <AttentionScreen client={fakeAttentionClient({ kind: 'ok', page })} auth={fakeAuth()} />,
+    );
+
+    const items = within(await list()).getAllByRole('listitem');
+    expect(within(items[0]).getByText('Vence en 5,5 h')).toBeInTheDocument();
+    expect(within(items[1]).queryByText(/Vence|Venció|Sin firmar/)).not.toBeInTheDocument();
     expect(within(items[2]).getByText('Sin firmar')).toBeInTheDocument();
   });
 

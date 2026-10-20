@@ -9,3 +9,5 @@ export const GET_KUDE = Symbol('GetKude');
 
 /** Injection token for the `acceptCreditNote` application function. */
 export const ACCEPT_CREDIT_NOTE = Symbol('AcceptCreditNote');
+/** Injection token for the `acceptDebitNote` application function (NDE). */
+export const ACCEPT_DEBIT_NOTE = Symbol('AcceptDebitNote');

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Pool } from 'pg';
 import { PGlite } from '@electric-sql/pglite';
+import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
 import { drizzle as drizzlePglite } from 'drizzle-orm/pglite';
 import { migrate as migratePglite } from 'drizzle-orm/pglite/migrator';
 import * as schema from '../../src/schema.js';
@@ -54,7 +55,7 @@ function migrateClient(client: PGlite): Promise<void> {
 
 async function getMigratedTemplate(): Promise<Blob> {
   migratedTemplate ??= (async () => {
-    const seed = new PGlite();
+    const seed = new PGlite({ extensions: { btree_gist } });
     try {
       await migrateClient(seed);
       return await seed.dumpDataDir('none');
@@ -66,7 +67,10 @@ async function getMigratedTemplate(): Promise<Blob> {
 }
 
 async function createPgliteFromTemplate(): Promise<DatabaseHandle> {
-  const client = new PGlite({ loadDataDir: await getMigratedTemplate() });
+  const client = new PGlite({
+    loadDataDir: await getMigratedTemplate(),
+    extensions: { btree_gist },
+  });
   const db = drizzlePglite(client, { schema });
   return {
     db,

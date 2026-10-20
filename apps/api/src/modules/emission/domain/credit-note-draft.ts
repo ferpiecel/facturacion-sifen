@@ -83,14 +83,20 @@ export function creditNoteSumRule(
   };
 }
 
+/** The two notes that hang from an FE: C002 = 5 (NCE) and C002 = 6 (NDE), sharing group E5 and H. */
+export type NoteKind = 'credit' | 'debit';
+
 /** H004f / 2438: same operation currency. Only PYG exists, so this is a guard for multi-currency. */
-export function creditNoteCurrencyRule(invoiceCurrency: string): ValidationError | undefined {
+export function creditNoteCurrencyRule(
+  invoiceCurrency: string,
+  kind: NoteKind = 'credit',
+): ValidationError | undefined {
   if (invoiceCurrency === 'PYG') return undefined;
   return {
     field: 'associatedCdc',
-    rule: 'credit-note-currency-mismatch',
+    rule: `${kind}-note-currency-mismatch`,
     sifenCode: '2438',
-    message: 'The credit note currency must match the one of the associated invoice',
+    message: `The ${kind} note currency must match the one of the associated invoice`,
   };
 }
 
@@ -104,12 +110,33 @@ export function validateCreditNoteDraft(
   invoice: AssociatedInvoiceFacts | undefined,
   config: ValidationConfig,
 ): ValidationError[] {
+  return validateNoteDraft('credit', draft, invoice, config);
+}
+
+/**
+ * Pure pre-SIFEN validation of an NDE (HU-E7-02). Same association, reason, receiver and item rules
+ * as the NCE; the 2417 sum is not applied because H004d names credit notes only and a debit adds to the FE.
+ */
+export function validateDebitNoteDraft(
+  draft: CreditNoteDraft,
+  invoice: AssociatedInvoiceFacts | undefined,
+  config: ValidationConfig,
+): ValidationError[] {
+  return validateNoteDraft('debit', draft, invoice, config);
+}
+
+function validateNoteDraft(
+  kind: NoteKind,
+  draft: CreditNoteDraft,
+  invoice: AssociatedInvoiceFacts | undefined,
+  config: ValidationConfig,
+): ValidationError[] {
   const errors: ValidationError[] = [];
 
   if (!Object.hasOwn(CREDIT_NOTE_REASONS, draft.reasonCode)) {
     errors.push({
       field: 'reasonCode',
-      rule: 'credit-note-reason',
+      rule: `${kind}-note-reason`,
       sifenCode: '1452',
       message: 'The reason must be one of the eight codes of E401 (1 to 8)',
     });
@@ -148,12 +175,12 @@ export function validateCreditNoteDraft(
     if (invoice.receiver.kind === 'unnamed') {
       errors.push({
         field: 'associatedCdc',
-        rule: 'credit-note-unnamed-receiver',
+        rule: `${kind}-note-unnamed-receiver`,
         sifenCode: '1331',
-        message: 'A credit note cannot be issued for an invoice with an unnamed receiver',
+        message: `A ${kind} note cannot be issued for an invoice with an unnamed receiver`,
       });
     }
-    const currency = creditNoteCurrencyRule(invoice.currency);
+    const currency = creditNoteCurrencyRule(invoice.currency, kind);
     if (currency) errors.push(currency);
   }
 
@@ -162,7 +189,7 @@ export function validateCreditNoteDraft(
   );
   errors.push(...itemErrors);
 
-  if (creditable && invoice && itemErrors.length === 0) {
+  if (kind === 'credit' && creditable && invoice && itemErrors.length === 0) {
     const sum = creditNoteSumRule(
       readAmount(invoice.totalAmount, 'totalAmount'),
       readAmount(invoice.creditedAmount, 'creditedAmount'),

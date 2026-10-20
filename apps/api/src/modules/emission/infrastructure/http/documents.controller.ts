@@ -43,6 +43,12 @@ export class DocumentsController {
     if (!parsed.ok) {
       throw validationProblem(parsed.errors);
     }
+    if (parsed.type === 'NDE') {
+      // The NDE body parses, but its route is wired with HU-E7-02 N3 (use case, KuDE, OpenAPI).
+      throw validationProblem([
+        { field: 'type', rule: 'schema', message: 'The type "NDE" is not available yet' },
+      ]);
+    }
     try {
       const context = {
         tenantId: this.cls.get(TENANT_ID_CLS_KEY),

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseCreateDocument } from './create-document.request.js';
 import {
   parseCreateCreditNote,
+  parseCreateDebitNote,
   parseDocumentRequest,
   toCreditNoteDraft,
 } from './credit-note.request.js';
@@ -108,7 +109,11 @@ describe('parseDocumentRequest (the `type` discriminator)', () => {
     expect(parseDocumentRequest(NCE)).toMatchObject({ ok: true, type: 'NCE' });
   });
 
-  it.each(['NDE', 'nce', 5, null, ''])('rejects the unknown type %j', (type) => {
+  it('routes `type: NDE` to the debit note', () => {
+    expect(parseDocumentRequest({ ...NCE, type: 'NDE' })).toMatchObject({ ok: true, type: 'NDE' });
+  });
+
+  it.each(['AFE', 'nde', 6, null, ''])('rejects the unknown type %j', (type) => {
     expect(parseDocumentRequest({ ...FE, type })).toEqual({
       ok: false,
       errors: [expect.objectContaining({ field: 'type', rule: 'schema' })],
@@ -122,5 +127,26 @@ describe('parseDocumentRequest (the `type` discriminator)', () => {
 
   it('keeps the FE schema from taking a credit note body', () => {
     expect(parseCreateDocument(NCE).ok).toBe(false);
+  });
+});
+
+/** Spec: HU-E7-02. The NDE body is the NCE one with `type: NDE`: same association and reason. */
+describe('parseCreateDebitNote', () => {
+  const NDE = { ...NCE, type: 'NDE' };
+
+  it('accepts a debit note and defaults the rounding and currency', () => {
+    const { roundingPyg: _omitted, ...withoutRounding } = NDE;
+    const result = parseCreateDebitNote(withoutRounding);
+    expect(result).toMatchObject({
+      ok: true,
+      value: { type: 'NDE', roundingPyg: 0, currency: 'PYG' },
+    });
+  });
+
+  it('rejects a credit note body and a receiver, which is the invoice one', () => {
+    expect(parseCreateDebitNote(NCE)).toMatchObject({ ok: false });
+    expect(parseCreateDebitNote({ ...NDE, receiver: { kind: 'unnamed' } })).toMatchObject({
+      ok: false,
+    });
   });
 });

@@ -37,6 +37,7 @@ import {
 } from './webhook-delivery.processor.js';
 import { createWorkerGateway } from './worker-gateway.js';
 import { loadWorkerConfig, WorkerConfigError } from './worker-config.js';
+import { loadEmailConfig } from '../modules/email/infrastructure/email-config.js';
 
 // Worker process entrypoint (ADR-0003: same code as the API, a different entrypoint): wiring of
 // env, Postgres, Redis and signals, exercised by the Redis integration job and the manual run in
@@ -66,6 +67,8 @@ function required(env: NodeJS.ProcessEnv, name: string): string {
 async function main(env: NodeJS.ProcessEnv): Promise<void> {
   const config = loadWorkerConfig(env);
   const gateway = createWorkerGateway(env);
+  // Fails closed in production without SMTP unless EMAIL_ENABLED=false; the send job (HU-E11-02) uses it.
+  const emailConfig = loadEmailConfig(env);
 
   // Tenant work runs as app_login/app_user under RLS; only the tenant listing uses platform_admin.
   const appHandle = createNodePostgresDatabase(required(env, 'DATABASE_URL'));
@@ -148,6 +151,7 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
     logger,
   });
   logger.info(`transmission worker started (cycle every ${String(config.cycleIntervalMs)} ms)`);
+  logger.info(`document email ${emailConfig.enabled ? 'enabled' : 'disabled'}`);
 
   let stopping = false;
   const shutdown = (signal: string) => {

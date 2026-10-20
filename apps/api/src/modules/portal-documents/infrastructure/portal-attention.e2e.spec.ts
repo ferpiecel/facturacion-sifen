@@ -99,6 +99,40 @@ describe('GET /portal/attention (HU-E12-04)', () => {
     await handle.db.update(tenants).set({ environment: 'test' }).where(eq(tenants.id, acme.id));
     await seedDocuments(handle.db, globex.id, ['signed'], () => signed(100));
 
+    // 100 old rejected documents must not crowd out the more urgent ones when the list is cut.
+    const [initech] = await handle.db.insert(tenants).values({ name: 'Initech SA' }).returning();
+    const [seed] = await seedDocuments(handle.db, initech.id, ['signed'], () => signed(80));
+    const [base] = await handle.db.select().from(documents).where(eq(documents.id, seed.id));
+    cdcOf.crowdedOverdue = seed.cdc;
+    const [heldRow] = await handle.db
+      .insert(documents)
+      .values({
+        ...base,
+        id: undefined,
+        cdc: '0180069563100100100' + '00500' + '12026010111234567891',
+        number: 500,
+        status: 'accepted',
+        signedAt: null,
+        signedXml: null,
+        transmissionHold: 'signing:SigningDataIncompleteError',
+      })
+      .returning();
+    cdcOf.crowdedHeld = heldRow.cdc;
+    await handle.db.insert(documents).values(
+      Array.from({ length: 100 }, (_, n) => ({
+        ...base,
+        id: undefined,
+        cdc: '0180069563100100100' + String(600 + n).padStart(5, '0') + '12026010111234567891',
+        number: 600 + n,
+        status: 'rejected',
+        ...signed(200 + n),
+      })),
+    );
+    cookies.initech = await portalSessionCookie(handle.db, 'owner@initech.example', {
+      tenantId: initech.id,
+      role: 'owner',
+    });
+
     cookies.owner = await portalSessionCookie(handle.db, 'owner@example.com', {
       tenantId: acme.id,
       role: 'owner',
@@ -138,5 +172,16 @@ describe('GET /portal/attention (HU-E12-04)', () => {
     ]);
     expect(body).toMatchObject({ total: 4, truncated: false });
     expect(body.items[2].rejectionReason).toBe('RUC inexistente');
+  });
+
+  it('keeps the most urgent documents when the list is cut at 100', async () => {
+    const body = (await get(cookies.initech)).json<Body>();
+
+    expect(body.items).toHaveLength(100);
+    expect(body.items.map((i) => i.cdc).slice(0, 2)).toEqual([
+      cdcOf.crowdedOverdue,
+      cdcOf.crowdedHeld,
+    ]);
+    expect(body).toMatchObject({ total: 102, truncated: true });
   });
 });

@@ -108,7 +108,19 @@ describe('createListAttentionDocuments (HU-E12-04)', () => {
     const [item] = (await run('t')).items;
 
     expect(item.reasons).toEqual(['overdue', 'held']);
-    expect(item.hold).toBe('signing:SigningDataIncompleteError');
+    expect(item.hold).toBe('signing_failed');
+  });
+
+  it.each([
+    ['signing:SigningDataIncompleteError', 'signing_failed'],
+    ['transmission:attempts-exhausted', 'attempts_exhausted'],
+    ['recovery:0420-unresolved', 'recovery_unresolved'],
+    ['recovery:attempts-exhausted', 'recovery_attempts_exhausted'],
+    ['something:new', 'unknown'],
+  ])('maps the internal hold %s to the stable code %s', async (internal, code) => {
+    const { run } = setup([row('held', { transmissionHold: internal })]);
+
+    expect((await run('t')).items[0].hold).toBe(code);
   });
 
   it('a held document without signature has no deadline', async () => {

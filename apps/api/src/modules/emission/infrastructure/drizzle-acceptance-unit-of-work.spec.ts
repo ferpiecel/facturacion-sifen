@@ -9,6 +9,7 @@ import {
   tenantFiscalProfiles,
   tenants,
   tenantTimbrados,
+  usageCounters,
   webhookDeliveries,
   withTenantTransaction,
   type DatabaseHandle,
@@ -295,5 +296,21 @@ describe('AcceptInvoice with the Drizzle unit of work', () => {
     expect(row.payload).toMatchObject({
       data: { document_id: documentId, cdc, status: 'accepted' },
     });
+  });
+
+  it('counts each accepted document once in the Paraguay month of its acceptance (HU-E15-02)', async () => {
+    await accept('2026-10-31T12:00:00Z')(input());
+    await accept('2026-11-01T02:30:00Z')(input());
+    const replayKey = 'same-request';
+    await accept('2026-11-01T03:30:00Z')(input({ idempotencyKey: replayKey }));
+    await accept('2026-11-01T03:31:00Z')(input({ idempotencyKey: replayKey }));
+
+    const rows = await withTenantTransaction(handle.db, tenantId, (tx) =>
+      tx.select().from(usageCounters),
+    );
+    expect(rows.map((r) => [r.period, r.documentsIssued]).sort()).toEqual([
+      ['2026-10-01', 2],
+      ['2026-11-01', 1],
+    ]);
   });
 });

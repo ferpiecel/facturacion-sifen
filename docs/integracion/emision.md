@@ -246,7 +246,7 @@ Los errores usan `{ "statusCode", "message" }`. El `422` agrega `errors[]` con `
 |---|---|
 | Por id | `GET /v1/documents/{id}` |
 | Por CDC | `GET /v1/documents?cdc=<44 dígitos>` |
-| KuDE (PDF) | `GET /v1/documents/{id}/kude`. Responde `409` hasta que el documento esté firmado y `422` si su tipo todavía no tiene KuDE (nota de débito, autofactura, remisión) |
+| KuDE (PDF) | `GET /v1/documents/{id}/kude?format=letter\|ticket-80\|ticket-58` (por defecto `letter`; `ticket-80` y `ticket-58` son cinta de papel de 80 y 58 mm para impresoras térmicas). Un `format` desconocido responde `400`. Responde `409` hasta que el documento esté firmado y `422` si su tipo todavía no tiene KuDE (nota de débito, autofactura, remisión) |
 
 El documento incluye `number` (por ejemplo `001-002-0000007`), `status`, `environment`, `issued_at`, `totals.amount` (texto) y `totals.currency`, `receiver.ruc`, `sifen` (código y mensaje de SIFEN, `null` hasta la transmisión) y `urls.xml` / `urls.kude`.
 

@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import type { FacturaPocInput } from '@sifen/sifen-gateway';
+import { signedInvoiceWithQr } from '../../../../../test/support/signed-invoice.js';
+import { readKudeInvoice } from '../../application/kude-reader.js';
 import type { KudeInvoice, KudeItem } from '../../domain/kude-model.js';
 import {
   decodeQr,
@@ -8,6 +11,7 @@ import {
   pdfText,
   textItems,
 } from './pdf-inspect.test-helper.js';
+import { createKudeRenderer } from './kude-renderer.js';
 import { PdfkitTicketKudeRenderer } from './pdfkit-ticket-kude-renderer.js';
 
 const CDC = '01800695631001001000000612021112917595714694';
@@ -136,5 +140,45 @@ describe.each([
     const receiver = { kind: 'named', document: '1131421-4', name: 'Belén Bosco', email: 'b@x.py' };
     const text = await pdfText(await render({ ...invoice(), receiver } as KudeInvoice));
     for (const expected of ['1131421-4', 'Belén Bosco', 'b@x.py']) expect(text).toContain(expected);
+  });
+});
+
+describe('PdfkitTicketKudeRenderer, credit note', () => {
+  const FE_CDC = '01800695631001002000012312026010111234567891';
+
+  it('prints the NCE title, reason and associated invoice', async () => {
+    const xml = await signedInvoiceWithQr((input: FacturaPocInput) => ({
+      ...input,
+      data: {
+        ...Object.fromEntries(
+          Object.entries(input.data).filter(([key]) => key !== 'factura' && key !== 'condicion'),
+        ),
+        tipoDocumento: 5,
+        notaCreditoDebito: { motivo: 2 },
+        documentoAsociado: { formato: 1, cdc: FE_CDC },
+      },
+    }));
+    const text = await pdfText(
+      await new PdfkitTicketKudeRenderer().render(readKudeInvoice(xml), 'ticket-58'),
+    );
+    for (const expected of [
+      'KuDE de Nota de Crédito Electrónica',
+      'Devolución',
+      '001-002-0000123',
+    ]) {
+      expect(text).toContain(expected);
+    }
+    expect(text).not.toContain('KuDE de Factura Electrónica');
+  });
+});
+
+describe('createKudeRenderer', () => {
+  it('uses the letter layout by default and the ticket layout on request', async () => {
+    const renderer = createKudeRenderer();
+    const width = async (format?: 'letter' | 'ticket-80') =>
+      (await pageSizes(await renderer.render(invoice(), format))).map((page) => page.w)[0];
+    expect(await width()).toBeCloseTo(595.28, 0);
+    expect(await width('letter')).toBeCloseTo(595.28, 0);
+    expect(await width('ticket-80')).toBeCloseTo(80 * MM, 1);
   });
 });

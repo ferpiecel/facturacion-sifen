@@ -9,7 +9,7 @@ import { emissionValidationConfig } from './emission-validation-config.js';
 import { ACCEPT_CREDIT_NOTE, ACCEPT_INVOICE, GET_DOCUMENT, GET_KUDE } from './emission.tokens.js';
 import { createDrizzleAcceptanceUnitOfWork } from './infrastructure/drizzle-acceptance-unit-of-work.js';
 import { createDrizzleDocumentReader } from './infrastructure/drizzle-document-reader.js';
-import { PdfkitKudeRenderer } from './infrastructure/kude/pdfkit-kude-renderer.js';
+import { createKudeRenderer } from './infrastructure/kude/kude-renderer.js';
 import { DocumentQueryController } from './infrastructure/http/document-query.controller.js';
 import { DocumentsController } from './infrastructure/http/documents.controller.js';
 
@@ -42,7 +42,7 @@ export function acceptInvoiceFor(db: Database) {
         db
           ? createGetKude({
               reader: createDrizzleDocumentReader(db),
-              renderer: new PdfkitKudeRenderer(),
+              renderer: createKudeRenderer(),
             })
           : () => Promise.reject(new ServiceUnavailableException()),
       inject: [DATABASE],

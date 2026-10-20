@@ -25,7 +25,7 @@ import {
   KudeSourceError,
 } from '../../application/kude-reader.js';
 import { GET_DOCUMENT, GET_KUDE } from '../../emission.tokens.js';
-import { parseCdcQuery, parseDocumentId } from './document-query.js';
+import { parseCdcQuery, parseDocumentId, parseKudeFormatQuery } from './document-query.js';
 
 /** HU-E5-07. The tenant comes from the API key; another tenant's document is a 404. */
 @Controller('v1/documents')
@@ -44,26 +44,28 @@ export class DocumentQueryController {
     return this.find({ id: parseDocumentId(id) });
   }
 
-  /** HU-E10-01: the KuDE PDF, available as soon as the document is signed. */
+  /** HU-E10-01: the KuDE PDF, available as soon as the document is signed. HU-E10-02: `?format=`. */
   @Get(':id/kude')
   @Header('Cache-Control', 'private, no-store')
-  async kude(@Param('id') id: string) {
+  async kude(@Param('id') id: string, @Query('format') format: unknown) {
     const documentId = parseDocumentId(id);
-    const result = await this.getKude(this.cls.get(TENANT_ID_CLS_KEY), documentId).catch(
-      (error: unknown) => {
-        if (error instanceof KudeDocumentTypeUnsupportedError) {
-          // Not a failure: the document is fine, its type has no KuDE layout yet.
-          this.logger.warn(`KuDE not available for document ${documentId}: type unsupported`);
-          throw new UnprocessableEntityException(
-            'The KuDE is not available for this document type yet',
-          );
-        }
-        if (!(error instanceof KudeSourceError)) throw error;
-        // Field name only: neither the XML nor its values reach the log or the response.
-        this.logger.error(`KuDE not printable for document ${documentId}: ${error.field}`);
-        throw new InternalServerErrorException('The KuDE could not be generated');
-      },
-    );
+    const result = await this.getKude(
+      this.cls.get(TENANT_ID_CLS_KEY),
+      documentId,
+      parseKudeFormatQuery(format),
+    ).catch((error: unknown) => {
+      if (error instanceof KudeDocumentTypeUnsupportedError) {
+        // Not a failure: the document is fine, its type has no KuDE layout yet.
+        this.logger.warn(`KuDE not available for document ${documentId}: type unsupported`);
+        throw new UnprocessableEntityException(
+          'The KuDE is not available for this document type yet',
+        );
+      }
+      if (!(error instanceof KudeSourceError)) throw error;
+      // Field name only: neither the XML nor its values reach the log or the response.
+      this.logger.error(`KuDE not printable for document ${documentId}: ${error.field}`);
+      throw new InternalServerErrorException('The KuDE could not be generated');
+    });
     if (result.kind === 'not-found') throw new NotFoundException('Document not found');
     if (result.kind === 'not-signed') throw new ConflictException('Document is not signed yet');
     return new StreamableFile(result.pdf, {

@@ -34,7 +34,7 @@
 - [x] T1a Extract fonts/sanitize/QR helpers from the letter renderer (golden output unchanged).
       Branch `refactor/hu-e10-02-kude-pdf-common`. Route: inline (mechanical refactor).
 - [x] T1b Ticket renderer 80/58 mm for FE. Branch `feat/hu-e10-02-kude-ticket-renderer`.
-- [ ] T1c NCE rows, dispatcher, `?format=` query, OpenAPI and docs. Branch
+- [x] T1c NCE rows, dispatcher, `?format=` query, OpenAPI and docs. Branch
       `feat/hu-e10-02-kude-ticket-wiring`.
 - [ ] T2 Email: port, nodemailer adapter, env config + docs/configuracion.md.
 - [ ] T3 Email: outbox migration (+ RLS) and store.

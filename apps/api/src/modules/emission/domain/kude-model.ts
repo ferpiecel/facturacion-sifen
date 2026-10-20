@@ -12,6 +12,17 @@ export const KUDE_CONSULT_URL: Readonly<Record<QrEnvironment, string>> = {
   test: 'https://ekuatia.set.gov.py/consultas-test/',
 };
 
+/**
+ * Paper layouts of a KuDE (MT v150 13.5 "Formato 1" letter, 13.6 "Formato 2" paper roll). The roll
+ * widths are the two thermal printer sizes: 80 mm and 58 mm.
+ */
+export const KUDE_FORMATS = ['letter', 'ticket-80', 'ticket-58'] as const;
+export type KudeFormat = (typeof KUDE_FORMATS)[number];
+
+export function parseKudeFormat(value: unknown): KudeFormat | undefined {
+  return KUDE_FORMATS.find((format) => format === value);
+}
+
 export interface KudeItem {
   /** E701 */
   code: string;

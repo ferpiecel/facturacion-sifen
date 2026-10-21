@@ -37,6 +37,7 @@ describe('debit note XML', () => {
     const { xml, cdc } = await generateInvoiceXml(new TipsDeXmlBuilder(), draft, ctx());
     expect(cdc).toMatch(/^06/);
     expect(xml).toMatch(/<iTiDE>6<\/iTiDE>/);
+    expect(xml).toMatch(/<dDesTiDE>Nota de débito electrónica<\/dDesTiDE>/);
     expect(xml).toMatch(/<gCamNCDE><iMotEmi>3<\/iMotEmi>/);
     expect(xml).toContain(`<dCdCDERef>${FE_CDC}</dCdCDERef>`);
     for (const absent of ['<gCamCond>', '<gCamFE>', '<iTipTra>', '<gTransp>']) {

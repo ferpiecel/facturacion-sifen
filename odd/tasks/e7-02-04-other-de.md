@@ -23,7 +23,7 @@ Issue an NDE (`iTiDE` 6), an AFE (4) and an NRE (7) through `POST /v1/documents`
 
 - [x] N1 domain rules and acceptance use case for an NDE (`validateCreditNoteDraft` with a kind, `createAcceptCreditNote({ kind })`)
 - [x] N2 request contract (`type: "NDE"`), XML mapping (iTiDE 6), signing store dispatch (the controller still answers 422 for `NDE` until N3)
-- [ ] N3 routing in the controller, KuDE, OpenAPI, guide, e2e
+- [x] N3 routing in the controller, KuDE (letter and ticket), OpenAPI, guide, e2e
 
 ### AFE and NRE
 
@@ -35,3 +35,5 @@ Issue an NDE (`iTiDE` 6), an AFE (4) and an NRE (7) through `POST /v1/documents`
 
 - N2 done (branch `feat/hu-e7-02-nde-contract-xml`, chained on #293). RED: request spec 3 failed (`parseCreateDebitNote` missing), signing spec 2 failed (`DocumentTypeNotSignableError` for type 6); the XML spec could not import before the packages were built, GREEN after. Route: inline.
 - N2 commits: 726662a (feature), d0af865 (lint fix); rebased on main after #293 merged. `pnpm verify` OK.
+- N3 done (branch `feat/hu-e7-02-nde-routing-kude`, on main after #295). RED: letter/ticket KuDE specs and the three NDE e2e tests failed before the change. Also folded the #293/#295 review nits: `associated-document-unreadable` message now says credit or debit note; `readDocument` throws explicitly for any type other than 1, 5, 6; the NDE `dDesTiDE` text is asserted. `pnpm verify` coverage ran with `--maxWorkers=2` (SIGKILL under memory pressure otherwise): 2584 passed. Route: inline.
+- N3 commits: 9ea40e7 (routing, KuDE letter, OpenAPI, guide), 060be24 (ticket KuDE).

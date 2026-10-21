@@ -10,8 +10,11 @@ import {
   type TenancyClsStore,
 } from '../../../tenancy/infrastructure/tenancy-cls-store.js';
 import type { createAcceptInvoice } from '../../application/accept-invoice.js';
-import type { createAcceptCreditNote } from '../../application/accept-credit-note.js';
-import { ACCEPT_CREDIT_NOTE, ACCEPT_INVOICE } from '../../emission.tokens.js';
+import type {
+  createAcceptCreditNote,
+  createAcceptDebitNote,
+} from '../../application/accept-credit-note.js';
+import { ACCEPT_CREDIT_NOTE, ACCEPT_DEBIT_NOTE, ACCEPT_INVOICE } from '../../emission.tokens.js';
 import { toAcceptInvoiceInput } from './create-document.request.js';
 import { parseDocumentRequest, toCreditNoteDraft } from './credit-note.request.js';
 import { parseIdempotencyKey } from './idempotency-key.js';
@@ -25,6 +28,8 @@ export class DocumentsController {
     private readonly acceptInvoice: ReturnType<typeof createAcceptInvoice>,
     @Inject(ACCEPT_CREDIT_NOTE)
     private readonly acceptCreditNote: ReturnType<typeof createAcceptCreditNote>,
+    @Inject(ACCEPT_DEBIT_NOTE)
+    private readonly acceptDebitNote: ReturnType<typeof createAcceptDebitNote>,
     private readonly cls: ClsService<TenancyClsStore & IdentityClsStore>,
   ) {}
 
@@ -43,12 +48,6 @@ export class DocumentsController {
     if (!parsed.ok) {
       throw validationProblem(parsed.errors);
     }
-    if (parsed.type === 'NDE') {
-      // The NDE body parses, but its route is wired with HU-E7-02 N3 (use case, KuDE, OpenAPI).
-      throw validationProblem([
-        { field: 'type', rule: 'schema', message: 'The type "NDE" is not available yet' },
-      ]);
-    }
     try {
       const context = {
         tenantId: this.cls.get(TENANT_ID_CLS_KEY),
@@ -57,14 +56,14 @@ export class DocumentsController {
         idempotencyKey,
       };
       const accepted =
-        parsed.type === 'NCE'
-          ? await this.acceptCreditNote({
+        parsed.type === 'FE'
+          ? await this.acceptInvoice(toAcceptInvoiceInput(parsed.value, context))
+          : await (parsed.type === 'NCE' ? this.acceptCreditNote : this.acceptDebitNote)({
               ...context,
               establishmentCode: parsed.value.establishment,
               expeditionPointCode: parsed.value.expeditionPoint,
               draft: toCreditNoteDraft(parsed.value),
-            })
-          : await this.acceptInvoice(toAcceptInvoiceInput(parsed.value, context));
+            });
       return { document_id: accepted.documentId, cdc: accepted.cdc };
     } catch (error) {
       throw toHttpException(error) ?? error;

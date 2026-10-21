@@ -18,9 +18,10 @@ y pequeños, patrón ya existente).
 
 ## Tareas
 
-- [x] T1 (PR 1) API `GET /portal/attention`: caso de uso, puerto, store SQL, controller, e2e.
-- [ ] T2 (PR 2) Cliente web y pantalla `/accion-requerida` + entrada de navegación.
-- [ ] T3 (PR 3) Deuda: "Comprobantes recientes" con el listado real (pageSize 5) y encabezado con `/auth/me`.
+- [x] T1 (PRs 1 y 2) API `GET /portal/attention`: clasificación a2edea3, c8f6f61 (PR 1); endpoint, store SQL y e2e b35bf48 (PR 2, depende del PR 1). Dividido en dos por el límite de 400 líneas.
+- [x] T1b (PR 1, #301) Orden de urgencia vencido, retenido, por vencer, rechazado: 656ff47 (con e2e de más de 100 rechazados).
+- [x] T2 (PRs #303 y #304) Cliente web db5d23c, 777c0be (`hold` como unión de códigos estables); pantalla `/accion-requerida` cec3626, fd071b8 (etiquetas de retención), 54de127 (plazo solo para vencidos y por vencer). #304 es borrador sobre #303 y se rebasa sobre `main` cuando #301 y #303 se mergeen.
+- [ ] T3 Deuda del portal en tres rebanadas: (a) encabezado con empresa y rol reales 2213f0b (#305); (b) tabla de comprobantes recientes 4b0cdc3 (#306); (c) cableado del panel sin datos de muestra a3875a0 (pendiente de PR, depende de (a) y (b)). Falta el nombre del usuario: requiere `displayName` en `/auth/me`.
 
 ## Verificación
 

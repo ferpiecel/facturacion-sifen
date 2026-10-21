@@ -1,4 +1,4 @@
-import { SIFEN_CODES, type SifenGateway } from '@sifen/sifen-gateway';
+import { SIFEN_CODES, SifenCircuitOpenError, type SifenGateway } from '@sifen/sifen-gateway';
 import { EmptyLoteError, type Lote } from '../domain/lote-builder.js';
 
 /** What SIFEN (or its silence) told us about a sent lote. */
@@ -12,12 +12,19 @@ export type LoteDispatchOutcome =
 export interface LoteDispatchStore {
   /** Atomically moves `pending -> sending`; false when the lote was already claimed. */
   claim(loteId: string): Promise<boolean>;
+  /** Returns a claimed lote to `pending` when nothing was sent, with no attempt counted. */
+  release(loteId: string): Promise<void>;
   record(loteId: string, outcome: LoteDispatchOutcome): Promise<void>;
 }
 
 export interface SendLoteDeps {
   readonly gateway: Pick<SifenGateway, 'enviarLote'>;
   readonly store: LoteDispatchStore;
+  /**
+   * When the send endpoint is paused by its circuit breaker, the instant it may be tried again;
+   * `null` when sending is allowed. Checked before the claim, so a paused endpoint leaves no trace.
+   */
+  readonly pausedUntil?: () => Date | null;
 }
 
 export interface SendLoteCommand {
@@ -26,12 +33,22 @@ export interface SendLoteCommand {
   readonly lote: Lote;
 }
 
-export type SendLoteResult = LoteDispatchOutcome | { readonly status: 'already-claimed' };
+/** The endpoint's circuit is open: nothing was claimed or sent; the lote stays `pending` until `retryAt`. */
+export interface LoteDeferred {
+  readonly status: 'deferred';
+  readonly retryAt: Date;
+}
+
+export type SendLoteResult =
+  LoteDispatchOutcome | LoteDeferred | { readonly status: 'already-claimed' };
 
 /**
  * Sends a built lote to SIFEN exactly once and records the outcome (plan 8.1, ADR-0007).
  * If `record` fails after the send, the error propagates and the lote stays `sending`;
  * HU-E6-04 recovers a stale `sending` lote as `unknown` by querying SIFEN. Never resent.
+ * An open circuit (HU-E6-08) defers before the claim: the lote stays `pending`. If the circuit opens
+ * between that check and the call, the gateway refuses without sending: the claim is released back to
+ * `pending` and the result is `deferred`, so the lote keeps its 72 h window.
  * @throws EmptyLoteError before anything is claimed or sent.
  */
 export class SendLote {
@@ -39,14 +56,23 @@ export class SendLote {
 
   async execute(command: SendLoteCommand): Promise<SendLoteResult> {
     if (command.lote.documents.length === 0) throw new EmptyLoteError();
+    const retryAt = this.deps.pausedUntil?.() ?? null;
+    if (retryAt) return { status: 'deferred', retryAt };
     if (!(await this.deps.store.claim(command.loteId))) return { status: 'already-claimed' };
 
     const outcome = await this.dispatch(command);
+    if (outcome.status === 'deferred') {
+      await this.deps.store.release(command.loteId);
+      return outcome;
+    }
     await this.deps.store.record(command.loteId, outcome);
     return outcome;
   }
 
-  private async dispatch({ dId, lote }: SendLoteCommand): Promise<LoteDispatchOutcome> {
+  private async dispatch({
+    dId,
+    lote,
+  }: SendLoteCommand): Promise<LoteDispatchOutcome | LoteDeferred> {
     try {
       const receipt = await this.deps.gateway.enviarLote({
         dId,
@@ -54,6 +80,10 @@ export class SendLote {
       });
       return interpret(receipt);
     } catch (error) {
+      // The breaker refused locally: nothing reached SIFEN, so the lote is not `unknown`.
+      if (error instanceof SifenCircuitOpenError) {
+        return { status: 'deferred', retryAt: error.retryAt };
+      }
       // Once the call started SIFEN may hold the lote, whatever went wrong: never resend.
       const reason = error instanceof Error ? error.message : String(error);
       return { status: 'unknown', reason, cause: error };

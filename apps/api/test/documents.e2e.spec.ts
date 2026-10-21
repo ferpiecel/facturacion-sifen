@@ -242,6 +242,65 @@ describe('POST /v1/documents (e2e)', () => {
     });
   });
 
+  describe('debit notes', () => {
+    const nde = (cdc: string) => ({
+      type: 'NDE',
+      establishment: '001',
+      expeditionPoint: '002',
+      associatedCdc: cdc,
+      reasonCode: 2,
+      items: [{ ...LINE, quantity: 1, unitPrice: 50_000, vatRate: 10 }],
+    });
+    const approvedFe = async () => {
+      const fe = (await post(BODY)).json<{ document_id: string; cdc: string }>();
+      for (const status of ['signed', 'submitted', 'approved']) {
+        await handle.db.update(documents).set({ status }).where(eq(documents.id, fe.document_id));
+      }
+      return fe;
+    };
+
+    it('accepts an NDE of an approved FE with 202, a 06 CDC and its own number', async () => {
+      const fe = await approvedFe();
+
+      const response = await post(nde(fe.cdc));
+
+      expect(response.statusCode).toBe(202);
+      const { document_id: id, cdc } = response.json<{ document_id: string; cdc: string }>();
+      expect(cdc).toMatch(/^06\d{42}$/);
+      const [row] = await handle.db.select().from(documents).where(eq(documents.id, id));
+      expect(row).toMatchObject({
+        documentType: 6,
+        number: 1,
+        associatedCdc: fe.cdc,
+        status: 'accepted',
+      });
+    });
+
+    it('refuses an FE that does not exist (2403) and one not approved yet, burning no number', async () => {
+      const missing = await post(nde('01800695631001002000000112026010111234567891'));
+      expect(missing.statusCode).toBe(422);
+      expect(missing.json<{ errors: Array<{ rule: string }> }>().errors).toEqual([
+        expect.objectContaining({ rule: 'associated-document-not-found' }),
+      ]);
+      const fe = (await post(BODY)).json<{ cdc: string }>();
+      const pending = await post(nde(fe.cdc));
+      expect(pending.statusCode).toBe(422);
+      expect(
+        (await handle.db.select().from(documents)).filter((d) => d.documentType === 6),
+      ).toEqual([]);
+    });
+
+    it('replays an NDE with the same Idempotency-Key and refuses another body with 409', async () => {
+      const fe = await approvedFe();
+      const first = await post(nde(fe.cdc), bearer, 'nde-key');
+      const again = await post(nde(fe.cdc), bearer, 'nde-key');
+      expect(again.json()).toEqual(first.json());
+      expect((await post({ ...nde(fe.cdc), reasonCode: 3 }, bearer, 'nde-key')).statusCode).toBe(
+        409,
+      );
+    });
+  });
+
   it('rejects a request without a valid API key with 401', async () => {
     expect((await post(BODY, null)).statusCode).toBe(401);
     expect((await post(BODY, 'sk_live_nope')).statusCode).toBe(401);

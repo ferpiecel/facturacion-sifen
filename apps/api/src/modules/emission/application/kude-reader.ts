@@ -13,7 +13,7 @@ export class KudeSourceError extends Error {
   }
 }
 
-/** The signed document is of a type that has no KuDE layout yet (an NCE until HU-E7-01 slice F). */
+/** The signed document is of a type that has no KuDE layout yet (an AFE or an NRE). */
 export class KudeDocumentTypeUnsupportedError extends KudeSourceError {
   constructor(readonly documentTypeCode: string) {
     super(
@@ -117,10 +117,11 @@ export function readKudeInvoice(xml: string, options: { stampValidTo?: string } 
   if (!cdc) throw new KudeSourceError('CDC (DE/@Id)', 'is missing');
   const timbrado = section(xml, 'gTimb');
   const documentTypeCode = required(timbrado, 'iTiDE');
-  if (documentTypeCode !== '1' && documentTypeCode !== '5') {
+  if (documentTypeCode !== '1' && documentTypeCode !== '5' && documentTypeCode !== '6') {
     throw new KudeDocumentTypeUnsupportedError(documentTypeCode);
   }
-  const isCreditNote = documentTypeCode === '5';
+  const isCreditNote = documentTypeCode !== '1'; // an NCE (5) or an NDE (6): same layout
+  const noteSlot = documentTypeCode === '6' ? 'debitNote' : 'creditNote';
   const qrUrl = required(section(xml, 'gCamFuFD'), 'dCarQR');
   const environment = qrUrl.startsWith(qrBaseUrl('production'))
     ? 'production'
@@ -194,7 +195,7 @@ export function readKudeInvoice(xml: string, options: { stampValidTo?: string } 
     transactionType: isCreditNote ? undefined : required(operation, 'dDesTipTra'),
     ...(isCreditNote
       ? {
-          creditNote: {
+          [noteSlot]: {
             reason: required(section(xml, 'gCamNCDE'), 'dDesMotEmi'),
             associatedCdc: associatedCdc(section(xml, 'gCamDEAsoc')),
           },

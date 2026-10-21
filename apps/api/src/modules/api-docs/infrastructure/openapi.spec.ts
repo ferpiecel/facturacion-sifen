@@ -127,7 +127,7 @@ describe('OpenAPI document', () => {
     );
   });
 
-  it('offers the invoice and the credit note bodies, told apart by `type`', () => {
+  it('offers the invoice and the credit note and debit note bodies, told apart by `type`', () => {
     const schemas = spec.components.schemas as Record<
       string,
       { required?: string[]; properties?: Record<string, unknown> }
@@ -144,6 +144,7 @@ describe('OpenAPI document', () => {
       oneOf: [
         { $ref: '#/components/schemas/CreateDocumentRequest' },
         { $ref: '#/components/schemas/CreateCreditNoteRequest' },
+        { $ref: '#/components/schemas/CreateDebitNoteRequest' },
       ],
     });
   });

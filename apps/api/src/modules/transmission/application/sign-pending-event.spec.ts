@@ -38,6 +38,9 @@ class InMemoryStore implements EventSigningStore {
         .map((e) => e.id),
     );
   }
+  holdEvent() {
+    return Promise.resolve();
+  }
   load(id: string) {
     return Promise.resolve(this.events.find((e) => e.id === id));
   }

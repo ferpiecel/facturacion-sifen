@@ -118,6 +118,7 @@ export function createTenantCycleFactory({
       }),
       events: {
         pendingEventIds: (limit) => eventSigning.pendingEventIds(limit),
+        holdEvent: (eventId, reason) => eventSigning.holdEvent(eventId, reason),
         signer: new SignPendingEvent({
           store: eventSigning,
           certificates,
@@ -127,7 +128,7 @@ export function createTenantCycleFactory({
         }),
         sender: new SendEventBatch({
           gateway,
-          store: createDrizzleEventBatchStore({ db, tenantId, now }),
+          store: createDrizzleEventBatchStore({ db, tenantId, now, logger }),
           nextRequestId: () => store.nextRequestId(),
           validate: validateEventXml,
           logger,

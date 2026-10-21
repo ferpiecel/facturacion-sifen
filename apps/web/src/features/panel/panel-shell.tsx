@@ -6,6 +6,7 @@ import {
   ReceiptText,
   Search,
   Store,
+  TriangleAlert,
   User,
 } from 'lucide-react';
 import Image from 'next/image';
@@ -24,6 +25,7 @@ import type { AuthClient } from '../auth/auth-client';
 const NAV = [
   { href: '/', label: 'Panel de Control', icon: LayoutDashboard },
   { href: '/comprobantes', label: 'Comprobantes y KuDE', icon: ReceiptText },
+  { href: '/accion-requerida', label: 'Acción requerida', icon: TriangleAlert },
   { href: '/comercios', label: 'Mis Comercios', icon: Building2 },
 ] as const;
 

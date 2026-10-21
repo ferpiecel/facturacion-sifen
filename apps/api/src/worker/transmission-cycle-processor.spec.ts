@@ -8,6 +8,7 @@ const empty: CycleReport = {
   signed: 0,
   signSkipped: 0,
   sendSkipped: 0,
+  sendDeferred: 0,
   assembled: 0,
   sent: [],
   polled: [],
@@ -104,6 +105,12 @@ describe('TransmissionCycleProcessor', () => {
     });
     await processor.process({ tenantId: TENANT });
     expect(logs[0].message).toContain('polled=2 recovered=1 swept=3');
+  });
+
+  it('reports the lotes left pending by an open circuit in the cycle summary', async () => {
+    const { processor, logs } = setup({ sendDeferred: 2 });
+    await processor.process({ tenantId: TENANT });
+    expect(logs[0].message).toContain('deferred=2');
   });
 
   it('logs a quiet summary, and warnings for held documents, stale lotes and failures', async () => {

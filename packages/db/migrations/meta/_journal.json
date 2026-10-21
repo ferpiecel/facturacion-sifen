@@ -365,6 +365,13 @@
       "when": 1792518518925,
       "tag": "0051_usage_counters_and_invoices",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1792518578925,
+      "tag": "0052_lotes_release_claim",
+      "breakpoints": true
     }
   ]
 }

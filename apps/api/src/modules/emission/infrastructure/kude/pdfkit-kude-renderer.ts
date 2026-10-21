@@ -11,6 +11,7 @@ import {
   groupCdc,
   KUDE_CONSULT_URL,
   KUDE_CREDIT_NOTE_TITLE,
+  KUDE_DEBIT_NOTE_TITLE,
   KUDE_TITLE,
   documentNumberOfCdc,
   type KudeInvoice,
@@ -51,7 +52,11 @@ function cells(item: KudeItem): Record<(typeof COLUMNS)[number]['key'], string> 
 }
 
 const titleOf = (invoice: KudeInvoice): string =>
-  invoice.creditNote ? KUDE_CREDIT_NOTE_TITLE : KUDE_TITLE;
+  invoice.debitNote
+    ? KUDE_DEBIT_NOTE_TITLE
+    : invoice.creditNote
+      ? KUDE_CREDIT_NOTE_TITLE
+      : KUDE_TITLE;
 
 /** KuDE of an FE on A4 (MT v150 chapter 13, "Formato 1"), drawn with embedded Noto Sans. */
 export class PdfkitKudeRenderer implements KudeRenderer {
@@ -157,7 +162,7 @@ export class PdfkitKudeRenderer implements KudeRenderer {
       stamp.validTo === undefined
         ? ''
         : `Fecha de Fin de Vigencia: ${formatDateDmy(stamp.validTo)}`,
-      `${invoice.creditNote ? 'Nota de Crédito Electrónica' : 'Factura Electrónica'} Nº ${documentNumber}`,
+      `${invoice.debitNote ? 'Nota de Débito Electrónica' : invoice.creditNote ? 'Nota de Crédito Electrónica' : 'Factura Electrónica'} Nº ${documentNumber}`,
     ].filter(Boolean);
     let middle = top;
     stampLines.forEach((text, i) => {
@@ -210,8 +215,9 @@ export class PdfkitKudeRenderer implements KudeRenderer {
     if (invoice.transactionType !== undefined) {
       rows.push(`Tipo de Operación: ${invoice.transactionType}`);
     }
-    if (invoice.creditNote) {
-      const { reason, associatedCdc } = invoice.creditNote;
+    const note = invoice.debitNote ?? invoice.creditNote;
+    if (note) {
+      const { reason, associatedCdc } = note;
       rows.push(
         `Motivo de Emisión: ${reason}`,
         `Documento Asociado: Factura Electrónica Nº ${documentNumberOfCdc(associatedCdc)}`,

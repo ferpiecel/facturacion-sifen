@@ -12,8 +12,8 @@
         "tags": [
           "Documents"
         ],
-        "summary": "Accept an invoice (FE) or a credit note (NCE) for emission",
-        "description": "The body is an FE unless `type` is `NCE` (credit note associated to an approved FE; its receiver is taken from that FE). A credit note answers 422 with the rule of the failed check (for example `credit-note-sum-exceeds-invoice`, 2417) before any number is used. Returns 202 once the document is persisted with its CDC; signing and transmission to SIFEN are asynchronous. Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.",
+        "summary": "Accept an invoice (FE), a credit note (NCE) or a debit note (NDE) for emission",
+        "description": "The body is an FE unless `type` is `NCE` (credit note) or `NDE` (debit note), both associated to an approved FE whose receiver they take. A credit note answers 422 with the rule of the failed check (for example `credit-note-sum-exceeds-invoice`, 2417) before any number is used. Returns 202 once the document is persisted with its CDC; signing and transmission to SIFEN are asynchronous. Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.",
         "security": [
           {
             "apiKey": []
@@ -45,6 +45,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/CreateCreditNoteRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CreateDebitNoteRequest"
                   }
                 ]
               }
@@ -291,7 +294,7 @@
         "tags": [
           "Documents"
         ],
-        "summary": "Download the KuDE (PDF) of an FE or an NCE, available once the document is signed",
+        "summary": "Download the KuDE (PDF) of an FE, an NCE or an NDE, available once the document is signed",
         "security": [
           {
             "apiKey": []
@@ -1293,6 +1296,94 @@
           "type": {
             "type": "string",
             "const": "NCE"
+          },
+          "establishment": {
+            "type": "string",
+            "pattern": "^\\d{3}$"
+          },
+          "expeditionPoint": {
+            "type": "string",
+            "pattern": "^\\d{3}$"
+          },
+          "associatedCdc": {
+            "type": "string",
+            "pattern": "^[0-9]{44}$"
+          },
+          "reasonCode": {
+            "type": "number"
+          },
+          "items": {
+            "maxItems": 999,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "maxLength": 50
+                },
+                "description": {
+                  "type": "string",
+                  "maxLength": 2000
+                },
+                "unitCode": {
+                  "type": "number"
+                },
+                "quantity": {
+                  "type": "number"
+                },
+                "unitPrice": {
+                  "type": "number"
+                },
+                "vatRate": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "code",
+                "description",
+                "unitCode",
+                "quantity",
+                "unitPrice",
+                "vatRate"
+              ]
+            }
+          },
+          "roundingPyg": {
+            "default": 0,
+            "type": "number"
+          },
+          "currency": {
+            "default": "PYG",
+            "type": "string",
+            "const": "PYG"
+          },
+          "receiver": {
+            "not": {}
+          },
+          "operationType": {
+            "not": {}
+          },
+          "location": {
+            "not": {}
+          }
+        },
+        "required": [
+          "type",
+          "establishment",
+          "expeditionPoint",
+          "associatedCdc",
+          "reasonCode",
+          "items"
+        ]
+      },
+      "CreateDebitNoteRequest": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "NDE"
           },
           "establishment": {
             "type": "string",

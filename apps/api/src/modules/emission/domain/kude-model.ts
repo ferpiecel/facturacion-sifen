@@ -4,6 +4,8 @@ import type { QrEnvironment } from './qr.js';
 /** MT v150 13.3: the KuDE denomination for an electronic invoice (FE). */
 export const KUDE_TITLE = 'KuDE de Factura Electrónica';
 /** MT v150 13.3: the KuDE denomination for an electronic credit note (NCE). */
+/** The KuDE denomination for an electronic debit note (NDE). */
+export const KUDE_DEBIT_NOTE_TITLE = 'KuDE de Nota de Débito Electrónica';
 export const KUDE_CREDIT_NOTE_TITLE = 'KuDE de Nota de Crédito Electrónica';
 
 /** MT v150 13.4.4: consultation portal per environment (with the trailing slash of the MT). */
@@ -90,6 +92,8 @@ export interface KudeInvoice {
   transactionType?: string;
   /** E402 and H004 of an NCE (iTiDE 5): the reason and the CDC of the FE it credits; absent in an FE. */
   creditNote?: { reason: string; associatedCdc: string };
+  /** The same data of an NDE (iTiDE 6); never set together with `creditNote`. */
+  debitNote?: { reason: string; associatedCdc: string };
   items: KudeItem[];
   totals: {
     subtotalExempt: number;

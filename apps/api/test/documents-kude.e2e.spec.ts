@@ -253,13 +253,29 @@ describe('GET /v1/documents/{id}/kude (e2e)', () => {
     expect(text).toContain('Documento Asociado: Factura Electrónica Nº');
   });
 
-  it('answers a clear 422, logged below error level, for a signed type with no KuDE yet (an NDE)', async () => {
-    const errors = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+  it('returns the KuDE PDF of a signed NDE with its own title', async () => {
     const { document_id: id, cdc } = await create(writer);
     const nde = (await creditNoteXml(cdc)).replace('<iTiDE>5</iTiDE>', '<iTiDE>6</iTiDE>');
     await handle.db
       .update(documents)
       .set({ status: 'signed', signedXml: nde, signedAt: new Date() })
+      .where(eq(documents.id, id));
+
+    const response = await get(`/v1/documents/${id}/kude`, reader);
+
+    expect(response.statusCode).toBe(200);
+    const text = await pdfText(new Uint8Array(response.rawPayload));
+    expect(text).toContain('KuDE de Nota de Débito Electrónica');
+    expect(text).toContain('Motivo de Emisión: Devolución');
+  });
+
+  it('answers a clear 422, logged below error level, for a signed type with no KuDE yet (an AFE)', async () => {
+    const errors = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const { document_id: id, cdc } = await create(writer);
+    const afe = (await creditNoteXml(cdc)).replace('<iTiDE>5</iTiDE>', '<iTiDE>4</iTiDE>');
+    await handle.db
+      .update(documents)
+      .set({ status: 'signed', signedXml: afe, signedAt: new Date() })
       .where(eq(documents.id, id));
 
     const response = await get(`/v1/documents/${id}/kude`, reader);

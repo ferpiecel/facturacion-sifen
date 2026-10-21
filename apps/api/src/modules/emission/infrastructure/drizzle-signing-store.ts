@@ -136,6 +136,10 @@ async function readDocument(
   document: typeof documents.$inferSelect,
 ): Promise<ReturnType<typeof readPayload> & { note?: NoteData; noteKind?: 'credit' | 'debit' }> {
   if (document.documentType === 1) return readPayload(document.payload);
+  // Explicit: a type added later must not fall into the credit note branch.
+  if (document.documentType !== 5 && document.documentType !== 6) {
+    throw new DocumentTypeNotSignableError(document.documentType);
+  }
   const { associatedCdc } = document;
   const invoice =
     associatedCdc === null
@@ -156,7 +160,7 @@ async function readDocument(
   if (associatedCdc === null || invoice === undefined) {
     throw new SigningDataIncompleteError(['associatedCdc']);
   }
-  const noteKind = document.documentType === 6 ? 'debit' : 'credit';
+  const noteKind = document.documentType === 5 ? 'credit' : 'debit';
   return {
     ...readNotePayload(document.payload, invoice.payload, associatedCdc, noteKind),
     noteKind,

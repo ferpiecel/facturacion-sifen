@@ -18,6 +18,11 @@ class InMemoryStore implements EventRecoveryStore {
   readonly sweeps: { cutoff: Date; limit: number }[] = [];
   readonly asked: { sentBefore: Date; limit: number }[] = [];
   readonly notes = new Map<string, string>();
+  readonly misses = new Map<string, string>();
+  readonly holds = new Map<string, string>();
+  /** Ids whose `record` throws, as a database failure would. */
+  readonly failingRecord = new Set<string>();
+  readonly failingNote = new Set<string>();
   readonly outcomes = new Map<string, EventOutcome>();
   constructor(
     private readonly unresolved: readonly UnresolvedCancellation[],
@@ -32,16 +37,29 @@ class InMemoryStore implements EventRecoveryStore {
     return Promise.resolve(this.unresolved);
   }
   noteInconclusive(id: string, note: string) {
+    if (this.failingNote.has(id)) return Promise.reject(new Error('db down'));
     this.notes.set(id, note);
     return Promise.resolve();
   }
+  noteMissing(id: string, note: string) {
+    this.misses.set(id, note);
+    return Promise.resolve();
+  }
+  hold(id: string, note: string) {
+    this.holds.set(id, note);
+    return Promise.resolve();
+  }
   record(outcomes: ReadonlyMap<string, EventOutcome>) {
-    for (const [id, outcome] of outcomes) this.outcomes.set(id, outcome);
+    for (const [id, outcome] of outcomes) {
+      if (this.failingRecord.has(id)) return Promise.reject(new Error('conflict'));
+      this.outcomes.set(id, outcome);
+    }
     return Promise.resolve();
   }
 }
 
 function setup(unresolved: readonly UnresolvedCancellation[], swept = 0) {
+  const warnings: string[] = [];
   const gateway = new FakeSifenGateway();
   const store = new InMemoryStore(unresolved, swept);
   const resolve = new ResolveUnknownEvents({
@@ -51,12 +69,22 @@ function setup(unresolved: readonly UnresolvedCancellation[], swept = 0) {
     now: () => NOW,
     staleSendingAfterMs: 30 * 60_000,
     settleAfterMs: 15 * 60_000,
+    confirmAfterMs: 15 * 60_000,
+    holdAfterMs: 72 * 3_600_000,
     limit: 10,
+    logger: { warn: (message: string) => warnings.push(message) },
   });
-  return { gateway, store, resolve };
+  return { gateway, store, resolve, warnings };
 }
 
-const one: UnresolvedCancellation = { id: 'ev-1', cdc: CDC };
+const minutesAgo = (n: number) => new Date(NOW.getTime() - n * 60_000);
+const one: UnresolvedCancellation = {
+  id: 'ev-1',
+  cdc: CDC,
+  sentAt: minutesAgo(60),
+  missedAt: null,
+};
+const missedLongAgo: UnresolvedCancellation = { ...one, missedAt: minutesAgo(30) };
 
 describe('ResolveUnknownEvents', () => {
   it('turns orphan sending events older than the threshold into unknown, and asks only for settled ones', async () => {
@@ -80,8 +108,8 @@ describe('ResolveUnknownEvents', () => {
     expect(result).toMatchObject({ approved: 1, rejected: 0, inconclusive: 0 });
   });
 
-  it('settles as rejected, locally, when the document has no such cancellation', async () => {
-    const { gateway, store, resolve } = setup([one]);
+  it('settles as rejected, locally, only when an earlier pass already found the cancellation absent', async () => {
+    const { gateway, store, resolve } = setup([missedLongAgo]);
     gateway.enqueue(
       'consultarDE',
       sifenScenarios.cdcEncontrado('<rDE/>', [cancellationOf(OTHER_CDC)]),
@@ -94,6 +122,83 @@ describe('ResolveUnknownEvents', () => {
       code: LOCAL_NOT_REGISTERED_CODE,
     });
     expect(result).toMatchObject({ approved: 0, rejected: 1 });
+  });
+
+  it('only notes the first absence: SIFEN may lag, so the rejection waits for a later pass', async () => {
+    const { gateway, store, resolve } = setup([one]);
+    gateway.enqueue('consultarDE', sifenScenarios.cdcEncontrado('<rDE/>', []));
+
+    const result = await resolve.execute();
+
+    expect(store.outcomes.size).toBe(0);
+    expect(store.misses.has('ev-1')).toBe(true);
+    expect(result).toMatchObject({ rejected: 0, inconclusive: 1 });
+  });
+
+  it('does not reject on a repeat absence that is too close to the first one', async () => {
+    const { gateway, store, resolve } = setup([{ ...one, missedAt: minutesAgo(5) }]);
+    gateway.enqueue('consultarDE', sifenScenarios.cdcEncontrado('<rDE/>', []));
+
+    await resolve.execute();
+
+    expect(store.outcomes.size).toBe(0);
+    expect(store.misses.size).toBe(0);
+    expect(store.notes.has('ev-1')).toBe(true);
+  });
+
+  it('approves a cancellation whose events carry namespace prefixes', async () => {
+    const { gateway, store, resolve } = setup([one]);
+    const prefixed = `<ns2:xEvento><ns2:rGeVeCan><ns2:Id>${CDC}</ns2:Id></ns2:rGeVeCan></ns2:xEvento>`;
+    gateway.enqueue('consultarDE', sifenScenarios.cdcEncontrado('<rDE/>', [prefixed]));
+
+    await resolve.execute();
+
+    expect(store.outcomes.get('ev-1')).toMatchObject({ status: 'approved' });
+  });
+
+  it('isolates a failing event: the pass goes on, and only ids are logged', async () => {
+    const second: UnresolvedCancellation = { ...one, id: 'ev-2', cdc: OTHER_CDC };
+    const { gateway, store, resolve, warnings } = setup([one, second]);
+    store.failingRecord.add('ev-1');
+    store.failingNote.add('ev-1');
+    gateway.enqueue('consultarDE', sifenScenarios.cdcEncontrado('<rDE/>', [cancellationOf(CDC)]));
+    gateway.enqueue(
+      'consultarDE',
+      sifenScenarios.cdcEncontrado('<rDE/>', [cancellationOf(OTHER_CDC)]),
+    );
+
+    const result = await resolve.execute();
+
+    expect(store.outcomes.get('ev-2')).toMatchObject({ status: 'approved' });
+    expect(result).toMatchObject({ approved: 1, inconclusive: 1 });
+    expect(warnings.join(' ')).toContain('ev-1');
+    expect(warnings.join(' ')).not.toContain(CDC);
+  });
+
+  it('holds for an operator an event still unresolved after the 72 h window', async () => {
+    const { gateway, store, resolve, warnings } = setup([
+      { ...missedLongAgo, sentAt: new Date(NOW.getTime() - 73 * 3_600_000), missedAt: null },
+    ]);
+    gateway.enqueue('consultarDE', sifenScenarios.cdcInexistente());
+
+    const result = await resolve.execute();
+
+    expect(store.holds.has('ev-1')).toBe(true);
+    expect(store.notes.size).toBe(0);
+    expect(result).toMatchObject({ inconclusive: 1 });
+    expect(warnings.join(' ')).toContain('ev-1');
+  });
+
+  it('still approves a late event found registered, past the window', async () => {
+    const { gateway, store, resolve } = setup([
+      { ...one, sentAt: new Date(NOW.getTime() - 100 * 3_600_000) },
+    ]);
+    gateway.enqueue('consultarDE', sifenScenarios.cdcEncontrado('<rDE/>', [cancellationOf(CDC)]));
+
+    await resolve.execute();
+
+    expect(store.outcomes.get('ev-1')).toMatchObject({ status: 'approved' });
+    expect(store.holds.size).toBe(0);
   });
 
   it.each([
@@ -111,7 +216,10 @@ describe('ResolveUnknownEvents', () => {
   });
 
   it('never resends an event: it only queries', async () => {
-    const { gateway, resolve } = setup([one, { id: 'ev-2', cdc: OTHER_CDC }]);
+    const { gateway, resolve } = setup([
+      one,
+      { id: 'ev-2', cdc: OTHER_CDC, sentAt: minutesAgo(60), missedAt: null },
+    ]);
     gateway.enqueue('consultarDE', sifenScenarios.cdcEncontrado('<rDE/>', [cancellationOf(CDC)]));
     gateway.enqueue('consultarDE', sifenScenarios.cdcEncontrado('<rDE/>', []));
 

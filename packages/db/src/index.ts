@@ -25,6 +25,7 @@ export {
   payments,
   plans,
   portalRole,
+  rucBlocks,
   SUBSCRIPTION_STATUSES,
   subscriptions,
   TENANT_TABLES,

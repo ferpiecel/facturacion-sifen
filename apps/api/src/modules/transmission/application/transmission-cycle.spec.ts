@@ -294,6 +294,34 @@ describe('TransmissionCycle', () => {
     ]);
   });
 
+  it('stops sending for the cycle once the circuit defers a lote, leaving the rest pending', async () => {
+    const { cycle, log } = setup({
+      pending: [
+        { loteId: 'l1', lote: lote() },
+        { loteId: 'l2', lote: lote() },
+        { loteId: 'l3', lote: lote() },
+      ],
+      send: (id) =>
+        Promise.resolve(id === 'l1' ? { status: 'sent' } : { status: 'deferred', retryAt: NOW }),
+    });
+
+    const report = await cycle.run();
+
+    expect(log.filter((entry) => entry.startsWith('send:'))).toEqual(['send:l1:1', 'send:l2:2']);
+    expect(report.sent).toEqual([{ loteId: 'l1', status: 'sent' }]);
+    expect(report.sendDeferred).toBe(2);
+    expect(report.failures).toEqual([]);
+  });
+
+  it('does not push a deferred lote behind the others', async () => {
+    const { cycle, deferred } = setup({
+      pending: [{ loteId: 'l1', lote: lote() }],
+      send: () => Promise.resolve({ status: 'deferred', retryAt: NOW }),
+    });
+    await cycle.run();
+    expect(deferred).toEqual([]);
+  });
+
   it('polls due lotes with the cycle clock and isolates a failing one', async () => {
     const { cycle, log, warnings } = setup({
       due: ['l1', 'l2'],
@@ -316,6 +344,7 @@ describe('TransmissionCycle', () => {
       signSkipped: 0,
       assembled: 0,
       sendSkipped: 0,
+      sendDeferred: 0,
       sent: [],
       polled: [],
       recovered: [],

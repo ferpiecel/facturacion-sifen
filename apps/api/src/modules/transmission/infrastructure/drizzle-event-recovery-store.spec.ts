@@ -69,7 +69,12 @@ describe('DrizzleEventRecoveryStore', () => {
   });
 
   const storeFor = (tenant: string) =>
-    createDrizzleEventRecoveryStore({ db: handle.db, tenantId: tenant, now: () => NOW });
+    createDrizzleEventRecoveryStore({
+      db: handle.db,
+      tenantId: tenant,
+      now: () => NOW,
+      claimLeaseMs: 0,
+    });
   const read = (id: string) =>
     withTenantTransaction(handle.db, tenantId, (tx) =>
       tx.select().from(issuerEvents).where(eq(issuerEvents.id, id)),
@@ -170,10 +175,54 @@ describe('DrizzleEventRecoveryStore', () => {
 
     const listed = await storeFor(tenantId).unresolvedCancellations(minutesAgo(15), 10);
 
-    expect(listed).toEqual([
+    expect(listed.map(({ id, cdc }) => ({ id, cdc }))).toEqual([
       { id: newer, cdc: cdcs.get(newer) },
       { id: older, cdc: cdcs.get(older) },
     ]);
+    expect(listed[0]).toMatchObject({ sentAt: minutesAgo(50), missedAt: null });
+  });
+
+  it('claims what it lists: another worker, while the claim lasts, gets none of the same events', async () => {
+    const id = await event('unknown', 60);
+    const leased = createDrizzleEventRecoveryStore({
+      db: handle.db,
+      tenantId,
+      now: () => NOW,
+      claimLeaseMs: 5 * 60_000,
+    });
+
+    expect(
+      (await storeFor(tenantId).unresolvedCancellations(minutesAgo(15), 10)).map((e) => e.id),
+    ).toEqual([id]);
+    expect(await leased.unresolvedCancellations(minutesAgo(15), 10)).toEqual([]);
+  });
+
+  it('remembers the first absence with its time, and stops listing a held event', async () => {
+    const missed = await event('unknown', 60);
+    const held = await event('unknown', 60);
+    const store = storeFor(tenantId);
+
+    await store.noteMissing(missed, 'absent, to confirm');
+    await store.hold(held, 'unresolved past the window');
+
+    expect(await read(missed)).toMatchObject({
+      status: 'unknown',
+      responseCode: 'LOC-MISS',
+      respondedAt: NOW,
+    });
+    expect(await read(held)).toMatchObject({ status: 'unknown', responseCode: 'LOC-HOLD' });
+    const listed = await store.unresolvedCancellations(minutesAgo(15), 10);
+    expect(listed).toEqual([expect.objectContaining({ id: missed, missedAt: NOW })]);
+  });
+
+  it('keeps the first absence time when a later query is only inconclusive', async () => {
+    const id = await event('unknown', 60);
+    const store = storeFor(tenantId);
+    await store.noteMissing(id, 'absent');
+
+    await store.noteInconclusive(id, 'query failed');
+
+    expect(await read(id)).toMatchObject({ responseCode: 'LOC-MISS', respondedAt: NOW });
   });
 
   it('notes an inconclusive query on the event, which stays unknown', async () => {

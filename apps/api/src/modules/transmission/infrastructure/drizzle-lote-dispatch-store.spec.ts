@@ -6,6 +6,7 @@ import {
   loteDocuments,
   auditLog,
   lotes,
+  rucBlocks,
   tenantEstablishments,
   tenantExpeditionPoints,
   tenants,
@@ -352,6 +353,74 @@ describe('DrizzleLoteDispatchStore', () => {
     expect(await readDocument(cdcs.queued)).toMatchObject({
       transmissionAttempts: 2,
       nextTransmissionAt: new Date('2026-10-01T12:10:00.000Z'),
+    });
+  });
+
+  describe('a rejection that blocks the RUC (HU-E6-05)', () => {
+    const blocked = {
+      status: 'rejected',
+      code: '0301',
+      reason: 'RUC bloqueado',
+      rucBlocked: true,
+    } as const;
+    const readBlocks = () =>
+      withTenantTransaction(handle.db, tenantId, (tx) => tx.select().from(rucBlocks));
+
+    it('records the pause and requeues the documents until it ends, without counting an attempt', async () => {
+      const cdcs = await seedDocuments(['queued']);
+      const store = storeFor(tenantId);
+      await store.claim(loteId);
+      await store.record(loteId, blocked);
+      expect(await readBlocks()).toMatchObject([
+        {
+          tenantId,
+          environment: 'test',
+          blockedAt: NOW,
+          blockedUntil: new Date('2026-10-01T12:30:00.000Z'),
+          reason: 'RUC bloqueado',
+        },
+      ]);
+      expect(await readDocument(cdcs.queued)).toMatchObject({
+        status: 'queued',
+        transmissionAttempts: 0,
+        nextTransmissionAt: new Date('2026-10-01T12:30:00.000Z'),
+        transmissionHold: null,
+      });
+      expect((await readLote()).status).toBe('rejected');
+    });
+
+    it('never shortens a longer backoff the document already waits', async () => {
+      const cdcs = await seedDocuments(['queued']);
+      const later = new Date('2026-10-01T15:00:00.000Z');
+      await handle.db
+        .update(documents)
+        .set({ nextTransmissionAt: later })
+        .where(eq(documents.cdc, cdcs.queued));
+      const store = storeFor(tenantId);
+      await store.claim(loteId);
+      await store.record(loteId, blocked);
+      expect((await readDocument(cdcs.queued)).nextTransmissionAt).toEqual(later);
+    });
+
+    it('uses the configured pause length', async () => {
+      await seedDocuments(['queued']);
+      const store = createDrizzleLoteDispatchStore({
+        db: handle.db,
+        tenantId,
+        now: () => NOW,
+        rucBlockMs: 10 * 60_000,
+      });
+      await store.claim(loteId);
+      await store.record(loteId, blocked);
+      expect((await readBlocks())[0].blockedUntil).toEqual(new Date('2026-10-01T12:10:00.000Z'));
+    });
+
+    it('does not record a pause for an ordinary refusal', async () => {
+      await seedDocuments(['queued']);
+      const store = storeFor(tenantId);
+      await store.claim(loteId);
+      await store.record(loteId, { status: 'rejected', code: '0301', reason: 'x' });
+      expect(await readBlocks()).toEqual([]);
     });
   });
 

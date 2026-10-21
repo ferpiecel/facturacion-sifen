@@ -1,10 +1,17 @@
 import { SIFEN_CODES, SifenCircuitOpenError, type SifenGateway } from '@sifen/sifen-gateway';
 import { EmptyLoteError, type Lote } from '../domain/lote-builder.js';
+import { isRucBlockMessage } from './ruc-block.js';
 
 /** What SIFEN (or its silence) told us about a sent lote. */
 export type LoteDispatchOutcome =
   | { readonly status: 'sent'; readonly dProtConsLote: string }
-  | { readonly status: 'rejected'; readonly code: string; readonly reason: string }
+  | {
+      readonly status: 'rejected';
+      readonly code: string;
+      readonly reason: string;
+      /** The refusal says SIFEN blocked the RUC (HU-E6-05): the tenant's sends pause for a while. */
+      readonly rucBlocked?: true;
+    }
   /** No usable answer: SIFEN may have the lote. Never resend; recover by querying (HU-E6-04). */
   | { readonly status: 'unknown'; readonly reason: string; readonly cause?: unknown };
 
@@ -100,7 +107,12 @@ function interpret(receipt: {
     return { status: 'sent', dProtConsLote: receipt.dProtConsLote };
   }
   if (receipt.dCodRes === SIFEN_CODES.LOTE_NO_ENCOLADO) {
-    return { status: 'rejected', code: receipt.dCodRes, reason: receipt.dMsgRes };
+    return {
+      status: 'rejected',
+      code: receipt.dCodRes,
+      reason: receipt.dMsgRes,
+      ...(isRucBlockMessage(receipt.dMsgRes) ? { rucBlocked: true as const } : {}),
+    };
   }
   return {
     status: 'unknown',

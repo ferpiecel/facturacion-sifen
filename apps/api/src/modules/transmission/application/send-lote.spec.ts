@@ -85,9 +85,9 @@ describe('SendLote', () => {
 
   it('records code and reason on 0301', async () => {
     const { gateway, store, send } = setup();
-    gateway.enqueue('enviarLote', sifenScenarios.loteNoEncolado('RUC bloqueado'));
+    gateway.enqueue('enviarLote', sifenScenarios.loteNoEncolado('Lote invalido'));
     const outcome = await send.execute({ loteId: 'lote-1', dId: 1n, lote });
-    expect(outcome).toEqual({ status: 'rejected', code: '0301', reason: 'RUC bloqueado' });
+    expect(outcome).toEqual({ status: 'rejected', code: '0301', reason: 'Lote invalido' });
     expect(store.states.get('lote-1')).toBe('rejected');
   });
 
@@ -159,6 +159,30 @@ describe('SendLote', () => {
     await expect(send.execute({ loteId: 'lote-1', dId: 1n, lote })).rejects.toThrow('db down');
     expect(store.states.get('lote-1')).toBe('sending');
     expect(gateway.callsTo('enviarLote')).toHaveLength(1);
+  });
+
+  describe('a 0301 that blocks the RUC (HU-E6-05)', () => {
+    it.each([
+      'RUC bloqueado por envio de lotes invalidos',
+      'Contribuyente BLOQUEADO temporalmente',
+      'El RUC se encuentra bloqueado',
+    ])('flags %j', async (reason) => {
+      const { gateway, send } = setup();
+      gateway.enqueue('enviarLote', sifenScenarios.loteNoEncolado(reason));
+      expect(await send.execute({ loteId: 'lote-1', dId: 1n, lote })).toEqual({
+        status: 'rejected',
+        code: '0301',
+        reason,
+        rucBlocked: true,
+      });
+    });
+
+    it('does not flag an ordinary refusal', async () => {
+      const { gateway, send } = setup();
+      gateway.enqueue('enviarLote', sifenScenarios.loteNoEncolado('Lote sin documentos'));
+      const outcome = await send.execute({ loteId: 'lote-1', dId: 1n, lote });
+      expect(outcome).toEqual({ status: 'rejected', code: '0301', reason: 'Lote sin documentos' });
+    });
   });
 
   describe('with SIFEN down (HU-E6-08)', () => {

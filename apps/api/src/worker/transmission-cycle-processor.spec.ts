@@ -9,6 +9,7 @@ const empty: CycleReport = {
   signSkipped: 0,
   sendSkipped: 0,
   sendDeferred: 0,
+  rucBlocks: 0,
   assembled: 0,
   sent: [],
   polled: [],

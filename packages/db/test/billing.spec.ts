@@ -83,16 +83,14 @@ describe('billing tables', () => {
     expect(bare).toMatchObject({ monthlyPrice: null, overagePrice: null, documentQuota: null });
     expect(
       await causeOf(
-        db
-          .insert(subscriptions)
-          .values({
-            tenantId: b,
-            planId,
-            status: 'cancelled',
-            monthlyPrice: 1,
-            overagePrice: -1,
-            documentQuota: 1,
-          }),
+        db.insert(subscriptions).values({
+          tenantId: b,
+          planId,
+          status: 'cancelled',
+          monthlyPrice: 1,
+          overagePrice: -1,
+          documentQuota: 1,
+        }),
       ),
     ).toContain('subscriptions_terms_nonneg');
   });

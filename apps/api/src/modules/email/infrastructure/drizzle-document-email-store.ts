@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, lte } from 'drizzle-orm';
+import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
 import { documentEmails, tenants, withTenantTransaction, type Database } from '@sifen/db';
 import type { DocumentEmailStore } from '../application/ports/document-email-store.port.js';
 
@@ -26,9 +26,14 @@ export function createDrizzleDocumentEmailStore({
           .limit(limit)
           .for('update', { of: documentEmails, skipLocked: true });
         if (rows.length > 0) {
+          // The claim is the attempt: counting it here, in the lease's transaction, makes a second
+          // claim after the lease expires see a higher count than the first worker's.
           await tx
             .update(documentEmails)
-            .set({ nextAttemptAt: new Date(now.getTime() + leaseMs) })
+            .set({
+              nextAttemptAt: new Date(now.getTime() + leaseMs),
+              attemptCount: sql`${documentEmails.attemptCount} + 1`,
+            })
             .where(
               inArray(
                 documentEmails.id,
@@ -45,7 +50,7 @@ export function createDrizzleDocumentEmailStore({
                   tenantId: email.tenantId,
                   documentId: email.documentId,
                   recipient: email.recipient,
-                  attemptCount: email.attemptCount,
+                  attemptCount: email.attemptCount + 1,
                   tenantName,
                 },
               ],
@@ -62,15 +67,15 @@ export function createDrizzleDocumentEmailStore({
             and(
               eq(documentEmails.id, id),
               inArray(documentEmails.status, OPEN),
-              // The outcome must be the attempt right after the claimed one: a worker whose lease
-              // expired cannot overwrite a newer outcome.
-              eq(documentEmails.attemptCount, outcome.attemptCount - 1),
+              // The outcome must belong to the latest claim: a worker whose lease expired (and whose
+              // row was claimed again) cannot overwrite the newer attempt's outcome.
+              eq(documentEmails.attemptCount, outcome.attemptCount),
             ),
           )
           .returning({ id: documentEmails.id });
         if (updated.length !== 1) {
           throw new Error(
-            `Document email ${id} is not due at attempt ${String(outcome.attemptCount - 1)}`,
+            `Document email ${id} is not due at attempt ${String(outcome.attemptCount)}`,
           );
         }
       });

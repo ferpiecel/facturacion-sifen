@@ -76,15 +76,36 @@ describe('DrizzleDocumentEmailStore', () => {
       tenantId,
       documentId: early.documentId,
       recipient: 'cliente@example.com',
-      attemptCount: 2,
+      attemptCount: 3,
       tenantName: 'Acme SA',
     });
+    expect((await read(early.id)).attemptCount).toBe(3);
     expect((await read(late.id)).nextAttemptAt).toEqual(new Date(NOW.getTime() + 5 * MIN));
     expect(await store().claimDue(NOW, 10, 5 * MIN)).toEqual([]);
   });
 
-  it('records a sent outcome', async () => {
+  it('counts every claim as an attempt, so a stale worker cannot overwrite the newer claim', async () => {
     const row = await email();
+    const [first] = await store().claimDue(NOW, 10, MIN);
+    expect(first.attemptCount).toBe(1);
+    const later = new Date(NOW.getTime() + 2 * MIN);
+    const [second] = await store().claimDue(later, 10, MIN);
+    expect(second.attemptCount).toBe(2);
+    const outcome = (attemptCount: number) => ({
+      status: 'sent' as const,
+      attemptCount,
+      lastAttemptAt: later,
+      nextAttemptAt: null,
+      sentAt: later,
+      lastError: null,
+    });
+    await expect(store().record(row.id, outcome(first.attemptCount))).rejects.toThrow(/not due/);
+    await store().record(row.id, outcome(second.attemptCount));
+    expect(await read(row.id)).toMatchObject({ status: 'sent', attemptCount: 2 });
+  });
+
+  it('records a sent outcome', async () => {
+    const row = await email({ attemptCount: 1 });
     await store().record(row.id, {
       status: 'sent',
       attemptCount: 1,
@@ -106,7 +127,7 @@ describe('DrizzleDocumentEmailStore', () => {
     await expect(
       store().record(row.id, {
         status: 'dead',
-        attemptCount: 1,
+        attemptCount: 2,
         lastAttemptAt: NOW,
         nextAttemptAt: null,
         sentAt: null,

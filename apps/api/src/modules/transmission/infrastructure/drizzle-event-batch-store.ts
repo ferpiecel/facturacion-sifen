@@ -55,7 +55,7 @@ async function cancelDocument(
     .returning({ id: documents.id })
     .then((rows) => rows.at(0));
   if (!cancelled) {
-    const [current] = await tx
+    const current = await tx
       .select({ status: documents.status })
       .from(documents)
       .where(and(eq(documents.tenantId, tenantId), eq(documents.id, documentId)));

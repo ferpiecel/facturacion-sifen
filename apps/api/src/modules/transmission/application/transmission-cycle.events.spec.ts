@@ -19,6 +19,7 @@ const idle: TransmissionCycleStore = {
   holdDocument: () => Promise.resolve(),
   heldDocuments: () => Promise.resolve([]),
   deferPendingLote: () => Promise.resolve(),
+  rucBlockedUntil: () => Promise.resolve(null),
   pendingOlderThan: () => Promise.resolve(0),
 };
 
@@ -34,6 +35,7 @@ interface EventSetup {
 function setup(o: EventSetup = {}) {
   const log: string[] = [];
   const warnings: string[] = [];
+  const holds: string[] = [];
   const limits: Record<string, number> = {};
   const cycle = new TransmissionCycle({
     tenantId: TENANT,
@@ -50,6 +52,10 @@ function setup(o: EventSetup = {}) {
             pendingEventIds: (limit: number) => {
               limits.signEvent = limit;
               return Promise.resolve(o.pending ?? []);
+            },
+            holdEvent: (eventId: string, reason: string) => {
+              holds.push(`${eventId}:${reason}`);
+              return Promise.resolve();
             },
             signer: {
               execute: async ({ eventId }: { tenantId: string; eventId: string }) => {
@@ -77,7 +83,7 @@ function setup(o: EventSetup = {}) {
     batch: o.batch,
     logger: { warn: (message) => warnings.push(message) },
   });
-  return { cycle, log, warnings, limits };
+  return { cycle, log, warnings, limits, holds };
 }
 
 describe('TransmissionCycle issuer events', () => {
@@ -116,6 +122,36 @@ describe('TransmissionCycle issuer events', () => {
     const report = await cycle.run();
 
     expect(report.events).toMatchObject({ signed: 0, signSkipped: 1 });
+  });
+
+  it.each(['EventIdOutOfRangeError', 'EventDataIncompleteError', 'EventKindNotSignableError'])(
+    'parks an event whose signing fails with %s, so it stops starving the batch',
+    async (name) => {
+      const { cycle, holds } = setup({
+        pending: ['e1', 'e2'],
+        sign: (id) => {
+          if (id !== 'e1') return Promise.resolve(undefined);
+          const error = new Error('detail');
+          error.name = name;
+          return Promise.reject(error);
+        },
+      });
+
+      await cycle.run();
+
+      expect(holds).toEqual([`e1:signing:${name}`]);
+    },
+  );
+
+  it('does not park an event for a transient signing failure', async () => {
+    const { cycle, holds } = setup({
+      pending: ['e1'],
+      sign: () => Promise.reject(new TypeError('network')),
+    });
+
+    await cycle.run();
+
+    expect(holds).toEqual([]);
   });
 
   it('isolates a failing signature, a failing send and a failing recovery, by error class only', async () => {

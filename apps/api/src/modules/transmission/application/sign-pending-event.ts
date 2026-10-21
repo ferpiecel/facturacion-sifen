@@ -31,6 +31,8 @@ export interface EventToSign {
 export interface EventSigningStore {
   /** `pending` events of the tenant's current environment, oldest first. */
   pendingEventIds(limit: number): Promise<readonly string[]>;
+  /** Parks a `pending` event for an operator (marked by its reason): `pendingEventIds` no longer lists it. */
+  holdEvent(eventId: string, reason: string): Promise<void>;
   load(eventId: string): Promise<EventToSign | undefined>;
   /** Atomically `pending -> signed`; false when the event is no longer pending. */
   markSigned(eventId: string, signed: { signedXml: string; signedAt: Date }): Promise<boolean>;

@@ -76,8 +76,52 @@ describe('KuDE of a credit note', () => {
     },
   );
 
-  it('still refuses the types that have no layout (an NDE)', async () => {
-    const xml = (await creditNote()).replace('<iTiDE>5</iTiDE>', '<iTiDE>6</iTiDE>');
+  it('still refuses the types that have no layout (an AFE)', async () => {
+    const xml = (await creditNote()).replace('<iTiDE>5</iTiDE>', '<iTiDE>4</iTiDE>');
     expect(() => readKudeInvoice(xml)).toThrow(/unsupported/);
+  });
+});
+
+/** The real NDE pipeline output (xmlgen type 6). Spec: HU-E7-02 N3. */
+const debitNote = (reasonCode = 2) =>
+  signedInvoiceWithQr((input: FacturaPocInput) => ({
+    ...input,
+    data: {
+      ...Object.fromEntries(
+        Object.entries(input.data).filter(([key]) => key !== 'factura' && key !== 'condicion'),
+      ),
+      tipoDocumento: 6,
+      notaCreditoDebito: { motivo: reasonCode },
+      documentoAsociado: { formato: 1, cdc: FE_CDC },
+    },
+  }));
+
+describe('KuDE of a debit note', () => {
+  it('reads the reason and the associated invoice into the debit note slot', async () => {
+    const model = readKudeInvoice(await debitNote(3));
+    expect(model.debitNote).toEqual({ reason: 'Descuento', associatedCdc: FE_CDC });
+    expect(model.creditNote).toBeUndefined();
+    expect(model.operationCondition).toBeUndefined();
+    expect(model.transactionType).toBeUndefined();
+  });
+
+  it('prints the NDE title, number, reason and associated invoice, and a QR that decodes', async () => {
+    const model = readKudeInvoice(await debitNote(2));
+    const pdf = await new PdfkitKudeRenderer().render(model);
+    const text = await pdfText(pdf);
+
+    for (const expected of [
+      'KuDE de Nota de Débito Electrónica',
+      'Nota de Débito Electrónica Nº',
+      'Motivo de Emisión: Devolución',
+      'Documento Asociado: Factura Electrónica Nº 001-002-0000123',
+      FE_CDC.match(/\d{4}/g)?.join(' '),
+    ]) {
+      expect(text).toContain(expected);
+    }
+    for (const absent of ['Crédito', 'KuDE de Factura Electrónica', 'Condición de Venta']) {
+      expect(text).not.toContain(absent);
+    }
+    expect(await decodeQr(pdf)).toBe(model.qrUrl);
   });
 });

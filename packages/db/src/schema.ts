@@ -1470,6 +1470,31 @@ export const usageCounters = pgTable(
 );
 
 /**
+ * Pauses of a tenant's sends after SIFEN blocked its RUC (HU-E6-05, Guía 2024: 10 to 60 minutes).
+ * Append-only history: the active pause is the latest row whose `blocked_until` has not passed,
+ * and the row count is the metric.
+ */
+export const rucBlocks = pgTable(
+  'ruc_blocks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    environment: tenantEnvironment('environment').notNull(),
+    blockedAt: timestamp('blocked_at', { withTimezone: true }).notNull().defaultNow(),
+    blockedUntil: timestamp('blocked_until', { withTimezone: true }).notNull(),
+    /** SIFEN's `dMsgRes` for the refused lote, capped; never XML or credentials. */
+    reason: text('reason').notNull(),
+  },
+  (table) => [
+    index('ruc_blocks_active_idx').on(table.tenantId, table.environment, table.blockedUntil),
+    check('ruc_blocks_window', sql`${table.blockedUntil} > ${table.blockedAt}`),
+    check('ruc_blocks_reason_length', sql`char_length(${table.reason}) <= 500`),
+  ],
+);
+
+/**
  * Every table that carries a `tenant_id` column and MUST be covered by
  * `FORCE ROW LEVEL SECURITY` plus a tenant-isolation policy. The
  * `rls-coverage.spec.ts` drift check discovers these tables from the
@@ -1484,6 +1509,7 @@ export const TENANT_TABLES = [
   'invoices_saas',
   'lotes',
   'payments',
+  'ruc_blocks',
   'subscriptions',
   'tenant_document_sequences',
   'tenant_establishments',

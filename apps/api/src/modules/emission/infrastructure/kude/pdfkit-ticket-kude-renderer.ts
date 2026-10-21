@@ -9,6 +9,7 @@ import {
   groupCdc,
   KUDE_CONSULT_URL,
   KUDE_CREDIT_NOTE_TITLE,
+  KUDE_DEBIT_NOTE_TITLE,
   KUDE_TITLE,
   documentNumberOfCdc,
   type KudeInvoice,
@@ -32,7 +33,11 @@ const MEASURE_HEIGHT = 200_000;
 const CDC_GROUPS_PER_ROW = 4;
 
 const titleOf = (invoice: KudeInvoice): string =>
-  invoice.creditNote ? KUDE_CREDIT_NOTE_TITLE : KUDE_TITLE;
+  invoice.debitNote
+    ? KUDE_DEBIT_NOTE_TITLE
+    : invoice.creditNote
+      ? KUDE_CREDIT_NOTE_TITLE
+      : KUDE_TITLE;
 
 const rateLabel = (rate: KudeItem['vatRate']): string => (rate === 0 ? 'Ex.' : `${String(rate)}%`);
 
@@ -163,10 +168,14 @@ class Layout {
     if (stamp.validTo !== undefined) {
       this.block(`Fin de Vigencia: ${formatDateDmy(stamp.validTo)}`, { align: 'center' });
     }
-    this.block(invoice.creditNote ? 'Nota de Crédito Electrónica' : 'Factura Electrónica', {
-      align: 'center',
-      bold: true,
-    });
+    this.block(
+      invoice.debitNote
+        ? 'Nota de Débito Electrónica'
+        : invoice.creditNote
+          ? 'Nota de Crédito Electrónica'
+          : 'Factura Electrónica',
+      { align: 'center', bold: true },
+    );
     this.block(
       `Nº ${formatDocumentNumber(invoice.establishment, invoice.point, invoice.documentNumber)}`,
       { align: 'center', bold: true },
@@ -191,8 +200,9 @@ class Layout {
       rows.push('Razón Social: Sin Nombre');
     }
     if (invoice.transactionType !== undefined) rows.push(`Operación: ${invoice.transactionType}`);
-    if (invoice.creditNote) {
-      const { reason, associatedCdc } = invoice.creditNote;
+    const note = invoice.debitNote ?? invoice.creditNote;
+    if (note) {
+      const { reason, associatedCdc } = note;
       rows.push(
         `Motivo: ${reason}`,
         `Factura asociada: ${documentNumberOfCdc(associatedCdc)}`,

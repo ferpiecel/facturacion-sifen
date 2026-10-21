@@ -38,6 +38,11 @@ export interface TransmissionCycleStore {
   holdDocument(documentId: string, reason: string): Promise<void>;
   /** Documents parked for operator attention (signing poison, 0301 retries exhausted). */
   heldDocuments(limit: number): Promise<readonly HeldDocument[]>;
+  /**
+   * The end of the tenant's active RUC pause (HU-E6-05), or null when sends are allowed. While it
+   * lasts the tenant sends nothing: more lotes would prolong SIFEN's block.
+   */
+  rucBlockedUntil(now: Date): Promise<Date | null>;
   /** Moves a `pending` lote that failed to send behind the others, so it cannot starve them. */
   deferPendingLote(loteId: string): Promise<void>;
   /** `pending` lotes created before `cutoff`: a send that keeps failing, or a crash before it. */
@@ -67,10 +72,19 @@ export const DETERMINISTIC_SIGNING_ERRORS: ReadonlySet<string> = new Set([
   'SigningMismatchError',
 ]);
 
+/** The event counterpart: signing errors that repeat until the event's own data or kind changes. */
+export const DETERMINISTIC_EVENT_SIGNING_ERRORS: ReadonlySet<string> = new Set([
+  'EventIdOutOfRangeError',
+  'EventDataIncompleteError',
+  'EventKindNotSignableError',
+]);
+
 /** The issuer-event steps of a tenant's cycle (HU-E8-04): sign, send in batches of up to 15, resolve the unknown. */
 export interface TransmissionCycleEvents {
   /** `pending` events of the tenant's current environment, oldest first. */
   pendingEventIds(limit: number): Promise<readonly string[]>;
+  /** Parks a pending event for an operator: it stops being listed, and keeps blocking a duplicate. */
+  holdEvent(eventId: string, reason: string): Promise<void>;
   readonly signer: Pick<SignPendingEvent, 'execute'>;
   readonly sender: Pick<SendEventBatch, 'execute'>;
   readonly resolver: Pick<ResolveUnknownEvents, 'execute'>;
@@ -121,6 +135,12 @@ export interface CycleReport {
   readonly assembled: number;
   /** Lotes another worker had already claimed: not sent by this run. */
   readonly sendSkipped: number;
+  /** Lotes left `pending` because the circuit of the send endpoint was open (HU-E6-08). */
+  readonly sendDeferred: number;
+  /** Lotes SIFEN refused because it blocked the tenant's RUC; their documents wait out the pause (HU-E6-05). */
+  readonly rucBlocks: number;
+  /** Sends are paused until then because SIFEN blocked the RUC (HU-E6-05); null when they are not. */
+  readonly sendPausedUntil: Date | null;
   readonly sent: readonly { readonly loteId: string; readonly status: string }[];
   readonly polled: readonly { readonly loteId: string; readonly status: string }[];
   /** Lotes queried by CDC after 0364 or the 48 h window (HU-E6-04). */
@@ -246,10 +266,26 @@ export class TransmissionCycle {
   private async sendPending() {
     const sent: { loteId: string; status: string }[] = [];
     let sendSkipped = 0;
+    let sendDeferred = 0;
+    let rucBlocks = 0;
+    // Fail closed: if the pause cannot be read, nothing is sent this run.
+    const blockedUntil = await this.guard('send', undefined, () =>
+      this.deps.store.rucBlockedUntil(this.clock()),
+    );
+    if (blockedUntil === undefined || blockedUntil !== null) {
+      return { sent, sendSkipped, sendDeferred, rucBlocks, sendPausedUntil: blockedUntil ?? null };
+    }
     const pending = await this.guard('send', undefined, () =>
       this.deps.store.pendingLotes(this.batch.send),
     );
     for (const { loteId, lote } of pending ?? []) {
+      // The endpoint is paused: every remaining lote would be refused too, so try them next cycle.
+      if (sendDeferred > 0) {
+        sendDeferred += 1;
+        continue;
+      }
+      // A blocked RUC pauses every send of the tenant: more lotes now would prolong the block.
+      if (rucBlocks > 0) continue;
       const result = await this.guard('send', loteId, async () => {
         const dId = await this.deps.store.nextRequestId();
         return this.deps.sender.execute({ loteId, dId, lote });
@@ -257,9 +293,17 @@ export class TransmissionCycle {
       if (result === undefined) {
         await this.guard('send', loteId, () => this.deps.store.deferPendingLote(loteId));
       } else if (result.status === 'already-claimed') sendSkipped += 1;
+      else if (result.status === 'deferred') sendDeferred += 1;
+      else if (result.status === 'rejected' && result.rucBlocked) rucBlocks += 1;
       else sent.push({ loteId, status: result.status });
     }
-    return { sent, sendSkipped };
+    const sendPausedUntil =
+      rucBlocks > 0
+        ? ((await this.guard('send', undefined, () =>
+            this.deps.store.rucBlockedUntil(this.clock()),
+          )) ?? null)
+        : null;
+    return { sent, sendSkipped, sendDeferred, rucBlocks, sendPausedUntil };
   }
 
   private async pollDue() {
@@ -305,8 +349,9 @@ export class TransmissionCycle {
       const result = await this.guard('sign-event', eventId, () =>
         wired.signer.execute({ tenantId: this.deps.tenantId, eventId }),
       );
-      if (result?.status === 'signed') signed += 1;
-      else if (result) signSkipped += 1;
+      if (result === undefined) await this.parkEventIfDeterministic(eventId);
+      else if (result.status === 'signed') signed += 1;
+      else signSkipped += 1;
     }
     const send = await this.guard('send-event', undefined, () => wired.sender.execute());
     const resolve = await this.guard('resolve-event', undefined, () => wired.resolver.execute());
@@ -322,6 +367,17 @@ export class TransmissionCycle {
     if (last?.id !== documentId || !DETERMINISTIC_SIGNING_ERRORS.has(last.error)) return;
     await this.guard('sign', documentId, () =>
       this.deps.store.holdDocument(documentId, `signing:${last.error}`),
+    );
+  }
+
+  private async parkEventIfDeterministic(eventId: string): Promise<void> {
+    const last = this.failures.at(-1);
+    const wired = this.deps.events;
+    if (!wired || last?.id !== eventId || !DETERMINISTIC_EVENT_SIGNING_ERRORS.has(last.error)) {
+      return;
+    }
+    await this.guard('sign-event', eventId, () =>
+      wired.holdEvent(eventId, `signing:${last.error}`),
     );
   }
 

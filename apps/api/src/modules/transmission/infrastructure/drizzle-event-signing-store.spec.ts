@@ -125,6 +125,26 @@ describe('DrizzleEventSigningStore', () => {
     expect(await storeFor(otherTenantId).pendingEventIds(10)).toHaveLength(1);
   });
 
+  it('parks a pending event for an operator: it keeps its place in the table but is no longer listed', async () => {
+    const parked = await insertEvent({ eventId: 1n });
+    const other = await insertEvent({
+      kind: 'voiding',
+      eventId: 2n,
+      documentId: null,
+      voidRange: RANGE,
+    });
+
+    await storeFor(tenantId).holdEvent(parked, 'signing:EventDataIncompleteError');
+
+    expect(await storeFor(tenantId).pendingEventIds(10)).toEqual([other]);
+    const [row] = await handle.db.select().from(issuerEvents).where(eq(issuerEvents.id, parked));
+    expect(row).toMatchObject({
+      status: 'pending',
+      responseCode: null,
+      responseMessage: 'signing:EventDataIncompleteError',
+    });
+  });
+
   it('loads a cancellation with the CDC of its document and the tenant environment', async () => {
     const id = await insertEvent({});
 

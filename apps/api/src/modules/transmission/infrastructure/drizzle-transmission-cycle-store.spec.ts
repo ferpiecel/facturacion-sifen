@@ -6,6 +6,7 @@ import {
   documents,
   loteDocuments,
   lotes,
+  rucBlocks,
   tenantEstablishments,
   tenantExpeditionPoints,
   tenantFiscalProfiles,
@@ -418,5 +419,35 @@ describe('DrizzleTransmissionCycleStore', () => {
     expect(ids).toContain(lotOpen);
     expect(ids).not.toContain(lotWaiting);
     expect(ids).not.toContain(lotMoved);
+  });
+
+  describe('rucBlockedUntil (HU-E6-05)', () => {
+    const block = (tenant: string, until: Date, environment: 'test' | 'production' = 'test') =>
+      handle.db.insert(rucBlocks).values({
+        tenantId: tenant,
+        environment,
+        blockedAt: at(0),
+        blockedUntil: until,
+        reason: 'RUC bloqueado',
+      });
+
+    it('is null when the tenant was never blocked or the pause is over', async () => {
+      expect(await store().rucBlockedUntil(at(30))).toBeNull();
+      await block(tenantId, at(30));
+      expect(await store().rucBlockedUntil(at(30))).toBeNull();
+    });
+
+    it('returns the end of the longest active pause of the tenant', async () => {
+      await block(tenantId, at(40));
+      await block(tenantId, at(55));
+      await block(tenantId, at(10));
+      expect(await store().rucBlockedUntil(at(30))).toEqual(at(55));
+    });
+
+    it('ignores other tenants and other environments', async () => {
+      await block(otherTenantId, at(90));
+      await block(tenantId, at(90), 'production');
+      expect(await store().rucBlockedUntil(at(30))).toBeNull();
+    });
   });
 });

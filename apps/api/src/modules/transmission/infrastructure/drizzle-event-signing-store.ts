@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, isNull } from 'drizzle-orm';
 import { documents, issuerEvents, tenants, withTenantTransaction, type Database } from '@sifen/db';
 import type {
   EventSigningStore,
@@ -29,11 +29,34 @@ export function createDrizzleEventSigningStore({
               eq(tenants.environment, issuerEvents.environment),
             ),
           )
-          .where(and(eq(issuerEvents.tenantId, tenantId), eq(issuerEvents.status, 'pending')))
+          .where(
+            and(
+              eq(issuerEvents.tenantId, tenantId),
+              eq(issuerEvents.status, 'pending'),
+              isNull(issuerEvents.responseMessage),
+            ),
+          )
           .orderBy(asc(issuerEvents.createdAt), asc(issuerEvents.id))
           .limit(limit),
       );
       return rows.map((row) => row.id);
+    },
+
+    async holdEvent(eventId, reason) {
+      await withTenantTransaction(db, tenantId, (tx) =>
+        tx
+          .update(issuerEvents)
+          // A pending event cannot carry a response code (issuer_events_answered_pair): the reason in
+          // `response_message`, empty on every pending event, is the marker `pendingEventIds` skips.
+          .set({ responseMessage: reason.slice(0, 500) })
+          .where(
+            and(
+              eq(issuerEvents.tenantId, tenantId),
+              eq(issuerEvents.id, eventId),
+              eq(issuerEvents.status, 'pending'),
+            ),
+          ),
+      );
     },
 
     async load(eventId) {

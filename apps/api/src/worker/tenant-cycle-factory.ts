@@ -43,6 +43,8 @@ import { createDrizzleTransmissionCycleStore } from '../modules/transmission/inf
 export interface TenantCycleFactoryDeps {
   readonly db: Database;
   readonly gateway: SifenGateway;
+  /** When the send endpoint's circuit is open, the instant it may be tried again (HU-E6-08). */
+  readonly sendPausedUntil?: () => Date | null;
   readonly certificates: CertificateSource;
   readonly cscs: CscSource;
   readonly logger?: { warn(message: string): void };
@@ -61,6 +63,7 @@ export interface TenantCycleFactoryDeps {
 export function createTenantCycleFactory({
   db,
   gateway,
+  sendPausedUntil,
   certificates,
   cscs,
   logger,
@@ -99,6 +102,7 @@ export function createTenantCycleFactory({
       sender: new SendLote({
         gateway,
         store: createDrizzleLoteDispatchStore({ db, tenantId, now }),
+        pausedUntil: sendPausedUntil,
       }),
       poller: new PollLoteResult({
         gateway,
@@ -114,6 +118,7 @@ export function createTenantCycleFactory({
       }),
       events: {
         pendingEventIds: (limit) => eventSigning.pendingEventIds(limit),
+        holdEvent: (eventId, reason) => eventSigning.holdEvent(eventId, reason),
         signer: new SignPendingEvent({
           store: eventSigning,
           certificates,
@@ -123,7 +128,7 @@ export function createTenantCycleFactory({
         }),
         sender: new SendEventBatch({
           gateway,
-          store: createDrizzleEventBatchStore({ db, tenantId, now }),
+          store: createDrizzleEventBatchStore({ db, tenantId, now, logger }),
           nextRequestId: () => store.nextRequestId(),
           validate: validateEventXml,
           logger,
@@ -133,6 +138,7 @@ export function createTenantCycleFactory({
           store: createDrizzleEventRecoveryStore({ db, tenantId, now }),
           nextRequestId: () => store.nextRequestId(),
           now,
+          logger,
         }),
       },
       now,

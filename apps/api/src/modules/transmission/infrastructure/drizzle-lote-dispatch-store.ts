@@ -1,5 +1,14 @@
-import { and, eq, inArray } from 'drizzle-orm';
-import { documents, loteDocuments, lotes, withTenantTransaction, type Database } from '@sifen/db';
+import { and, eq, inArray, isNull, lt, or } from 'drizzle-orm';
+import {
+  documents,
+  loteDocuments,
+  lotes,
+  rucBlocks,
+  tenants,
+  withTenantTransaction,
+  type Database,
+} from '@sifen/db';
+import { DEFAULT_RUC_BLOCK_MS } from '../application/ruc-block.js';
 import { recordAudit } from '../../audit/infrastructure/record-audit.js';
 import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
 import type { LoteDispatchOutcome, LoteDispatchStore } from '../application/send-lote.js';
@@ -24,6 +33,8 @@ export interface DrizzleLoteDispatchStoreOptions {
   readonly now?: () => Date;
   /** 0301 refusals after which a document is held for an operator instead of re-queued. */
   readonly maxTransmissionAttempts?: number;
+  /** How long a tenant's sends pause after SIFEN blocks its RUC (default 30 minutes, HU-E6-05). */
+  readonly rucBlockMs?: number;
 }
 
 /** `LoteDispatchStore` over `lotes`; every call runs as app_user inside the tenant's transaction. */
@@ -32,6 +43,7 @@ export function createDrizzleLoteDispatchStore({
   tenantId,
   now = () => new Date(),
   maxTransmissionAttempts = DEFAULT_MAX_TRANSMISSION_ATTEMPTS,
+  rucBlockMs = DEFAULT_RUC_BLOCK_MS,
 }: DrizzleLoteDispatchStoreOptions): LoteDispatchStore {
   return {
     async claim(loteId) {
@@ -44,6 +56,16 @@ export function createDrizzleLoteDispatchStore({
           .returning({ id: lotes.id }),
       );
       return claimed.length === 1;
+    },
+
+    async release(loteId) {
+      // Only a still-`sending` lote goes back: nothing was sent, so no attempt is counted.
+      await withTenantTransaction(db, tenantId, (tx) =>
+        tx
+          .update(lotes)
+          .set({ status: 'pending', sendAttemptedAt: null, updatedAt: now() })
+          .where(and(eq(lotes.id, loteId), eq(lotes.status, 'sending'))),
+      );
     },
 
     async record(loteId, outcome) {
@@ -89,10 +111,51 @@ export function createDrizzleLoteDispatchStore({
             at: now(),
           });
         }
-        if (outcome.status === 'rejected') await backOff(tx, loteId);
+        if (outcome.status === 'rejected') {
+          if (outcome.rucBlocked) await pauseTenant(tx, loteId, outcome.reason);
+          else await backOff(tx, loteId);
+        }
       });
     },
   };
+
+  /**
+   * SIFEN blocked the RUC (HU-E6-05): records the pause and holds the lote's documents back until it
+   * ends. The block is not the documents' fault, so no attempt is counted and none is held; a longer
+   * wait they already have is kept.
+   */
+  async function pauseTenant(tx: Tx, loteId: string, reason: string): Promise<void> {
+    const environment = await tx
+      .select({ environment: tenants.environment })
+      .from(tenants)
+      .where(eq(tenants.id, tenantId))
+      .then((found) => found.at(0)?.environment);
+    if (!environment) throw new Error('Tenant not found');
+    const until = new Date(now().getTime() + rucBlockMs);
+    await tx.insert(rucBlocks).values({
+      tenantId,
+      environment,
+      blockedAt: now(),
+      blockedUntil: until,
+      reason: reason.slice(0, 500),
+    });
+    await tx
+      .update(documents)
+      .set({ nextTransmissionAt: until, updatedAt: now() })
+      .where(
+        and(
+          eq(documents.status, 'queued'),
+          or(isNull(documents.nextTransmissionAt), lt(documents.nextTransmissionAt, until)),
+          inArray(
+            documents.id,
+            tx
+              .select({ id: loteDocuments.documentId })
+              .from(loteDocuments)
+              .where(eq(loteDocuments.loteId, loteId)),
+          ),
+        ),
+      );
+  }
 
   /**
    * A refused lote leaves its documents `queued` and eligible; count the refusal and make them wait

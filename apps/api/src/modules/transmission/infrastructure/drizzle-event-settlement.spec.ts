@@ -33,7 +33,14 @@ describe('settling issuer events', () => {
     await handle.close();
   });
 
-  const store = () => createDrizzleEventBatchStore({ db: handle.db, tenantId, now: () => NOW });
+  const warnings: string[] = [];
+  const store = () =>
+    createDrizzleEventBatchStore({
+      db: handle.db,
+      tenantId,
+      now: () => NOW,
+      logger: { warn: (message) => warnings.push(message) },
+    });
 
   /** A cancellation (or voiding) in `sending`, ready to be settled. */
   async function sending(documentId: string | null) {
@@ -94,6 +101,10 @@ describe('settling issuer events', () => {
     expect(
       (await handle.db.select().from(issuerEvents).where(eq(issuerEvents.id, id)))[0].status,
     ).toBe('approved');
+    // Not silent: an approved cancellation of a document that cannot be cancelled is for an operator.
+    expect(warnings).toEqual([expect.stringContaining(id)]);
+    expect(warnings[0]).toContain(doc.id);
+    expect(warnings[0]).toContain('rejected');
   });
 
   it('audits a rejection and an unknown outcome without touching the document', async () => {

@@ -137,6 +137,7 @@ export function createTenantCycleFactory({
           store: createDrizzleEventRecoveryStore({ db, tenantId, now }),
           nextRequestId: () => store.nextRequestId(),
           now,
+          logger,
         }),
       },
       now,

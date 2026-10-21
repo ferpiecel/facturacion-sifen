@@ -121,6 +121,8 @@ export interface CycleReport {
   readonly assembled: number;
   /** Lotes another worker had already claimed: not sent by this run. */
   readonly sendSkipped: number;
+  /** Lotes left `pending` because the circuit of the send endpoint was open (HU-E6-08). */
+  readonly sendDeferred: number;
   readonly sent: readonly { readonly loteId: string; readonly status: string }[];
   readonly polled: readonly { readonly loteId: string; readonly status: string }[];
   /** Lotes queried by CDC after 0364 or the 48 h window (HU-E6-04). */
@@ -246,10 +248,16 @@ export class TransmissionCycle {
   private async sendPending() {
     const sent: { loteId: string; status: string }[] = [];
     let sendSkipped = 0;
+    let sendDeferred = 0;
     const pending = await this.guard('send', undefined, () =>
       this.deps.store.pendingLotes(this.batch.send),
     );
     for (const { loteId, lote } of pending ?? []) {
+      // The endpoint is paused: every remaining lote would be refused too, so try them next cycle.
+      if (sendDeferred > 0) {
+        sendDeferred += 1;
+        continue;
+      }
       const result = await this.guard('send', loteId, async () => {
         const dId = await this.deps.store.nextRequestId();
         return this.deps.sender.execute({ loteId, dId, lote });
@@ -257,9 +265,10 @@ export class TransmissionCycle {
       if (result === undefined) {
         await this.guard('send', loteId, () => this.deps.store.deferPendingLote(loteId));
       } else if (result.status === 'already-claimed') sendSkipped += 1;
+      else if (result.status === 'deferred') sendDeferred += 1;
       else sent.push({ loteId, status: result.status });
     }
-    return { sent, sendSkipped };
+    return { sent, sendSkipped, sendDeferred };
   }
 
   private async pollDue() {

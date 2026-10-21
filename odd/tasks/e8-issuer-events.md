@@ -112,7 +112,7 @@ planning PR is docs only.
 - [x] T2 HU-E8-04 B1 and B2: `issuer_events` table, guards, rollback, RLS tests, ADR-0020 (PRs #272, #273).
 - [x] T3 HU-E8-04 C1 and C2 (with A3): XSD, batcher, send use case, response handling, store (PRs #274, #275, #276). Evidence in "Slice C evidence".
 - [x] T4 HU-E8-04 D (PRs #279, #280, #281, #283, #285 and the cycle wiring, commits bc710be and 1527523): sign pending events, recovery by query, audit and settlement, event step in the cycle. The two-connection `claim` test (F5) stays open; see "Slice D evidence".
-- [x] T4b E8 hardening A (review findings of #281, #283): a cancellation is rejected only after two absent queries 15 min apart; `xContEv` read beside `rContDe`/under the body and prefixed names; per-event isolation; 72 h hold (`LOC-HOLD`); claim with `FOR UPDATE SKIP LOCKED` plus a 5 min lease (commit b19063a).
+- [x] T4b E8 hardening A (review findings of #281, #283): a cancellation is rejected only after two absent queries 15 min apart; `xContEv` read beside `rContDe`/under the body and prefixed names; per-event isolation; 72 h hold (`LOC-HOLD`); claim with `FOR UPDATE SKIP LOCKED` plus a 5 min lease (commit 72f286c).
 - [ ] T4c E8 hardening B (#292, #285): park deterministic event-signing errors; log a settled cancellation whose document is not cancellable; two-connection claim test. In progress on `fix/e8-hardening-signing-park`.
 - [ ] T5 HU-E8-02 A to C: `approved_at`, cancel rules and use case, endpoint and settlement.
 - [ ] T6 HU-E8-03 A to C: voided ranges, inutilize endpoint, deadline alert.

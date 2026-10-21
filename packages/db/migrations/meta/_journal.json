@@ -372,6 +372,13 @@
       "when": 1792518578925,
       "tag": "0052_lotes_release_claim",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1792518638925,
+      "tag": "0053_ruc_blocks",
+      "breakpoints": true
     }
   ]
 }

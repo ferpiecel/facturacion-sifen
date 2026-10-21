@@ -83,6 +83,7 @@ pnpm --filter @sifen/api worker
 ```
 
 - **Gateway:** todavía no existe el adaptador real de SIFEN (SOAP). Hasta entonces el worker solo arranca con `SIFEN_GATEWAY=simulator` y `NODE_ENV=development|test`; en producción se niega a arrancar en vez de simular envíos.
+- **SIFEN caído (HU-E6-08, ADR-0008):** cada endpoint de SIFEN tiene un circuit breaker compartido por todos los tenants del proceso. Tras 5 fallos de transporte o timeouts consecutivos se abre, el worker deja de llamarlo (cooldown de 30 s que se duplica hasta 15 min, con una sola llamada de prueba) y registra `WARN SIFEN circuit <operación>: closed -> open`. Mientras está abierto, los lotes `pending` quedan sin reclamar (el resumen del ciclo muestra `deferred=<n>`) y la API sigue aceptando documentos, que quedan firmados y encolados. Un lote cuya llamada ya salió y no tuvo respuesta nunca se reenvía: queda `unknown` y se recupera por CDC (HU-E6-04). Cada proceso worker lleva su propio estado de breaker.
 - **Logs:** una línea por ciclo con conteos; advertencias (`WARN`) cuando hay documentos retenidos (`held`, usar `document:release-hold` tras corregir la causa), lotes pendientes viejos (`stalePending`) o fallos. Solo ids, conteos y nombres de error: nunca XML, certificados ni URLs.
 - **Apagado:** `SIGTERM`/`SIGINT` deja terminar los ciclos en curso antes de salir.
 - **Pruebas con Redis real:** `REDIS_URL=redis://localhost:6379 pnpm --filter @sifen/api exec vitest run src/worker`. Sin `REDIS_URL` esas pruebas se omiten; en CI las corre el job `worker-redis`.

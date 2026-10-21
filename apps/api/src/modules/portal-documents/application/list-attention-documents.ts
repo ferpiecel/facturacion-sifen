@@ -15,7 +15,7 @@ import type {
 export const ATTENTION_LIMIT = 100;
 
 /** Most urgent first; the order of the values is the order of the list. */
-export const ATTENTION_REASONS = ['overdue', 'held', 'rejected', 'due_soon'] as const;
+export const ATTENTION_REASONS = ['overdue', 'held', 'due_soon', 'rejected'] as const;
 export type AttentionReason = (typeof ATTENTION_REASONS)[number];
 
 export interface AttentionItem extends PortalDocumentItem {
@@ -24,7 +24,8 @@ export interface AttentionItem extends PortalDocumentItem {
   deadline: string | null;
   /** Hours left to the deadline, to a tenth; zero once it has passed. */
   hoursRemaining: number | null;
-  hold: string | null;
+  /** Stable code of why the pipeline stopped on the document; see `HOLD_CODES`. */
+  hold: HoldCode | null;
   rejectionReason: string | null;
 }
 
@@ -35,6 +36,27 @@ export interface AttentionPage {
 }
 
 const PENDING = new Set(['signed', 'queued', 'submitted']);
+/**
+ * The pipeline stores internal hold reasons (`signing:<ErrorClass>`, `transmission:...`, `recovery:...`); the portal
+ * exposes stable codes so those internals can change without breaking clients.
+ */
+export const HOLD_CODES = [
+  'signing_failed',
+  'attempts_exhausted',
+  'recovery_unresolved',
+  'recovery_attempts_exhausted',
+  'unknown',
+] as const;
+export type HoldCode = (typeof HOLD_CODES)[number];
+
+export function holdCodeOf(internal: string): HoldCode {
+  if (internal.startsWith('signing:')) return 'signing_failed';
+  if (internal === 'transmission:attempts-exhausted') return 'attempts_exhausted';
+  if (internal === 'recovery:0420-unresolved') return 'recovery_unresolved';
+  if (internal === 'recovery:attempts-exhausted') return 'recovery_attempts_exhausted';
+  return 'unknown';
+}
+
 const rank = (reason: AttentionReason) => ATTENTION_REASONS.indexOf(reason);
 
 function reasonsOf(row: PortalAttentionRow, deadline: Date | null, now: Date): AttentionReason[] {
@@ -79,7 +101,7 @@ export function createListAttentionDocuments(deps: {
           reasons,
           deadline: deadline?.toISOString() ?? null,
           hoursRemaining: deadline ? hoursRemaining(deadline, now) : null,
-          hold: row.transmissionHold,
+          hold: row.transmissionHold === null ? null : holdCodeOf(row.transmissionHold),
           rejectionReason: rejectionReasonOf(row.status, parseSifenMessages(row.sifenMessages)),
         },
       ];

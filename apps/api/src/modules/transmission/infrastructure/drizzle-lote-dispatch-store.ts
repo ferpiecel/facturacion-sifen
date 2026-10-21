@@ -46,6 +46,16 @@ export function createDrizzleLoteDispatchStore({
       return claimed.length === 1;
     },
 
+    async release(loteId) {
+      // Only a still-`sending` lote goes back: nothing was sent, so no attempt is counted.
+      await withTenantTransaction(db, tenantId, (tx) =>
+        tx
+          .update(lotes)
+          .set({ status: 'pending', sendAttemptedAt: null, updatedAt: now() })
+          .where(and(eq(lotes.id, loteId), eq(lotes.status, 'sending'))),
+      );
+    },
+
     async record(loteId, outcome) {
       await withTenantTransaction(db, tenantId, async (tx) => {
         const updated = await tx

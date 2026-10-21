@@ -10,6 +10,7 @@ const empty: CycleReport = {
   sendSkipped: 0,
   sendDeferred: 0,
   rucBlocks: 0,
+  sendPausedUntil: null,
   assembled: 0,
   sent: [],
   polled: [],
@@ -24,7 +25,11 @@ const lease = new AbortController();
 
 function setup(
   report: Partial<CycleReport> = {},
-  options: { locked?: boolean; fail?: boolean } = {},
+  options: {
+    locked?: boolean;
+    fail?: boolean;
+    metrics?: (name: string, tenantId: string, by: number) => void;
+  } = {},
 ) {
   const clock = { now: 0 };
   const received: (AbortSignal | undefined)[] = [];
@@ -59,6 +64,7 @@ function setup(
     }),
     now: () => new Date(clock.now),
     heldListEveryMs: 600_000,
+    metric: options.metrics,
     logger: {
       info: (message) => logs.push({ level: 'info', message }),
       warn: (message) => logs.push({ level: 'warn', message }),
@@ -112,6 +118,33 @@ describe('TransmissionCycleProcessor', () => {
     const { processor, logs } = setup({ sendDeferred: 2 });
     await processor.process({ tenantId: TENANT });
     expect(logs[0].message).toContain('deferred=2');
+  });
+
+  describe('RUC block alert and metric (HU-E6-05)', () => {
+    it('raises an error-level alert and counts the block when a lote made SIFEN block the RUC', async () => {
+      const metrics: string[] = [];
+      const { processor, logs } = setup(
+        { rucBlocks: 1, sendPausedUntil: new Date('2026-10-02T12:30:00Z') },
+        { metrics: (name, tenantId, by) => metrics.push(`${name}:${tenantId}:${String(by)}`) },
+      );
+      await processor.process({ tenantId: TENANT });
+      const alert = logs.find((log) => log.level === 'error');
+      expect(alert?.message).toContain(`tenant ${TENANT} RUC blocked`);
+      expect(alert?.message).toContain('2026-10-02T12:30:00.000Z');
+      expect(metrics).toEqual([`sifen_ruc_block_total:${TENANT}:1`]);
+    });
+
+    it('only warns while an earlier pause lasts, without counting it again', async () => {
+      const metrics: string[] = [];
+      const { processor, logs } = setup(
+        { sendPausedUntil: new Date('2026-10-02T12:30:00Z') },
+        { metrics: (name, tenantId, by) => metrics.push(`${name}:${tenantId}:${String(by)}`) },
+      );
+      await processor.process({ tenantId: TENANT });
+      expect(logs.filter((log) => log.level === 'error')).toEqual([]);
+      expect(logs.some((log) => log.message.includes('sends paused until'))).toBe(true);
+      expect(metrics).toEqual([]);
+    });
   });
 
   it('logs a quiet summary, and warnings for held documents, stale lotes and failures', async () => {

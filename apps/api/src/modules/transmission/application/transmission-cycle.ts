@@ -38,6 +38,11 @@ export interface TransmissionCycleStore {
   holdDocument(documentId: string, reason: string): Promise<void>;
   /** Documents parked for operator attention (signing poison, 0301 retries exhausted). */
   heldDocuments(limit: number): Promise<readonly HeldDocument[]>;
+  /**
+   * The end of the tenant's active RUC pause (HU-E6-05), or null when sends are allowed. While it
+   * lasts the tenant sends nothing: more lotes would prolong SIFEN's block.
+   */
+  rucBlockedUntil(now: Date): Promise<Date | null>;
   /** Moves a `pending` lote that failed to send behind the others, so it cannot starve them. */
   deferPendingLote(loteId: string): Promise<void>;
   /** `pending` lotes created before `cutoff`: a send that keeps failing, or a crash before it. */
@@ -134,6 +139,8 @@ export interface CycleReport {
   readonly sendDeferred: number;
   /** Lotes SIFEN refused because it blocked the tenant's RUC; their documents wait out the pause (HU-E6-05). */
   readonly rucBlocks: number;
+  /** Sends are paused until then because SIFEN blocked the RUC (HU-E6-05); null when they are not. */
+  readonly sendPausedUntil: Date | null;
   readonly sent: readonly { readonly loteId: string; readonly status: string }[];
   readonly polled: readonly { readonly loteId: string; readonly status: string }[];
   /** Lotes queried by CDC after 0364 or the 48 h window (HU-E6-04). */
@@ -261,6 +268,13 @@ export class TransmissionCycle {
     let sendSkipped = 0;
     let sendDeferred = 0;
     let rucBlocks = 0;
+    // Fail closed: if the pause cannot be read, nothing is sent this run.
+    const blockedUntil = await this.guard('send', undefined, () =>
+      this.deps.store.rucBlockedUntil(this.clock()),
+    );
+    if (blockedUntil === undefined || blockedUntil !== null) {
+      return { sent, sendSkipped, sendDeferred, rucBlocks, sendPausedUntil: blockedUntil ?? null };
+    }
     const pending = await this.guard('send', undefined, () =>
       this.deps.store.pendingLotes(this.batch.send),
     );
@@ -283,7 +297,13 @@ export class TransmissionCycle {
       else if (result.status === 'rejected' && result.rucBlocked) rucBlocks += 1;
       else sent.push({ loteId, status: result.status });
     }
-    return { sent, sendSkipped, sendDeferred, rucBlocks };
+    const sendPausedUntil =
+      rucBlocks > 0
+        ? ((await this.guard('send', undefined, () =>
+            this.deps.store.rucBlockedUntil(this.clock()),
+          )) ?? null)
+        : null;
+    return { sent, sendSkipped, sendDeferred, rucBlocks, sendPausedUntil };
   }
 
   private async pollDue() {

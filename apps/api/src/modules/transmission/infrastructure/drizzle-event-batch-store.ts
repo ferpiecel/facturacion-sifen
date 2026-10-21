@@ -58,7 +58,8 @@ async function cancelDocument(
     const current = await tx
       .select({ status: documents.status })
       .from(documents)
-      .where(and(eq(documents.tenantId, tenantId), eq(documents.id, documentId)));
+      .where(and(eq(documents.tenantId, tenantId), eq(documents.id, documentId)))
+      .then((rows) => rows.at(0));
     onSkipped(current?.status);
     return;
   }

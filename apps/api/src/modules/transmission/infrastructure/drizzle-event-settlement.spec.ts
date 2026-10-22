@@ -146,6 +146,43 @@ describe('settling issuer events', () => {
     ]);
   });
 
+  it('moves the rejected documents of an approved voiding to number_voided and queues the webhook', async () => {
+    const docs = await seedDocuments(
+      handle.db,
+      tenantId,
+      ['rejected', 'approved', 'rejected', 'rejected'],
+      (i) => (i === 3 ? { number: 9, cdc: '9'.repeat(44) } : {}),
+    );
+    await seedWebhookEndpoint(handle.db, tenantId);
+    const id = await sending(null);
+
+    await store().record(new Map([[id, approved]]));
+
+    expect(await Promise.all(docs.map((d) => statusOf(d.id)))).toEqual([
+      'number_voided',
+      'approved',
+      'number_voided',
+      'rejected',
+    ]);
+    const deliveries = await handle.db.select().from(webhookDeliveries);
+    expect(deliveries.map((d) => d.eventType)).toEqual([
+      'document.number_voided',
+      'document.number_voided',
+    ]);
+    const audits = (await handle.db.select().from(auditLog)).map((a) => a.action);
+    expect(audits.filter((a) => a === 'document.number_voided')).toHaveLength(2);
+  });
+
+  it('settles a voiding of numbers that have no document', async () => {
+    const id = await sending(null);
+
+    await store().record(new Map([[id, approved]]));
+
+    expect((await handle.db.select().from(auditLog)).map((a) => a.action)).toEqual([
+      'issuer_event.approved',
+    ]);
+  });
+
   it('audits a local rejection of an unsent event', async () => {
     const [doc] = await seedDocuments(handle.db, tenantId, ['approved']);
     const [row] = await handle.db

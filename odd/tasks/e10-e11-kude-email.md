@@ -36,10 +36,10 @@
 - [x] T1b Ticket renderer 80/58 mm for FE. Branch `feat/hu-e10-02-kude-ticket-renderer`.
 - [x] T1c NCE rows, dispatcher, `?format=` query, OpenAPI and docs. Branch
       `feat/hu-e10-02-kude-ticket-wiring`.
-- [ ] T2 Email: port, nodemailer adapter, env config + docs/configuracion.md.
-- [ ] T3 Email: outbox migration (+ RLS) and store.
-- [ ] T4 Email: enqueue on approval, job that renders KuDE and sends, idempotent.
-- [ ] T5 Docs (integration guide, backlog status).
+- [x] T2 Email (#299): port, nodemailer adapter, env config + docs/configuracion.md.
+- [x] T3 Email (#310 table, #311 store): outbox migration (+ RLS) and store.
+- [x] T4 Email (#311 enqueue, #313 sender, processor+wiring PR): enqueue on approval, job that renders KuDE and sends, idempotent.
+- [x] T5 Docs (integration guide, backlog status).
 
 ## Progress
 Started 2026-10-17.

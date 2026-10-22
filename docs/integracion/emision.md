@@ -262,6 +262,16 @@ El documento incluye `number` (por ejemplo `001-002-0000007`), `status`, `enviro
 
 Para conocer el resultado final no haga polling: registre un endpoint y use los eventos `document.approved`, `document.approved_with_observations` y `document.rejected` descritos en [`webhooks.md`](webhooks.md). Un rechazo trae el motivo de SIFEN.
 
+### Correo al receptor
+
+Cuando SIFEN aprueba el documento (`approved` o `approved_with_observations`), la plataforma envía al correo del receptor (`dEmailRec`) un mensaje con dos adjuntos: el KuDE en carta (PDF) y el XML firmado. El remitente es la cuenta de la plataforma y el nombre visible es el del emisor.
+
+- El envío es asíncrono y no bloquea la emisión ni la aprobación: un fallo de correo nunca cambia el estado del documento.
+- Hay un único correo por documento; reintentar o reprocesar la aprobación no lo duplica.
+- Un receptor sin correo, o con una dirección inválida, no recibe mensaje. Limitación actual: `POST /v1/documents` todavía no acepta el correo del receptor, así que el XML que genera la plataforma no incluye `dEmailRec` y los documentos emitidos por la API quedan sin envío (`skipped`) hasta que se agregue ese campo.
+- Un fallo transitorio (conexión, timeout, SMTP 4xx) se reintenta con espera creciente (1 min, 5 min, 30 min, 2 h y 6 h) y después queda sin enviar. Un rechazo permanente del servidor de correo, o un KuDE que no se pueda generar, no se reintenta.
+- Si el envío está apagado en la plataforma (`EMAIL_ENABLED=false`), no se envía nada.
+
 ## Alcance actual
 
 - Este endpoint emite **facturas (FE)**, **notas de crédito (NCE)** y **notas de débito (NDE)** electrónicas. Otros tipos de documento no están disponibles por esta ruta.

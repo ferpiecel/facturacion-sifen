@@ -183,10 +183,7 @@ describe('CancelDocument with the Drizzle unit of work', () => {
     };
     const setStatus = async (id: string, status: string) => {
       for (const step of PATHS[status]) {
-        await handle.db
-          .update(documents)
-          .set({ status: step })
-          .where(eq(documents.id, id));
+        await handle.db.update(documents).set({ status: step }).where(eq(documents.id, id));
       }
     };
 

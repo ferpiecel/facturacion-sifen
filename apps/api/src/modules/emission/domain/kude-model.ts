@@ -6,6 +6,8 @@ export const KUDE_TITLE = 'KuDE de Factura Electrónica';
 /** MT v150 13.3: the KuDE denomination for an electronic credit note (NCE). */
 /** The KuDE denomination for an electronic debit note (NDE). */
 export const KUDE_DEBIT_NOTE_TITLE = 'KuDE de Nota de Débito Electrónica';
+/** MT v150 13.3: the KuDE denomination for an electronic self-invoice (AFE). */
+export const KUDE_SELF_INVOICE_TITLE = 'KuDE de Autofactura Electrónica';
 export const KUDE_CREDIT_NOTE_TITLE = 'KuDE de Nota de Crédito Electrónica';
 
 /** MT v150 13.4.4: consultation portal per environment (with the trailing slash of the MT). */
@@ -94,6 +96,12 @@ export interface KudeInvoice {
   creditNote?: { reason: string; associatedCdc: string };
   /** The same data of an NDE (iTiDE 6); never set together with `creditNote`. */
   debitNote?: { reason: string; associatedCdc: string };
+  /** E300 and H of an AFE (iTiDE 4): the seller, where the transaction took place and the constancia. */
+  selfInvoice?: {
+    seller: { name: string; idType: string; idNumber: string; address: string };
+    place: string;
+    certificate: { type: string; number: string };
+  };
   items: KudeItem[];
   totals: {
     subtotalExempt: number;

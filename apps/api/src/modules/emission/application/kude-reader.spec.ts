@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   exemptItem,
+  selfInvoice,
   signedInvoiceWithQr,
   unnamedReceiver,
 } from '../../../../test/support/signed-invoice.js';
@@ -153,10 +154,31 @@ describe('readKudeInvoice', () => {
     ).toThrow(/dSub10/);
   });
 
-  it('rejects documents that are not an FE, NCE or NDE (an AFE has no layout yet)', () => {
-    expect(() => readKudeInvoice(xml.replace('<iTiDE>1</iTiDE>', '<iTiDE>4</iTiDE>'))).toThrow(
+  it('rejects documents of a type with no layout yet (an NRE)', () => {
+    expect(() => readKudeInvoice(xml.replace('<iTiDE>1</iTiDE>', '<iTiDE>7</iTiDE>'))).toThrow(
       /unsupported/,
     );
+  });
+
+  it('reads an AFE: the seller, the place and the constancia, with the issuer as receiver', async () => {
+    const model = readKudeInvoice(await signedInvoiceWithQr(selfInvoice));
+    expect(model).toMatchObject({
+      operationCondition: 'Contado',
+      receiver: { kind: 'named', name: expect.stringContaining('DE generado') },
+      selfInvoice: {
+        seller: {
+          name: 'Juan Perez',
+          idType: 'Cédula paraguaya',
+          idNumber: '1234567',
+          address: 'Calle 1',
+        },
+        place: 'Calle del Cultivo',
+        certificate: { type: 'Constancia de no ser contribuyente', number: '12345678901' },
+      },
+    });
+    expect(model.creditNote).toBeUndefined();
+    expect(model.debitNote).toBeUndefined();
+    expect(model.totals.totalVat).toBe(0);
   });
 
   it('reads each field only from its own group, ignoring look-alike elements elsewhere', () => {

@@ -43,6 +43,16 @@ describe('validateSelfInvoiceDraft', () => {
     expect(rules({ certificate: { type: 2, number: '12345678901', control: 'ABC' } })).toEqual([
       'self-invoice-certificate-control',
     ]);
+    // The XSD pattern is [0-9A-Za-z-]{8}.
+    expect(rules({ certificate: { type: 2, number: '12345678901', control: 'ABCD 234' } })).toEqual(
+      ['self-invoice-certificate-control'],
+    );
+  });
+
+  it('rejects a constancia number with leading zeros: xmlgen would turn it into a number', () => {
+    expect(rules({ certificate: { type: 2, number: '00000012345', control: 'ABCD1234' } })).toEqual(
+      ['self-invoice-certificate-number'],
+    );
   });
 
   it('reuses the item and rounding rules and checks both places', () => {

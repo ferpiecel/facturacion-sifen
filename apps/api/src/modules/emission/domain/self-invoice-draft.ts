@@ -84,18 +84,18 @@ export function validateSelfInvoiceDraft(
       'The constancia type must be 1 or 2 (H014)',
     );
   }
-  if (!/^\d{11}$/.test(certificate.number)) {
+  if (!/^[1-9]\d{10}$/.test(certificate.number)) {
     add(
       'certificate.number',
       'self-invoice-certificate-number',
-      'The constancia number must have 11 digits (H016)',
+      'The constancia number must have 11 digits and not start with 0 (H016; xmlgen reads it as a number and would drop the zeros)',
     );
   }
-  if (certificate.control.length !== 8) {
+  if (!/^[0-9A-Za-z-]{8}$/.test(certificate.control)) {
     add(
       'certificate.control',
       'self-invoice-certificate-control',
-      'The constancia control must have 8 characters (H017)',
+      'The constancia control must have 8 letters, digits or hyphens (H017, XSD)',
     );
   }
   errors.push(

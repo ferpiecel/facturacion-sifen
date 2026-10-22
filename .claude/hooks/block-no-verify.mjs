@@ -23,7 +23,7 @@ process.stdin.on('end', () => {
 const HOOKED = new Set(['commit', 'push', 'merge', 'rebase', 'cherry-pick', 'am']);
 
 function findSkip(command) {
-  const unquoted = command.replace(/'[^']*'|"(?:\\.|[^"\\])*"/g, ' Q ');
+  const unquoted = stripQuoted(command);
   for (const segment of unquoted.split(/&&|\|\||[;|&\n()]/)) {
     const words = segment.trim().split(/\s+/);
     const git = words.indexOf('git');
@@ -39,9 +39,38 @@ function findSkip(command) {
     const sub = words[i];
     if (!HOOKED.has(sub)) continue;
     const args = words.slice(i + 1);
-    if (args.includes('--no-verify')) return `git ${sub} --no-verify`;
+    // git accepts unambiguous prefixes of long options (--no-veri).
+    if (args.some((a) => a.length >= 6 && '--no-verify'.startsWith(a))) {
+      return `git ${sub} --no-verify`;
+    }
     if (sub === 'commit' && args.some((a) => /^-[a-zA-Z]*n[a-zA-Z]*$/.test(a)))
       return 'git commit -n';
   }
   return null;
+}
+
+// Replaces quoted spans with a placeholder, walking the command like a shell
+// does: an apostrophe inside double quotes or after a backslash is literal.
+function stripQuoted(command) {
+  let out = '';
+  let quote = null;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i];
+    if (quote === null) {
+      if (ch === '\\') {
+        i++;
+        out += ' ';
+      } else if (ch === "'" || ch === '"') {
+        quote = ch;
+        out += ' Q ';
+      } else {
+        out += ch;
+      }
+    } else if (quote === '"' && ch === '\\') {
+      i++;
+    } else if (ch === quote) {
+      quote = null;
+    }
+  }
+  return out;
 }

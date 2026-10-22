@@ -52,4 +52,17 @@ describe('parseCreateSelfInvoice', () => {
       'seller.name',
     ]);
   });
+
+  it.each(['12 345', '1.234.567', 'ñ123', 'A'.repeat(21)])(
+    'rejects the seller id %j (XSD ^[0-9A-Za-z-]{1,20}$)',
+    (idNumber) => {
+      const parsed = parseCreateSelfInvoice({ ...body, seller: { ...body.seller, idNumber } });
+      expect(parsed.ok).toBe(false);
+    },
+  );
+
+  it('accepts a passport-like id with letters and hyphens', () => {
+    const idNumber = 'AB-12345';
+    expect(parseCreateSelfInvoice({ ...body, seller: { ...body.seller, idNumber } }).ok).toBe(true);
+  });
 });

@@ -41,7 +41,9 @@ export const createSelfInvoiceSchema = z.object({
     nature: z.number(),
     /** iTipIDVen (E304): 1 cédula paraguaya, 2 pasaporte, 3 cédula extranjera, 4 carnet de residencia. */
     idType: z.number(),
-    idNumber: text(20).regex(/^[^\s.]+$/, 'The document number has no spaces or dots'),
+    idNumber: z
+      .string()
+      .regex(/^[0-9A-Za-z-]{1,20}$/, 'The document number has 1 to 20 letters, digits or hyphens'),
     name: text(60, 4),
     ...placeFields,
   }),

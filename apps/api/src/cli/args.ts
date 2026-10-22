@@ -129,10 +129,11 @@ function parseCount(value: string | undefined, flag: string): number {
 
 /** `--tier <from-documents>:<unit-price>`: the unit price applies from that document count upward. */
 function parseTier(value: string): { fromDocuments: number; unitPrice: number } {
-  const [from, price, ...extra] = value.split(':');
-  if (extra.length > 0 || from === undefined || price === undefined) {
+  const parts = value.split(':');
+  if (parts.length !== 2) {
     throw new OpsArgError('--tier must be <from-documents>:<unit-price>');
   }
+  const [from, price] = parts;
   return { fromDocuments: parseCount(from, 'tier'), unitPrice: parseCount(price, 'tier') };
 }
 

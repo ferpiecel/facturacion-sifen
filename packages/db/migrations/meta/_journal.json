@@ -393,6 +393,13 @@
       "when": 1792536988617,
       "tag": "0055_document_emails",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1792688760519,
+      "tag": "0056_documents_approved_at",
+      "breakpoints": true
     }
   ]
 }

@@ -666,4 +666,107 @@ describe('documents', () => {
       expect(def).toContain('WHERE');
     });
   });
+  /** Spec: HU-E8-02 (MT v150 11.6.1, 4009/4010). The instant SIFEN approved the document. */
+  describe('approved_at', () => {
+    it('is null until the document is approved', async () => {
+      const { db, a, setupA, doc } = await seed();
+      const [row] = await db
+        .insert(documents)
+        .values(doc(a, setupA, { status: 'submitted' }))
+        .returning();
+      expect(row.approvedAt).toBeNull();
+      const [rejected] = await db
+        .update(documents)
+        .set({ status: 'rejected' })
+        .where(eq(documents.id, row.id))
+        .returning();
+      expect(rejected.approvedAt).toBeNull();
+    });
+
+    it.each(['approved', 'approved_with_observations'])(
+      'is stamped with the database clock when the status becomes %s',
+      async (status) => {
+        const { db, a, setupA, doc } = await seed();
+        const before = Date.now();
+        const [row] = await db
+          .insert(documents)
+          .values(doc(a, setupA, { status: 'submitted' }))
+          .returning();
+        const [approved] = await db
+          .update(documents)
+          .set({ status })
+          .where(eq(documents.id, row.id))
+          .returning();
+        expect(approved.approvedAt).toBeInstanceOf(Date);
+        expect(approved.approvedAt!.getTime()).toBeGreaterThanOrEqual(before - 1000);
+      },
+    );
+
+    it('keeps the instant the caller supplies (the processing time SIFEN reported)', async () => {
+      const { db, a, setupA, doc } = await seed();
+      const at = new Date('2026-10-05T12:00:00Z');
+      const [row] = await db
+        .insert(documents)
+        .values(doc(a, setupA, { status: 'submitted' }))
+        .returning();
+      const [approved] = await db
+        .update(documents)
+        .set({ status: 'approved', approvedAt: at })
+        .where(eq(documents.id, row.id))
+        .returning();
+      expect(approved.approvedAt).toEqual(at);
+    });
+
+    it('is write-once and survives later transitions', async () => {
+      const { db, a, setupA, doc } = await seed();
+      const at = new Date('2026-10-05T12:00:00Z');
+      const [row] = await db
+        .insert(documents)
+        .values(doc(a, setupA, { status: 'approved', approvedAt: at }))
+        .returning();
+      expect(
+        await causeOf(db.update(documents).set({ approvedAt: new Date('2026-10-06T00:00:00Z') })),
+      ).toContain('approved_at is write-once');
+      expect(await causeOf(db.update(documents).set({ approvedAt: null }))).toContain(
+        'approved_at is write-once',
+      );
+      const [cancelled] = await db
+        .update(documents)
+        .set({ status: 'cancelled' })
+        .where(eq(documents.id, row.id))
+        .returning();
+      expect(cancelled.approvedAt).toEqual(at);
+    });
+
+    it('can be set on an approved row that has none (a row approved before the column)', async () => {
+      const { db, a, setupA, doc } = await seed();
+      const [row] = await db
+        .insert(documents)
+        .values(doc(a, setupA, { status: 'approved' }))
+        .returning();
+      expect(row.approvedAt).toBeNull();
+      const at = new Date('2026-10-05T12:00:00Z');
+      const [stamped] = await db
+        .update(documents)
+        .set({ approvedAt: at })
+        .where(eq(documents.id, row.id))
+        .returning();
+      expect(stamped.approvedAt).toEqual(at);
+    });
+
+    it('cannot be set on a document that is not approved', async () => {
+      const { db, a, setupA, doc } = await seed();
+      expect(
+        await causeOf(
+          db
+            .insert(documents)
+            .values(doc(a, setupA, { status: 'submitted', approvedAt: new Date() })),
+        ),
+      ).toContain('approved_at');
+      await db.insert(documents).values(doc(a, setupA, { status: 'submitted' }));
+      expect(await causeOf(db.update(documents).set({ approvedAt: new Date() }))).toContain(
+        'approved_at',
+      );
+    });
+  });
 });

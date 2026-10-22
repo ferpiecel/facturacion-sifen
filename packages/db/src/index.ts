@@ -51,6 +51,8 @@ export {
   WEBHOOK_DELIVERY_STATUSES,
   WEBHOOK_EVENT_TYPES,
   webhookDeliveries,
+  documentEmails,
+  DOCUMENT_EMAIL_STATUSES,
   webhookEndpoints,
 } from './schema.js';
 export {

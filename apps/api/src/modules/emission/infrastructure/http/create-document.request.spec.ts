@@ -111,6 +111,25 @@ describe('parseCreateDocument', () => {
     expect(fields({ ...BODY, items: [item] })).toContain(`items[0].${key}`);
   });
 
+  it('accepts a plain receiver email', () => {
+    const result = parseCreateDocument({
+      ...BODY,
+      receiver: { ...NAMED, email: 'cliente@ejemplo.com' },
+    });
+    expect(result.ok && result.value.receiver).toMatchObject({ email: 'cliente@ejemplo.com' });
+  });
+
+  it.each([
+    'a@b',
+    'Cliente <c@ejemplo.com>',
+    'a@ejemplo.com, b@ejemplo.com',
+    'a b@ejemplo.com',
+    `${'x'.repeat(70)}@ejemplo.com`,
+    '',
+  ])('rejects receiver.email = %j', (email) => {
+    expect(fields({ ...BODY, receiver: { ...NAMED, email } })).toContain('receiver.email');
+  });
+
   it.each([
     ['name', 'abc'],
     ['name', 'x'.repeat(256)],

@@ -1,8 +1,12 @@
 import { z } from 'zod';
 import { parseRuc } from '../../../fiscal-config/domain/ruc.js';
 import { isUnitOfMeasureCode } from '../../domain/unit-of-measure.js';
+import { isPlainEmailAddress } from '../../../email/domain/plain-email-address.js';
 import type { ValidationError } from '../../domain/invoice-draft.js';
 import type { AcceptInvoiceInput } from '../../application/accept-invoice.js';
+
+/** `tEmail` (DE_Types_v150.xsd:10). */
+const TEMAIL = /^[0-9a-zA-Z][0-9a-zA-Z.\-_]*@([0-9a-zA-Z][0-9a-zA-Z\-_]*\.)+[a-zA-Z]{2,9}$/;
 
 /** MT v150 E001 gCamItem occurs 1-999 times per DE (p. 86). */
 const MAX_ITEMS = 999;
@@ -63,6 +67,17 @@ const receiver = z.discriminatedUnion('kind', [
       /** cCiuRec / dDesCiuRec (D223/D224): tCiudad 5 digits (:1764), description up to 30 (:1776). */
       cityCode: digits(5).optional(),
       cityDescription: text(30).optional(),
+      /**
+       * dEmailRec (D213): tEmail pattern (DE_Types_v150.xsd:7), 3 to 80 characters (MT v150). One plain
+       * address: the same check the mailer relies on, so a list or a display name never reaches it.
+       */
+      email: z
+        .string()
+        .min(3)
+        .max(80)
+        .regex(TEMAIL, 'Receiver email does not match the SIFEN tEmail pattern')
+        .refine(isPlainEmailAddress, 'Receiver email must be a single plain address')
+        .optional(),
     })
     .superRefine((receiver, ctx) => {
       if (

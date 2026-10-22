@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { X509Certificate } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import {
@@ -142,8 +142,27 @@ describe('TransmissionCycle end to end', () => {
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
+    dbClockFollowsTestClock = false;
     await handle.close();
   });
+
+  /**
+   * PGlite reads its `now()` (and so `lotes.created_at` and the `resent_at` stamp) from JavaScript's
+   * `Date`. The recovery orders a resent document against its lotes with those database timestamps, and
+   * the machine's real clock can step between the lotes of one test (the order then inverts and the
+   * resend is never recovered). A test that depends on that order makes the database clock follow the
+   * injected one: every instant it uses is a value the test chose.
+   */
+  let dbClockFollowsTestClock = false;
+  const followTestClockInDatabase = () => {
+    dbClockFollowsTestClock = true;
+    vi.useFakeTimers({ toFake: ['Date'], now: clock });
+  };
+  const setClock = (iso: string) => {
+    clock = new Date(iso);
+    if (dbClockFollowsTestClock) vi.setSystemTime(clock);
+  };
 
   function buildCycle(
     gateway: FakeSifenGateway,
@@ -244,7 +263,7 @@ describe('TransmissionCycle end to end', () => {
     const cycle = buildCycle(gateway);
     const first = await cycle.run();
     const loteId = first.sent[0].loteId;
-    clock = new Date('2026-10-04T12:11:00Z');
+    setClock('2026-10-04T12:11:00Z');
     gateway.enqueue('consultarLote', sifenScenarios.loteConcluido([]));
     expect((await cycle.run()).polled).toEqual([{ loteId, status: 'recovery' }]);
     expect((await readDocument()).status).toBe('submitted');
@@ -256,11 +275,12 @@ describe('TransmissionCycle end to end', () => {
     withTenantTransaction(handle.db, tenantId, (tx) => tx.select().from(lotes));
 
   it('resends once after a post-window 0420, with the same CDC, after verifying it again (HU-E6-04)', async () => {
+    followTestClockInDatabase();
     const gateway = new FakeSifenGateway();
     const { cycle, loteId } = await handedOverToRecovery(gateway);
 
     // Past the 48 h window a 0420 is definitive: the document is queued again (once), its old lote closes.
-    clock = new Date('2026-10-04T12:22:00Z');
+    setClock('2026-10-04T12:22:00Z');
     gateway.enqueue('consultarDE', sifenScenarios.cdcInexistente());
     expect((await cycle.run()).recovered).toEqual([{ loteId, status: 'incomplete' }]);
     expect(await readDocument()).toMatchObject({
@@ -273,13 +293,13 @@ describe('TransmissionCycle end to end', () => {
     expect((await allLotes()).map((l) => l.status)).toEqual(['processed']);
 
     // 8 minutes after the recovery's query the check must not ask again (10 min between queries).
-    clock = new Date('2026-10-04T12:30:00Z');
+    setClock('2026-10-04T12:30:00Z');
     const tooSoon = await cycle.run();
     expect(tooSoon).toMatchObject({ assembled: 0, sent: [] });
     expect(gateway.callsTo('consultarDE')).toHaveLength(1);
 
     // Ten minutes after it the next run verifies the CDC once more (still 0420), then sends it in a new lote.
-    clock = new Date('2026-10-04T12:33:00Z');
+    setClock('2026-10-04T12:33:00Z');
     gateway.enqueue('consultarDE', sifenScenarios.cdcInexistente());
     gateway.enqueue('enviarLote', sifenScenarios.loteRecibido('4500999'));
     const resend = await cycle.run();
@@ -295,10 +315,10 @@ describe('TransmissionCycle end to end', () => {
 
     // The resent lote is polled and handed to recovery; 48 h after ITS send a second 0420 holds the
     // document (no third send), with its own reason.
-    clock = new Date('2026-10-04T12:45:00Z');
+    setClock('2026-10-04T12:45:00Z');
     gateway.enqueue('consultarLote', sifenScenarios.loteConcluido([]));
     expect((await cycle.run()).polled).toEqual([{ loteId: resentLoteId, status: 'processed' }]);
-    clock = new Date('2026-10-06T12:34:00Z');
+    setClock('2026-10-06T12:34:00Z');
     gateway.enqueue('consultarDE', sifenScenarios.cdcInexistente());
     expect((await cycle.run()).recovered).toEqual([{ loteId: resentLoteId, status: 'incomplete' }]);
     expect(await readDocument()).toMatchObject({

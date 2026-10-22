@@ -10,7 +10,7 @@ export default defineConfig({
     // Each worker holds several WASM Postgres instances (~100 MB each) and is
     // CPU-bound; one worker per core under `turbo` parallelism oversubscribed
     // the machine, causing 30 s timeouts and OOM-killed workers (SIGKILL).
-    maxWorkers: 4,
+    maxWorkers: Number(process.env.VITEST_MAX_WORKERS) || 4,
     testTimeout: 30_000,
     hookTimeout: 30_000,
     coverage: {

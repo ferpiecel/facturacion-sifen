@@ -17,7 +17,7 @@ export default defineConfig({
     // Each worker holds several WASM Postgres instances and is CPU-bound;
     // one worker per core under `turbo` parallelism caused OOM-killed
     // workers (SIGKILL) and "connection terminated unexpectedly".
-    maxWorkers: 4,
+    maxWorkers: Number(process.env.VITEST_MAX_WORKERS) || 4,
     // The process timezone must never leak into fiscal timestamps (xmlgen formats
     // dates with local getters): run the whole suite under UTC, where any leak shows.
     env: { TZ: 'UTC' },

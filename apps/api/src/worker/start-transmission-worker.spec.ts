@@ -103,6 +103,32 @@ function withDeadlineWatch(deps: ReturnType<typeof setup>['deps'], events: strin
   };
 }
 
+function withEmails(deps: ReturnType<typeof setup>['deps'], events: string[]) {
+  return {
+    ...deps,
+    emails: {
+      everyMs: 30_000,
+      schedules: {
+        list: () => Promise.resolve(['a', 'gone']),
+        upsert: (id: string, every: number) => {
+          events.push(`em-upsert:${id}:${String(every)}`);
+          return Promise.resolve();
+        },
+        remove: (id: string) => {
+          events.push(`em-remove:${id}`);
+          return Promise.resolve();
+        },
+      } satisfies TenantScheduleStore,
+      createWorker: () => ({
+        close: () => {
+          events.push('email-worker-closed');
+          return Promise.resolve();
+        },
+      }),
+    },
+  };
+}
+
 /** Spec: HU-E6-02 (S5e). Worker lifecycle: schedule every tenant, keep schedules fresh, stop gracefully. */
 describe('startTransmissionWorker', () => {
   it('schedules every tenant at the cadence, starts the worker and reconciles periodically', async () => {
@@ -267,6 +293,36 @@ describe('startTransmissionWorker', () => {
 
     expect(events.slice(0, 2)).toEqual(['upsert:a:60000', 'upsert:b:60000']);
     expect(logs.join('\n')).toContain('deadline watch schedule reconcile failed: Error');
+    expect(logs.join('\n')).not.toContain('redis://');
+  });
+
+  /** Spec: HU-E11-02. The document email queue is scheduled and closed with the others. */
+  it('schedules the document email job per tenant and closes its worker on stop', async () => {
+    const { deps, events } = setup();
+    const running = await startTransmissionWorker(withEmails(deps, events));
+    expect(events).toEqual([
+      'upsert:a:60000',
+      'upsert:b:60000',
+      'em-upsert:a:30000',
+      'em-upsert:b:30000',
+      'em-remove:gone',
+      'interval:300000',
+    ]);
+
+    await running.stop();
+
+    expect(events).toContain('email-worker-closed');
+  });
+
+  it('keeps going when the document email reconcile fails, logging only the error class', async () => {
+    const { deps, events, logs } = setup();
+    const failing = withEmails(deps, events);
+    failing.emails.schedules.list = () => Promise.reject(new Error('redis://u:pw@h'));
+
+    const running = await startTransmissionWorker(failing);
+    await running.stop();
+
+    expect(logs.join('\n')).toContain('document email schedule reconcile failed: Error');
     expect(logs.join('\n')).not.toContain('redis://');
   });
 });

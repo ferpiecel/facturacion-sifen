@@ -6,6 +6,11 @@ import {
   type DeadlineWatchJobData,
 } from './deadline-watch.processor.js';
 import {
+  DOCUMENT_EMAIL_QUEUE,
+  documentEmailJob,
+  type DocumentEmailJobData,
+} from './document-email.processor.js';
+import {
   WEBHOOK_DELIVERY_QUEUE,
   webhookDeliveryJob,
   type WebhookDeliveryJobData,
@@ -238,5 +243,54 @@ export function createDeadlineWatchWorker({
     },
   );
   if (logger) logQueueErrors(worker, 'deadline watch worker', logger);
+  return worker;
+}
+
+const documentEmailTenantJob: TenantJob = (tenantId) => {
+  const { name, data } = documentEmailJob(tenantId);
+  return { name, data };
+};
+
+/** The `document-email` schedules (HU-E11-02): same per-tenant scheduler keys, on their own queue. */
+export function createDocumentEmailScheduleStore(queue: ScheduleQueue): TenantScheduleStore {
+  return createTenantScheduleStore(queue, documentEmailTenantJob);
+}
+
+/** The `document-email` queue, with its errors routed to the logger. */
+export function createDocumentEmailQueue(
+  connection: Redis,
+  logger: QueueLogger,
+  prefix?: string,
+): Queue<DocumentEmailJobData> {
+  const queue = new Queue<DocumentEmailJobData>(DOCUMENT_EMAIL_QUEUE, {
+    connection,
+    ...(prefix === undefined ? {} : { prefix }),
+  });
+  logQueueErrors(queue, 'document email queue', logger);
+  return queue;
+}
+
+export interface DocumentEmailWorkerOptions {
+  readonly connection: Redis;
+  readonly concurrency: number;
+  readonly process: (data: DocumentEmailJobData) => Promise<unknown>;
+  readonly prefix?: string;
+  readonly logger?: QueueLogger;
+}
+
+/** The DocumentEmailWorker (HU-E11-02): runs each tenant's repeatable send job. */
+export function createDocumentEmailWorker({
+  connection,
+  concurrency,
+  process,
+  prefix,
+  logger,
+}: DocumentEmailWorkerOptions): Worker<DocumentEmailJobData> {
+  const worker = new Worker<DocumentEmailJobData>(
+    DOCUMENT_EMAIL_QUEUE,
+    (job) => process(job.data),
+    { connection, concurrency, ...(prefix === undefined ? {} : { prefix }) },
+  );
+  if (logger) logQueueErrors(worker, 'document email worker', logger);
   return worker;
 }

@@ -23,9 +23,12 @@ export interface SetPlanPriceParams extends PlanTerms {
 
 const DAY_MS = 86_400_000;
 
-function parseDate(value: string, flag: string): Date {
+export function parseDate(value: string, flag: string): Date {
   const date = new Date(`${value}T00:00:00Z`);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || date.toISOString().slice(0, 10) !== value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(date.getTime())) {
+    throw new Error(`${flag} must be a valid YYYY-MM-DD date`);
+  }
+  if (date.toISOString().slice(0, 10) !== value) {
     throw new Error(`${flag} must be a valid YYYY-MM-DD date`);
   }
   return date;

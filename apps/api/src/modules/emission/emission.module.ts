@@ -3,6 +3,7 @@ import type { Database } from '@sifen/db';
 import { DATABASE } from '../database/database.module.js';
 import { createAcceptCreditNote, createAcceptDebitNote } from './application/accept-credit-note.js';
 import { createAcceptInvoice } from './application/accept-invoice.js';
+import { createAcceptSelfInvoice } from './application/accept-standalone.js';
 import { createGetDocument } from './application/get-document.js';
 import { createGetKude } from './application/get-kude.js';
 import { emissionValidationConfig } from './emission-validation-config.js';
@@ -10,6 +11,7 @@ import {
   ACCEPT_CREDIT_NOTE,
   ACCEPT_DEBIT_NOTE,
   ACCEPT_INVOICE,
+  ACCEPT_SELF_INVOICE,
   GET_DOCUMENT,
   GET_KUDE,
 } from './emission.tokens.js';
@@ -69,6 +71,17 @@ export function acceptInvoiceFor(db: Database) {
       useFactory: (db: Database | null) =>
         db
           ? createAcceptDebitNote({
+              unitOfWork: createDrizzleAcceptanceUnitOfWork(db),
+              validation: emissionValidationConfig(),
+            })
+          : () => Promise.reject(new ServiceUnavailableException()),
+      inject: [DATABASE],
+    },
+    {
+      provide: ACCEPT_SELF_INVOICE,
+      useFactory: (db: Database | null) =>
+        db
+          ? createAcceptSelfInvoice({
               unitOfWork: createDrizzleAcceptanceUnitOfWork(db),
               validation: emissionValidationConfig(),
             })

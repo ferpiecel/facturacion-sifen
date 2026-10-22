@@ -36,7 +36,7 @@ import { TransmissionCycleProcessor, type WorkerLogger } from './transmission-cy
 import { createDeadlineWatchProcessor } from './deadline-watch.processor.js';
 import { createDocumentEmailProcessor } from './document-email.processor.js';
 import { createSmtpDocumentMailer } from '../modules/email/infrastructure/adapters/smtp-document-mailer.js';
-import { loadEmailConfig } from '../modules/email/infrastructure/email-config.js';
+import { EmailConfigError, loadEmailConfig } from '../modules/email/infrastructure/email-config.js';
 import { createGetKude } from '../modules/emission/application/get-kude.js';
 import { createDrizzleDocumentReader } from '../modules/emission/infrastructure/drizzle-document-reader.js';
 import { PdfkitKudeRenderer } from '../modules/emission/infrastructure/kude/pdfkit-kude-renderer.js';
@@ -143,6 +143,7 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
       mailer: createSmtpDocumentMailer(emailConfig),
       getKude: (tenantId, documentId) => kude(tenantId, documentId),
       reader,
+      logger,
     });
   } else {
     logger.info('document emails are disabled (EMAIL_ENABLED=false or no SMTP_HOST)');
@@ -260,8 +261,11 @@ const isMainModule =
   process.argv[1] && import.meta.url === new URL(process.argv[1], 'file://').href;
 if (isMainModule) {
   main(process.env).catch((error: unknown) => {
-    // Only the class and, for config errors, the fixed message: URLs and keys never reach the log.
-    const detail = error instanceof WorkerConfigError ? `: ${error.message}` : '';
+    // Only the class and, for config errors, the fixed message (variable names, never values): URLs and keys never reach the log.
+    const detail =
+      error instanceof WorkerConfigError || error instanceof EmailConfigError
+        ? `: ${error.message}`
+        : '';
     logger.error(
       `transmission worker failed to start (${error instanceof Error ? error.name : 'unknown error'})${detail}`,
     );

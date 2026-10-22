@@ -370,6 +370,24 @@ describe('unnamed receiver (innominado)', () => {
   });
 });
 
+describe('receiver email (D213 dEmailRec)', () => {
+  it('emits dEmailRec after the address block, XSD-valid', async () => {
+    const ctx = context('production');
+    const withEmail = { ...ctx, receiver: { ...namedReceiver(ctx), email: 'cliente@ejemplo.com' } };
+    const { xml } = await generateInvoiceXml(builder, draft, withEmail);
+
+    expect(xml).toContain('<dEmailRec>cliente@ejemplo.com</dEmailRec>');
+    expect(xml.indexOf('<dDesCiuRec>')).toBeLessThan(xml.indexOf('<dEmailRec>'));
+    expect(validateXml(xml, 'siRecepDE').errors.map((e) => e.message)).toEqual([MISSING_SIGNATURE]);
+  });
+
+  it('omits dEmailRec when the receiver has none', async () => {
+    const { xml } = await generateInvoiceXml(builder, draft, context('production'));
+
+    expect(xml).not.toContain('dEmailRec');
+  });
+});
+
 describe('receiver address block (D213-D223)', () => {
   const ADDRESS_TAGS = [
     'dDirRec',

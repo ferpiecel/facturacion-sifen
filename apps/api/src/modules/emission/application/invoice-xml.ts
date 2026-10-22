@@ -44,6 +44,8 @@ export interface XmlReceiver {
   districtDescription?: string;
   cityCode?: number;
   cityDescription?: string;
+  /** dEmailRec (D213b): the address the approved document is emailed to. */
+  email?: string;
 }
 
 export interface InvoiceXmlContext {
@@ -118,6 +120,7 @@ function namedReceiverInput(
     razonSocial: receiver.name,
     tipoOperacion: operationType,
     ...receiverAddress(receiver, departmentCode),
+    ...(receiver.email === undefined ? {} : { email: receiver.email }),
     pais: 'PRY',
     paisDescripcion: 'Paraguay',
     tipoContribuyente: 1,

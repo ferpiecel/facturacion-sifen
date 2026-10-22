@@ -54,6 +54,7 @@ Receptor identificado (`kind: "named"`):
 | `houseNumber` | Texto de 1 a 6 dígitos. Obligatorio si hay `address` (`receiver-house-number-required`) |
 | `districtCode` / `districtDescription` | Opcionales, siempre juntos. Código entero de 1 a 9999 y descripción de hasta 30 caracteres |
 | `cityCode` / `cityDescription` | Siempre juntos. Código entero de 1 a 99999 y descripción de hasta 30 caracteres. Con `address` son obligatorios salvo en `B2F`, donde no deben informarse (`receiver-city-required`, `receiver-city-not-allowed`) |
+| `email` | Opcional. Una sola dirección simple (`usuario@dominio.tld`) de 3 a 80 caracteres, con el patrón `tEmail` de SIFEN; no se aceptan listas ni nombres (`Juan <a@b.com>`). Va en el XML como `dEmailRec` y es el destino del correo con el KuDE y el XML firmado (ver [Correo al receptor](#correo-al-receptor)). Las notas de crédito y débito usan el correo de la factura |
 
 `B2F` hoy se rechaza por completo (`operation-type-not-supported`, decisión de producto); las reglas siguientes quedan fijadas para cuando se habilite. Con `B2F` se rechaza `location.departmentCode` (`receiver-department-not-allowed`) y `cityCode`. Con otra operación y `address`, el departamento es obligatorio (`receiver-department-required`).
 
@@ -268,7 +269,7 @@ Cuando SIFEN aprueba el documento (`approved` o `approved_with_observations`), l
 
 - El envío es asíncrono y no bloquea la emisión ni la aprobación: un fallo de correo nunca cambia el estado del documento.
 - Hay un único correo por documento; reintentar o reprocesar la aprobación no lo duplica.
-- Un receptor sin correo, o con una dirección inválida, no recibe mensaje. Limitación actual: `POST /v1/documents` todavía no acepta el correo del receptor, así que el XML que genera la plataforma no incluye `dEmailRec` y los documentos emitidos por la API quedan sin envío (`skipped`) hasta que se agregue ese campo.
+- Un receptor sin correo, o con una dirección inválida, no recibe mensaje. El correo se informa en `receiver.email` (ver la tabla del receptor); sin él el documento no lleva `dEmailRec` y no se envía nada.
 - Un fallo transitorio (conexión, timeout, SMTP 4xx) se reintenta con espera creciente (1 min, 5 min, 30 min, 2 h y 6 h) y después queda sin enviar. Un rechazo permanente del servidor de correo, o un KuDE que no se pueda generar, no se reintenta.
 - Si el envío está apagado en la plataforma (`EMAIL_ENABLED=false`), no se envía nada.
 

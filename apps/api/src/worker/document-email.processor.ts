@@ -41,6 +41,7 @@ export interface DocumentEmailProcessorDeps {
   readonly reader: SignedXmlReader;
   readonly now?: () => Date;
   readonly batchSize?: number;
+  readonly logger?: { warn(message: string): void };
 }
 
 /** Runs one send pass for the job's tenant. The tenant id is validated before any query is built. */
@@ -48,13 +49,20 @@ export function createDocumentEmailProcessor(deps: DocumentEmailProcessorDeps) {
   return async (job: { data: DocumentEmailJobData }): Promise<SendSummary> => {
     const { tenantId } = job.data;
     assertValidTenantId(tenantId);
-    return createSendDocumentEmails({
+    const summary = await createSendDocumentEmails({
       store: createDrizzleDocumentEmailStore({ db: deps.db, tenantId }),
       mailer: deps.mailer,
       getKude: deps.getKude,
       reader: deps.reader,
       now: deps.now,
       batchSize: deps.batchSize,
+      logger: deps.logger,
     })();
+    if (summary.dead > 0 || summary.unrecorded > 0) {
+      deps.logger?.warn(
+        `document emails for tenant ${tenantId}: claimed=${String(summary.claimed)} sent=${String(summary.sent)} retried=${String(summary.retried)} dead=${String(summary.dead)} unrecorded=${String(summary.unrecorded)}`,
+      );
+    }
+    return summary;
   };
 }

@@ -38,6 +38,8 @@ interface Setup {
   sweepFails?: boolean;
   staleSendingAfterMs?: number;
   batch?: TransmissionCycleDeps['batch'];
+  blockedUntil?: Date | null;
+  blockedFails?: boolean;
 }
 
 function setup(o: Setup = {}) {
@@ -85,6 +87,12 @@ function setup(o: Setup = {}) {
     deferPendingLote: (loteId) => {
       deferred.push(loteId);
       return Promise.resolve();
+    },
+    rucBlockedUntil: (at) => {
+      log.push(`blocked@${at.toISOString()}`);
+      return o.blockedFails
+        ? Promise.reject(new Error('db down'))
+        : Promise.resolve(o.blockedUntil ?? null);
     },
     pendingOlderThan: (cutoff) => {
       cutoffs.push(cutoff);
@@ -151,6 +159,7 @@ describe('TransmissionCycle', () => {
       `sign:${TENANT}:d1`,
       'assemble',
       `sweep@${new Date(NOW.getTime() - 30 * 60_000).toISOString()}`,
+      `blocked@${NOW.toISOString()}`,
       'send:l1:1',
       `due@${NOW.toISOString()}`,
       'poll:l2:2',
@@ -329,6 +338,44 @@ describe('TransmissionCycle', () => {
     expect(report).toMatchObject({ rucBlocks: 1, sendDeferred: 0, sent: [] });
   });
 
+  it('does not send while the RUC pause lasts, but still polls and recovers', async () => {
+    const until = new Date(NOW.getTime() + 600_000);
+    const { cycle, log, limits } = setup({
+      blockedUntil: until,
+      pending: [{ loteId: 'l1', lote: lote() }],
+      due: ['d1'],
+      recoverable: ['r1'],
+    });
+
+    const report = await cycle.run();
+
+    expect(log.some((entry) => entry.startsWith('send:'))).toBe(false);
+    expect(limits.send).toBeUndefined();
+    expect(log).toContain('poll:d1:1');
+    expect(log).toContain('recover:r1');
+    expect(report.sendPausedUntil).toEqual(until);
+    expect(report.sent).toEqual([]);
+  });
+
+  it('fails closed: if the pause cannot be read it does not send', async () => {
+    const { cycle, log } = setup({
+      blockedFails: true,
+      pending: [{ loteId: 'l1', lote: lote() }],
+    });
+    const report = await cycle.run();
+    expect(log.some((entry) => entry.startsWith('send:'))).toBe(false);
+    expect(report.failures).toEqual([{ step: 'send', error: 'Error' }]);
+  });
+
+  it('sends normally once the pause is over', async () => {
+    const { cycle, log } = setup({
+      blockedUntil: null,
+      pending: [{ loteId: 'l1', lote: lote() }],
+    });
+    await cycle.run();
+    expect(log).toContain('send:l1:1');
+  });
+
   it('does not push a deferred lote behind the others', async () => {
     const { cycle, deferred } = setup({
       pending: [{ loteId: 'l1', lote: lote() }],
@@ -362,6 +409,7 @@ describe('TransmissionCycle', () => {
       sendSkipped: 0,
       sendDeferred: 0,
       rucBlocks: 0,
+      sendPausedUntil: null,
       sent: [],
       polled: [],
       recovered: [],

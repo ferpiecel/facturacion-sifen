@@ -23,6 +23,8 @@ export {
   partnerMemberships,
   partners,
   payments,
+  planPrices,
+  planPriceTiers,
   plans,
   portalRole,
   rucBlocks,

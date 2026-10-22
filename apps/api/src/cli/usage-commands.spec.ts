@@ -55,6 +55,19 @@ describe('showUsage', () => {
     );
   });
 
+  it('does not apply a subscription that starts on the first day of the next month', async () => {
+    await assignSubscription(
+      handle.db,
+      { tenantId, planCode: 'inicial', startsOn: '2026-11-01' },
+      NOW,
+    );
+    await count('2026-10-01', 130);
+
+    const october = await showUsage(handle.db, { tenantId, period: '2026-10' }, NOW);
+
+    expect(october).toMatchObject({ subscription: null, overageAmount: 0 });
+  });
+
   it('shows a month before the subscription without its terms, and an empty month as zero', async () => {
     await assignSubscription(handle.db, { tenantId, planCode: 'inicial' }, NOW);
     await count('2026-08-01', 10);

@@ -1,4 +1,4 @@
-import { and, eq, gte, isNull, lte, or } from 'drizzle-orm';
+import { and, eq, gt, isNull, lt, or } from 'drizzle-orm';
 import { assertValidTenantId, plans, subscriptions, usageCounters, type Database } from '@sifen/db';
 import { billingPeriod } from '../modules/billing/domain/billing-period.js';
 import { asPlatformAdmin } from './platform-admin.js';
@@ -66,10 +66,10 @@ export async function showUsage(
         .where(
           and(
             eq(subscriptions.tenantId, params.tenantId),
-            lte(subscriptions.startsAt, new Date(`${periodEnd}T00:00:00-03:00`)),
+            lt(subscriptions.startsAt, new Date(`${periodEnd}T00:00:00-03:00`)),
             or(
               isNull(subscriptions.endsAt),
-              gte(subscriptions.endsAt, new Date(`${period}T00:00:00-03:00`)),
+              gt(subscriptions.endsAt, new Date(`${period}T00:00:00-03:00`)),
             ),
           ),
         )

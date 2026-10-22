@@ -1164,6 +1164,66 @@ export const ISSUER_EVENT_STATUSES = [
   'unknown',
 ] as const;
 
+export const DOCUMENT_EMAIL_STATUSES = ['pending', 'failed', 'sent', 'dead', 'skipped'] as const;
+
+/**
+ * Email outbox (HU-E11-02): the approved document (KuDE PDF + signed XML) owed to one receiver. One
+ * row per (document, recipient) is the idempotency key; it is also the retry queue and the history.
+ * The attachments are rendered at send time from the stored signed XML, so nothing sensitive is kept
+ * here besides the recipient. `last_error` is a code, never provider text. Never deleted.
+ */
+export const documentEmails = pgTable(
+  'document_emails',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    documentId: uuid('document_id').notNull(),
+    recipient: varchar('recipient', { length: 254 }),
+    status: varchar('status', { length: 16 }).notNull().default('pending'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }),
+    lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+    lastError: varchar('last_error', { length: 64 }),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'document_emails_tenant_document_fk',
+      columns: [table.tenantId, table.documentId],
+      foreignColumns: [documents.tenantId, documents.id],
+    }),
+    unique('document_emails_document_key').on(table.tenantId, table.documentId),
+    index('document_emails_due_idx')
+      .on(table.nextAttemptAt)
+      .where(sql`${table.status} IN ('pending', 'failed')`),
+    check(
+      'document_emails_status_valid',
+      sql`${table.status} IN (${sqlList(DOCUMENT_EMAIL_STATUSES)})`,
+    ),
+    check(
+      'document_emails_next_attempt_pair',
+      sql`(${table.status} IN ('pending', 'failed')) = (${table.nextAttemptAt} IS NOT NULL)`,
+    ),
+    check(
+      'document_emails_sent_pair',
+      sql`(${table.status} = 'sent') = (${table.sentAt} IS NOT NULL)`,
+    ),
+    check('document_emails_attempts_nonneg', sql`${table.attemptCount} >= 0`),
+    check(
+      'document_emails_recipient_format',
+      sql`${table.recipient} IS NULL OR (position('@' in ${table.recipient}) > 1 AND ${table.recipient} !~ '[[:space:]]')`,
+    ),
+    check(
+      'document_emails_skipped_pair',
+      sql`(${table.status} = 'skipped') = (${table.recipient} IS NULL)`,
+    ),
+  ],
+);
+
 /**
  * Events the issuer sends to `siRecepEvento` (HU-E8-04, ADR-0020): one table, typed by `kind`. A
  * cancellation or nomination points at a document; a voiding carries its number range. `event_id` is
@@ -1503,6 +1563,7 @@ export const rucBlocks = pgTable(
 export const TENANT_TABLES = [
   'api_keys',
   'audit_log',
+  'document_emails',
   'documents',
   'issuer_events',
   'lote_documents',

@@ -1,7 +1,8 @@
 import { eq } from 'drizzle-orm';
 import { planPrices, plans, type Database } from '@sifen/db';
 import { billingDate } from '../modules/billing/domain/billing-period.js';
-import { setPlanPrice, type PlanTerms } from './plan-commands.js';
+import { setPlanPriceIn, type PlanTerms } from './plan-commands.js';
+import { asPlatformAdmin } from './platform-admin.js';
 
 interface SeedPlan extends PlanTerms {
   code: string;
@@ -56,22 +57,26 @@ const SEED_PLANS: SeedPlan[] = [
  * Operator CLI: creates the PO plans and, only for a plan that has no price row yet, its first price
  * valid from today. Re-running it (or running it after `plan:price-set`) changes nothing.
  */
-export async function seedPlans(db: Database, now: Date): Promise<{ seeded: string[] }> {
+export function seedPlans(db: Database, now: Date): Promise<{ seeded: string[] }> {
+  return asPlatformAdmin(db, (tx) => seedPlansIn(tx, now));
+}
+
+async function seedPlansIn(tx: Database, now: Date): Promise<{ seeded: string[] }> {
   const seeded: string[] = [];
   const today = billingDate(now);
   for (const seed of SEED_PLANS) {
-    await db
+    await tx
       .insert(plans)
       .values({ code: seed.code, name: seed.name, audience: seed.audience })
       .onConflictDoNothing({ target: plans.code });
-    const [plan] = await db.select({ id: plans.id }).from(plans).where(eq(plans.code, seed.code));
-    const existing = await db
+    const [plan] = await tx.select({ id: plans.id }).from(plans).where(eq(plans.code, seed.code));
+    const existing = await tx
       .select({ id: planPrices.id })
       .from(planPrices)
       .where(eq(planPrices.planId, plan.id))
       .limit(1);
     if (existing.length > 0) continue;
-    await setPlanPrice(db, { ...seed, planCode: seed.code, validFrom: today });
+    await setPlanPriceIn(tx, { ...seed, planCode: seed.code, validFrom: today });
     seeded.push(seed.code);
   }
   return { seeded };

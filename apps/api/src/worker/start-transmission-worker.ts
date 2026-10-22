@@ -28,6 +28,12 @@ export interface StartTransmissionWorkerDeps {
     readonly schedules: TenantScheduleStore;
     readonly createWorker: () => { close(): Promise<void> };
   };
+  /** Document emails (HU-E11-02): same shape, its own queue and cadence; absent when email is off. */
+  readonly emails?: {
+    readonly everyMs: number;
+    readonly schedules: TenantScheduleStore;
+    readonly createWorker: () => { close(): Promise<void> };
+  };
   readonly logger: WorkerLogger;
   readonly timers?: {
     setInterval(fn: () => void, ms: number): NodeJS.Timeout;
@@ -84,6 +90,7 @@ export async function startTransmissionWorker(
     );
     await reconcileAux('webhook', deps.webhooks, refresh);
     await reconcileAux('deadline watch', deps.deadlineWatch, refresh);
+    await reconcileAux('document email', deps.emails, refresh);
     if (transmission) throw transmission.error;
   };
 
@@ -91,7 +98,7 @@ export async function startTransmissionWorker(
   const worker = deps.createWorker(deps.process);
   const auxiliary: { close(): Promise<void> }[] = [];
   try {
-    for (const aux of [deps.webhooks, deps.deadlineWatch]) {
+    for (const aux of [deps.webhooks, deps.deadlineWatch, deps.emails]) {
       if (aux) auxiliary.push(aux.createWorker());
     }
   } catch (error) {

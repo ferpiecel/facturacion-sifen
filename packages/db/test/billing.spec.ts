@@ -53,6 +53,80 @@ describe('billing tables', () => {
     ).toContain('plans_api_call_limit_nonneg');
   });
 
+  it('defaults a plan audience to direct and rejects unknown audiences', async () => {
+    const { db } = await seed();
+    const [direct] = await db.insert(plans).values({ code: 'd', name: 'D' }).returning();
+    const [partner] = await db
+      .insert(plans)
+      .values({ code: 'p', name: 'P', audience: 'partner' })
+      .returning();
+    expect([direct.audience, partner.audience]).toEqual(['direct', 'partner']);
+    expect(
+      await causeOf(db.insert(plans).values({ code: 'z', name: 'Z', audience: 'other' })),
+    ).toContain('plans_audience_valid');
+  });
+
+  it('snapshots price terms on the subscription and rejects negative terms', async () => {
+    const { db, a, b, planId } = await seed();
+    const [row] = await db
+      .insert(subscriptions)
+      .values({
+        tenantId: a,
+        planId,
+        monthlyPrice: 99000,
+        overagePrice: 500,
+        documentQuota: 100,
+      })
+      .returning();
+    expect(row).toMatchObject({ monthlyPrice: 99000, overagePrice: 500, documentQuota: 100 });
+    const [bare] = await db.insert(subscriptions).values({ tenantId: b, planId }).returning();
+    expect(bare).toMatchObject({ monthlyPrice: null, overagePrice: null, documentQuota: null });
+    expect(
+      await causeOf(
+        db.insert(subscriptions).values({
+          tenantId: b,
+          planId,
+          status: 'cancelled',
+          monthlyPrice: 1,
+          overagePrice: -1,
+          documentQuota: 1,
+        }),
+      ),
+    ).toContain('subscriptions_terms_nonneg');
+  });
+
+  it('requires the price snapshot to be all-null or all-set, and freezes it once set', async () => {
+    const { db, a, b, planId } = await seed();
+    expect(
+      await causeOf(
+        db.insert(subscriptions).values({ tenantId: b, planId, monthlyPrice: 1, overagePrice: 1 }),
+      ),
+    ).toContain('subscriptions_snapshot_complete');
+    const [row] = await db
+      .insert(subscriptions)
+      .values({ tenantId: a, planId, monthlyPrice: 99000, overagePrice: 500, documentQuota: 100 })
+      .returning();
+    for (const patch of [{ monthlyPrice: 1 }, { overagePrice: 1 }, { documentQuota: 1 }]) {
+      expect(
+        await causeOf(
+          db
+            .update(subscriptions)
+            .set(patch)
+            .where(sql`id = ${row.id}`),
+        ),
+      ).toContain('subscription price snapshot is immutable');
+    }
+    await db
+      .update(subscriptions)
+      .set({ status: 'past_due' })
+      .where(sql`id = ${row.id}`);
+    const [bare] = await db.insert(subscriptions).values({ tenantId: b, planId }).returning();
+    await db
+      .update(subscriptions)
+      .set({ monthlyPrice: 1, overagePrice: 1, documentQuota: 1 })
+      .where(sql`id = ${bare.id}`);
+  });
+
   it('lets a tenant read plans but not write them', async () => {
     const { db, a } = await seed();
     const seen = await withTenantTransaction(db, a, (tx) => tx.select().from(plans));

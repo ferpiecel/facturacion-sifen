@@ -1,4 +1,4 @@
-import { createPgliteDatabase, type DatabaseHandle } from '@sifen/db';
+import { createPgliteDatabase, type Database, type DatabaseHandle } from '@sifen/db';
 import { sql } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { asPlatformAdmin } from './platform-admin.js';
@@ -15,7 +15,7 @@ describe('asPlatformAdmin', () => {
   it('runs the callback as platform_admin and leaves the session role untouched afterwards', async () => {
     handle = createPgliteDatabase();
     await handle.migrate();
-    const roleOf = async (db: typeof handle.db) =>
+    const roleOf = async (db: Database) =>
       ((await db.execute(sql`select current_user as "role"`)) as { rows: { role: string }[] })
         .rows[0].role;
     const before = await roleOf(handle.db);

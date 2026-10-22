@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import {
   auditLog,
+  documents,
   createPgliteDatabase,
   issuerEvents,
   tenants,
@@ -146,6 +147,68 @@ describe('CancelDocument with the Drizzle unit of work', () => {
     });
     await expect(cancel()(request())).rejects.toMatchObject({
       refusal: { rule: 'has-live-associated-documents', associatedCdcs: [nce.cdc] },
+    });
+  });
+
+  describe('credit note statuses against the live-associated rule', () => {
+    const acceptNce = async () => {
+      const draft = {
+        associatedCdc: feCdc,
+        reasonCode: 2,
+        items: [{ quantity: 1, unitPrice: 1000, vatRate: 10 as const }],
+        roundingPyg: 0,
+      };
+      return createAcceptCreditNote({
+        unitOfWork: createDrizzleAcceptanceUnitOfWork(handle.db),
+        now: () => new Date('2026-03-06T01:30:00Z'),
+      })({
+        tenantId,
+        actor: { type: 'api_key', id: 'k' },
+        establishmentCode: '001',
+        expeditionPointCode: '002',
+        draft,
+        payload: { type: 'NCE', ...draft },
+        idempotencyKey: 'nce-status',
+      });
+    };
+    const PATHS: Record<string, string[]> = {
+      accepted: [],
+      signed: ['signed'],
+      queued: ['signed', 'queued'],
+      submitted: ['signed', 'submitted'],
+      approved: ['signed', 'submitted', 'approved'],
+      approved_with_observations: ['signed', 'submitted', 'approved_with_observations'],
+      rejected: ['signed', 'submitted', 'rejected'],
+      corrected: ['signed', 'submitted', 'rejected', 'corrected'],
+    };
+    const setStatus = async (id: string, status: string) => {
+      for (const step of PATHS[status]) {
+        await handle.db
+          .update(documents)
+          .set({ status: step as (typeof documents.$inferInsert)['status'] })
+          .where(eq(documents.id, id));
+      }
+    };
+
+    it.each(['rejected', 'corrected'] as const)('lets a %s credit note go', async (status) => {
+      const nce = await acceptNce();
+      await setStatus(nce.documentId, status);
+      await expect(cancel()(request())).resolves.toBeDefined();
+    });
+
+    it.each([
+      'accepted',
+      'signed',
+      'queued',
+      'submitted',
+      'approved',
+      'approved_with_observations',
+    ] as const)('blocks on a %s credit note', async (status) => {
+      const nce = await acceptNce();
+      await setStatus(nce.documentId, status);
+      await expect(cancel()(request())).rejects.toMatchObject({
+        refusal: { rule: 'has-live-associated-documents', associatedCdcs: [nce.cdc] },
+      });
     });
   });
 });

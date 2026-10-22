@@ -25,9 +25,34 @@ Issue an NDE (`iTiDE` 6), an AFE (4) and an NRE (7) through `POST /v1/documents`
 - [x] N2 request contract (`type: "NDE"`), XML mapping (iTiDE 6), signing store dispatch (the controller still answers 422 for `NDE` until N3)
 - [x] N3 routing in the controller, KuDE (letter and ticket), OpenAPI, guide, e2e
 
-### AFE and NRE
+### AFE (HU-E7-03)
 
-- [ ] Detailed after the NDE (domain, contract, XML and signing, KuDE and e2e).
+- [ ] A1 domain: `Place`, `validateSelfInvoiceDraft` (seller E4, constancia H, items and rounding reused)
+- [ ] A2 acceptance (`createAcceptStandalone`, `createAcceptSelfInvoice`, type 4) and request contract (`type: "AFE"`)
+- [ ] A3 XML mapping (iTiDE 4: gCamAE, gCamCond, gCamDEAsoc constancia), signing store dispatch, receiver = issuer
+- [ ] A4 routing in the controller, KuDE (letter and ticket), OpenAPI, guide, e2e
+
+### NRE (HU-E7-04)
+
+- [ ] R1 domain: `validateRemissionDraft` (motive E501, responsible E503, transport E9, items without prices)
+- [ ] R2 acceptance (type 7) and request contract (`type: "NRE"`)
+- [ ] R3 XML mapping (iTiDE 7: gCamNRE, gTransp, no gOpeCom/gTotSub/gValorItem/gCamIVA) and signing store dispatch
+- [ ] R4 routing, KuDE (letter and ticket), OpenAPI, guide, e2e
+
+### Normative basis for AFE and NRE (MT v150)
+
+| Type | Rule | Source |
+|---|---|---|
+| AFE (4) | gCamAE mandatory (2550); seller nature 1/2, id type 1..4, place of the transaction | E300-E322 |
+| AFE (4) | Receiver = issuer (D206 = D101, 1317), nature contribuyente (1315), operation B2C (1316), cash only (1503) | D3, E7 |
+| AFE (4) | One associated document, a constancia (H002 = 3, 2416); type 1 no contribuyente, 2 microproductores; number 11 digits and control 8 characters (H016, H017) | H, 2415 |
+| AFE (4) | No gCamIVA (1901), no gTransp (2101), no F002-F005, F015-F020, F023, F025, F026 | E730, E900, F001 |
+| NRE (7) | gCamNRE mandatory (2600); motive 1..14 or 99 (with text), responsible 1..5, dKmR, dFecEm optional | E500-E506 |
+| NRE (7) | Motive 7 requires receiver RUC = issuer RUC (2606) | E501 |
+| NRE (7) | gTransp mandatory (2100): type, modality, freight responsible, start and end dates, departure, delivery, vehicle, carrier | E900-E997, 2102-2113, 2150 |
+| NRE (7) | No gOpeCom (1201), no gTotSub, no gValorItem (1851), no gCamIVA (1901); receiver address mandatory (1318) | D010, F001, E720, E730, D213 |
+
+Library constraints (xmlgen 1.0.283, `facturacionelectronicapy-xmlgen`): it needs district codes, the constancia number and control for both types, and `dKmR` for the NRE; the contract requires them even where the MT says optional.
 
 ## Progress
 

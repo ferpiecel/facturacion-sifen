@@ -169,6 +169,48 @@ export function buildOpenApiDocument() {
           },
         },
       },
+      '/v1/documents/{id}/cancel': {
+        post: {
+          operationId: 'cancelDocument',
+          tags: ['Documents'],
+          summary: 'Request the cancellation of an approved document',
+          description:
+            'Asynchronous like emission: 202 once the cancellation event is stored; the worker signs it with the tenant certificate and sends it to SIFEN, and the document becomes `cancelled` (webhook `document.cancelled`) when SIFEN registers it. ' +
+            'Only a document SIFEN holds as approved can be cancelled, within 48 hours of its approval for an FE and 168 hours for an AFE, NCE, NDE or NRE (MT v150 11.6.1, 4009 and 4010); a document with live associated documents is refused and they are listed (cancel them first, from the last to the first). ' +
+            'A receiver having confirmed the document does not block it (NT 025). The 422 body carries `errors[0].rule` (`document-not-approved`, `cancel-window-expired`, `has-live-associated-documents`, `cancel-document-type-unsupported`, `approval-instant-unknown`) and, when SIFEN defines one, `sifenCode`. ' +
+            'Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.',
+          ...secured(['documents:write']),
+          parameters: [
+            idParam('Document'),
+            {
+              name: 'Idempotency-Key',
+              in: 'header',
+              required: true,
+              description: '1 to 255 printable ASCII characters, no spaces',
+              schema: { type: 'string', pattern: '^[!-~]{1,255}$' },
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: { 'application/json': { schema: ref('CancelDocumentRequest') } },
+          },
+          responses: {
+            '202': json('Accepted', ref('EventAccepted')),
+            '400': problem('Missing or malformed Idempotency-Key, or id is not a UUID'),
+            '401': UNAUTHORIZED,
+            '403': FORBIDDEN,
+            '404': NOT_FOUND,
+            '409': problem(
+              'Idempotency-Key reused with another body, or the document already has a cancellation (4003)',
+            ),
+            '422': problem(
+              'The reason is invalid or a cancellation rule refuses it',
+              'ValidationProblem',
+            ),
+            '503': problem('The tenant ran out of event ids'),
+          },
+        },
+      },
       '/v1/documents/{id}/kude': {
         get: {
           operationId: 'downloadKude',
@@ -419,6 +461,20 @@ export function buildOpenApiDocument() {
           properties: {
             document_id: { type: 'string', format: 'uuid' },
             cdc: { type: 'string', pattern: '^[0-9]{44}$' },
+          },
+        },
+        CancelDocumentRequest: {
+          type: 'object',
+          required: ['reason'],
+          properties: { reason: { type: 'string', minLength: 5, maxLength: 500 } },
+        },
+        EventAccepted: {
+          type: 'object',
+          required: ['event_id', 'document_id', 'status'],
+          properties: {
+            event_id: { type: 'string', format: 'uuid' },
+            document_id: { type: 'string', format: 'uuid' },
+            status: { type: 'string', enum: ['pending'] },
           },
         },
         Document: {

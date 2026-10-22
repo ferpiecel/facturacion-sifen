@@ -13,8 +13,11 @@ import {
   type DocumentMailer,
 } from './ports/document-mailer.port.js';
 
-/** A claim holds an email this long; a crash before `record` makes it due again afterwards. */
-const LEASE_MS = 5 * 60 * 1000;
+/**
+ * Worst case of one send: nodemailer's connection, greeting and socket timeouts (30 s each, see the
+ * SMTP adapter) plus a margin for the KuDE render and the XML read.
+ */
+const PER_SEND_BUDGET_MS = 3 * 30_000 + 30_000;
 const DEFAULT_BATCH_SIZE = 10;
 
 export interface SendDocumentEmailsDeps {
@@ -24,6 +27,8 @@ export interface SendDocumentEmailsDeps {
   readonly reader: SignedXmlReader;
   readonly now?: () => Date;
   readonly batchSize?: number;
+  /** Receives ids and codes only, never addresses or provider text. */
+  readonly logger?: { warn(message: string): void };
 }
 
 export interface SendSummary {
@@ -115,13 +120,17 @@ export function createSendDocumentEmails(deps: SendDocumentEmailsDeps) {
     try {
       await deps.store.record(row.id, outcome);
       return outcome;
-    } catch {
+    } catch (error) {
+      deps.logger?.warn(
+        `document email ${row.id} (attempt ${String(attemptCount)}, ${outcome.status}) was not recorded: ${error instanceof Error ? error.name : 'unknown error'}`,
+      );
       return undefined;
     }
   }
 
   return async (): Promise<SendSummary> => {
-    const rows = await deps.store.claimDue(now(), batchSize, LEASE_MS);
+    // The sends run one after another, so the lease of the last row must outlast the whole batch.
+    const rows = await deps.store.claimDue(now(), batchSize, batchSize * PER_SEND_BUDGET_MS);
     const outcomes: (EmailAttemptOutcome | undefined)[] = [];
     // Sequential: one SMTP account, and a large PDF render at a time keeps the worker's memory flat.
     for (const row of rows) outcomes.push(await attempt(row));

@@ -44,9 +44,10 @@ describe('document email worker', () => {
     await handle.close();
   });
 
-  const processor = (send: () => Promise<void>) =>
+  const processor = (send: () => Promise<void>, logger?: { warn(message: string): void }) =>
     createDocumentEmailProcessor({
       db: handle.db,
+      logger,
       mailer: { send: vi.fn(send) },
       getKude: () =>
         Promise.resolve({ kind: 'ok', pdf: new Uint8Array([1]), filename: 'kude.pdf' }),
@@ -76,6 +77,21 @@ describe('document email worker', () => {
       data: { tenantId },
     });
     expect(await row()).toMatchObject({ status: 'dead', lastError: 'smtp_rejected' });
+  });
+
+  it('warns with counts when an email goes dead', async () => {
+    const warn = vi.fn();
+    await processor(() => Promise.reject(new MailerError(false, 'smtp_rejected')), { warn })({
+      data: { tenantId },
+    });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toMatch(/dead=1.*unrecorded=0/);
+  });
+
+  it('stays quiet when everything was sent', async () => {
+    const warn = vi.fn();
+    await processor(() => Promise.resolve(), { warn })({ data: { tenantId } });
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('rejects a malformed tenant id before building any query', async () => {

@@ -28,6 +28,7 @@ function setup(
     kude?: () => Promise<KudeResult>;
     xml?: string | null;
     recordFails?: boolean;
+    logger?: { warn(message: string): void };
   } = {},
 ) {
   const outcomes: Record<string, EmailAttemptOutcome> = {};
@@ -55,6 +56,7 @@ function setup(
         }),
     },
     now: () => NOW,
+    logger: opts.logger,
   });
   return { run, send, outcomes, store };
 }
@@ -135,6 +137,29 @@ describe('sendDocumentEmails', () => {
     });
     await run();
     expect(outcomes.e1).toMatchObject({ status: 'dead', lastError: 'kude_unavailable' });
+  });
+
+  it('leases a batch for its worst case: every row with the full SMTP timeouts', async () => {
+    const { run, store } = setup([due()]);
+    await run();
+    const [, limit, leaseMs] = (store.claimDue as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      Date,
+      number,
+      number,
+    ];
+    // Three 30 s SMTP timeouts per send, plus the KuDE render, for each row of the batch.
+    expect(leaseMs).toBeGreaterThanOrEqual(limit * 3 * 30_000);
+  });
+
+  it('logs an unrecorded outcome with ids only', async () => {
+    const warn = vi.fn();
+    const { run } = setup([due({ id: 'e9' })], { recordFails: true, logger: { warn } });
+    await run();
+    expect(warn).toHaveBeenCalledTimes(1);
+    const message = String(warn.mock.calls[0][0]);
+    expect(message).toContain('e9');
+    expect(message).not.toContain('db down');
+    expect(message).not.toContain('cliente@example.com');
   });
 
   it('counts an outcome that could not be stored as unrecorded', async () => {

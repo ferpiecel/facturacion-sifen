@@ -12,6 +12,7 @@ import {
   KUDE_CONSULT_URL,
   KUDE_CREDIT_NOTE_TITLE,
   KUDE_DEBIT_NOTE_TITLE,
+  KUDE_SELF_INVOICE_TITLE,
   KUDE_TITLE,
   documentNumberOfCdc,
   type KudeInvoice,
@@ -56,7 +57,18 @@ const titleOf = (invoice: KudeInvoice): string =>
     ? KUDE_DEBIT_NOTE_TITLE
     : invoice.creditNote
       ? KUDE_CREDIT_NOTE_TITLE
-      : KUDE_TITLE;
+      : invoice.selfInvoice
+        ? KUDE_SELF_INVOICE_TITLE
+        : KUDE_TITLE;
+
+const documentLabelOf = (invoice: KudeInvoice): string =>
+  invoice.debitNote
+    ? 'Nota de Débito Electrónica'
+    : invoice.creditNote
+      ? 'Nota de Crédito Electrónica'
+      : invoice.selfInvoice
+        ? 'Autofactura Electrónica'
+        : 'Factura Electrónica';
 
 /** KuDE of an FE on A4 (MT v150 chapter 13, "Formato 1"), drawn with embedded Noto Sans. */
 export class PdfkitKudeRenderer implements KudeRenderer {
@@ -162,7 +174,7 @@ export class PdfkitKudeRenderer implements KudeRenderer {
       stamp.validTo === undefined
         ? ''
         : `Fecha de Fin de Vigencia: ${formatDateDmy(stamp.validTo)}`,
-      `${invoice.debitNote ? 'Nota de Débito Electrónica' : invoice.creditNote ? 'Nota de Crédito Electrónica' : 'Factura Electrónica'} Nº ${documentNumber}`,
+      `${documentLabelOf(invoice)} Nº ${documentNumber}`,
     ].filter(Boolean);
     let middle = top;
     stampLines.forEach((text, i) => {
@@ -214,6 +226,16 @@ export class PdfkitKudeRenderer implements KudeRenderer {
     }
     if (invoice.transactionType !== undefined) {
       rows.push(`Tipo de Operación: ${invoice.transactionType}`);
+    }
+    if (invoice.selfInvoice) {
+      const { seller, place, certificate } = invoice.selfInvoice;
+      rows.push(
+        `Vendedor: ${seller.name}`,
+        `Documento del Vendedor: ${seller.idType} ${seller.idNumber}`,
+        `Dirección del Vendedor: ${seller.address}`,
+        `Lugar de la Transacción: ${place}`,
+        `Constancia: ${certificate.type} Nº ${certificate.number}`,
+      );
     }
     const note = invoice.debitNote ?? invoice.creditNote;
     if (note) {

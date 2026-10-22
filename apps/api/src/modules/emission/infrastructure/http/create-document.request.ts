@@ -9,13 +9,13 @@ import type { AcceptInvoiceInput } from '../../application/accept-invoice.js';
 const TEMAIL = /^[0-9a-zA-Z][0-9a-zA-Z.\-_]*@([0-9a-zA-Z][0-9a-zA-Z\-_]*\.)+[a-zA-Z]{2,9}$/;
 
 /** MT v150 E001 gCamItem occurs 1-999 times per DE (p. 86). */
-const MAX_ITEMS = 999;
+export const MAX_ITEMS = 999;
 
 /** `noEmptyString` (DE_Types_v150.xsd:1724): at least one non-whitespace character. */
 // eslint-disable-next-line no-control-regex -- XSD `.` excludes line breaks; control characters never sign
 const CONTROL_CHARS = /[\u0000-\u001F\u007F]/;
 
-const text = (max: number, min = 1) =>
+export const text = (max: number, min = 1) =>
   z
     .string()
     .max(max)
@@ -26,7 +26,7 @@ const text = (max: number, min = 1) =>
       error: `Must have at least ${String(min)} non-blank characters`,
     });
 
-const digits = (max: number) =>
+export const digits = (max: number) =>
   z
     .number()
     .int()

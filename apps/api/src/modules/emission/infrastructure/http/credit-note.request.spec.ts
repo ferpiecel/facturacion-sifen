@@ -131,7 +131,7 @@ describe('parseDocumentRequest (the `type` discriminator)', () => {
       items: [{ code: 'A-1', description: 'Maíz', unitCode: 77, quantity: 2, unitPrice: 50000 }],
     };
     expect(parseDocumentRequest(AFE)).toMatchObject({ ok: true, type: 'AFE' });
-    expect(parseDocumentRequest({ ...AFE, items: [] })).toMatchObject({ ok: false });
+    expect(parseDocumentRequest({ ...AFE, certificate: undefined })).toMatchObject({ ok: false });
   });
 
   it.each(['nre', 'nde', 6, null, ''])('rejects the unknown type %j', (type) => {

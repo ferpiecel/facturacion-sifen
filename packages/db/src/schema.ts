@@ -978,6 +978,12 @@ export const documents = pgTable(
      * (HU-E6-04): write-once, and the only door of the `submitted -> queued` transition.
      */
     resentAt: timestamp('resent_at', { withTimezone: true }),
+    /**
+     * When SIFEN approved the document (HU-E8-02): the 48 h / 168 h cancellation windows count from it
+     * (MT v150 11.6.1, 4009 and 4010). Write-once, only on an approved document, stamped by trigger 0056 when
+     * the status becomes approved. NULL on rows approved before the column existed (refreshed lazily).
+     */
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
     /** Not eligible for a new lote before this instant (backoff after 0301). */
     nextTransmissionAt: timestamp('next_transmission_at', { withTimezone: true }),
     /**

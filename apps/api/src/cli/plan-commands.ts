@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, isNull, lte, or, gte } from 'drizzle-orm';
 import { planPriceTiers, planPrices, plans, type Database } from '@sifen/db';
+import { asPlatformAdmin } from './platform-admin.js';
 import { billingDate } from '../modules/billing/domain/billing-period.js';
 
 export interface PlanTier {
@@ -48,67 +49,73 @@ function sameTiers(a: PlanTier[], b: PlanTier[]): boolean {
  * before (only `valid_to` is written) and a new row is inserted, so an amount is never UPDATEd and a
  * subscription's history stays intact. Identical terms in force are a no-op.
  */
-export async function setPlanPrice(
+export function setPlanPrice(
   db: Database,
   params: SetPlanPriceParams,
 ): Promise<{ changed: boolean }> {
+  return asPlatformAdmin(db, (tx) => setPlanPriceIn(tx, params));
+}
+
+/** {@link setPlanPrice} inside a caller-owned `platform_admin` transaction. */
+export async function setPlanPriceIn(
+  tx: Database,
+  params: SetPlanPriceParams,
+): Promise<{ changed: boolean }> {
   const from = parseDate(params.validFrom, 'valid-from');
-  return await db.transaction(async (tx) => {
-    const plan = (await tx.select().from(plans).where(eq(plans.code, params.planCode))).at(0);
-    if (!plan) throw new Error(`plan not found: ${params.planCode}`);
-    const latest = (
-      await tx
-        .select()
-        .from(planPrices)
-        .where(eq(planPrices.planId, plan.id))
-        .orderBy(desc(planPrices.validFrom))
-        .limit(1)
-    ).at(0);
-    if (latest) {
-      const tiers = await tx
-        .select({
-          fromDocuments: planPriceTiers.fromDocuments,
-          unitPrice: planPriceTiers.unitPrice,
-        })
-        .from(planPriceTiers)
-        .where(eq(planPriceTiers.planPriceId, latest.id));
-      if (
-        latest.validTo === null &&
-        latest.monthlyPrice === params.monthlyPrice &&
-        latest.includedDocuments === params.includedDocuments &&
-        latest.overagePrice === params.overagePrice &&
-        sameTiers(tiers, params.tiers)
-      ) {
-        return { changed: false };
-      }
-      const floor = latest.validTo ?? latest.validFrom;
-      if (params.validFrom <= floor) {
-        throw new Error(`valid-from must be after ${floor}`);
-      }
-      if (latest.validTo === null) {
-        await tx
-          .update(planPrices)
-          .set({ validTo: isoDay(new Date(from.getTime() - DAY_MS)) })
-          .where(eq(planPrices.id, latest.id));
-      }
-    }
-    const [row] = await tx
-      .insert(planPrices)
-      .values({
-        planId: plan.id,
-        monthlyPrice: params.monthlyPrice,
-        includedDocuments: params.includedDocuments,
-        overagePrice: params.overagePrice,
-        validFrom: params.validFrom,
+  const plan = (await tx.select().from(plans).where(eq(plans.code, params.planCode))).at(0);
+  if (!plan) throw new Error(`plan not found: ${params.planCode}`);
+  const latest = (
+    await tx
+      .select()
+      .from(planPrices)
+      .where(eq(planPrices.planId, plan.id))
+      .orderBy(desc(planPrices.validFrom))
+      .limit(1)
+  ).at(0);
+  if (latest) {
+    const tiers = await tx
+      .select({
+        fromDocuments: planPriceTiers.fromDocuments,
+        unitPrice: planPriceTiers.unitPrice,
       })
-      .returning({ id: planPrices.id });
-    if (params.tiers.length > 0) {
-      await tx
-        .insert(planPriceTiers)
-        .values(params.tiers.map((tier) => ({ ...tier, planPriceId: row.id })));
+      .from(planPriceTiers)
+      .where(eq(planPriceTiers.planPriceId, latest.id));
+    if (
+      latest.validTo === null &&
+      latest.monthlyPrice === params.monthlyPrice &&
+      latest.includedDocuments === params.includedDocuments &&
+      latest.overagePrice === params.overagePrice &&
+      sameTiers(tiers, params.tiers)
+    ) {
+      return { changed: false };
     }
-    return { changed: true };
-  });
+    const floor = latest.validTo ?? latest.validFrom;
+    if (params.validFrom <= floor) {
+      throw new Error(`valid-from must be after ${floor}`);
+    }
+    if (latest.validTo === null) {
+      await tx
+        .update(planPrices)
+        .set({ validTo: isoDay(new Date(from.getTime() - DAY_MS)) })
+        .where(eq(planPrices.id, latest.id));
+    }
+  }
+  const [row] = await tx
+    .insert(planPrices)
+    .values({
+      planId: plan.id,
+      monthlyPrice: params.monthlyPrice,
+      includedDocuments: params.includedDocuments,
+      overagePrice: params.overagePrice,
+      validFrom: params.validFrom,
+    })
+    .returning({ id: planPrices.id });
+  if (params.tiers.length > 0) {
+    await tx
+      .insert(planPriceTiers)
+      .values(params.tiers.map((tier) => ({ ...tier, planPriceId: row.id })));
+  }
+  return { changed: true };
 }
 
 export interface PlanListing {
@@ -124,7 +131,11 @@ export interface PlanListing {
 }
 
 /** Operator CLI: every plan with the price row in force on `now` (Paraguay day), tiers included. */
-export async function listPlans(db: Database, now: Date): Promise<PlanListing[]> {
+export function listPlans(db: Database, now: Date): Promise<PlanListing[]> {
+  return asPlatformAdmin(db, (tx) => listPlansIn(tx, now));
+}
+
+async function listPlansIn(db: Database, now: Date): Promise<PlanListing[]> {
   const today = billingDate(now);
   const rows = await db
     .select({ plan: plans, price: planPrices })

@@ -23,6 +23,8 @@ import {
   setFiscalProfile,
   setTenantEnvironment,
 } from './commands.js';
+import { listPlans, setPlanPrice } from './plan-commands.js';
+import { seedPlans } from './plan-seed.js';
 import { createPortalUser } from './user-commands.js';
 
 /**
@@ -94,6 +96,33 @@ export async function runOpsCommand(
   certificates?: CertificateDeps,
 ): Promise<string> {
   switch (command.kind) {
+    case 'plan:seed': {
+      const { seeded } = await seedPlans(db, new Date());
+      return seeded.length > 0
+        ? `plans priced: ${seeded.join(', ')}`
+        : 'plans already priced: nothing changed';
+    }
+    case 'plan:list': {
+      const rows = await listPlans(db, new Date());
+      return rows
+        .map((plan) => {
+          const terms =
+            plan.monthlyPrice === null
+              ? 'no price in force'
+              : `Gs. ${String(plan.monthlyPrice)}/month, ${String(plan.includedDocuments)} documents, overage Gs. ${String(plan.overagePrice)} (from ${String(plan.validFrom)})`;
+          const tiers = plan.tiers
+            .map((tier) => `from ${String(tier.fromDocuments)}: Gs. ${String(tier.unitPrice)}`)
+            .join('; ');
+          return `${plan.code} [${plan.audience}${plan.active ? '' : ', inactive'}] ${terms}${tiers ? ` | tiers ${tiers}` : ''}`;
+        })
+        .join('\n');
+    }
+    case 'plan:price-set': {
+      const { changed } = await setPlanPrice(db, command);
+      return changed
+        ? `plan price set: ${command.planCode} from ${command.validFrom}`
+        : `plan price unchanged: ${command.planCode}`;
+    }
     case 'partner:create': {
       const { id } = await createPartner(db, command.name);
       return `partner created: ${id}`;

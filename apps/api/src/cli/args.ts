@@ -28,6 +28,17 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 export class OpsArgError extends Error {}
 
 export type OpsCommand =
+  | { kind: 'plan:seed' }
+  | { kind: 'plan:list' }
+  | {
+      kind: 'plan:price-set';
+      planCode: string;
+      monthlyPrice: number;
+      includedDocuments: number;
+      overagePrice: number;
+      validFrom: string;
+      tiers: { fromDocuments: number; unitPrice: number }[];
+    }
   | { kind: 'partner:create'; name: string }
   | { kind: 'tenant:create'; name: string; partnerId: string | undefined }
   | {
@@ -105,6 +116,25 @@ function parseStrict<T extends ParseArgsConfig>(config: T) {
     const code = (error as { code?: string }).code ?? 'ERR_PARSE_ARGS';
     throw new OpsArgError(`invalid arguments (${code})`);
   }
+}
+
+function parseCount(value: string | undefined, flag: string): number {
+  const raw = requireOption(value, flag);
+  const number = Number(raw);
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(number)) {
+    throw new OpsArgError(`--${flag} must be a non-negative whole number`);
+  }
+  return number;
+}
+
+/** `--tier <from-documents>:<unit-price>`: the unit price applies from that document count upward. */
+function parseTier(value: string): { fromDocuments: number; unitPrice: number } {
+  const parts = value.split(':');
+  if (parts.length !== 2) {
+    throw new OpsArgError('--tier must be <from-documents>:<unit-price>');
+  }
+  const [from, price] = parts;
+  return { fromDocuments: parseCount(from, 'tier'), unitPrice: parseCount(price, 'tier') };
 }
 
 function requireOption(value: string | undefined, flag: string): string {
@@ -199,6 +229,33 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
   }
 
   switch (subcommand) {
+    case 'plan:seed':
+    case 'plan:list': {
+      parseStrict({ args: rest, options: {} });
+      return { kind: subcommand };
+    }
+    case 'plan:price-set': {
+      const { values } = parseStrict({
+        args: rest,
+        options: {
+          plan: { type: 'string' },
+          monthly: { type: 'string' },
+          included: { type: 'string' },
+          overage: { type: 'string' },
+          'valid-from': { type: 'string' },
+          tier: { type: 'string', multiple: true },
+        },
+      });
+      return {
+        kind: 'plan:price-set',
+        planCode: requireOption(values.plan, 'plan'),
+        monthlyPrice: parseCount(values.monthly, 'monthly'),
+        includedDocuments: parseCount(values.included, 'included'),
+        overagePrice: parseCount(values.overage, 'overage'),
+        validFrom: requireOption(values['valid-from'], 'valid-from'),
+        tiers: (values.tier ?? []).map(parseTier),
+      };
+    }
     case 'partner:create': {
       const { values } = parseStrict({ args: rest, options: { name: { type: 'string' } } });
       return { kind: 'partner:create', name: requireOption(values.name, 'name') };

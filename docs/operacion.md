@@ -67,6 +67,16 @@ Orden recomendado. Dependencias reales: todo exige que exista el tenant; `establ
 
 Para emitir documentos además hacen falta `apikey:create`, `csc:add` y `certificate:add` (este último exige haber ejecutado antes `fiscal:set`).
 
+## Planes y precios
+
+Los planes son datos de plataforma, no constantes del código. Cada plan tiene filas `plan_prices` con vigencia (`valid_from` y `valid_to`, ambos inclusivos); una restricción `EXCLUDE` impide que dos vigencias del mismo plan se superpongan.
+
+- `plan:seed`: crea los planes del PO (Inicial Gs. 99.000/mes con 100 DE y excedente Gs. 500; PyME 199.000/500/400; Empresa 399.000/2.000/300; Partner a Gs. 300 por DE hasta 10.000 y Gs. 200 desde ahí, en `plan_price_tiers`) y, solo si el plan no tiene ninguna fila de precio, su primer precio vigente desde hoy (día de Paraguay). Es idempotente: repetirlo, o correrlo después de `plan:price-set`, no cambia nada.
+- `plan:list`: cada plan con el precio vigente hoy y sus tramos.
+- `plan:price-set --plan <código> --monthly <Gs> --included <DE> --overage <Gs> --valid-from <YYYY-MM-DD> [--tier <desde>:<precio>]...`: inserta una fila nueva y cierra el `valid_to` de la anterior el día previo. Nunca hace UPDATE de montos, así el historial queda intacto. `--valid-from` debe ser posterior al último precio; repetir los términos vigentes no hace nada.
+
+La migración `0050` ejecuta `CREATE EXTENSION IF NOT EXISTS btree_gist` (la necesita la restricción `EXCLUDE`). El rol que corre las migraciones debe tener `CREATE` sobre la base de datos, o la extensión debe estar creada de antemano por un superusuario; si no, la migración falla.
+
 ## Worker de transmisión
 
 El worker (`apps/api/src/worker/worker.ts`, mismo código que la API, otro punto de entrada: ADR-0003) corre el ciclo de transmisión de cada tenant (firmar los documentos aceptados, armar lotes, enviar los lotes pendientes y consultar los vencidos) como un job repetible por tenant en la cola BullMQ `lote-build` (ADR-0013). Postgres es la fuente de verdad: Redis solo coordina, y los jobs se reconstruyen al arrancar. Un candado en Redis por tenant evita que dos ciclos del mismo tenant corran a la vez, aunque haya varios procesos worker.

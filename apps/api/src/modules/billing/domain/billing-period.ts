@@ -11,3 +11,9 @@ export function billingPeriod(instant: Date): string {
   const month = String(local.getUTCMonth() + 1).padStart(2, '0');
   return `${String(local.getUTCFullYear())}-${month}-01`;
 }
+
+/** `YYYY-MM-DD` of the Paraguay calendar day that contains `instant`. */
+export function billingDate(instant: Date): string {
+  const local = new Date(instant.getTime() + BILLING_UTC_OFFSET_HOURS * 3_600_000);
+  return local.toISOString().slice(0, 10);
+}

@@ -18,6 +18,8 @@ export interface TransmissionCycleProcessorDeps {
   readonly now?: () => Date;
   /** The held-document id list is logged at most this often per tenant (default 10 minutes). */
   readonly heldListEveryMs?: number;
+  /** Counter sink (`sifen_ruc_block_total`, HU-E6-05); without it the alert log is the only signal. */
+  readonly metric?: (name: string, tenantId: string, by: number) => void;
 }
 
 export type CycleJobResult = { readonly status: 'done' | 'skipped' };
@@ -65,6 +67,15 @@ export class TransmissionCycleProcessor {
       logger.warn(
         `tenant ${tenantId} cycle lost the run lock and stopped early; the next run resumes`,
       );
+    }
+    if (report.rucBlocks > 0) {
+      // The alert: the tenant stops sending until the pause ends, then its documents go out again.
+      logger.error(
+        `tenant ${tenantId} RUC blocked by SIFEN: sends paused until ${report.sendPausedUntil?.toISOString() ?? 'unknown'}`,
+      );
+      this.deps.metric?.('sifen_ruc_block_total', tenantId, report.rucBlocks);
+    } else if (report.sendPausedUntil) {
+      logger.warn(`tenant ${tenantId} sends paused until ${report.sendPausedUntil.toISOString()}`);
     }
     if (report.held.length > 0) logger.warn(this.heldMessage(tenantId, report.held));
     if (report.stalePending > 0) {

@@ -1,9 +1,24 @@
-import { and, asc, count, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  max,
+  or,
+  sql,
+} from 'drizzle-orm';
 import {
   documents,
   loteDocuments,
   lotes,
   nextRequestId,
+  rucBlocks,
   tenantFiscalProfiles,
   tenants,
   withTenantTransaction,
@@ -248,6 +263,21 @@ export function createDrizzleTransmissionCycleStore({
             and(eq(lotes.tenantId, tenantId), eq(lotes.id, loteId), eq(lotes.status, 'pending')),
           ),
       );
+    },
+
+    async rucBlockedUntil(at) {
+      const rows = await withTenantTransaction(db, tenantId, (tx) =>
+        tx
+          .select({ until: max(rucBlocks.blockedUntil) })
+          .from(rucBlocks)
+          // Only the current environment: a pause earned in a left one does not apply.
+          .innerJoin(
+            tenants,
+            and(eq(tenants.id, rucBlocks.tenantId), eq(tenants.environment, rucBlocks.environment)),
+          )
+          .where(and(eq(rucBlocks.tenantId, tenantId), gt(rucBlocks.blockedUntil, at))),
+      );
+      return rows.at(0)?.until ?? null;
     },
 
     async pendingOlderThan(cutoff) {

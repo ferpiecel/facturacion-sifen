@@ -5,6 +5,7 @@ import {
   createPgliteDatabase,
   documents,
   tenants,
+  usageCounters,
   withTenantTransaction,
   type DatabaseHandle,
 } from '@sifen/db';
@@ -98,6 +99,16 @@ describe('AcceptCreditNote with the Drizzle unit of work', () => {
 
   afterEach(async () => {
     await handle.close();
+  });
+
+  it('counts an NCE toward usage like any other electronic document (HU-E15-02)', async () => {
+    const count = () =>
+      withTenantTransaction(handle.db, tenantId, (tx) => tx.select().from(usageCounters)).then(
+        (r) => r.map((c) => c.documentsIssued),
+      );
+    expect(await count()).toEqual([1]); // the FE of beforeEach
+    await acceptCredit()(credit());
+    expect(await count()).toEqual([2]);
   });
 
   it('stores an NCE with type 05, its own numbering, the association and the FE receiver', async () => {

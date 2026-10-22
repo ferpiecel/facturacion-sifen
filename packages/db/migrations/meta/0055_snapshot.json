@@ -1,6 +1,6 @@
 {
   "id": "737f2a47-8dac-4a80-a45b-f6e7941419af",
-  "prevId": "81cfe665-074a-4a4f-8bdf-e8e3c317c12e",
+  "prevId": "9885347c-1c59-42aa-ad1e-ba30b3a0a9ad",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1819,6 +1819,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "audience": {
+          "name": "audience",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'direct'"
+        },
         "features": {
           "name": "features",
           "type": "jsonb",
@@ -1859,6 +1866,10 @@
           "name": "plans_code_format",
           "value": "\"plans\".\"code\" ~ '^[a-z0-9]+(-[a-z0-9]+)*$'"
         },
+        "plans_audience_valid": {
+          "name": "plans_audience_valid",
+          "value": "\"plans\".\"audience\" IN ('direct', 'partner')"
+        },
         "plans_api_call_limit_nonneg": {
           "name": "plans_api_call_limit_nonneg",
           "value": "\"plans\".\"api_call_limit\" IS NULL OR \"plans\".\"api_call_limit\" >= 0"
@@ -1895,6 +1906,24 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'active'"
+        },
+        "monthly_price": {
+          "name": "monthly_price",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "overage_price": {
+          "name": "overage_price",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "document_quota": {
+          "name": "document_quota",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
         },
         "starts_at": {
           "name": "starts_at",
@@ -1982,6 +2011,14 @@
       },
       "policies": {},
       "checkConstraints": {
+        "subscriptions_terms_nonneg": {
+          "name": "subscriptions_terms_nonneg",
+          "value": "coalesce(\"subscriptions\".\"monthly_price\", 0) >= 0 AND coalesce(\"subscriptions\".\"overage_price\", 0) >= 0 AND coalesce(\"subscriptions\".\"document_quota\", 0) >= 0"
+        },
+        "subscriptions_snapshot_complete": {
+          "name": "subscriptions_snapshot_complete",
+          "value": "(\"subscriptions\".\"monthly_price\" IS NULL AND \"subscriptions\".\"overage_price\" IS NULL AND \"subscriptions\".\"document_quota\" IS NULL) OR (\"subscriptions\".\"monthly_price\" IS NOT NULL AND \"subscriptions\".\"overage_price\" IS NOT NULL AND \"subscriptions\".\"document_quota\" IS NOT NULL)"
+        },
         "subscriptions_status_valid": {
           "name": "subscriptions_status_valid",
           "value": "\"subscriptions\".\"status\" IN ('trialing', 'active', 'past_due', 'cancelled')"
@@ -4154,109 +4191,6 @@
         "webhook_endpoints_previous_pair": {
           "name": "webhook_endpoints_previous_pair",
           "value": "(\"webhook_endpoints\".\"previous_sealed\" IS NULL) = (\"webhook_endpoints\".\"previous_expires_at\" IS NULL)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.ruc_blocks": {
-      "name": "ruc_blocks",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "environment": {
-          "name": "environment",
-          "type": "tenant_environment",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "blocked_at": {
-          "name": "blocked_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "blocked_until": {
-          "name": "blocked_until",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "ruc_blocks_active_idx": {
-          "name": "ruc_blocks_active_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "environment",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "blocked_until",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "ruc_blocks_tenant_id_tenants_id_fk": {
-          "name": "ruc_blocks_tenant_id_tenants_id_fk",
-          "tableFrom": "ruc_blocks",
-          "tableTo": "tenants",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "ruc_blocks_window": {
-          "name": "ruc_blocks_window",
-          "value": "\"ruc_blocks\".\"blocked_until\" > \"ruc_blocks\".\"blocked_at\""
-        },
-        "ruc_blocks_reason_length": {
-          "name": "ruc_blocks_reason_length",
-          "value": "char_length(\"ruc_blocks\".\"reason\") <= 500"
         }
       },
       "isRLSEnabled": false

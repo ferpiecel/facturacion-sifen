@@ -1,5 +1,6 @@
 import { and, eq, inArray } from 'drizzle-orm';
 import { documents, webhookDeliveries, webhookEndpoints, type TenantTx } from '@sifen/db';
+import { enqueueDocumentEmails } from '../../email/infrastructure/enqueue-document-emails.js';
 import {
   documentEventData,
   documentEventId,
@@ -27,6 +28,8 @@ export async function enqueueDocumentEvents(
   { tenantId, documentIds, at }: EnqueueDocumentEventsInput,
 ): Promise<void> {
   if (documentIds.length === 0) return;
+  // The receiver's email rides the same transition, in the same transaction (HU-E11-02).
+  await enqueueDocumentEmails(tx, { tenantId, documentIds, at });
   const endpoints = await tx
     .select({ id: webhookEndpoints.id, events: webhookEndpoints.events })
     .from(webhookEndpoints)

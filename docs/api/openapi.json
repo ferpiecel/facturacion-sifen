@@ -1197,6 +1197,12 @@
                   "cityDescription": {
                     "type": "string",
                     "maxLength": 30
+                  },
+                  "email": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 80,
+                    "pattern": "^[0-9a-zA-Z][0-9a-zA-Z.\\-_]*@([0-9a-zA-Z][0-9a-zA-Z\\-_]*\\.)+[a-zA-Z]{2,9}$"
                   }
                 },
                 "required": [

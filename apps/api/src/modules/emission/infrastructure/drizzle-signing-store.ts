@@ -81,7 +81,7 @@ function readPayload(payload: unknown): {
     return { draft: toInvoiceDraft(body), receiver: undefined, ...detail.data };
   }
   const { ruc, name, address, houseNumber, districtCode, districtDescription } = body.receiver;
-  const { cityCode, cityDescription } = body.receiver;
+  const { cityCode, cityDescription, email } = body.receiver;
   const receiver: XmlReceiver = {
     ruc,
     name,
@@ -89,6 +89,7 @@ function readPayload(payload: unknown): {
     ...(houseNumber === undefined ? {} : { houseNumber }),
     ...(districtCode === undefined ? {} : { districtCode, districtDescription }),
     ...(cityCode === undefined ? {} : { cityCode, cityDescription }),
+    ...(email === undefined ? {} : { email }),
   };
   return { draft: toInvoiceDraft(body), receiver, ...detail.data };
 }

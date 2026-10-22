@@ -28,6 +28,20 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 export class OpsArgError extends Error {}
 
 export type OpsCommand =
+  | { kind: 'usage:show'; tenantId: string; period: string | undefined }
+  | {
+      kind: 'subscription:assign';
+      tenantId: string;
+      planCode: string;
+      startsOn: string | undefined;
+    }
+  | {
+      kind: 'payment:record';
+      tenantId: string;
+      amount: number;
+      reference: string | undefined;
+      paidOn: string | undefined;
+    }
   | { kind: 'plan:seed' }
   | { kind: 'plan:list' }
   | {
@@ -229,6 +243,55 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
   }
 
   switch (subcommand) {
+    case 'usage:show': {
+      const { values } = parseStrict({
+        args: rest,
+        options: { tenant: { type: 'string' }, period: { type: 'string' } },
+      });
+      return {
+        kind: 'usage:show',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        period: values.period,
+      };
+    }
+    case 'subscription:assign': {
+      const { values } = parseStrict({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          plan: { type: 'string' },
+          'starts-on': { type: 'string' },
+        },
+      });
+      return {
+        kind: 'subscription:assign',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        planCode: requireOption(values.plan, 'plan'),
+        startsOn: values['starts-on'],
+      };
+    }
+    case 'payment:record': {
+      const { values } = parseStrict({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          amount: { type: 'string' },
+          reference: { type: 'string' },
+          'paid-on': { type: 'string' },
+        },
+      });
+      const amount = parseCount(values.amount, 'amount');
+      if (amount === 0) {
+        throw new OpsArgError('--amount must be greater than zero');
+      }
+      return {
+        kind: 'payment:record',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        amount,
+        reference: values.reference,
+        paidOn: values['paid-on'],
+      };
+    }
     case 'plan:seed':
     case 'plan:list': {
       parseStrict({ args: rest, options: {} });

@@ -77,6 +77,15 @@ Los planes son datos de plataforma, no constantes del código. Cada plan tiene f
 
 La migración `0050` ejecuta `CREATE EXTENSION IF NOT EXISTS btree_gist` (la necesita la restricción `EXCLUDE`). El rol que corre las migraciones debe tener `CREATE` sobre la base de datos, o la extensión debe estar creada de antemano por un superusuario; si no, la migración falla.
 
+## Suscripciones y pagos
+
+- `subscription:assign --tenant <id> --plan <código> [--starts-on <YYYY-MM-DD>]`: suscribe al tenant a un plan. Copia los términos de la fila `plan_prices` vigente en la fecha de inicio (hoy por defecto, día de Paraguay) a la suscripción (`monthly_price`, `overage_price`, `document_quota`), de modo que un cambio de precio posterior no la toca. Un tenant tiene una sola suscripción viva; falla si el plan no tiene precio vigente ese día. Queda en el audit log (`subscription.assigned`).
+- `payment:record --tenant <id> --amount <Gs> [--reference <texto>] [--paid-on <YYYY-MM-DD>]`: registra un pago manual contra la suscripción viva del tenant. Los pagos son solo de inserción; un error se corrige con otra fila. Queda en el audit log (`payment.recorded`).
+
+- `usage:show --tenant <id> [--period <YYYY-MM>]`: uso del mes de facturación (calendario de Paraguay; el actual por defecto) frente a la cuota y al precio de excedente de la suscripción vigente ese mes (su snapshot, no el precio actual del plan): documentos emitidos, excedente en documentos y en guaraníes, llamadas a la API, notificaciones y un aviso desde el 80 % de la cuota. Solo lee. Los tramos del plan partner no se aplican todavía: se informa el precio de excedente plano del snapshot.
+
+No hay corte por cuota en el MVP: el uso se cuenta y se consulta, no se bloquea.
+
 ## Worker de transmisión
 
 El worker (`apps/api/src/worker/worker.ts`, mismo código que la API, otro punto de entrada: ADR-0003) corre el ciclo de transmisión de cada tenant (firmar los documentos aceptados, armar lotes, enviar los lotes pendientes y consultar los vencidos) como un job repetible por tenant en la cola BullMQ `lote-build` (ADR-0013). Postgres es la fuente de verdad: Redis solo coordina, y los jobs se reconstruyen al arrancar. Un candado en Redis por tenant evita que dos ciclos del mismo tenant corran a la vez, aunque haya varios procesos worker.
@@ -98,4 +107,3 @@ pnpm --filter @sifen/api worker
 - **Logs:** una línea por ciclo con conteos; advertencias (`WARN`) cuando hay documentos retenidos (`held`, usar `document:release-hold` tras corregir la causa), lotes pendientes viejos (`stalePending`) o fallos. Solo ids, conteos y nombres de error: nunca XML, certificados ni URLs.
 - **Apagado:** `SIGTERM`/`SIGINT` deja terminar los ciclos en curso antes de salir.
 - **Pruebas con Redis real:** `REDIS_URL=redis://localhost:6379 pnpm --filter @sifen/api exec vitest run src/worker`. Sin `REDIS_URL` esas pruebas se omiten; en CI las corre el job `worker-redis`.
-

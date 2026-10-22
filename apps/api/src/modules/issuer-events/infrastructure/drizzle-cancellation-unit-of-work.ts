@@ -1,4 +1,4 @@
-import { and, eq, inArray, notInArray } from 'drizzle-orm';
+import { and, eq, ne, notInArray } from 'drizzle-orm';
 import {
   documents,
   issuerEvents,
@@ -78,7 +78,8 @@ function createUnit(tx: TenantTx, tenantId: string): CancellationUnit {
             eq(documents.tenantId, tenantId),
             eq(documents.environment, environment),
             eq(documents.associatedCdc, cdc),
-            notInArray(documents.status, ['cancelled', 'number_voided']),
+            // Rejected never existed for SIFEN, corrected was replaced, cancelled/voided are gone.
+            notInArray(documents.status, ['rejected', 'corrected', 'cancelled', 'number_voided']),
           ),
         )
         .orderBy(documents.cdc);
@@ -93,7 +94,7 @@ function createUnit(tx: TenantTx, tenantId: string): CancellationUnit {
             eq(issuerEvents.tenantId, tenantId),
             eq(issuerEvents.documentId, documentId),
             eq(issuerEvents.kind, 'cancellation'),
-            inArray(issuerEvents.status, ['pending', 'signed', 'sending', 'unknown', 'approved']),
+            ne(issuerEvents.status, 'rejected'),
           ),
         )
         .then(first);

@@ -45,11 +45,12 @@ export interface CancellationUnit {
   /** The tenant's document, locked with `FOR NO KEY UPDATE` until the transaction ends, or null. */
   lockDocument(documentId: string): Promise<CancellationTarget | null>;
   /**
-   * CDCs of the documents associated to `cdc` that still count: every status except `cancelled` and
-   * `number_voided`, plus those with a cancellation that was requested and not rejected.
+   * CDCs of the documents associated to `cdc` that still count: approved by SIFEN or still on the
+   * way to approval (accepted, signed, queued, submitted). `rejected`, `corrected`, `cancelled` and
+   * `number_voided` do not.
    */
   listLiveAssociatedCdcs(cdc: string, environment: Environment): Promise<string[]>;
-  /** The cancellation of this document that is not rejected (pending, signed, sent or approved). */
+  /** The cancellation of this document that is not rejected (any status but `rejected`). */
   findOpenCancellation(documentId: string): Promise<{ eventId: string } | null>;
   /**
    * Takes the next event id of the tenant and stores the cancellation `pending`.

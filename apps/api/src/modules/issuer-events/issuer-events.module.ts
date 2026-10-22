@@ -10,8 +10,9 @@ import { NumberingEventsController } from './infrastructure/http/numbering-event
 import { CANCEL_DOCUMENT, VOID_NUMBERS } from './issuer-events.tokens.js';
 
 /**
- * `POST /v1/documents/{id}/cancel` (HU-E8-02) and `POST /v1/numbering/inutilize` (HU-E8-03). Without a `DATABASE` the app still boots and `ApiKeyGuard`
- * fails every request closed with 503 before the controller runs.
+ * `POST /v1/documents/{id}/cancel` (HU-E8-02) and `POST /v1/numbering/inutilize` (HU-E8-03).
+ * Without a `DATABASE` the app still boots and `ApiKeyGuard` fails every request closed with 503
+ * before the controller runs.
  */
 @Module({
   controllers: [IssuerEventsController, NumberingEventsController],

@@ -185,7 +185,7 @@ describe('CancelDocument with the Drizzle unit of work', () => {
       for (const step of PATHS[status]) {
         await handle.db
           .update(documents)
-          .set({ status: step as (typeof documents.$inferInsert)['status'] })
+          .set({ status: step })
           .where(eq(documents.id, id));
       }
     };

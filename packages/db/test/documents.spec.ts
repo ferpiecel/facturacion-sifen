@@ -698,7 +698,7 @@ describe('documents', () => {
           .where(eq(documents.id, row.id))
           .returning();
         expect(approved.approvedAt).toBeInstanceOf(Date);
-        expect(approved.approvedAt!.getTime()).toBeGreaterThanOrEqual(before - 1000);
+        expect((approved.approvedAt as Date).getTime()).toBeGreaterThanOrEqual(before - 1000);
       },
     );
 

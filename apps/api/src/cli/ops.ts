@@ -25,6 +25,8 @@ import {
 } from './commands.js';
 import { listPlans, setPlanPrice } from './plan-commands.js';
 import { seedPlans } from './plan-seed.js';
+import { assignSubscription, recordPayment } from './subscription-commands.js';
+import { showUsage } from './usage-commands.js';
 import { createPortalUser } from './user-commands.js';
 
 /**
@@ -96,6 +98,44 @@ export async function runOpsCommand(
   certificates?: CertificateDeps,
 ): Promise<string> {
   switch (command.kind) {
+    case 'usage:show': {
+      const report = await showUsage(
+        db,
+        { tenantId: command.tenantId, period: command.period },
+        new Date(),
+      );
+      const plan = report.subscription
+        ? `${report.subscription.planCode}, quota ${String(report.subscription.documentQuota)}, overage Gs. ${String(report.subscription.overagePrice)}`
+        : 'no subscription';
+      return [
+        `usage ${report.period.slice(0, 7)} (tenant ${report.tenantId}): ${plan}`,
+        `documents issued: ${String(report.documentsIssued)}`,
+        `overage: ${String(report.overageDocuments)} documents, Gs. ${String(report.overageAmount)}`,
+        `api calls: ${String(report.apiCalls)}, notifications: ${String(report.notificationsSent)}`,
+        ...(report.quotaWarning ? ['warning: 80% of the document quota reached'] : []),
+      ].join('\n');
+    }
+    case 'subscription:assign': {
+      const result = await assignSubscription(
+        db,
+        { tenantId: command.tenantId, planCode: command.planCode, startsOn: command.startsOn },
+        new Date(),
+      );
+      return `subscription created: ${result.id} (${result.planCode} from ${result.startsOn}, Gs. ${String(result.monthlyPrice)}/month, quota ${String(result.documentQuota)}, overage Gs. ${String(result.overagePrice)})`;
+    }
+    case 'payment:record': {
+      const result = await recordPayment(
+        db,
+        {
+          tenantId: command.tenantId,
+          amount: command.amount,
+          reference: command.reference,
+          paidOn: command.paidOn,
+        },
+        new Date(),
+      );
+      return `payment recorded: ${result.id} (Gs. ${String(result.amount)}, subscription ${result.subscriptionId})`;
+    }
     case 'plan:seed': {
       const { seeded } = await seedPlans(db, new Date());
       return seeded.length > 0

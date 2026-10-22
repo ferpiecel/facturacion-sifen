@@ -24,6 +24,6 @@
 - [x] T2 migration 0051: invoices_saas and usage_counters with an increment-only trigger (PR #296: ea98231, 06223f0, 0bcf643)
 - [x] T3 count accepted documents in the acceptance transaction (PR 2/2 of the usage stream: 2e40aab rebuilt on main)
 - [x] T4 migration 0054 (0052/0053 taken by transmission, 0055 by the email outbox; PR #302): plans.audience and subscription price snapshot (monthly_price, overage_price, document_quota); no tiers, no plans.overage_price
-- [ ] T5 ops `plan:*` and `plan:seed` reading and writing plan_prices (new row + close previous valid_to, never UPDATE of amounts); document btree_gist CREATE privilege in docs/operacion.md
-- [ ] T6 ops `subscription:assign`, `payment:record`, `usage:show` reading plan_prices
+- [x] T5 (PRs #314, #316) ops `plan:*` and `plan:seed` reading and writing plan_prices (new row + close previous valid_to, never UPDATE of amounts); document btree_gist CREATE privilege in docs/operacion.md
+- [x] T6 (PRs #318 and the usage:show wiring PR) ops `subscription:assign`, `payment:record`, `usage:show` reading plan_prices
 - [ ] Follow-up: consider revoking UPDATE on plan_prices price columns from platform_admin; portal/API `GET /v1/usage`; SaaS invoice issuing (v1.0)

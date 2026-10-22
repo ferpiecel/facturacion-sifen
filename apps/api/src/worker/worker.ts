@@ -116,6 +116,10 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
       logger,
     }),
     logger,
+    // No metrics backend yet: counters go out as one parseable log line.
+    metric: (name, tenantId, by) => {
+      logger.info(`metric ${name}{tenant="${tenantId}"} +${String(by)}`);
+    },
   });
 
   // Webhook delivery needs neither the tenant run lock (the store claims rows with SKIP LOCKED and a

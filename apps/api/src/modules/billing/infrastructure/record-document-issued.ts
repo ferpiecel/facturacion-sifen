@@ -11,7 +11,8 @@ export interface RecordDocumentIssuedInput {
 /**
  * HU-E15-02: counts one accepted document for the tenant's billing month. A single atomic
  * `INSERT ... ON CONFLICT DO UPDATE` inside the caller's tenant transaction, so the count commits or
- * rolls back with the document and no per-request aggregate query is needed.
+ * rolls back with the document and no per-request aggregate query is needed. Every electronic
+ * document type (FE, NCE, NDE and future AFE/NRE) counts: plans are priced per electronic document.
  */
 export async function recordDocumentIssued(
   tx: TenantTx,

@@ -400,6 +400,13 @@
       "when": 1792688760519,
       "tag": "0056_documents_approved_at",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1792689094566,
+      "tag": "0057_issuer_events_idempotency",
+      "breakpoints": true
     }
   ]
 }

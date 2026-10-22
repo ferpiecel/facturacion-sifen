@@ -1253,6 +1253,10 @@ export const issuerEvents = pgTable(
     voidRange: jsonb('void_range'),
     /** `mOtEve`, 5 to 500 characters. */
     reason: text('reason').notNull(),
+    /** `Idempotency-Key` of the request that created the event (HU-E8-02), unique per tenant; null for older rows. */
+    idempotencyKey: varchar('idempotency_key', { length: 255 }),
+    /** sha-256 hex of the canonical request, to detect a reused key. */
+    requestHash: char('request_hash', { length: 64 }),
     status: varchar('status', { length: 16 }).notNull().default('pending'),
     signedXml: text('signed_xml'),
     signedAt: timestamp('signed_at', { withTimezone: true }),
@@ -1277,6 +1281,13 @@ export const issuerEvents = pgTable(
     uniqueIndex('issuer_events_open_idx')
       .on(table.tenantId, table.documentId, table.kind)
       .where(sql`${table.documentId} IS NOT NULL AND ${table.status} <> 'rejected'`),
+    uniqueIndex('issuer_events_idempotency_idx')
+      .on(table.tenantId, table.idempotencyKey)
+      .where(sql`${table.idempotencyKey} IS NOT NULL`),
+    check(
+      'issuer_events_idempotency_pair',
+      sql`(${table.idempotencyKey} IS NULL) = (${table.requestHash} IS NULL)`,
+    ),
     index('issuer_events_to_send_idx')
       .on(table.tenantId, table.environment, table.createdAt)
       .where(sql`${table.status} = 'signed'`),

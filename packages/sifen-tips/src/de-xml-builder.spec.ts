@@ -27,4 +27,43 @@ describe('TipsDeXmlBuilder', () => {
     expect(generateXMLDE).toHaveBeenNthCalledWith(1, {}, {}, { pygDecimals: 8 });
     expect(generateXMLDE).toHaveBeenNthCalledWith(2, {}, {});
   });
+
+  describe('xmlgen console output', () => {
+    it('keeps what xmlgen logs (the seller location of an AFE) out of stdout and restores console', async () => {
+      const original = console.log;
+      const spy = vi.fn();
+      console.log = spy;
+      try {
+        generateXMLDE.mockImplementation(() => {
+          console.log({ ubicacion: 'Calle 1' });
+          return Promise.resolve('<rDE/>');
+        });
+        const builder = new TipsDeXmlBuilder();
+        await builder.buildParaSifen({ params: {}, data: {} });
+        expect(spy).not.toHaveBeenCalled();
+        expect(console.log).toBe(spy);
+      } finally {
+        console.log = original;
+      }
+    });
+
+    it('restores console even when xmlgen throws and across concurrent builds', async () => {
+      const original = console.log;
+      const spy = vi.fn();
+      console.log = spy;
+      try {
+        generateXMLDE.mockRejectedValueOnce(new Error('boom'));
+        generateXMLDE.mockResolvedValueOnce('<rDE/>');
+        const builder = new TipsDeXmlBuilder();
+        const results = await Promise.allSettled([
+          builder.buildParaSifen({ params: {}, data: {} }),
+          builder.buildParaSifen({ params: {}, data: {} }),
+        ]);
+        expect(results.map((r) => r.status)).toEqual(['rejected', 'fulfilled']);
+        expect(console.log).toBe(spy);
+      } finally {
+        console.log = original;
+      }
+    });
+  });
 });

@@ -6,6 +6,7 @@ import {
   DocumentNotFoundError,
   EventKeyReusedError,
 } from '../../application/cancel-document.js';
+import { VoidRefusedError } from '../../application/void-numbers.js';
 import { EventIdExhaustedError } from '../drizzle-event-support.js';
 
 function problem(status: HttpStatus, message: string, errors?: object[]): HttpException {
@@ -39,6 +40,9 @@ export function toIssuerEventHttpException(error: unknown): HttpException | null
         ...('deadline' in details ? { deadline: details.deadline.toISOString() } : {}),
       },
     ]);
+  }
+  if (error instanceof VoidRefusedError) {
+    return problem(HttpStatus.UNPROCESSABLE_ENTITY, 'The voiding was refused', error.errors);
   }
   if (error instanceof CancellationAlreadyRequestedError) {
     return problem(HttpStatus.CONFLICT, error.message, [

@@ -15,7 +15,7 @@ import {
 import { createEstablishment } from '../../fiscal-config/domain/establishment.js';
 import { createExpeditionPoint } from '../../fiscal-config/domain/expedition-point.js';
 import { createFiscalProfile } from '../../fiscal-config/domain/fiscal-profile.js';
-import { createRuc } from '../../fiscal-config/domain/ruc.js';
+import { createRuc, formatRuc } from '../../fiscal-config/domain/ruc.js';
 import { createTimbrado } from '../../fiscal-config/domain/timbrado.js';
 import {
   EstablishmentContactMissingError,
@@ -32,7 +32,9 @@ import {
   parseCreateDebitNote,
   toCreditNoteDraft,
 } from './http/credit-note.request.js';
-import type { XmlReceiver } from '../application/invoice-xml.js';
+import { parseCreateSelfInvoice, toSelfInvoiceDraft } from './http/self-invoice.request.js';
+import type { InvoiceXmlContext, XmlReceiver } from '../application/invoice-xml.js';
+import type { FiscalProfile } from '../../fiscal-config/domain/fiscal-profile.js';
 
 export interface DrizzleSigningStoreOptions {
   readonly db: Database;
@@ -128,6 +130,35 @@ function readNotePayload(
   };
 }
 
+/**
+ * An AFE (HU-E7-03): the receiver is the issuer (D206 = D101, 1317), B2C and without location, so
+ * the draft is built here and only the seller, the place and the constancia come from the payload.
+ */
+function readSelfInvoicePayload(
+  payload: unknown,
+  issuer: FiscalProfile,
+): ReturnType<typeof readPayload> & { selfInvoice: InvoiceXmlContext['selfInvoice'] } {
+  const base = parseCreateSelfInvoice(payload);
+  if (!base.ok) throw new SigningDataIncompleteError(base.errors.map((e) => e.field));
+  const detail = xmlDetailSchema.safeParse(payload);
+  if (!detail.success) {
+    throw new SigningDataIncompleteError(detail.error.issues.map((i) => pathOf(i.path)));
+  }
+  const { seller, place, certificate, items, roundingPyg } = toSelfInvoiceDraft(base.value);
+  return {
+    draft: {
+      receiver: { kind: 'named', isPublicEntity: false },
+      operationType: 'B2C',
+      location: {},
+      items,
+      roundingPyg,
+    },
+    receiver: { ruc: formatRuc(issuer.ruc), name: issuer.legalName },
+    items: detail.data.items,
+    selfInvoice: { seller, place, certificate },
+  };
+}
+
 const first = <T>(rows: T[]): T | undefined => rows.at(0);
 
 /** The XML data of an FE, or of an NCE or NDE together with the FE row it is associated to. */
@@ -135,8 +166,16 @@ async function readDocument(
   tx: TenantTx,
   tenantId: string,
   document: typeof documents.$inferSelect,
-): Promise<ReturnType<typeof readPayload> & { note?: NoteData; noteKind?: 'credit' | 'debit' }> {
+  issuer: FiscalProfile,
+): Promise<
+  ReturnType<typeof readPayload> & {
+    note?: NoteData;
+    noteKind?: 'credit' | 'debit';
+    selfInvoice?: InvoiceXmlContext['selfInvoice'];
+  }
+> {
   if (document.documentType === 1) return readPayload(document.payload);
+  if (document.documentType === 4) return readSelfInvoicePayload(document.payload, issuer);
   // Explicit: a type added later must not fall into the credit note branch.
   if (document.documentType !== 5 && document.documentType !== 6) {
     throw new DocumentTypeNotSignableError(document.documentType);
@@ -191,8 +230,8 @@ export function createDrizzleSigningStore({
           if (document.status !== 'accepted') {
             return { documentId: document.id, status: document.status };
           }
-          // Only an FE (1), an NCE (5) and an NDE (6) have an XML builder; any other type is held.
-          if (![1, 5, 6].includes(document.documentType)) {
+          // Only an FE (1), an AFE (4), an NCE (5) and an NDE (6) have an XML builder; any other type is held.
+          if (![1, 4, 5, 6].includes(document.documentType)) {
             throw new DocumentTypeNotSignableError(document.documentType);
           }
           const tenant = first(
@@ -252,8 +291,6 @@ export function createDrizzleSigningStore({
             throw new EstablishmentContactMissingError(establishment.code);
           }
 
-          const readable = await readDocument(tx, tenantId, document);
-          const { draft, receiver, items } = readable;
           const issuer = createFiscalProfile({
             ruc: createRuc(profile.rucBase, profile.rucDv),
             legalName: profile.legalName,
@@ -265,6 +302,8 @@ export function createDrizzleSigningStore({
               description: a.description,
             })),
           });
+          const readable = await readDocument(tx, tenantId, document, issuer);
+          const { draft, receiver, items } = readable;
           return {
             documentId: document.id,
             cdc: document.cdc,
@@ -312,6 +351,7 @@ export function createDrizzleSigningStore({
               },
               issuedAt: document.issuedAt,
               ...(receiver === undefined ? {} : { receiver }),
+              ...(readable.selfInvoice === undefined ? {} : { selfInvoice: readable.selfInvoice }),
               ...(readable.note === undefined
                 ? {}
                 : readable.noteKind === 'debit'

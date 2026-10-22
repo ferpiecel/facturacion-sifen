@@ -11,6 +11,9 @@ import {
   createWebhookDeliveryQueue,
   createWebhookDeliveryWorker,
   createWebhookScheduleStore,
+  createDocumentEmailQueue,
+  createDocumentEmailScheduleStore,
+  createDocumentEmailWorker,
 } from './queue.js';
 import { startTransmissionWorker } from './start-transmission-worker.js';
 import { createRedisTenantRunLock } from './tenant-run-lock.js';
@@ -157,6 +160,32 @@ describe.skipIf(!REDIS_URL)('BullMQ transmission queue (real Redis)', () => {
     cleanup.push(() => worker.close());
 
     await createWebhookScheduleStore(queue).upsert('t1', 100);
+    await until(() => seen.length >= 2);
+
+    expect(new Set(seen)).toEqual(new Set(['t1']));
+  });
+
+  /** Spec: HU-E11-02. The `document-email` queue is its own and delivers one repeatable job per tenant. */
+  it('keeps one document email schedule per tenant and runs its job with the tenant id', async () => {
+    const { prefix, connection } = open();
+    const queue = createDocumentEmailQueue(connection, { error: () => undefined }, prefix);
+    cleanup.push(() => queue.close());
+    const store = createDocumentEmailScheduleStore(queue);
+    const seen: string[] = [];
+    const worker = createDocumentEmailWorker({
+      connection,
+      prefix,
+      concurrency: 1,
+      process: (data) => {
+        seen.push(data.tenantId);
+        return Promise.resolve();
+      },
+    });
+    cleanup.push(() => worker.close());
+
+    await store.upsert('t1', 100);
+    await store.upsert('t1', 100); // idempotent: still one
+    expect(await store.list()).toEqual(['t1']);
     await until(() => seen.length >= 2);
 
     expect(new Set(seen)).toEqual(new Set(['t1']));

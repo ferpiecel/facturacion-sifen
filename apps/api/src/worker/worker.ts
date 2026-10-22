@@ -10,6 +10,9 @@ import {
 } from '../modules/emission/infrastructure/signing-sources.js';
 import {
   createDeadlineWatchQueue,
+  createDocumentEmailQueue,
+  createDocumentEmailScheduleStore,
+  createDocumentEmailWorker,
   createDeadlineWatchScheduleStore,
   createDeadlineWatchWorker,
   createRedisConnection,
@@ -31,6 +34,12 @@ import { startTransmissionWorker } from './start-transmission-worker.js';
 import { createTenantCycleFactory } from './tenant-cycle-factory.js';
 import { TransmissionCycleProcessor, type WorkerLogger } from './transmission-cycle-processor.js';
 import { createDeadlineWatchProcessor } from './deadline-watch.processor.js';
+import { createDocumentEmailProcessor } from './document-email.processor.js';
+import { createSmtpDocumentMailer } from '../modules/email/infrastructure/adapters/smtp-document-mailer.js';
+import { loadEmailConfig } from '../modules/email/infrastructure/email-config.js';
+import { createGetKude } from '../modules/emission/application/get-kude.js';
+import { createDrizzleDocumentReader } from '../modules/emission/infrastructure/drizzle-document-reader.js';
+import { PdfkitKudeRenderer } from '../modules/emission/infrastructure/kude/pdfkit-kude-renderer.js';
 import {
   createWebhookDeliveryDeps,
   createWebhookDeliveryProcessor,
@@ -45,6 +54,7 @@ import { loadWorkerConfig, WorkerConfigError } from './worker-config.js';
 
 const RECONCILE_EVERY_MS = 5 * 60_000;
 const WEBHOOK_DELIVERY_EVERY_MS = 30_000;
+const DOCUMENT_EMAIL_EVERY_MS = 30_000;
 
 const logger: WorkerLogger = {
   info: (message) => {
@@ -66,6 +76,9 @@ function required(env: NodeJS.ProcessEnv, name: string): string {
 
 async function main(env: NodeJS.ProcessEnv): Promise<void> {
   const config = loadWorkerConfig(env);
+  // Fails closed at startup (HU-E11-02): production without SMTP settings and without an explicit
+  // EMAIL_ENABLED=false never starts.
+  const emailConfig = loadEmailConfig(env);
   const baseGateway = createWorkerGateway(env);
   // One circuit breaker per SIFEN endpoint, shared by every tenant (HU-E6-08).
   const { gateway, sendPausedUntil } = withCircuitBreaker(baseGateway, { logger });
@@ -79,6 +92,7 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
   const queue = createTransmissionQueue(connection, logger);
   const webhookQueue = createWebhookDeliveryQueue(connection, logger);
   const deadlineQueue = createDeadlineWatchQueue(connection, logger);
+  const emailQueue = emailConfig.enabled ? createDocumentEmailQueue(connection, logger) : undefined;
 
   const certificateCache = new CachedCertificateVault(
     createCertificateVault(env, readBoundedFile),
@@ -118,6 +132,22 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
   // The deadline watch only reads documents and writes the outbox (HU-E6-07): no run lock, no SIFEN.
   const processDeadlineWatch = createDeadlineWatchProcessor({ db: appHandle.db });
 
+  // Document emails (HU-E11-02) only read approved documents and talk to SMTP: no run lock, no SIFEN.
+  let processEmails: ReturnType<typeof createDocumentEmailProcessor> | undefined;
+  if (emailConfig.enabled) {
+    const reader = createDrizzleDocumentReader(appHandle.db);
+    const renderer = new PdfkitKudeRenderer();
+    const kude = createGetKude({ reader, renderer });
+    processEmails = createDocumentEmailProcessor({
+      db: appHandle.db,
+      mailer: createSmtpDocumentMailer(emailConfig),
+      getKude: (tenantId, documentId) => kude(tenantId, documentId),
+      reader,
+    });
+  } else {
+    logger.info('document emails are disabled (EMAIL_ENABLED=false or no SMTP_HOST)');
+  }
+
   const running = await startTransmissionWorker({
     cycleIntervalMs: config.cycleIntervalMs,
     reconcileEveryMs: RECONCILE_EVERY_MS,
@@ -153,6 +183,22 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
           logger,
         }),
     },
+    ...(emailQueue && processEmails
+      ? {
+          emails: {
+            everyMs: DOCUMENT_EMAIL_EVERY_MS,
+            schedules: createDocumentEmailScheduleStore(emailQueue),
+            createWorker: () =>
+              createDocumentEmailWorker({
+                connection,
+                // One SMTP account: a single send pass at a time per worker process.
+                concurrency: 1,
+                process: (data) => processEmails({ data }),
+                logger,
+              }),
+          },
+        }
+      : {}),
     logger,
   });
   logger.info(`transmission worker started (cycle every ${String(config.cycleIntervalMs)} ms)`);
@@ -171,7 +217,13 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
           certificateCache.clear();
           return Promise.resolve();
         },
-        () => Promise.all([queue.close(), webhookQueue.close(), deadlineQueue.close()]),
+        () =>
+          Promise.all([
+            queue.close(),
+            webhookQueue.close(),
+            deadlineQueue.close(),
+            emailQueue?.close(),
+          ]),
         () => connection.quit(),
         () => Promise.all([appHandle.close(), platformHandle.close()]),
       ];

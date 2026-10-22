@@ -217,7 +217,13 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
           certificateCache.clear();
           return Promise.resolve();
         },
-        () => Promise.all([queue, webhookQueue, deadlineQueue, emailQueue].map((q) => q?.close())),
+        () =>
+          Promise.all([
+            queue.close(),
+            webhookQueue.close(),
+            deadlineQueue.close(),
+            emailQueue?.close(),
+          ]),
         () => connection.quit(),
         () => Promise.all([appHandle.close(), platformHandle.close()]),
       ];

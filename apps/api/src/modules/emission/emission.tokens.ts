@@ -11,3 +11,5 @@ export const GET_KUDE = Symbol('GetKude');
 export const ACCEPT_CREDIT_NOTE = Symbol('AcceptCreditNote');
 /** Injection token for the `acceptDebitNote` application function (NDE). */
 export const ACCEPT_DEBIT_NOTE = Symbol('AcceptDebitNote');
+/** Injection token for the `acceptSelfInvoice` application function (AFE). */
+export const ACCEPT_SELF_INVOICE = Symbol('AcceptSelfInvoice');

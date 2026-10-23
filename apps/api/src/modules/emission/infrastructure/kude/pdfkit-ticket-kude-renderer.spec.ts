@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FacturaPocInput } from '@sifen/sifen-gateway';
-import { signedInvoiceWithQr } from '../../../../../test/support/signed-invoice.js';
+import { selfInvoice, signedInvoiceWithQr } from '../../../../../test/support/signed-invoice.js';
 import { readKudeInvoice } from '../../application/kude-reader.js';
 import type { KudeInvoice, KudeItem } from '../../domain/kude-model.js';
 import {
@@ -197,6 +197,25 @@ describe('PdfkitTicketKudeRenderer, debit note', () => {
       expect(text).toContain(expected);
     }
     expect(text).not.toContain('Crédito');
+  });
+});
+
+describe('PdfkitTicketKudeRenderer, self-invoice', () => {
+  it('prints the AFE title, seller and constancia', async () => {
+    const xml = await signedInvoiceWithQr(selfInvoice);
+    const text = await pdfText(
+      await new PdfkitTicketKudeRenderer().render(readKudeInvoice(xml), 'ticket-80'),
+    );
+    for (const expected of [
+      'KuDE de Autofactura Electrónica',
+      'Autofactura Electrónica',
+      'Juan Perez',
+      '1234567',
+      '12345678901',
+    ]) {
+      expect(text).toContain(expected);
+    }
+    expect(text).not.toContain('KuDE de Factura Electrónica');
   });
 });
 

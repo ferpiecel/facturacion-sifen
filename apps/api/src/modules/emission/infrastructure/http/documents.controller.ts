@@ -14,7 +14,14 @@ import type {
   createAcceptCreditNote,
   createAcceptDebitNote,
 } from '../../application/accept-credit-note.js';
-import { ACCEPT_CREDIT_NOTE, ACCEPT_DEBIT_NOTE, ACCEPT_INVOICE } from '../../emission.tokens.js';
+import type { createAcceptSelfInvoice } from '../../application/accept-standalone.js';
+import {
+  ACCEPT_CREDIT_NOTE,
+  ACCEPT_DEBIT_NOTE,
+  ACCEPT_INVOICE,
+  ACCEPT_SELF_INVOICE,
+} from '../../emission.tokens.js';
+import { toSelfInvoiceDraft } from './self-invoice.request.js';
 import { toAcceptInvoiceInput } from './create-document.request.js';
 import { parseDocumentRequest, toCreditNoteDraft } from './credit-note.request.js';
 import { parseIdempotencyKey } from './idempotency-key.js';
@@ -30,6 +37,8 @@ export class DocumentsController {
     private readonly acceptCreditNote: ReturnType<typeof createAcceptCreditNote>,
     @Inject(ACCEPT_DEBIT_NOTE)
     private readonly acceptDebitNote: ReturnType<typeof createAcceptDebitNote>,
+    @Inject(ACCEPT_SELF_INVOICE)
+    private readonly acceptSelfInvoice: ReturnType<typeof createAcceptSelfInvoice>,
     private readonly cls: ClsService<TenancyClsStore & IdentityClsStore>,
   ) {}
 
@@ -58,12 +67,19 @@ export class DocumentsController {
       const accepted =
         parsed.type === 'FE'
           ? await this.acceptInvoice(toAcceptInvoiceInput(parsed.value, context))
-          : await (parsed.type === 'NCE' ? this.acceptCreditNote : this.acceptDebitNote)({
-              ...context,
-              establishmentCode: parsed.value.establishment,
-              expeditionPointCode: parsed.value.expeditionPoint,
-              draft: toCreditNoteDraft(parsed.value),
-            });
+          : parsed.type === 'AFE'
+            ? await this.acceptSelfInvoice({
+                ...context,
+                establishmentCode: parsed.value.establishment,
+                expeditionPointCode: parsed.value.expeditionPoint,
+                draft: toSelfInvoiceDraft(parsed.value),
+              })
+            : await (parsed.type === 'NCE' ? this.acceptCreditNote : this.acceptDebitNote)({
+                ...context,
+                establishmentCode: parsed.value.establishment,
+                expeditionPointCode: parsed.value.expeditionPoint,
+                draft: toCreditNoteDraft(parsed.value),
+              });
       return { document_id: accepted.documentId, cdc: accepted.cdc };
     } catch (error) {
       throw toHttpException(error) ?? error;

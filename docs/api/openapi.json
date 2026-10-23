@@ -12,8 +12,8 @@
         "tags": [
           "Documents"
         ],
-        "summary": "Accept an invoice (FE), a credit note (NCE) or a debit note (NDE) for emission",
-        "description": "The body is an FE unless `type` is `NCE` (credit note) or `NDE` (debit note), both associated to an approved FE whose receiver they take. A credit note answers 422 with the rule of the failed check (for example `credit-note-sum-exceeds-invoice`, 2417) before any number is used. Returns 202 once the document is persisted with its CDC; signing and transmission to SIFEN are asynchronous. Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.",
+        "summary": "Accept an invoice (FE), a credit note (NCE), a debit note (NDE) or a self-invoice (AFE) for emission",
+        "description": "The body is an FE unless `type` is `NCE` (credit note) or `NDE` (debit note), both associated to an approved FE whose receiver they take, or `AFE` (self-invoice: the issuer buys from a seller who is not a contribuyente; the receiver is the issuer, there is no VAT and the seller constancia is mandatory). A credit note answers 422 with the rule of the failed check (for example `credit-note-sum-exceeds-invoice`, 2417) before any number is used. Returns 202 once the document is persisted with its CDC; signing and transmission to SIFEN are asynchronous. Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.",
         "security": [
           {
             "apiKey": []
@@ -48,6 +48,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/CreateDebitNoteRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CreateSelfInvoiceRequest"
                   }
                 ]
               }
@@ -538,7 +541,7 @@
         "tags": [
           "Documents"
         ],
-        "summary": "Download the KuDE (PDF) of an FE, an NCE or an NDE, available once the document is signed",
+        "summary": "Download the KuDE (PDF) of an FE, an AFE, an NCE or an NDE, available once the document is signed",
         "security": [
           {
             "apiKey": []
@@ -1712,6 +1715,188 @@
           "expeditionPoint",
           "associatedCdc",
           "reasonCode",
+          "items"
+        ]
+      },
+      "CreateSelfInvoiceRequest": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "AFE"
+          },
+          "establishment": {
+            "type": "string",
+            "pattern": "^\\d{3}$"
+          },
+          "expeditionPoint": {
+            "type": "string",
+            "pattern": "^\\d{3}$"
+          },
+          "seller": {
+            "type": "object",
+            "properties": {
+              "nature": {
+                "type": "number"
+              },
+              "idType": {
+                "type": "number"
+              },
+              "idNumber": {
+                "type": "string",
+                "pattern": "^[0-9A-Za-z-]{1,20}$"
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 60
+              },
+              "address": {
+                "type": "string",
+                "maxLength": 255
+              },
+              "houseNumber": {
+                "type": "string",
+                "pattern": "^\\d{1,6}$"
+              },
+              "departmentCode": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "districtCode": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9999
+              },
+              "cityCode": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 99999
+              }
+            },
+            "required": [
+              "nature",
+              "idType",
+              "idNumber",
+              "name",
+              "address",
+              "houseNumber",
+              "departmentCode",
+              "districtCode",
+              "cityCode"
+            ]
+          },
+          "place": {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string",
+                "maxLength": 255
+              },
+              "houseNumber": {
+                "type": "string",
+                "pattern": "^\\d{1,6}$"
+              },
+              "departmentCode": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "districtCode": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9999
+              },
+              "cityCode": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 99999
+              }
+            },
+            "required": [
+              "address",
+              "houseNumber",
+              "departmentCode",
+              "districtCode",
+              "cityCode"
+            ]
+          },
+          "certificate": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "number"
+              },
+              "number": {
+                "type": "string"
+              },
+              "control": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "number",
+              "control"
+            ]
+          },
+          "items": {
+            "maxItems": 999,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "maxLength": 50
+                },
+                "description": {
+                  "type": "string",
+                  "maxLength": 2000
+                },
+                "unitCode": {
+                  "type": "number"
+                },
+                "quantity": {
+                  "type": "number"
+                },
+                "unitPrice": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "code",
+                "description",
+                "unitCode",
+                "quantity",
+                "unitPrice"
+              ]
+            }
+          },
+          "roundingPyg": {
+            "default": 0,
+            "type": "number"
+          },
+          "currency": {
+            "default": "PYG",
+            "type": "string",
+            "const": "PYG"
+          },
+          "receiver": {
+            "not": {}
+          },
+          "operationType": {
+            "not": {}
+          }
+        },
+        "required": [
+          "type",
+          "establishment",
+          "expeditionPoint",
+          "seller",
+          "place",
+          "certificate",
           "items"
         ]
       },

@@ -23,6 +23,7 @@ import {
   type ValidationConfig,
 } from '../domain/invoice-draft.js';
 import { invoiceTotals, lineTotal, parseAmount } from '../domain/invoice-totals.js';
+import type { SelfInvoiceDraft } from '../domain/self-invoice-draft.js';
 
 /** The draft, the XSD check or the XML post-processing cannot produce a valid document. */
 export class InvoiceXmlError extends Error {
@@ -73,11 +74,49 @@ export interface InvoiceXmlContext {
   creditNote?: { associatedCdc: string; reasonCode: number };
   /** Present when the document is an NDE (iTiDE 6, HU-E7-02): same shape and rules as `creditNote`. */
   debitNote?: { associatedCdc: string; reasonCode: number };
+  /**
+   * Present when the document is an AFE (iTiDE 4, HU-E7-03): the seller, the place of the
+   * transaction and the constancia. The receiver is the issuer, passed as `receiver`.
+   */
+  selfInvoice?: Pick<SelfInvoiceDraft, 'seller' | 'place' | 'certificate'>;
 }
 
-/** iTiDE of the document the context describes: 5 for an NCE, 6 for an NDE, 1 for an FE. */
-const documentTypeOf = (ctx: InvoiceXmlContext): 1 | 5 | 6 =>
-  ctx.creditNote ? 5 : ctx.debitNote ? 6 : 1;
+/** iTiDE of the document the context describes: 4 AFE, 5 NCE, 6 NDE, 1 FE. */
+const documentTypeOf = (ctx: InvoiceXmlContext): 1 | 4 | 5 | 6 =>
+  ctx.selfInvoice ? 4 : ctx.creditNote ? 5 : ctx.debitNote ? 6 : 1;
+
+/** E300 and H of an AFE for xmlgen: the seller, the place of the transaction and the constancia. */
+function selfInvoiceInput({
+  seller,
+  place,
+  certificate,
+}: NonNullable<InvoiceXmlContext['selfInvoice']>) {
+  return {
+    autoFactura: {
+      tipoVendedor: seller.nature,
+      documentoTipo: seller.idType,
+      documentoNumero: seller.idNumber,
+      nombre: seller.name,
+      direccion: seller.address,
+      numeroCasa: seller.houseNumber,
+      departamento: seller.departmentCode,
+      distrito: seller.districtCode,
+      ciudad: seller.cityCode,
+      ubicacion: {
+        lugar: place.address,
+        departamento: place.departmentCode,
+        distrito: place.districtCode,
+        ciudad: place.cityCode,
+      },
+    },
+    documentoAsociado: {
+      formato: 3,
+      constanciaTipo: certificate.type,
+      constanciaNumero: certificate.number,
+      constanciaControl: certificate.control,
+    },
+  };
+}
 
 /**
  * D213-D223 for xmlgen, only for what is informed. B2F (D202 = 4) never carries department or
@@ -321,13 +360,16 @@ export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext
               draft.operationType === 'B2F' ? undefined : departmentCode,
             ),
       // An NCE or NDE carries neither gCamFE nor gCamCond (E010, E600) but the reason and the association.
+      // An AFE has no gCamFE either, but its cash condition is mandatory (E600, 1503).
       ...(note
         ? {
             notaCreditoDebito: { motivo: note.reasonCode },
             documentoAsociado: { formato: 1, cdc: note.associatedCdc },
           }
         : {
-            factura: { presencia: 1 },
+            ...(ctx.selfInvoice
+              ? selfInvoiceInput(ctx.selfInvoice)
+              : { factura: { presencia: 1 } }),
             condicion: {
               tipo: 1,
               entregas: [{ tipo: 1, monto: net.toString(), moneda: 'PYG', cambio: 0 }],
@@ -418,7 +460,7 @@ function patchGeoGroup(
 }
 
 function geoExpectations(
-  suffix: 'Rec' | 'Emi',
+  suffix: 'Rec' | 'Emi' | 'Ven' | 'Prov',
   codes: { department?: number; district?: number; city?: number },
   catalog: GeoCatalog,
 ): GeoExpectation[] {
@@ -433,6 +475,29 @@ function geoExpectations(
     code,
     nameOf,
   }));
+}
+
+/** gCamAE: the seller's address (E310-E315, suffix Ven) and the place of the transaction (E317-E322, Prov). */
+function patchSelfInvoiceGeo(
+  xml: string,
+  { seller, place }: NonNullable<InvoiceXmlContext['selfInvoice']>,
+  catalog: GeoCatalog,
+  strict: boolean,
+): string {
+  const codes = (p: { departmentCode: number; districtCode: number; cityCode: number }) => ({
+    department: p.departmentCode,
+    district: p.districtCode,
+    city: p.cityCode,
+  });
+  return patchGeoGroup(
+    xml,
+    'gCamAE',
+    [
+      ...geoExpectations('Ven', codes(seller), catalog),
+      ...geoExpectations('Prov', codes(place), catalog),
+    ],
+    strict,
+  );
 }
 
 function applyCatalogGeography(
@@ -458,14 +523,17 @@ function applyCatalogGeography(
     ),
     strict,
   );
+  const withSeller = ctx.selfInvoice
+    ? patchSelfInvoiceGeo(issued, ctx.selfInvoice, catalog, strict)
+    : issued;
   const address = draft.receiver.kind === 'named' ? draft.receiver.address : undefined;
-  if (address === undefined) return issued;
+  if (address === undefined) return withSeller;
   // The district falls back to the city's, which is what xmlgen derives when it is not informed.
   const district =
     address.districtCode ??
     (address.cityCode === undefined ? undefined : catalog.city(address.cityCode)?.districtCode);
   return patchGeoGroup(
-    issued,
+    withSeller,
     'gDatRec',
     geoExpectations(
       'Rec',
@@ -547,7 +615,7 @@ export async function generateInvoiceXml(
   }
 
   const cdc = buildCdc({
-    documentType: ctx.creditNote ? '05' : ctx.debitNote ? '06' : '01',
+    documentType: String(documentTypeOf(ctx)).padStart(2, '0'),
     rucBase: ctx.issuer.ruc.base,
     rucDv: ctx.issuer.ruc.dv,
     establishment: ctx.establishment.code,

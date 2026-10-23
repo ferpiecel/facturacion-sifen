@@ -6,7 +6,7 @@ import {
   DocumentNotFoundError,
   EventKeyReusedError,
 } from '../../application/cancel-document.js';
-import { EventIdExhaustedError } from '../drizzle-cancellation-unit-of-work.js';
+import { EventIdExhaustedError } from '../drizzle-event-support.js';
 
 function problem(status: HttpStatus, message: string, errors?: object[]): HttpException {
   return new HttpException({ statusCode: status, message, ...(errors ? { errors } : {}) }, status);

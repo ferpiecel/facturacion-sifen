@@ -2,7 +2,6 @@ import { and, eq, ne, notInArray } from 'drizzle-orm';
 import {
   documents,
   issuerEvents,
-  nextRequestId,
   withTenantTransaction,
   type Database,
   type TenantTx,
@@ -13,29 +12,7 @@ import {
   type CancellationUnit,
   type CancellationUnitOfWork,
 } from '../application/ports/cancellation-unit-of-work.port.js';
-
-const IDEMPOTENCY_INDEX = 'issuer_events_idempotency_idx';
-/** MT v150 GDE003: `rEve/@Id` has at most 10 digits. */
-const MAX_EVENT_ID = 9_999_999_999n;
-
-/** The tenant's `dId` counter passed the 10 digits an event id may have. */
-export class EventIdExhaustedError extends Error {
-  constructor() {
-    super('The tenant ran out of event ids');
-    this.name = 'EventIdExhaustedError';
-  }
-}
-
-/** First row of a result, typed as possibly missing. */
-function first<T>(rows: T[]): T | undefined {
-  return rows.at(0);
-}
-
-function isKeyCollision(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) return false;
-  const { constraint, cause } = error as { constraint?: unknown; cause?: unknown };
-  return constraint === IDEMPOTENCY_INDEX || isKeyCollision(cause);
-}
+import { first, isKeyCollision, takeEventId } from './drizzle-event-support.js';
 
 function createUnit(tx: TenantTx, tenantId: string): CancellationUnit {
   return {
@@ -101,8 +78,7 @@ function createUnit(tx: TenantTx, tenantId: string): CancellationUnit {
       return row ? { eventId: row.id } : null;
     },
     async insertCancellation(event) {
-      const eventId = await nextRequestId(tx, tenantId, event.environment);
-      if (eventId > MAX_EVENT_ID) throw new EventIdExhaustedError();
+      const eventId = await takeEventId(tx, tenantId, event.environment);
       try {
         const [row] = await tx
           .insert(issuerEvents)

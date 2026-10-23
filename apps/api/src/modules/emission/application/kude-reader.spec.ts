@@ -164,7 +164,7 @@ describe('readKudeInvoice', () => {
     const model = readKudeInvoice(await signedInvoiceWithQr(selfInvoice));
     expect(model).toMatchObject({
       operationCondition: 'Contado',
-      receiver: { kind: 'named', name: expect.stringContaining('DE generado') },
+      receiver: { kind: 'named', name: expect.stringContaining('DE generado') as string },
       selfInvoice: {
         seller: {
           name: 'Juan Perez',

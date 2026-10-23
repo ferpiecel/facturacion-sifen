@@ -57,6 +57,12 @@ export class DocumentsController {
     if (!parsed.ok) {
       throw validationProblem(parsed.errors);
     }
+    if (parsed.type === 'NRE') {
+      // Routing arrives with R4 (HU-E7-04); until then the body is parsed but not accepted.
+      throw validationProblem([
+        { field: 'type', rule: 'type-not-supported', message: 'The NRE is not available yet' },
+      ]);
+    }
     try {
       const context = {
         tenantId: this.cls.get(TENANT_ID_CLS_KEY),

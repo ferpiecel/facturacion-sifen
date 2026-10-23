@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import type { ValidationError } from '../../domain/invoice-draft.js';
 import type { CreditNoteDraft } from '../../domain/credit-note-draft.js';
+import { parseCreateRemission, type CreateRemissionBody } from './remission.request.js';
+import { parseCreateSelfInvoice, type CreateSelfInvoiceBody } from './self-invoice.request.js';
 import {
   code,
   itemsSchema,
@@ -75,11 +77,13 @@ export type ParsedDocumentRequest =
   | { ok: true; type: 'FE'; value: CreateDocumentBody }
   | { ok: true; type: 'NCE'; value: CreateCreditNoteBody }
   | { ok: true; type: 'NDE'; value: CreateDebitNoteBody }
+  | { ok: true; type: 'AFE'; value: CreateSelfInvoiceBody }
+  | { ok: true; type: 'NRE'; value: CreateRemissionBody }
   | { ok: false; errors: ValidationError[] };
 
 /**
  * Dispatches on the `type` discriminator (ADR-0019 D1): absent or `FE` is an invoice, exactly as
- * before; `NCE` is a credit note and `NDE` a debit note; anything else is a schema error on `type`.
+ * before; `NCE` is a credit note, `NDE` a debit note and `AFE` a self-invoice and `NRE` a remission note; anything else is a schema error on `type`.
  */
 export function parseDocumentRequest(body: unknown): ParsedDocumentRequest {
   const type =
@@ -94,10 +98,24 @@ export function parseDocumentRequest(body: unknown): ParsedDocumentRequest {
     const parsed = parseCreateDebitNote(body);
     return parsed.ok ? { ok: true, type: 'NDE', value: parsed.value } : parsed;
   }
+  if (type === 'AFE') {
+    const parsed = parseCreateSelfInvoice(body);
+    return parsed.ok ? { ok: true, type: 'AFE', value: parsed.value } : parsed;
+  }
+  if (type === 'NRE') {
+    const parsed = parseCreateRemission(body);
+    return parsed.ok ? { ok: true, type: 'NRE', value: parsed.value } : parsed;
+  }
   if (type !== undefined && type !== 'FE') {
     return {
       ok: false,
-      errors: [{ field: 'type', rule: 'schema', message: 'The type must be "FE", "NCE" or "NDE"' }],
+      errors: [
+        {
+          field: 'type',
+          rule: 'schema',
+          message: 'The type must be "FE", "NCE", "NDE", "AFE" or "NRE"',
+        },
+      ],
     };
   }
   const parsed = parseCreateDocument(body);

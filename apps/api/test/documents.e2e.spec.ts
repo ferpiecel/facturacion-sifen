@@ -149,7 +149,7 @@ describe('POST /v1/documents (e2e)', () => {
   });
 
   it('answers 422 for an unknown `type` without consuming a number', async () => {
-    const response = await post({ ...BODY, type: 'AFE' });
+    const response = await post({ ...BODY, type: 'XYZ' });
 
     expect(response.statusCode).toBe(422);
     expect(response.json<{ errors: Array<{ field: string }> }>().errors).toEqual([
@@ -529,6 +529,68 @@ describe('POST /v1/documents (e2e)', () => {
 
     expect(response.statusCode).toBe(409);
     expect(response.json<{ message: string }>().message).toMatch(/exhausted/i);
+  });
+
+  describe('self-invoices (HU-E7-03)', () => {
+    const place = {
+      address: 'Calle 1',
+      houseNumber: '10',
+      departmentCode: 11,
+      districtCode: 143,
+      cityCode: 3344,
+    };
+    const AFE = {
+      type: 'AFE',
+      establishment: '001',
+      expeditionPoint: '002',
+      seller: { nature: 1, idType: 1, idNumber: '1234567', name: 'Juan Perez', ...place },
+      place,
+      certificate: { type: 1, number: '12345678901', control: 'ABCD1234' },
+      items: [{ ...LINE, quantity: 2, unitPrice: 50_000 }],
+    };
+
+    it('accepts an AFE with 202, a 04 CDC and its own number sequence', async () => {
+      const response = await post(AFE);
+
+      expect(response.statusCode).toBe(202);
+      const { document_id: id, cdc } = response.json<{ document_id: string; cdc: string }>();
+      expect(cdc).toMatch(/^04\d{42}$/);
+      const [row] = await handle.db.select().from(documents).where(eq(documents.id, id));
+      expect(row).toMatchObject({
+        documentType: 4,
+        number: 1,
+        associatedCdc: null,
+        status: 'accepted',
+      });
+    });
+
+    it('answers 422 naming the field of the rule that failed, burning no number', async () => {
+      const response = await post({
+        ...AFE,
+        certificate: { type: 1, number: '123', control: 'ABCD1234' },
+      });
+
+      expect(response.statusCode).toBe(422);
+      expect(response.json<{ errors: Array<{ rule: string }> }>().errors).toEqual([
+        expect.objectContaining({ rule: 'self-invoice-certificate-number' }),
+      ]);
+      expect(
+        (await handle.db.select().from(documents)).filter((d) => d.documentType === 4),
+      ).toEqual([]);
+    });
+
+    it('rejects a receiver in the body (it is the issuer) with 422', async () => {
+      const response = await post({ ...AFE, receiver: { kind: 'unnamed' } });
+      expect(response.statusCode).toBe(422);
+    });
+
+    it('replays an AFE with the same Idempotency-Key and refuses another body with 409', async () => {
+      const first = await post(AFE, bearer, 'afe-key');
+      const again = await post(AFE, bearer, 'afe-key');
+      expect(again.json()).toEqual(first.json());
+      const other = { ...AFE, items: [{ ...LINE, quantity: 3, unitPrice: 50_000 }] };
+      expect((await post(other, bearer, 'afe-key')).statusCode).toBe(409);
+    });
   });
 
   describe('Idempotency-Key (HU-E5-02)', () => {

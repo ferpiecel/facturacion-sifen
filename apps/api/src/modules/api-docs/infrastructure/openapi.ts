@@ -5,6 +5,7 @@ import {
   createCreditNoteSchema,
   createDebitNoteSchema,
 } from '../../emission/infrastructure/http/credit-note.request.js';
+import { createSelfInvoiceSchema } from '../../emission/infrastructure/http/self-invoice.request.js';
 import { WEBHOOK_EVENT_TYPES } from '../../webhooks/domain/webhook-event.js';
 
 /**
@@ -90,9 +91,10 @@ export function buildOpenApiDocument() {
         post: {
           operationId: 'createDocument',
           tags: ['Documents'],
-          summary: 'Accept an invoice (FE), a credit note (NCE) or a debit note (NDE) for emission',
+          summary:
+            'Accept an invoice (FE), a credit note (NCE), a debit note (NDE) or a self-invoice (AFE) for emission',
           description:
-            'The body is an FE unless `type` is `NCE` (credit note) or `NDE` (debit note), both associated to an approved FE whose receiver they take. ' +
+            'The body is an FE unless `type` is `NCE` (credit note) or `NDE` (debit note), both associated to an approved FE whose receiver they take, or `AFE` (self-invoice: the issuer buys from a seller who is not a contribuyente; the receiver is the issuer, there is no VAT and the seller constancia is mandatory). ' +
             'A credit note answers 422 with the rule of the failed check (for example `credit-note-sum-exceeds-invoice`, 2417) before any number is used. ' +
             'Returns 202 once the document is persisted with its CDC; signing and transmission to SIFEN are asynchronous. ' +
             'Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.',
@@ -115,6 +117,7 @@ export function buildOpenApiDocument() {
                     ref('CreateDocumentRequest'),
                     ref('CreateCreditNoteRequest'),
                     ref('CreateDebitNoteRequest'),
+                    ref('CreateSelfInvoiceRequest'),
                   ],
                 },
               },
@@ -216,7 +219,7 @@ export function buildOpenApiDocument() {
           operationId: 'downloadKude',
           tags: ['Documents'],
           summary:
-            'Download the KuDE (PDF) of an FE, an NCE or an NDE, available once the document is signed',
+            'Download the KuDE (PDF) of an FE, an AFE, an NCE or an NDE, available once the document is signed',
           ...secured(['documents:read']),
           description:
             'Paper layout by `format`: `letter` (A4, default), `ticket-80` or `ticket-58` (paper roll of 80 or 58 mm, for thermal printers; MT v150 13.6).',
@@ -452,6 +455,10 @@ export function buildOpenApiDocument() {
           unrepresentable: 'any',
         }),
         CreateDebitNoteRequest: z.toJSONSchema(createDebitNoteSchema, {
+          io: 'input',
+          unrepresentable: 'any',
+        }),
+        CreateSelfInvoiceRequest: z.toJSONSchema(createSelfInvoiceSchema, {
           io: 'input',
           unrepresentable: 'any',
         }),

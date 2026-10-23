@@ -13,7 +13,7 @@ export class KudeSourceError extends Error {
   }
 }
 
-/** The signed document is of a type that has no KuDE layout yet (an AFE or an NRE). */
+/** The signed document is of a type that has no KuDE layout yet (an NRE). */
 export class KudeDocumentTypeUnsupportedError extends KudeSourceError {
   constructor(readonly documentTypeCode: string) {
     super(
@@ -81,8 +81,9 @@ function section(source: string, name: string): string {
   return match[1];
 }
 
-function readItem(block: string): KudeItem {
-  const rate = pyg(block, 'dTasaIVA');
+/** An AFE item carries no gCamIVA (E730, 1901): its rate is 0. */
+function readItem(block: string, vatOptional: boolean): KudeItem {
+  const rate = vatOptional ? pyg(block, 'dTasaIVA', 0) : pyg(block, 'dTasaIVA');
   if (rate !== 0 && rate !== 5 && rate !== 10)
     throw new KudeSourceError('dTasaIVA', `unsupported rate ${String(rate)}`);
   const quantity = Number(required(block, 'dCantProSer'));
@@ -106,10 +107,29 @@ function associatedCdc(group: string): string {
   return cdc;
 }
 
+/** gCamAE (E300) and the constancia of gCamDEAsoc (H014-H017) of an AFE. */
+function readSelfInvoice(xml: string): NonNullable<KudeInvoice['selfInvoice']> {
+  const seller = section(xml, 'gCamAE');
+  const associated = section(xml, 'gCamDEAsoc');
+  return {
+    seller: {
+      name: required(seller, 'dNomVen'),
+      idType: required(seller, 'dDTipIDVen'),
+      idNumber: required(seller, 'dNumIDVen'),
+      address: required(seller, 'dDirVen'),
+    },
+    place: required(seller, 'dDirProv'),
+    certificate: {
+      type: required(associated, 'dDesTipCons'),
+      number: required(associated, 'dNumCons'),
+    },
+  };
+}
+
 /**
  * Builds the KuDE model from the signed DE (with `dCarQR`). Nothing is recomputed: the VAT
  * liquidation and totals are the ones the XML carries (MT 13.2: the KuDE shows no data that
- * is not in the signed XML). FE and NCE; `options.stampValidTo` supplies C009, which the DE
+ * is not in the signed XML). FE, AFE, NCE and NDE; `options.stampValidTo` supplies C009, which the DE
  * v150 XSD does not carry.
  */
 export function readKudeInvoice(xml: string, options: { stampValidTo?: string } = {}): KudeInvoice {
@@ -117,10 +137,11 @@ export function readKudeInvoice(xml: string, options: { stampValidTo?: string } 
   if (!cdc) throw new KudeSourceError('CDC (DE/@Id)', 'is missing');
   const timbrado = section(xml, 'gTimb');
   const documentTypeCode = required(timbrado, 'iTiDE');
-  if (documentTypeCode !== '1' && documentTypeCode !== '5' && documentTypeCode !== '6') {
+  if (!['1', '4', '5', '6'].includes(documentTypeCode)) {
     throw new KudeDocumentTypeUnsupportedError(documentTypeCode);
   }
-  const isCreditNote = documentTypeCode !== '1'; // an NCE (5) or an NDE (6): same layout
+  const isCreditNote = documentTypeCode === '5' || documentTypeCode === '6'; // an NCE or an NDE: same layout
+  const isSelfInvoice = documentTypeCode === '4';
   const noteSlot = documentTypeCode === '6' ? 'debitNote' : 'creditNote';
   const qrUrl = required(section(xml, 'gCamFuFD'), 'dCarQR');
   const environment = qrUrl.startsWith(qrBaseUrl('production'))
@@ -145,7 +166,7 @@ export function readKudeInvoice(xml: string, options: { stampValidTo?: string } 
     ...xml.matchAll(
       new RegExp(`<${NAME}gCamItem(?:\\s[^>]*)?>([\\s\\S]*?)</${NAME}gCamItem>`, 'g'),
     ),
-  ].map((m) => readItem(m[1]));
+  ].map((m) => readItem(m[1], isSelfInvoice));
   if (items.length === 0) throw new KudeSourceError('gCamItem', 'at least one item is required');
 
   const rucRec = optional(receiverBlock, 'dRucRec');
@@ -201,6 +222,7 @@ export function readKudeInvoice(xml: string, options: { stampValidTo?: string } 
           },
         }
       : {}),
+    ...(isSelfInvoice ? { selfInvoice: readSelfInvoice(xml) } : {}),
     items,
     totals: {
       subtotalExempt: pyg(totals, 'dSubExe', 0) + pyg(totals, 'dSubExo', 0),

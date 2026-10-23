@@ -113,7 +113,28 @@ describe('parseDocumentRequest (the `type` discriminator)', () => {
     expect(parseDocumentRequest({ ...NCE, type: 'NDE' })).toMatchObject({ ok: true, type: 'NDE' });
   });
 
-  it.each(['AFE', 'nde', 6, null, ''])('rejects the unknown type %j', (type) => {
+  it('routes `type: AFE` to the self-invoice', () => {
+    const place = {
+      address: 'Calle 1',
+      houseNumber: '10',
+      departmentCode: 11,
+      districtCode: 143,
+      cityCode: 3344,
+    };
+    const AFE = {
+      type: 'AFE',
+      establishment: '001',
+      expeditionPoint: '001',
+      seller: { nature: 1, idType: 1, idNumber: '1234567', name: 'Juan Perez', ...place },
+      place,
+      certificate: { type: 1, number: '12345678901', control: 'ABCD1234' },
+      items: [{ code: 'A-1', description: 'Maíz', unitCode: 77, quantity: 2, unitPrice: 50000 }],
+    };
+    expect(parseDocumentRequest(AFE)).toMatchObject({ ok: true, type: 'AFE' });
+    expect(parseDocumentRequest({ ...AFE, seller: undefined })).toMatchObject({ ok: false });
+  });
+
+  it.each(['nre', 'nde', 6, null, ''])('rejects the unknown type %j', (type) => {
     expect(parseDocumentRequest({ ...FE, type })).toEqual({
       ok: false,
       errors: [expect.objectContaining({ field: 'type', rule: 'schema' })],

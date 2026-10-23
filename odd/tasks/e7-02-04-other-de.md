@@ -34,8 +34,8 @@ Issue an NDE (`iTiDE` 6), an AFE (4) and an NRE (7) through `POST /v1/documents`
 
 ### NRE (HU-E7-04)
 
-- [ ] R1 domain: `validateRemissionDraft` (motive E501, responsible E503, transport E9, items without prices)
-- [ ] R2 acceptance (type 7) and request contract (`type: "NRE"`)
+- [x] R1 domain: `validateRemissionDraft` (motive E501, responsible E503, transport E9, items without prices) 8d6b71c
+- [x] R2 acceptance (type 7) and request contract (`type: "NRE"`) 8d6b71c (acceptance), request commit on branch tip
 - [ ] R3 XML mapping (iTiDE 7: gCamNRE, gTransp, no gOpeCom/gTotSub/gValorItem/gCamIVA) and signing store dispatch
 - [ ] R4 routing, KuDE (letter and ticket), OpenAPI, guide, e2e
 
@@ -72,3 +72,11 @@ Library constraints (xmlgen 1.0.283, `facturacionelectronicapy-xmlgen`): it need
 - NRE: R1 to R4 not started. MT facts are in the table above; items carry code, description, unitCode, quantity only (no gValorItem, E715 optional); no totals; `dKmR` mandatory by NT 009 (xmlgen validation); xmlgen supports one delivery, one vehicle, one carrier.
 - Pending validations for the PRs: E306 alphanumeric vs xmlgen digits-only; E312/E319 district required by xmlgen; E304/2562 needs a Marangatu lookup; E715 mandatory (1805) vs optional (field table).
 - Do not edit a worktree while its `pnpm verify` push runs (untracked files break `format:check`).
+
+### NRE handoff 3 (R1 and R2 done, branch `feat/hu-e7-04-nre-domain`)
+
+- Done: `domain/remission-draft.ts` (tables, `validateRemissionDraft(draft, config, issuerRuc?)`, motive 7 rule 2606 only when `issuerRuc` is given), `createAcceptRemission` in `accept-standalone.ts` (new optional `StandaloneKind.validateWithIssuer`, runs inside the transaction before numbering), `infrastructure/http/remission.request.ts` (`parseCreateRemission`, `toRemissionDraft`, `placeFields` exported from `self-invoice.request.ts`), dispatcher `NRE` in `credit-note.request.ts`. Also fixed a failing AFE dispatcher test inherited from the AFE tip (`items: []` is not a schema error; it now removes `seller`).
+- NEXT R3 (new branch from this one, draft PR "Depende de #<this PR>"): add `remission?: { motive, responsible, km, invoiceDate?, transport }` to `InvoiceXmlContext` and `documentTypeOf` -> 7 in `invoice-xml.ts`. Store builds the xmlgen draft as receiver named, B2B, items `{ quantity, unitPrice: 0, vatRate: 0 }`, `location.departmentCode = receiver.departmentCode`. In `mapInvoiceToXmlInput` for type 7 emit `remision: { motivo, remisionesResponsables: responsible, kms: km, fechaFactura }`, `descripcion` (xmlgen REQUIRES it for type 7, dInfoFisc: use the motive text), `detalleTransporte` (`tipo`, `modalidad`, `tipoResponsable`, `inicioEstimadoTranslado`, `finEstimadoTranslado`, `salida`/`entrega` {direccion, numeroCasa, departamento, distrito, ciudad}, `vehiculo` {tipo, marca, documentoTipo, documentoNumero}, `transportista` {contribuyente, nombre, ruc | documentoTipo+documentoNumero, direccion, chofer {documentoNumero, nombre, direccion}}), and no `condicion`/`factura`. xmlgen emits no gValorItem/gTotSub/gCamIVA for type 7 by itself; verify against the XSD (`generateInvoiceXml`). Geo text: `patchGeoGroup` groups `gCamSal`/`gCamEnt` with suffixes `Sal`/`Ent` (extend `geoExpectations` suffix union). Signing store: `readRemissionPayload` like `readSelfInvoicePayload`, type 7 added to the signable list. Unresolved: xmlgen has fixed text for motive 99 ("Otro"), no custom text.
+- NEXT R4: controller route `NRE` (new `ACCEPT_REMISSION` token in `emission.tokens.ts` and `emission.module.ts`, `createAcceptRemission`), `KudeInvoice.remission` and `readKudeInvoice` for iTiDE 7 (title "KuDE de Nota de Remisión Electrónica"; no prices/totals), letter and ticket renderers; the two KuDE "no layout" tests that use iTiDE 7 must switch to another unsupported type; OpenAPI (`pnpm --filter @sifen/api openapi`), `docs/integracion/emision.md`, e2e in `apps/api/test/documents.e2e.spec.ts` and `documents-kude.e2e.spec.ts`.
+- Validaciones pendientes for the PR bodies: E715 read strictly (item price refused, 1851); E306/E312/E319 as for the AFE; motive 99 free text; carrier agent (E996-E997), several vehicles/deliveries, nationality not supported by the contract.
+- Rebase after the AFE chain lands: `git rebase --onto origin/main feat/hu-e7-03-afe-routing-kude`.

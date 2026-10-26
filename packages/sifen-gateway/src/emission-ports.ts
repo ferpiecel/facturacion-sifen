@@ -77,10 +77,56 @@ export interface VoidingEvent {
 /** Issuer events the platform sends to `siRecepEvento` (HU-E8-04). Nomination joins in HU-E8-05. */
 export type IssuerEvent = CancellationEvent | VoidingEvent;
 
+/** The tenant as the receiver of a DE/DTE: a taxpayer (`iTipRec` 1) whose RUC is `base-dv`. */
+export interface ReceiverParty {
+  readonly ruc: string;
+  readonly name: string;
+}
+
+/** Conformity of the receiver (MT 11.5, `rGeVeConf`); a partial one carries the estimated receipt date (GCO004). */
+export interface ConformityEvent {
+  readonly kind: 'conformity';
+  readonly cdc: string;
+  readonly conformityType: 'total' | 'partial';
+  /** `AAAA-MM-DDThh:mm:ss`. */
+  readonly estimatedReceiptAt?: string;
+}
+
+/** Disconformity (`rGeVeDisconf`; reason of 5 to 500 characters). */
+export interface DisconformityEvent {
+  readonly kind: 'disconformity';
+  readonly cdc: string;
+  readonly reason: string;
+}
+
+/** Unawareness of a DE/DTE (`rGeVeDescon`). Dates are `AAAA-MM-DDThh:mm:ss`, Asunción time. */
+export interface UnawarenessEvent {
+  readonly kind: 'unawareness';
+  readonly cdc: string;
+  readonly reason: string;
+  readonly issuedAt: string;
+  readonly receivedAt: string;
+  readonly receiver: ReceiverParty;
+}
+
+/** Receipt notice of a DE/DTE (`rGeVeNotRec`). */
+export interface ReceiptNoticeEvent {
+  readonly kind: 'receipt_notice';
+  readonly cdc: string;
+  readonly issuedAt: string;
+  readonly receivedAt: string;
+  readonly totalPyg: number;
+  readonly receiver: ReceiverParty;
+}
+
+/** Events the tenant sends as receiver (HU-E9-01). */
+export type ReceiverEvent =
+  ConformityEvent | DisconformityEvent | UnawarenessEvent | ReceiptNoticeEvent;
+
 export interface IssuerEventBuildInput {
   /** Our identifier of the event (`rEve/@Id`, 1 to 10 digits); SIFEN echoes it in its answer. */
   readonly eventId: number;
-  readonly event: IssuerEvent;
+  readonly event: IssuerEvent | ReceiverEvent;
   /** `dFecFirma`; the builder uses the current time when omitted. */
   readonly signedAt?: Date;
 }

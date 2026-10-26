@@ -3,7 +3,7 @@ import { eq, sql } from 'drizzle-orm';
 import type { DatabaseHandle } from '../src/client.js';
 import { issuerEvents } from '../src/schema.js';
 import { withTenantTransaction } from '../src/tenant-transaction.js';
-import { RANGE, SIGNED_XML, seedIssuerEvents } from './support/issuer-events-fixture.js';
+import { RANGE, SIGNED_XML, causeOf, seedIssuerEvents } from './support/issuer-events-fixture.js';
 
 /** Spec: HU-E8-04 (DB part, ADR-0020). Issuer events: one table, typed by `kind`, isolated per tenant. */
 describe('issuer_events', () => {
@@ -89,6 +89,48 @@ describe('issuer_events', () => {
       .where(eq(issuerEvents.id, first.id));
 
     await db.insert(issuerEvents).values(cancel({ eventId: 3n }));
+  });
+
+  describe('idempotency (HU-E8-02)', () => {
+    const key = { idempotencyKey: 'k1', requestHash: 'a'.repeat(64) };
+
+    it('stores the key and the hash of the request', async () => {
+      const { db, cancel } = await seed();
+      const [row] = await db
+        .insert(issuerEvents)
+        .values(cancel({ ...key }))
+        .returning();
+      expect(row.idempotencyKey).toBe('k1');
+      expect(row.requestHash).toBe('a'.repeat(64));
+    });
+
+    it('keeps the key unique per tenant, and reusable by another one', async () => {
+      const { db, a, b, cancel, voiding } = await seed();
+      await db.insert(issuerEvents).values(cancel({ ...key }));
+      expect(
+        await causeOf(db.insert(issuerEvents).values(voiding({ eventId: 9n, ...key }))),
+      ).toContain('issuer_events_idempotency_idx');
+      await db.insert(issuerEvents).values(voiding({ eventId: 9n, tenantId: b, ...key }));
+      expect(a).not.toBe(b);
+    });
+
+    it('takes the key and the hash together, or neither', async () => {
+      const { db, cancel } = await seed();
+      expect(
+        await causeOf(db.insert(issuerEvents).values(cancel({ idempotencyKey: 'k1' }))),
+      ).toContain('issuer_events_idempotency_pair');
+    });
+
+    it('never changes them afterwards', async () => {
+      const { db, cancel } = await seed();
+      await db.insert(issuerEvents).values(cancel({ ...key }));
+      expect(await causeOf(db.update(issuerEvents).set({ idempotencyKey: 'k2' }))).toContain(
+        'immutable',
+      );
+      expect(await causeOf(db.update(issuerEvents).set({ requestHash: 'b'.repeat(64) }))).toContain(
+        'immutable',
+      );
+    });
   });
 
   describe('the answer of SIFEN', () => {

@@ -6,13 +6,10 @@ import type { InvoiceDraft } from '../domain/invoice-draft.js';
 import type { RemissionDraft } from '../domain/remission-draft.js';
 import { generateInvoiceXml, mapInvoiceToXmlInput } from './invoice-xml.js';
 
+const geo = { houseNumber: '10', districtCode: 143, cityCode: 3344 };
 /** The draft the signing store builds for an NRE: the receiver is named, the items carry no price. */
 const draft: InvoiceDraft = {
-  receiver: {
-    kind: 'named',
-    isPublicEntity: false,
-    address: { street: 'Calle 1', houseNumber: '10', districtCode: 143, cityCode: 3344 },
-  },
+  receiver: { kind: 'named', isPublicEntity: false, address: { street: 'Calle 1', ...geo } },
   operationType: 'B2B',
   items: [{ quantity: 2, unitPrice: 0, vatRate: 0 }],
   roundingPyg: 0,
@@ -46,14 +43,7 @@ const remission = { motive: 1, responsible: 1, km: 120, invoiceDate: '2026-11-01
 const ctx = () => ({
   ...context('test'),
   remission,
-  receiver: {
-    ruc: '80000001-3',
-    name: 'Empresa Real SA',
-    address: 'Calle 1',
-    houseNumber: '10',
-    districtCode: 143,
-    cityCode: 3344,
-  },
+  receiver: { ruc: '80000001-3', name: 'Empresa Real SA', address: 'Calle 1', ...geo },
   lines: [context('test').lines[0]],
 });
 

@@ -407,6 +407,13 @@
       "when": 1792689094566,
       "tag": "0057_issuer_events_idempotency",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1793057022426,
+      "tag": "0060_certificate_expiring_event",
+      "breakpoints": true
     }
   ]
 }

@@ -29,6 +29,7 @@ describe('webhook event envelope (HU-E11-01)', () => {
       'document.transmission_deadline_warning',
       'document.notification.delivered',
       'document.notification.failed',
+      'certificate.expiring',
     ]);
   });
 

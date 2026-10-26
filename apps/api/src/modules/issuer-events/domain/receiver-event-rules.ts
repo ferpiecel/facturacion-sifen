@@ -184,3 +184,129 @@ export function parseReceiverEventRequest(raw: unknown): ParsedReceiverEvent {
   }
   return issues.length > 0 || !value ? { ok: false, issues } : { ok: true, value };
 }
+
+/** A receiver event of the same CDC that SIFEN has not refused. Only the events registered through the platform. */
+export interface PriorReceiverEvent {
+  readonly kind: ReceiverEventKind;
+  readonly conformityType?: ConformityType | undefined;
+  readonly registeredAt: Date;
+}
+
+export type ReceiverEventRefusal =
+  | { rule: 'receiver-event-already-registered'; sifenCode: string; message: string }
+  | { rule: 'receiver-event-incongruent'; sifenCode: string; message: string }
+  | { rule: 'receiver-event-needs-correction'; message: string }
+  | { rule: 'receiver-event-window-expired'; sifenCode: string; message: string; deadline: Date };
+
+const EXPIRED_CODE: Record<ReceiverEventKind, { de: string; dte: string }> = {
+  conformity: { de: '4157', dte: '4157' },
+  disconformity: { de: '4206', dte: '4206' },
+  unawareness: { de: '4253', dte: '4263' },
+  receipt_notice: { de: '4103', dte: '4114' },
+};
+
+const DAY_MS = 86_400_000;
+
+/** The last instant at which the platform lets the event be registered: window days after the start, minus the margin. */
+export function receiverEventDeadline(
+  request: Pick<ReceiverEventRequest, 'issuedAt' | 'approvedAt'>,
+  config: ReceiverEventConfig,
+): Date {
+  // A DTE counts from SIFEN's approval; a DE (or an unknown approval) from the issue date, which is never later.
+  const start = request.approvedAt ?? wallClockToDate(request.issuedAt) ?? new Date(NaN);
+  return new Date(
+    start.getTime() + config.windowDays * DAY_MS - config.safetyMarginMinutes * 60_000,
+  );
+}
+
+const OPPOSITE: Partial<Record<ReceiverEventKind, ReceiverEventKind[]>> = {
+  conformity: ['disconformity', 'unawareness'],
+  disconformity: ['conformity', 'unawareness'],
+  unawareness: ['conformity', 'disconformity'],
+};
+const CONCLUSIVE: ReceiverEventKind[] = ['conformity', 'disconformity', 'unawareness'];
+
+function compatibility(
+  request: ReceiverEventRequest,
+  history: readonly PriorReceiverEvent[],
+): ReceiverEventRefusal | null {
+  const has = (kind: ReceiverEventKind) => history.some((e) => e.kind === kind);
+  const conformities = history.filter((e) => e.kind === 'conformity');
+  const already = (sifenCode: string, message: string): ReceiverEventRefusal => ({
+    rule: 'receiver-event-already-registered',
+    sifenCode,
+    message,
+  });
+  const incongruent = (sifenCode: string, message: string): ReceiverEventRefusal => ({
+    rule: 'receiver-event-incongruent',
+    sifenCode,
+    message,
+  });
+  switch (request.kind) {
+    case 'receipt_notice':
+      if (has('receipt_notice')) return already('4101', 'The CDC already has a receipt notice.');
+      if (has('unawareness'))
+        return incongruent('4113', 'A receipt notice cannot follow an unawareness.');
+      if (request.approvedAt && (has('conformity') || has('disconformity'))) {
+        return incongruent(
+          '4113',
+          'A DTE receipt notice cannot follow a conformity or disconformity.',
+        );
+      }
+      return null;
+    case 'conformity':
+      if (has('unawareness'))
+        return incongruent('4156', 'A conformity cannot follow an unawareness.');
+      // Up to two: partial first, then total.
+      if (
+        conformities.some((e) => e.conformityType === 'total') ||
+        (request.conformityType === 'partial' && conformities.length > 0)
+      ) {
+        return already('4150', 'The CDC already has its conformity events.');
+      }
+      return null;
+    case 'disconformity':
+      if (has('unawareness'))
+        return incongruent('4205', 'A disconformity cannot follow an unawareness.');
+      if (has('disconformity')) return already('4200', 'The CDC already has a disconformity.');
+      return null;
+    case 'unawareness':
+      if (has('unawareness')) return already('4251', 'The CDC already has an unawareness.');
+      return null;
+  }
+}
+
+/**
+ * The first rule the event breaks at `at`, or null when it may be registered. An event opposite to the
+ * last conformity, disconformity or unawareness is a CORRECTION (MT Tabla K, HU-E9-02) and is refused here.
+ */
+export function validateReceiverEvent(
+  request: ReceiverEventRequest,
+  history: readonly PriorReceiverEvent[],
+  at: Date,
+  config: ReceiverEventConfig = DEFAULT_RECEIVER_EVENT_CONFIG,
+): ReceiverEventRefusal | null {
+  const refusal = compatibility(request, history);
+  if (refusal) return refusal;
+  const last = history
+    .filter((e) => CONCLUSIVE.includes(e.kind))
+    .sort((a, b) => b.registeredAt.getTime() - a.registeredAt.getTime())
+    .at(0);
+  if (last && OPPOSITE[last.kind]?.includes(request.kind)) {
+    return {
+      rule: 'receiver-event-needs-correction',
+      message: 'This event contradicts the last one registered: register it as a correction.',
+    };
+  }
+  const deadline = receiverEventDeadline(request, config);
+  if (at.getTime() > deadline.getTime()) {
+    const codes = EXPIRED_CODE[request.kind];
+    return {
+      rule: 'receiver-event-window-expired',
+      sifenCode: request.approvedAt ? codes.dte : codes.de,
+      message: 'The deadline to register this event has expired.',
+      deadline,
+    };
+  }
+  return null;
+}

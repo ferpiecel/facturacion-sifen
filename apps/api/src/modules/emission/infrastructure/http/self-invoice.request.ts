@@ -19,7 +19,7 @@ const houseNumber = z.string().regex(/^\d{1,6}$/, 'House number must be 1 to 6 d
  * A place block (E308-E315 and E316-E322). The district is optional in the MT (E312, E319) but
  * xmlgen reads its text from its own table by code, so the contract requires it.
  */
-const placeFields = {
+export const placeFields = {
   address: text(255),
   houseNumber,
   departmentCode: z.number().int(),

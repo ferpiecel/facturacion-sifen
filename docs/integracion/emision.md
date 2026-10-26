@@ -218,6 +218,14 @@ Una nota de débito electrónica (NDE) aumenta el valor de una FE que usted ya e
 
 La respuesta es `202 { "document_id", "cdc" }`, con un CDC que empieza en `06` y numeración propia. Las reglas `422` son las de la NCE salvo `credit-note-sum-exceeds-invoice`, y con prefijo `debit-note-` (`debit-note-currency-mismatch`, `debit-note-unnamed-receiver`, `debit-note-reason`). El KuDE (`GET /v1/documents/{id}/kude`) lleva el título "KuDE de Nota de Débito Electrónica", el motivo y la FE asociada.
 
+## Emitir una autofactura
+
+Una autofactura electrónica (AFE) documenta una compra a un vendedor que no es contribuyente (persona sin RUC, productor rural o extranjero). Usted, como emisor, es también el receptor. Se envía al mismo `POST /v1/documents` con `"type": "AFE"` y el mismo `Idempotency-Key`.
+
+Campos propios: `seller` (`nature` 1 no contribuyente o 2 extranjero, `idType` 1 a 4, `idNumber` de 1 a 20 letras, números o guiones, `name`, y su dirección con `address`, `houseNumber`, `departmentCode`, `districtCode`, `cityCode`), `place` (dónde ocurrió la compra, mismo formato de dirección) y `certificate` (la constancia del vendedor: `type` 1 no contribuyente o 2 microproductor, `number` de 11 dígitos sin cero inicial y `control` de 8 caracteres). Los ítems llevan `code`, `description`, `unitCode`, `quantity` y `unitPrice`; no llevan IVA. No se envían `receiver` ni `operationType`: el receptor es el emisor, la operación es B2C y el pago es contado.
+
+La respuesta es `202 { "document_id", "cdc" }`, con un CDC que empieza en `04` y numeración propia. Las reglas `422` llevan el prefijo `self-invoice-` (por ejemplo `self-invoice-certificate-number`). El KuDE (`GET /v1/documents/{id}/kude`) lleva el título "KuDE de Autofactura Electrónica", el vendedor, el lugar de la transacción y la constancia.
+
 ## Idempotencia
 
 `Idempotency-Key` es obligatorio. Reintentar con la **misma clave y el mismo cuerpo** devuelve la misma respuesta sin crear otro documento; la misma clave con otro cuerpo responde `409`. Genere una clave nueva por documento y reutilícela solo para reintentar ese mismo documento.
@@ -275,6 +283,6 @@ Cuando SIFEN aprueba el documento (`approved` o `approved_with_observations`), l
 
 ## Alcance actual
 
-- Este endpoint emite **facturas (FE)**, **notas de crédito (NCE)** y **notas de débito (NDE)** electrónicas. Otros tipos de documento no están disponibles por esta ruta.
+- Este endpoint emite **facturas (FE)**, **autofacturas (AFE)**, **notas de crédito (NCE)** y **notas de débito (NDE)** electrónicas. Otros tipos de documento no están disponibles por esta ruta.
 - La condición de venta es contado, con un único pago en efectivo; no hay forma de expresar crédito ni otros medios de pago.
 - Solo moneda `PYG`.

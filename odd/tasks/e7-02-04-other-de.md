@@ -30,7 +30,7 @@ Issue an NDE (`iTiDE` 6), an AFE (4) and an NRE (7) through `POST /v1/documents`
 - [x] A1 domain: `Place`, `validateSelfInvoiceDraft` (seller E4, constancia H, items and rounding reused)
 - [x] A2 acceptance (`createAcceptStandalone`, `createAcceptSelfInvoice`, type 4) and request contract (`type: "AFE"`)
 - [x] A3 XML mapping (iTiDE 4: gCamAE, gCamCond, gCamDEAsoc constancia), signing store dispatch, receiver = issuer
-- [ ] A4 routing in the controller, KuDE (letter and ticket), OpenAPI, guide, e2e
+- [x] A4 split in two PRs: A4a KuDE (reader, model, letter and ticket) on `feat/hu-e7-03-afe-kude`; A4b routing (`ACCEPT_SELF_INVOICE`, controller, OpenAPI, guide, e2e) on `feat/hu-e7-03-afe-routing-kude`
 
 ### NRE (HU-E7-04)
 
@@ -72,3 +72,10 @@ Library constraints (xmlgen 1.0.283, `facturacionelectronicapy-xmlgen`): it need
 - NRE: R1 to R4 not started. MT facts are in the table above; items carry code, description, unitCode, quantity only (no gValorItem, E715 optional); no totals; `dKmR` mandatory by NT 009 (xmlgen validation); xmlgen supports one delivery, one vehicle, one carrier.
 - Pending validations for the PRs: E306 alphanumeric vs xmlgen digits-only; E312/E319 district required by xmlgen; E304/2562 needs a Marangatu lookup; E715 mandatory (1805) vs optional (field table).
 - Do not edit a worktree while its `pnpm verify` push runs (untracked files break `format:check`).
+
+### Handoff 2 (writer stopped at the context limit)
+
+- Review fixes done and pushed: #322 bd5ff81 (constancia number must be 11 digits not starting with 0; control `[0-9A-Za-z-]{8}`), #326 (idNumber `^[0-9A-Za-z-]{1,20}$`; PR body now lists E306/H016/H017 under pending validations), #332 (xmlgen console output muted in `packages/sifen-tips/src/de-xml-builder.ts`, tested). Chain restacked: #322 -> #326 -> #332 -> A4a -> A4b.
+- A4a branch `feat/hu-e7-03-afe-kude` (worktree `de-afe-c`) and A4b `feat/hu-e7-03-afe-routing-kude` (rebased on A4a): committed locally; the pre-push of A4a failed once on a lint error (fixed in a later commit). Check `git ls-remote origin 'feat/hu-e7-03-afe-*'`; push A4a, then A4b (draft PRs, `Depende de #<prev>`, Spanish body per the template, A4a base chained on #332). A4a is about 237 changed lines, A4b about 358.
+- Test helper added: `selfInvoice` transform in `apps/api/test/support/signed-invoice.ts` (real xmlgen AFE XML). The e2e `type` unknown test now uses `XYZ`; the KuDE no-layout tests now use iTiDE 7 (NRE): when NRE gets its KuDE (R4) change them to a type that remains unsupported or drop them.
+- NRE not started. Worktree `de-nre-a` exists (branch `feat/hu-e7-04-nre-domain` from the A4b tip, installed and built, no changes). Plan R1 to R4 above; seams: `createAcceptStandalone` with `documentType: 7`, `total: () => '0'`; `Place`/`validatePlace`; `itemsSchema.element.omit({...})`; `patchGeoGroup` with `gCamSal`/`gCamEnt`; E715 contradictory: pick the stricter reading (item price absent) and list it under "Validaciones pendientes". For the KuDE NRE use `selfInvoice` helper as a model to build a real xmlgen type 7 fixture.

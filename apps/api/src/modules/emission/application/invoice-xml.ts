@@ -423,22 +423,27 @@ export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext
             ),
       // An NCE or NDE carries neither gCamFE nor gCamCond (E010, E600) but the reason and the association.
       // An AFE has no gCamFE either, but its cash condition is mandatory (E600, 1503).
-      ...(ctx.remission
-        ? remissionInput(ctx.remission)
-        : note
-          ? {
-              notaCreditoDebito: { motivo: note.reasonCode },
-              documentoAsociado: { formato: 1, cdc: note.associatedCdc },
-            }
-          : {
-              ...(ctx.selfInvoice
-                ? selfInvoiceInput(ctx.selfInvoice)
+      ...(note
+        ? {
+            notaCreditoDebito: { motivo: note.reasonCode },
+            documentoAsociado: { formato: 1, cdc: note.associatedCdc },
+          }
+        : {
+            ...(ctx.selfInvoice
+              ? selfInvoiceInput(ctx.selfInvoice)
+              : ctx.remission
+                ? remissionInput(ctx.remission)
                 : { factura: { presencia: 1 } }),
-              condicion: {
-                tipo: 1,
-                entregas: [{ tipo: 1, monto: net.toString(), moneda: 'PYG', cambio: 0 }],
-              },
-            }),
+            // An NRE has no condition either (E600 belongs to the types with amounts).
+            ...(ctx.remission
+              ? {}
+              : {
+                  condicion: {
+                    tipo: 1,
+                    entregas: [{ tipo: 1, monto: net.toString(), moneda: 'PYG', cambio: 0 }],
+                  },
+                }),
+          }),
       items: draft.items.map((item, i) => ({
         codigo: ctx.lines[i]?.code,
         descripcion: i === 0 ? content.firstItemDescription : ctx.lines[i]?.description,

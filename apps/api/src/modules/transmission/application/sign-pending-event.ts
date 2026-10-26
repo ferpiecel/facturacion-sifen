@@ -21,7 +21,8 @@ export interface EventToSign {
   readonly tenantEnvironment: TenantEnvironment;
   readonly eventId: bigint;
   readonly kind: string;
-  readonly reason: string;
+  /** `mOtEve`; null only on the receiver events that carry none. */
+  readonly reason: string | null;
   /** CDC of the targeted document (cancellation, nomination); null for a voiding. */
   readonly cdc: string | null;
   readonly voidRange: StoredVoidRange | null;
@@ -90,12 +91,12 @@ export type SignPendingEventResult =
 
 function toIssuerEvent(event: EventToSign): IssuerEvent {
   if (event.kind === 'cancellation') {
-    if (event.cdc === null) throw new EventDataIncompleteError();
+    if (event.cdc === null || event.reason === null) throw new EventDataIncompleteError();
     return { kind: 'cancellation', cdc: event.cdc, reason: event.reason };
   }
   if (event.kind === 'voiding') {
     const range = event.voidRange;
-    if (range === null) throw new EventDataIncompleteError();
+    if (range === null || event.reason === null) throw new EventDataIncompleteError();
     return {
       kind: 'voiding',
       timbrado: range.timbrado,

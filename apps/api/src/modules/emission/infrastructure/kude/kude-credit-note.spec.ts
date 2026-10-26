@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FacturaPocInput } from '@sifen/sifen-gateway';
-import { signedInvoiceWithQr } from '../../../../../test/support/signed-invoice.js';
+import { selfInvoice, signedInvoiceWithQr } from '../../../../../test/support/signed-invoice.js';
 import { KudeSourceError, readKudeInvoice } from '../../application/kude-reader.js';
 import { decodeQr, pdfText } from './pdf-inspect.test-helper.js';
 import { PdfkitKudeRenderer } from './pdfkit-kude-renderer.js';
@@ -76,8 +76,8 @@ describe('KuDE of a credit note', () => {
     },
   );
 
-  it('still refuses the types that have no layout (an AFE)', async () => {
-    const xml = (await creditNote()).replace('<iTiDE>5</iTiDE>', '<iTiDE>4</iTiDE>');
+  it('still refuses the types that have no layout (an NRE)', async () => {
+    const xml = (await creditNote()).replace('<iTiDE>5</iTiDE>', '<iTiDE>7</iTiDE>');
     expect(() => readKudeInvoice(xml)).toThrow(/unsupported/);
   });
 });
@@ -120,6 +120,31 @@ describe('KuDE of a debit note', () => {
       expect(text).toContain(expected);
     }
     for (const absent of ['Crédito', 'KuDE de Factura Electrónica', 'Condición de Venta']) {
+      expect(text).not.toContain(absent);
+    }
+    expect(await decodeQr(pdf)).toBe(model.qrUrl);
+  });
+});
+
+/** Spec: HU-E7-03 A4. MT v150 13.3 title for the AFE; the seller and the constancia are printed. */
+describe('KuDE of a self-invoice', () => {
+  it('prints the AFE title, number, seller, place and constancia, and a QR that decodes', async () => {
+    const model = readKudeInvoice(await signedInvoiceWithQr(selfInvoice));
+    const pdf = await new PdfkitKudeRenderer().render(model);
+    const text = await pdfText(pdf);
+
+    for (const expected of [
+      'KuDE de Autofactura Electrónica',
+      'Autofactura Electrónica Nº',
+      'Vendedor: Juan Perez',
+      'Documento del Vendedor: Cédula paraguaya 1234567',
+      'Dirección del Vendedor: Calle 1',
+      'Lugar de la Transacción: Calle del Cultivo',
+      'Constancia: Constancia de no ser contribuyente Nº 12345678901',
+    ]) {
+      expect(text).toContain(expected);
+    }
+    for (const absent of ['KuDE de Factura Electrónica', 'Crédito', 'Débito']) {
       expect(text).not.toContain(absent);
     }
     expect(await decodeQr(pdf)).toBe(model.qrUrl);

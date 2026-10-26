@@ -10,6 +10,7 @@ import {
   KUDE_CONSULT_URL,
   KUDE_CREDIT_NOTE_TITLE,
   KUDE_DEBIT_NOTE_TITLE,
+  KUDE_SELF_INVOICE_TITLE,
   KUDE_TITLE,
   documentNumberOfCdc,
   type KudeInvoice,
@@ -37,7 +38,9 @@ const titleOf = (invoice: KudeInvoice): string =>
     ? KUDE_DEBIT_NOTE_TITLE
     : invoice.creditNote
       ? KUDE_CREDIT_NOTE_TITLE
-      : KUDE_TITLE;
+      : invoice.selfInvoice
+        ? KUDE_SELF_INVOICE_TITLE
+        : KUDE_TITLE;
 
 const rateLabel = (rate: KudeItem['vatRate']): string => (rate === 0 ? 'Ex.' : `${String(rate)}%`);
 
@@ -173,7 +176,9 @@ class Layout {
         ? 'Nota de Débito Electrónica'
         : invoice.creditNote
           ? 'Nota de Crédito Electrónica'
-          : 'Factura Electrónica',
+          : invoice.selfInvoice
+            ? 'Autofactura Electrónica'
+            : 'Factura Electrónica',
       { align: 'center', bold: true },
     );
     this.block(
@@ -200,6 +205,15 @@ class Layout {
       rows.push('Razón Social: Sin Nombre');
     }
     if (invoice.transactionType !== undefined) rows.push(`Operación: ${invoice.transactionType}`);
+    if (invoice.selfInvoice) {
+      const { seller, place, certificate } = invoice.selfInvoice;
+      rows.push(
+        `Vendedor: ${seller.name}`,
+        `Documento: ${seller.idType} ${seller.idNumber}`,
+        `Lugar: ${place}`,
+        `Constancia: ${certificate.number}`,
+      );
+    }
     const note = invoice.debitNote ?? invoice.creditNote;
     if (note) {
       const { reason, associatedCdc } = note;

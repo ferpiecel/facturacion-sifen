@@ -27,9 +27,9 @@ Issue an NDE (`iTiDE` 6), an AFE (4) and an NRE (7) through `POST /v1/documents`
 
 ### AFE (HU-E7-03)
 
-- [ ] A1 domain: `Place`, `validateSelfInvoiceDraft` (seller E4, constancia H, items and rounding reused)
-- [ ] A2 acceptance (`createAcceptStandalone`, `createAcceptSelfInvoice`, type 4) and request contract (`type: "AFE"`)
-- [ ] A3 XML mapping (iTiDE 4: gCamAE, gCamCond, gCamDEAsoc constancia), signing store dispatch, receiver = issuer
+- [x] A1 domain: `Place`, `validateSelfInvoiceDraft` (seller E4, constancia H, items and rounding reused)
+- [x] A2 acceptance (`createAcceptStandalone`, `createAcceptSelfInvoice`, type 4) and request contract (`type: "AFE"`)
+- [x] A3 XML mapping (iTiDE 4: gCamAE, gCamCond, gCamDEAsoc constancia), signing store dispatch, receiver = issuer
 - [ ] A4 routing in the controller, KuDE (letter and ticket), OpenAPI, guide, e2e
 
 ### NRE (HU-E7-04)
@@ -62,3 +62,13 @@ Library constraints (xmlgen 1.0.283, `facturacionelectronicapy-xmlgen`): it need
 - N2 commits: 726662a (feature), d0af865 (lint fix); rebased on main after #293 merged. `pnpm verify` OK.
 - N3 done (branch `feat/hu-e7-02-nde-routing-kude`, on main after #295). RED: letter/ticket KuDE specs and the three NDE e2e tests failed before the change. Also folded the #293/#295 review nits: `associated-document-unreadable` message now says credit or debit note; `readDocument` throws explicitly for any type other than 1, 5, 6; the NDE `dDesTiDE` text is asserted. `pnpm verify` coverage ran with `--maxWorkers=2` (SIGKILL under memory pressure otherwise): 2584 passed. Route: inline.
 - N3 commits: 9ea40e7 (routing, KuDE letter, OpenAPI, guide), 060be24 (ticket KuDE).
+
+### AFE and NRE progress (handoff)
+
+- A1 a21529b, PR #322 (main). A2 710924f, PR #326 (draft, depends on #322). A3 db890c5 and d643596 on `feat/hu-e7-03-afe-xml-signing` (pushed after a verify fix; open the draft PR "Depende de #326").
+- Route: inline for all (the orchestrator cut the writer; context was the limit). Experiments confirmed xmlgen 1.0.283 builds AFE and NRE XML that pass `siRecepDE` (see `invoice-xml.self-invoice.spec.ts`).
+- Reusable seams: `createAcceptStandalone` (NRE only needs `{ documentType: 7, validate, total: () => '0', receiverRuc }`), `Place` and `validatePlace` (NRE departure/delivery), `itemsSchema.element.omit({...})` for the NRE items, `patchGeoGroup`/`geoExpectations` in `invoice-xml.ts` (NRE: groups `gCamSal`, `gCamEnt` with suffixes `Sal`, `Ent`), `readSelfInvoicePayload` in the signing store as the pattern for the NRE.
+- NEXT (A4, worktree `de-afe-c`, branch `feat/hu-e7-03-afe-routing-kude`, no code yet): `parseDocumentRequest` accepts `AFE`; controller routes to a new `ACCEPT_SELF_INVOICE` token wired in `emission.module.ts`; KuDE: `KudeInvoice.selfInvoice` (seller, place, constancia), title "KuDE de Autofactura Electrónica" (MT 13.3), `readKudeInvoice` accepts iTiDE 4 (reads `gCamAE`, `gCamDEAsoc` constancia, shows `dNomRec`), letter and ticket renderers; OpenAPI `docs/api/openapi.json` (regenerate with `pnpm --filter @sifen/api openapi`), `docs/integracion/emision.md`, e2e in `apps/api/test/documents.e2e.spec.ts` and `documents-kude.e2e.spec.ts`. Template: commit d024976 (NDE routing).
+- NRE: R1 to R4 not started. MT facts are in the table above; items carry code, description, unitCode, quantity only (no gValorItem, E715 optional); no totals; `dKmR` mandatory by NT 009 (xmlgen validation); xmlgen supports one delivery, one vehicle, one carrier.
+- Pending validations for the PRs: E306 alphanumeric vs xmlgen digits-only; E312/E319 district required by xmlgen; E304/2562 needs a Marangatu lookup; E715 mandatory (1805) vs optional (field table).
+- Do not edit a worktree while its `pnpm verify` push runs (untracked files break `format:check`).

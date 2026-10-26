@@ -4,6 +4,7 @@ import { recordAudit } from '../../audit/infrastructure/record-audit.js';
 import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
 import type { EventBatchStore, EventOutcome } from '../application/send-event-batch.js';
 import { TRANSMISSION_WORKER_ACTOR } from './transmission-audit-actor.js';
+import { voidRejectedDocuments, type VoidedRange } from './void-documents.js';
 export interface DrizzleEventBatchStoreOptions {
   readonly db: Database;
   readonly tenantId: string;
@@ -178,6 +179,8 @@ export function createDrizzleEventBatchStore({
               id: issuerEvents.id,
               kind: issuerEvents.kind,
               documentId: issuerEvents.documentId,
+              environment: issuerEvents.environment,
+              voidRange: issuerEvents.voidRange,
             });
           if (updated.length !== 1) throw new Error(`Event ${id} is not being sent`);
           await auditEvent(
@@ -193,6 +196,15 @@ export function createDrizzleEventBatchStore({
               logger?.warn(
                 `issuer event ${id} approved but document ${documentId} was not cancelled: status ${status ?? 'unknown'}`,
               ),
+            );
+          }
+          if (outcome.status === 'approved' && event.kind === 'voiding' && event.voidRange) {
+            await voidRejectedDocuments(
+              tx,
+              tenantId,
+              event.environment,
+              event.voidRange as VoidedRange,
+              now(),
             );
           }
         }

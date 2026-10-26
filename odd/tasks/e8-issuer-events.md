@@ -114,8 +114,8 @@ planning PR is docs only.
 - [x] T4 HU-E8-04 D (PRs #279, #280, #281, #283, #285 and the cycle wiring, commits bc710be and 1527523): sign pending events, recovery by query, audit and settlement, event step in the cycle. The two-connection `claim` test (F5) stays open; see "Slice D evidence".
 - [x] T4b E8 hardening A (review findings of #281, #283): a cancellation is rejected only after two absent queries 15 min apart; `xContEv` read beside `rContDe`/under the body and prefixed names; per-event isolation; 72 h hold (`LOC-HOLD`); claim with `FOR UPDATE SKIP LOCKED` plus a 5 min lease (commit 72f286c).
 - [x] T4c E8 hardening B (#292, #285): park deterministic event-signing errors; log a settled cancellation whose document is not cancellable; two-connection claim test (commit d7ac9d4).
-- [ ] T5 HU-E8-02 A to C: `approved_at`, cancel rules and use case, endpoint and settlement.
-- [ ] T6 HU-E8-03 A to C: voided ranges, inutilize endpoint, deadline alert.
+- [x] T5 HU-E8-02: `approved_at` (#321, migration 0056), rules and idempotency column (#323, migration 0057), use case (#324), store (#325), endpoint, OpenAPI and guide (#327). Settlement `approved -> cancelled` and the `document.cancelled` webhook already existed (T4). Open: portal role matrix (see handoff).
+- [~] T6 HU-E8-03: rules (#328), use case (#329), store (#330), settlement of rejected documents to `number_voided` (#331), endpoint, OpenAPI and guide (#333). Open: the 15-day deadline alert (plan slice C).
 - [ ] T7 HU-E8-05 A and B: nomination storage, rules, endpoint, NCE interplay.
 - [ ] T8 HU-E8-01 A to C: correction ADR and migration, same-CDC resend, CDC-changing reissue.
 - [ ] T9 Close: guide, backlog and roadmap, T0 and T11 left open.
@@ -241,3 +241,24 @@ Hard requirements, not debt:
 ## Checks and evidence
 
 - None run for implementation; this document changes no source. Pending: Prevalidador confirmation (T0), the adapters (T1) and the battery (T10).
+
+## Handoff (writer stopped at its context budget, 2026-10-22)
+
+State: HU-E8-02 and HU-E8-03 are implemented and pushed as draft PRs chained on each other (all target `main`, each with `pnpm verify` OK at push). Order of the chain, oldest first: #321 (ready), #323, #324, #325, #327 (cancel), #328, #329, #330, #331, #333 (void). Each is based on the previous branch; rebase with `git rebase --onto main <previous-branch>` as each one is squash-merged. Worktrees: `facturacion-sifen-worktrees/e8-02-a`, `e8-02-b`, `e8-02-c`, `e8-03`, `e8-03-b` (branch `feat/hu-e8-03-void-endpoint` is the tip). #327 has 401 changed lines (limit 400, noted in its body).
+
+Migrations taken: 0056 (#321) and 0057 (#323). Next free is 0058 on this chain; re-check `packages/db/migrations/meta/_journal.json` on `origin/main` and open PRs before pushing another.
+
+Decisions taken while writing (deviations from the plan, for the tech lead to confirm):
+
+- D5: `approved_at` is stamped by trigger 0056 with `now()` when the status becomes approved (a value supplied by the writer wins). `dFecProc` is not parsed and `consultarDE` is not called: rows approved before the column use `signed_at` as a conservative lower bound (the signature is never later than the approval), and a 15 minute safety margin comes off the limit (`DEFAULT_CANCEL_WINDOW`). Types 2, 3 and 8 have no window in MT v150 11.6.1 (it names 01 and 04 to 07), so they are refused (`cancel-document-type-unsupported`).
+- D8: no `voided_number_ranges` table. Overlap (4066) is read from `issuer_events` (voidings not rejected); a voiding is refused unless every number is already issued (`to <= last_number` of the point's sequence, row locked), so the allocator can never reach a voided number. A voiding is refused when a document in the range is in any status but `rejected` or `number_voided` (4065).
+- Void config (`DEFAULT_VOID_CONFIG`): reason 5 to 150 characters, a single number allowed (MT 4068 says "greater", xmlgen accepts equal), maximum 1000 numbers (counted as quantity; MT 4067 literally reads `end - start <= 1000`). All three wait for T0.
+- Idempotency of events: columns `idempotency_key` and `request_hash` on `issuer_events` (unique per tenant), same pattern as `documents`.
+- Authorization: the endpoints use the API key scope `documents:write` (D10). The portal roles of P1 (owner, admin, emisor yes; lector no) have no endpoint to attach to yet (the portal has no write routes); add a portal controller reusing `createCancelDocument` and `createVoidNumbers` with the actor `user` and a role check when the portal screens exist, and test the `lector` refusal there.
+
+Remaining, in order:
+
+1. HU-E8-03 slice C: deadline alert (first 15 days of the following month, MT Tabla J; warn, send anyway). Needs the issue date of rejected documents in the range; gaps have none.
+2. HU-E8-05 nominate (slices A and B of the plan): nomination event builder in `packages/sifen-tips` (A1 of E8-04 deferred it), migration for the nominated receiver per FE (one per CDC), rules 4453, 4454, 4468, 4469 and the receiver fields by nature, `POST /v1/documents/{id}/nominate`, settlement storing the receiver, NCE/NDE 2442 and `credit-note-unnamed-receiver`. The command pattern to copy is `modules/issuer-events` (domain rules, use case with a unit of work, Drizzle unit, controller); the signing path rejects a nomination until its builder exists (see "Known limits" of slice D).
+3. HU-E8-01 correct: write ADR-0021 first (guarded in-place rewrite of a rejected row versus a replacement row), then slices A to C.
+4. T9 close and T0/T10 (blocked on the test environment). Also open from slice D: voiding and nomination resolution by query (no document to ask about).

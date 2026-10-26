@@ -1,4 +1,7 @@
 import { assertValidTenantId, type Database } from '@sifen/db';
+import { WarnCertificateExpiry } from '../modules/certificates/application/warn-certificate-expiry.js';
+import { DEFAULT_ALERT_DAYS } from '../modules/certificates/domain/certificate-expiry.js';
+import { createDrizzleCertificateExpiryStore } from '../modules/certificates/infrastructure/drizzle-certificate-expiry-store.js';
 import { WarnTransmissionDeadlines } from '../modules/transmission/application/warn-transmission-deadlines.js';
 import { createDrizzleDeadlineWarningStore } from '../modules/transmission/infrastructure/drizzle-deadline-warning-store.js';
 
@@ -32,16 +35,36 @@ export function deadlineWatchJob(tenantId: string, everyMs = DEFAULT_DEADLINE_WA
 export interface DeadlineWatchProcessorDeps {
   readonly db: Database;
   readonly now?: () => Date;
+  /** Certificate expiry thresholds in days (HU-E3-03); defaults to 60, 30 and 7. */
+  readonly certificateAlertDays?: readonly number[];
 }
 
-/** Runs one watch pass for the job's tenant. The tenant id is validated before any query is built. */
+/**
+ * Runs one watch pass for the job's tenant: the 72 h deadline warnings and the certificate expiry
+ * alerts (HU-E3-03), both read-only plus the webhook outbox. They run independently: one failing does
+ * not skip the other, and the first failure is rethrown so BullMQ records it. The tenant id is
+ * validated before any query is built.
+ */
 export function createDeadlineWatchProcessor(deps: DeadlineWatchProcessorDeps) {
-  return async (job: { data: DeadlineWatchJobData }): Promise<{ warned: number }> => {
+  return async (job: {
+    data: DeadlineWatchJobData;
+  }): Promise<{ warned: number; certificateAlerts: number }> => {
     const { tenantId } = job.data;
     assertValidTenantId(tenantId);
-    return new WarnTransmissionDeadlines({
-      store: createDrizzleDeadlineWarningStore({ db: deps.db, tenantId }),
-      now: deps.now ?? (() => new Date()),
-    }).run();
+    const now = deps.now ?? (() => new Date());
+    const [deadlines, certificates] = await Promise.allSettled([
+      new WarnTransmissionDeadlines({
+        store: createDrizzleDeadlineWarningStore({ db: deps.db, tenantId }),
+        now,
+      }).run(),
+      new WarnCertificateExpiry({
+        store: createDrizzleCertificateExpiryStore({ db: deps.db, tenantId }),
+        now,
+        thresholdsDays: deps.certificateAlertDays ?? DEFAULT_ALERT_DAYS,
+      }).run(),
+    ]);
+    if (deadlines.status === 'rejected') throw deadlines.reason as Error;
+    if (certificates.status === 'rejected') throw certificates.reason as Error;
+    return { warned: deadlines.value.warned, certificateAlerts: certificates.value.alerted };
   };
 }

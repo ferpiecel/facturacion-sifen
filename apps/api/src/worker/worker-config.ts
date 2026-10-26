@@ -1,3 +1,4 @@
+import { parseAlertDays } from '../modules/certificates/domain/certificate-expiry.js';
 import { DEFAULT_DEADLINE_WATCH_EVERY_MS } from './deadline-watch.processor.js';
 
 /** Invalid or missing environment for the worker. Messages never carry the offending value (REDIS_URL holds a password). */
@@ -19,6 +20,8 @@ export interface WorkerConfig {
   readonly certificateCacheMaxEntries: number;
   /** How often each tenant's 72 h deadline watch runs (HU-E6-07). */
   readonly deadlineWatchIntervalMs: number;
+  /** Days before expiry at which a certificate alert is sent, descending (HU-E3-03). */
+  readonly certificateAlertDays: readonly number[];
 }
 
 function integer(
@@ -35,6 +38,14 @@ function integer(
     throw new WorkerConfigError(`${name} is out of range`);
   }
   return value;
+}
+
+function alertDays(env: NodeJS.ProcessEnv): readonly number[] {
+  try {
+    return parseAlertDays(env.CERTIFICATE_ALERT_DAYS);
+  } catch {
+    throw new WorkerConfigError('CERTIFICATE_ALERT_DAYS is out of range');
+  }
 }
 
 /** Reads the worker's settings (README "Variables de entorno"); fails closed without Redis. */
@@ -64,5 +75,6 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv): WorkerConfig {
       60_000,
       3_600_000,
     ),
+    certificateAlertDays: alertDays(env),
   };
 }

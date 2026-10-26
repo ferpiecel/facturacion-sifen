@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   createPgliteDatabase,
   InvalidTenantIdError,
+  tenantCertificates,
   tenants,
   webhookDeliveries,
   type DatabaseHandle,
@@ -128,6 +129,63 @@ describe('deadline watch processor', () => {
 
   it('rejects a job whose tenant id is not a UUID before any query', async () => {
     await expect(run("x'; drop table documents; --")).rejects.toBeInstanceOf(InvalidTenantIdError);
-    await expect(run(randomUUID())).resolves.toEqual({ warned: 0 });
+    await expect(run(randomUUID())).resolves.toEqual({ warned: 0, certificateAlerts: 0 });
+  });
+
+  describe('certificate expiry alerts (HU-E3-03)', () => {
+    const DAY = 86_400_000;
+    const sealed = {
+      v: 1,
+      keyId: 'k',
+      wrappedKey: 'AA==',
+      nonce: 'AA==',
+      tag: 'AA==',
+      ciphertext: 'AA==',
+    };
+    const seedCertificate = async (tenant: string, daysLeft: number) =>
+      (
+        await handle.db
+          .insert(tenantCertificates)
+          .values({
+            tenantId: tenant,
+            environment: 'test',
+            sealed,
+            fingerprint: 'a'.repeat(64),
+            subjectRuc: '80000001-7',
+            notBefore: new Date(NOW.getTime() - 300 * DAY),
+            notAfter: new Date(NOW.getTime() + daysLeft * DAY),
+          })
+          .returning({ id: tenantCertificates.id })
+      )[0].id;
+    const alerts = async () =>
+      (await handle.db.select().from(webhookDeliveries)).filter(
+        (row) => row.eventType === 'certificate.expiring',
+      );
+
+    it('alerts once per threshold for the job tenant only', async () => {
+      await seedCertificate(tenantId, 29);
+      await seedCertificate(otherTenantId, 29);
+      await expect(run()).resolves.toMatchObject({ certificateAlerts: 1 });
+      await run();
+      const rows = await alerts();
+      expect(rows).toHaveLength(1);
+      expect(rows[0].tenantId).toBe(tenantId);
+      expect(rows[0].payload).toMatchObject({ data: { threshold_days: 30 } });
+    });
+
+    it('does not alert a certificate with plenty of time left', async () => {
+      await seedCertificate(tenantId, 90);
+      await expect(run()).resolves.toMatchObject({ certificateAlerts: 0 });
+    });
+
+    it('uses the configured thresholds', async () => {
+      await seedCertificate(tenantId, 89);
+      const custom = await createDeadlineWatchProcessor({
+        db: handle.db,
+        now: () => NOW,
+        certificateAlertDays: [90],
+      })({ data: { tenantId } });
+      expect(custom.certificateAlerts).toBe(1);
+    });
   });
 });

@@ -13,6 +13,7 @@ Todas tienen un valor por defecto, así que el entorno local funciona sin un arc
 | `POSTGRES_PORT` | `5432` | `docker-compose.yml` | Puerto de PostgreSQL en el host. |
 | `REDIS_PORT` | `6379` | `docker-compose.yml` | Puerto de Redis en el host. |
 | `REDIS_URL` | *(sin valor)* | worker | URL de Redis (`redis://` o `rediss://`) para BullMQ (ADR-0013). Obligatoria para el worker; nunca se escribe en logs ni en errores. Local: `redis://localhost:6379` con `docker compose up -d redis`. |
+| `RUC_CACHE_TTL_SECONDS` | `86400` | `apps/api` | Segundos que una respuesta de `siConsRUC` (RUC encontrado 0502 o inexistente 0500) se sirve desde la tabla `ruc_lookup_cache` antes de volver a consultar a SIFEN. Entero de 0 a 604800; `0` desactiva la caché. Un valor inválido impide arrancar la API. Un 0501 o un error nunca se guardan (HU-E6-09). |
 | `TRANSMISSION_CYCLE_INTERVAL_MS` | `60000` | worker | Cada cuánto corre el ciclo de transmisión de cada tenant (5 s a 1 h). |
 | `WORKER_CONCURRENCY` | `4` | worker | Tenants que un proceso worker atiende a la vez (1 a 32). |
 | `TENANT_RUN_LOCK_TTL_MS` | `300000` | worker | Vida del candado por tenant en Redis si el proceso muere a mitad de un ciclo (10 s a 1 h). |

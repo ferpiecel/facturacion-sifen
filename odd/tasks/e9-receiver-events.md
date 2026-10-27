@@ -63,7 +63,7 @@ each kind and 3 corrections.
 - [x] T4a P4a signing wiring
 - [x] T4b P4b use case (ccec384)
 - [x] T4c P4c idempotency
-- [ ] T4d P4d Drizzle unit of work
+- [x] T4d P4d Drizzle unit of work
 - [ ] T5 P5 endpoint + docs
 - [ ] T6 P6 correction (0059) rules + use case
 - [ ] T7 P7 correction endpoint + docs

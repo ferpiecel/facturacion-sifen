@@ -2,6 +2,7 @@
 
 ## Síntomas y detección
 
+- Alerta de Prometheus: `RucBloqueado` ([reglas](../operacion/alertas.md)).
 - Log: `ERROR tenant <id> RUC blocked by SIFEN: sends paused until <hora>` y el contador `sifen_ruc_blocks_total` (sin etiqueta de tenant).
 - Durante la pausa: `WARN tenant <id> sends paused until <hora>` en cada ciclo.
 - Fila nueva en `ruc_blocks` para el tenant.

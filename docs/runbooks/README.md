@@ -1,6 +1,6 @@
 # Runbooks de operación
 
-Procedimientos para el operador ante incidentes. Cada uno parte de lo que el código hace hoy (worker de transmisión, CLI `ops`, webhooks); lo que todavía no existe se marca como **Brecha** y no se inventan comandos para cubrirlo. Referencia general: [`../operacion.md`](../operacion.md) y [`../configuracion.md`](../configuracion.md).
+Procedimientos para el operador ante incidentes. Cada uno parte de lo que el código hace hoy (worker de transmisión, CLI `ops`, webhooks); lo que todavía no existe se marca como **Brecha** y no se inventan comandos para cubrirlo. Alertas y métricas: [`../operacion/alertas.md`](../operacion/alertas.md). Referencia general: [`../operacion.md`](../operacion.md) y [`../configuracion.md`](../configuracion.md).
 
 | Runbook | Cuándo usarlo |
 |---|---|

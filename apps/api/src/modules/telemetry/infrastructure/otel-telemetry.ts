@@ -37,6 +37,11 @@ export interface OtelTelemetry {
 }
 
 const SECONDS_BUCKETS = [0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300];
+/** OTLP/HTTP traces URL for a base endpoint; trailing slashes never produce `//v1/traces`. */
+export function otlpTracesUrl(endpoint: string): string {
+  return `${endpoint.replace(/\/+$/, '')}/v1/traces`;
+}
+
 const propagator = new W3CTraceContextPropagator();
 
 /**
@@ -56,7 +61,7 @@ export function createOtelTelemetry(
   const exporter =
     options.spanExporter ??
     (config.tracing
-      ? new OTLPTraceExporter({ url: `${config.otlpEndpoint ?? ''}/v1/traces` })
+      ? new OTLPTraceExporter({ url: otlpTracesUrl(config.otlpEndpoint ?? '') })
       : undefined);
   const processors = exporter
     ? [
@@ -67,7 +72,6 @@ export function createOtelTelemetry(
     : [];
   const tracerProvider = new TracerProvider({ resource, spanProcessors: processors });
   const tracer = tracerProvider.getTracer('sifen');
-  console.log('P', processors.length, config.tracing);
   context.setGlobalContextManager(new AsyncLocalStorageContextManager().enable());
 
   const counters = new Map<string, ReturnType<Meter['createCounter']>>();

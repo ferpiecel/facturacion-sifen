@@ -1,7 +1,7 @@
 import type { ServerResponse } from 'node:http';
 import { InMemorySpanExporter } from '@opentelemetry/sdk-trace';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createOtelTelemetry, type OtelTelemetry } from './otel-telemetry.js';
+import { createOtelTelemetry, otlpTracesUrl, type OtelTelemetry } from './otel-telemetry.js';
 
 const config = {
   tracing: false,
@@ -101,5 +101,13 @@ describe('createOtelTelemetry', () => {
   it('has no current traceparent outside a span', () => {
     otel = createOtelTelemetry(config, { spanExporter: exporter });
     expect(otel.telemetry.traceparent()).toBeUndefined();
+  });
+});
+
+describe('otlpTracesUrl', () => {
+  it('appends the traces path once, whatever the trailing slashes', () => {
+    expect(otlpTracesUrl('http://collector:4318')).toBe('http://collector:4318/v1/traces');
+    expect(otlpTracesUrl('http://collector:4318/')).toBe('http://collector:4318/v1/traces');
+    expect(otlpTracesUrl('http://collector:4318//')).toBe('http://collector:4318/v1/traces');
   });
 });

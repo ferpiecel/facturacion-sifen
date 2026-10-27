@@ -76,8 +76,8 @@ describe('KuDE of a credit note', () => {
     },
   );
 
-  it('still refuses the types that have no layout (an NRE)', async () => {
-    const xml = (await creditNote()).replace('<iTiDE>5</iTiDE>', '<iTiDE>7</iTiDE>');
+  it('still refuses the types that have no layout (a retention)', async () => {
+    const xml = (await creditNote()).replace('<iTiDE>5</iTiDE>', '<iTiDE>8</iTiDE>');
     expect(() => readKudeInvoice(xml)).toThrow(/unsupported/);
   });
 });

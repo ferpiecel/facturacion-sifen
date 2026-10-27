@@ -289,10 +289,10 @@ describe('GET /v1/documents/{id}/kude (e2e)', () => {
     expect(text).toContain('Constancia: Constancia de no ser contribuyente Nº 12345678901');
   });
 
-  it('answers a clear 422, logged below error level, for a signed type with no KuDE yet (an NRE)', async () => {
+  it('answers a clear 422, logged below error level, for a signed type with no KuDE yet (a retention)', async () => {
     const errors = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     const { document_id: id, cdc } = await create(writer);
-    const afe = (await creditNoteXml(cdc)).replace('<iTiDE>5</iTiDE>', '<iTiDE>7</iTiDE>');
+    const afe = (await creditNoteXml(cdc)).replace('<iTiDE>5</iTiDE>', '<iTiDE>8</iTiDE>');
     await handle.db
       .update(documents)
       .set({ status: 'signed', signedXml: afe, signedAt: new Date() })

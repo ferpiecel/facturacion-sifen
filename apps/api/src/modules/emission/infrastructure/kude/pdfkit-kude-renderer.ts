@@ -1,5 +1,5 @@
 import PDFDocument from 'pdfkit';
-import { fonts, renderQr, sanitize } from './kude-pdf-common.js';
+import { fonts, remissionRows, renderQr, sanitize } from './kude-pdf-common.js';
 import type { KudeRenderer } from '../../application/ports/kude-renderer.port.js';
 import { fromAsuncionTimestamp } from '../../application/invoice-xml.js';
 import {
@@ -12,6 +12,7 @@ import {
   KUDE_CONSULT_URL,
   KUDE_CREDIT_NOTE_TITLE,
   KUDE_DEBIT_NOTE_TITLE,
+  KUDE_REMISSION_TITLE,
   KUDE_SELF_INVOICE_TITLE,
   KUDE_TITLE,
   documentNumberOfCdc,
@@ -34,10 +35,26 @@ const COLUMNS = [
   { key: 'vat5', title: '5%', width: 55, align: 'right', wrap: false },
   { key: 'vat10', title: '10%', width: 61, align: 'right', wrap: false },
 ] as const;
+type CellKey = (typeof COLUMNS)[number]['key'];
 
+/** An NRE has no prices or amounts: code, description, unit and quantity across the page. */
+const REMISSION_COLUMNS: readonly {
+  key: CellKey;
+  title: string;
+  width: number;
+  align: 'left' | 'right';
+  wrap: boolean;
+}[] = [
+  { key: 'code', title: 'Cód.', width: 80, align: 'left', wrap: true },
+  { key: 'description', title: 'Descripción', width: 290, align: 'left', wrap: true },
+  { key: 'unit', title: 'Unidad', width: 80, align: 'left', wrap: true },
+  { key: 'quantity', title: 'Cant.', width: 90, align: 'right', wrap: false },
+];
+
+type Column = (typeof REMISSION_COLUMNS)[number];
 type Doc = InstanceType<typeof PDFDocument>;
 
-function cells(item: KudeItem): Record<(typeof COLUMNS)[number]['key'], string> {
+function cells(item: KudeItem): Record<CellKey, string> {
   const at = (rate: 0 | 5 | 10) => (item.vatRate === rate ? formatPyg(item.total) : '0');
   return {
     code: item.code,
@@ -59,7 +76,9 @@ const titleOf = (invoice: KudeInvoice): string =>
       ? KUDE_CREDIT_NOTE_TITLE
       : invoice.selfInvoice
         ? KUDE_SELF_INVOICE_TITLE
-        : KUDE_TITLE;
+        : invoice.remission
+          ? KUDE_REMISSION_TITLE
+          : KUDE_TITLE;
 
 const documentLabelOf = (invoice: KudeInvoice): string =>
   invoice.debitNote
@@ -68,7 +87,9 @@ const documentLabelOf = (invoice: KudeInvoice): string =>
       ? 'Nota de Crédito Electrónica'
       : invoice.selfInvoice
         ? 'Autofactura Electrónica'
-        : 'Factura Electrónica';
+        : invoice.remission
+          ? 'Nota de Remisión Electrónica'
+          : 'Factura Electrónica';
 
 /** KuDE of an FE on A4 (MT v150 chapter 13, "Formato 1"), drawn with embedded Noto Sans. */
 export class PdfkitKudeRenderer implements KudeRenderer {
@@ -102,7 +123,8 @@ export class PdfkitKudeRenderer implements KudeRenderer {
     });
 
     const y = this.general(doc, invoice, this.header(doc, invoice, qr) + 12);
-    this.totals(doc, invoice, this.items(doc, invoice.items, y));
+    const columns = invoice.remission ? REMISSION_COLUMNS : COLUMNS;
+    this.totals(doc, invoice, this.items(doc, invoice.items, y, columns));
     this.pageNumbers(doc);
     doc.end();
     return done;
@@ -237,6 +259,7 @@ export class PdfkitKudeRenderer implements KudeRenderer {
         `Constancia: ${certificate.type} Nº ${certificate.number}`,
       );
     }
+    if (invoice.remission) rows.push(...remissionRows(invoice.remission));
     const note = invoice.debitNote ?? invoice.creditNote;
     if (note) {
       const { reason, associatedCdc } = note;
@@ -251,9 +274,9 @@ export class PdfkitKudeRenderer implements KudeRenderer {
     return y + 8;
   }
 
-  private tableHeader(doc: Doc, y: number): number {
+  private tableHeader(doc: Doc, y: number, columns: readonly Column[]): number {
     let x = MARGIN;
-    for (const column of COLUMNS) {
+    for (const column of columns) {
       this.line(doc, column.title, x, y, {
         width: column.width - 3,
         align: column.align,
@@ -268,24 +291,24 @@ export class PdfkitKudeRenderer implements KudeRenderer {
     return y + 15;
   }
 
-  private items(doc: Doc, items: KudeItem[], start: number): number {
-    let y = this.tableHeader(doc, start);
+  private items(doc: Doc, items: KudeItem[], start: number, columns: readonly Column[]): number {
+    let y = this.tableHeader(doc, start, columns);
     for (const item of items) {
       const values = cells(item);
       doc.font('regular').fontSize(8);
       // The row is as tall as its tallest cell; amounts never wrap (they shrink instead).
       const height = Math.max(
         10,
-        ...COLUMNS.filter((c) => c.wrap).map((c) =>
-          doc.heightOfString(sanitize(values[c.key]), { width: c.width - 3 }),
-        ),
+        ...columns
+          .filter((c) => c.wrap)
+          .map((c) => doc.heightOfString(sanitize(values[c.key]), { width: c.width - 3 })),
       );
       if (y + height > doc.page.height - BOTTOM) {
         doc.addPage();
-        y = this.tableHeader(doc, MARGIN);
+        y = this.tableHeader(doc, MARGIN, columns);
       }
       let x = MARGIN;
-      for (const column of COLUMNS) {
+      for (const column of columns) {
         if (column.wrap) {
           doc
             .font('regular')
@@ -314,6 +337,10 @@ export class PdfkitKudeRenderer implements KudeRenderer {
       .lineTo(MARGIN + width, y)
       .stroke();
     y += 5;
+    if (invoice.remission) {
+      this.consult(doc, invoice, y);
+      return;
+    }
     const subtotals: [string, number][] = [
       ['exempt', totals.subtotalExempt],
       ['vat5', totals.subtotal5],
@@ -335,11 +362,14 @@ export class PdfkitKudeRenderer implements KudeRenderer {
     summary.forEach((text, i) => {
       this.line(doc, text, MARGIN, y + 16 + i * 12, { bold: true, size: 9 });
     });
-    y += 16 + summary.length * 12 + 12;
+    this.consult(doc, invoice, y + 16 + summary.length * 12 + 12);
+  }
+
+  private consult(doc: Doc, invoice: KudeInvoice, y: number): void {
     this.line(doc, 'Información de consulta en SIFEN', MARGIN, y, { bold: true });
     this.line(
       doc,
-      'Consulte la validez de esta Factura Electrónica con el número de CDC impreso abajo en:',
+      `Consulte la validez de esta ${documentLabelOf(invoice)} con el número de CDC impreso abajo en:`,
       MARGIN,
       y + 12,
       {},

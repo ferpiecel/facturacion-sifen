@@ -2,7 +2,7 @@
 
 - Feature: `e9-receiver-events` · Refs: HU-E9-01, HU-E9-02 (RF-10) · Engram mirror: `odd/e9-receiver-events/tasks`
 - TDD: strict (source: `openspec/config.yaml`, `strict_tdd: true`) · runner: Vitest (`pnpm --filter @sifen/api exec vitest run`, thresholds 85%)
-- Delivery: `ask-on-risk`, chain `stacked-to-main`; each PR 400 changed lines or less. Migrations: 0058 (E9-01) and 0059 (E9-02) only.
+- Delivery: `ask-on-risk`, chain `stacked-to-main`; each PR 400 changed lines or less. Migrations: 0065 (E9-01) and 0066 (E9-02) only.
 
 ## Objective
 
@@ -19,7 +19,7 @@ each kind and 3 corrections.
 - `TipsEventXmlBuilder` knows cancellation and voiding. xmlgen 1.0.283 has `generateXMLEventoConformidad|Disconformidad|Desconocimiento|Notificacion`
   (same envelope as the issuer ones: extract `gGroupGesEve`, set our `rEve/@Id`).
 - The target is a CDC of **another party's** document: there is no `documents` row. `issuer_events_subject` forces `document_id NOT NULL`
-  for every non-voiding kind, so migration 0058 must add `target_cdc` and the per-kind receiver data.
+  for every non-voiding kind, so migration 0065 must add `target_cdc` and the per-kind receiver data.
 - Receiver identity (`dNomRec`, `dRucRec`, `dDVRec`, `iTipRec = 1`) comes from the tenant's fiscal profile (`tenant_fiscal_profiles`).
 
 ## Normative basis (ADR-0012: NT 019 prevails over MT v150)
@@ -39,14 +39,14 @@ each kind and 3 corrections.
 | P1a | Pure domain: `receiver-event-rules` request parsing and validation (kinds, fields, dates)                                                              | about 350      |
 | P1b | Same module: 45-day window and compatibility matrix (`validateReceiverEvent`)                                                                          | about 330      |
 | P2  | Gateway types (4 receiver kinds) + `TipsEventXmlBuilder` for them; offline tests incl. signing                                                         | about 300      |
-| P3  | Migration 0058 (`issuer_events`: kinds, `target_cdc`, `receiver_data`, nullable reason, constraints, open index, guard) + schema + rollback + db tests | about 300      |
+| P3  | Migration 0065 (`issuer_events`: kinds, `target_cdc`, `receiver_data`, nullable reason, constraints, open index, guard) + schema + rollback + db tests | about 300      |
 | P4a | Signing wiring: `toIssuerEvent` and the signing store load receiver events                                                                             | about 220      |
 | P4b | Use case `RegisterReceiverEvent` + UoW port (in-memory spec)                                                                                           | about 400      |
 | P4c | Idempotency of the registration (replay, reused key, concurrent commit)                                                                                | about 150      |
 | P4d | Drizzle UoW (history, tenant identity, advisory lock, idempotency, audit) + pglite spec                                                                | about 300      |
 | P5  | `POST /v1/receiver-events`, module wiring, config, OpenAPI, `docs/configuracion.md`                                                                    | about 390      |
 | P5b | Integration guide section in `docs/integracion/eventos.md` (with the E9-02 section)                                                                    | about 60       |
-| P6a | HU-E9-02: migration 0059 (`corrects_event_id`, `correction_reason`, one per event, insert guard) + schema + db tests                                   | about 250      |
+| P6a | HU-E9-02: migration 0066 (`corrects_event_id`, `correction_reason`, one per event, insert guard) + schema + db tests                                   | about 250      |
 | P6b | Correction rules (pure): original approved, last conclusive event, not a correction, 15 days, opposite kind                                            | about 300      |
 | P6c | Use case `CorrectReceiverEvent` + port (in-memory spec)                                                                                                | about 350      |
 | P6d | Drizzle unit of work for corrections + pglite spec                                                                                                     | about 300      |
@@ -64,13 +64,13 @@ each kind and 3 corrections.
 - [x] T1 P1a request parsing (43be13c, PR #338)
 - [x] T1b P1b window and compatibility matrix
 - [x] T2 P2 builder (PR below)
-- [x] T3 P3 migration 0058
+- [x] T3 P3 migration 0065
 - [x] T4a P4a signing wiring
 - [x] T4b P4b use case (ccec384)
 - [x] T4c P4c idempotency
 - [x] T4d P4d Drizzle unit of work
 - [x] T5 P5 endpoint + OpenAPI + config
-- [x] T6a P6a migration 0059
+- [x] T6a P6a migration 0066
 - [x] T6b P6b correction rules (116d329)
 - [x] T6c P6c use case (ee54e21) and its idempotency (16ebd84)
 - [x] T6d P6d Drizzle unit of work (3d681d1)
@@ -81,20 +81,20 @@ each kind and 3 corrections.
 ## Progress and handoff
 
 Branch chain (each branches from the previous; worktree `e9-b` develops, `e9-a` is the detached push worktree). Do not rebase onto
-main: the orchestrator restacks the chain and renumbers migrations 0058/0059 in the journal at merge time.
+main: the orchestrator restacked the chain and renumbered migrations 0058/0059 to 0065/0066 (after HU-E6-06 0064) and restacked the chain onto feat/hu-e6-06-sync-cli (#380).
 
 | Branch | PR |
 |---|---|
 | feat/hu-e9-01-receiver-events (P1a) | #338 |
 | feat/hu-e9-01-receiver-rules (P1b) | #340 |
 | feat/hu-e9-01-receiver-xml (P2) | #342 |
-| feat/hu-e9-01-receiver-store (P3, 0058) | #345 |
+| feat/hu-e9-01-receiver-store (P3, 0065) | #345 |
 | feat/hu-e9-01-receiver-signing (P4a) | #348 |
 | feat/hu-e9-01-receiver-usecase (P4b) | #350 |
 | feat/hu-e9-01-receiver-idempotency (P4c) | #351 |
 | feat/hu-e9-01-receiver-unit-of-work (P4d) | #352 |
 | feat/hu-e9-01-receiver-endpoint (P5) | #353 |
-| feat/hu-e9-02-correction-store (P6a, 0059) | #354 |
+| feat/hu-e9-02-correction-store (P6a, 0066) | #354 |
 | feat/hu-e9-02-correction-rules (P6b) | #355 |
 | feat/hu-e9-02-correction-usecase (P6c) | #358 |
 | feat/hu-e9-02-correction-idempotency | #359 |

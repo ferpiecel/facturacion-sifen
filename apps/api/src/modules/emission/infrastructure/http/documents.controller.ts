@@ -119,7 +119,10 @@ export class DocumentsController {
                   draft: toCreditNoteDraft(parsed.value),
                 });
       if (wait === 'true') {
-        const settled = await this.waitForDocument(context.tenantId, accepted.documentId);
+        // The document is already accepted: a failed wait must not turn that into an error.
+        const settled = await this.waitForDocument(context.tenantId, accepted.documentId).catch(
+          () => undefined,
+        );
         if (settled) {
           void reply.status(HttpStatus.OK);
           return settled;

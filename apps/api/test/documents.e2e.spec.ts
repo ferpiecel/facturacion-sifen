@@ -16,6 +16,7 @@ import { createTenant, issueApiKey } from '../src/cli/commands.js';
 import { createHttpAdapter } from '../src/bootstrap/http.js';
 import { AppModule } from '../src/app.module.js';
 import { DATABASE, DATABASE_HANDLE } from '../src/modules/database/database.module.js';
+import { WAIT_FOR_DOCUMENT } from '../src/modules/emission/emission.tokens.js';
 import { parseCdc } from '../src/modules/emission/domain/cdc.js';
 
 const LINE = { code: 'A-001', description: 'Servicio de consultoria', unitCode: 77 };
@@ -804,6 +805,29 @@ describe('POST /v1/documents (e2e)', () => {
       });
       expect(response.statusCode).toBe(202);
       await short.close();
+    });
+
+    it('answers the usual 202 when the wait itself fails: the document is already accepted', async () => {
+      const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+        .overrideProvider(DATABASE_HANDLE)
+        .useValue(handle)
+        .overrideProvider(DATABASE)
+        .useValue(handle.db)
+        .overrideProvider(WAIT_FOR_DOCUMENT)
+        .useValue(() => Promise.reject(new Error('db down')))
+        .compile();
+      const broken = moduleRef.createNestApplication<NestFastifyApplication>(createHttpAdapter());
+      await broken.init();
+      await broken.getHttpAdapter().getInstance().ready();
+      const response = await broken.inject({
+        method: 'POST',
+        url: '/v1/documents?wait=true',
+        payload: BODY,
+        headers: { authorization: `Bearer ${bearer}`, 'idempotency-key': 'wait-4' },
+      });
+      expect(response.statusCode).toBe(202);
+      expect(response.json<{ document_id: string }>().document_id).toBeDefined();
+      await broken.close();
     });
 
     it('refuses to boot with an out-of-range SYNC_WAIT_TIMEOUT_MS', async () => {

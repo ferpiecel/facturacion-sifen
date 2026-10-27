@@ -26,6 +26,7 @@ import {
 import { listPlans, setPlanPrice } from './plan-commands.js';
 import { seedPlans } from './plan-seed.js';
 import { assignSubscription, recordPayment } from './subscription-commands.js';
+import { setSyncTransmission } from './sync-transmission-commands.js';
 import { showUsage } from './usage-commands.js';
 import { createPortalUser } from './user-commands.js';
 
@@ -98,6 +99,16 @@ export async function runOpsCommand(
   certificates?: CertificateDeps,
 ): Promise<string> {
   switch (command.kind) {
+    case 'tenant:sync-transmission': {
+      const result = await setSyncTransmission(db, {
+        tenantId: command.tenantId,
+        enabled: command.enabled,
+      });
+      const state = result.enabled ? 'enabled' : 'disabled';
+      return result.changed
+        ? `synchronous transmission ${state} for tenant ${result.tenantId}`
+        : `synchronous transmission already ${state} for tenant ${result.tenantId}`;
+    }
     case 'usage:show': {
       const report = await showUsage(
         db,

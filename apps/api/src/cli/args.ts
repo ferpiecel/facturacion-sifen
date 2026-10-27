@@ -29,6 +29,7 @@ export class OpsArgError extends Error {}
 
 export type OpsCommand =
   | { kind: 'usage:show'; tenantId: string; period: string | undefined }
+  | { kind: 'tenant:sync-transmission'; tenantId: string; enabled: boolean }
   | {
       kind: 'subscription:assign';
       tenantId: string;
@@ -243,6 +244,22 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
   }
 
   switch (subcommand) {
+    case 'tenant:sync-transmission': {
+      const { values } = parseStrict({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          on: { type: 'boolean' },
+          off: { type: 'boolean' },
+        },
+      });
+      if (values.on === values.off) throw new OpsArgError('pass exactly one of --on or --off');
+      return {
+        kind: 'tenant:sync-transmission',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        enabled: values.on === true,
+      };
+    }
     case 'usage:show': {
       const { values } = parseStrict({
         args: rest,

@@ -74,8 +74,41 @@ export interface VoidingEvent {
   readonly series?: string;
 }
 
-/** Issuer events the platform sends to `siRecepEvento` (HU-E8-04). Nomination joins in HU-E8-05. */
-export type IssuerEvent = CancellationEvent | VoidingEvent;
+/** The receiver a nomination names (NT 014, 015, 027); a taxpayer by RUC, anyone else by identity document. */
+export type NominationEventReceiver = (
+  | { readonly kind: 'taxpayer'; readonly ruc: string; readonly taxpayerType: 1 | 2 }
+  | {
+      readonly kind: 'non-taxpayer';
+      readonly documentType: 1 | 2 | 3 | 4 | 5;
+      readonly documentNumber: string;
+    }
+) & {
+  readonly name: string;
+  readonly tradeName?: string;
+  /** Three-letter country code. */
+  readonly country: string;
+  readonly operationType: 'B2B' | 'B2C' | 'B2F';
+  readonly address?: string;
+  readonly houseNumber?: string;
+  readonly departmentCode?: number;
+  readonly districtCode?: number;
+  readonly cityCode?: number;
+  readonly phone?: string;
+  readonly mobile?: string;
+  readonly email?: string;
+  readonly customerCode?: string;
+};
+
+/** Nomination of an FE issued to an unnamed receiver (MT 11.5.1, `rGEveNom`; reason of 5 to 500 characters). */
+export interface NominationEvent {
+  readonly kind: 'nomination';
+  readonly cdc: string;
+  readonly reason: string;
+  readonly receiver: NominationEventReceiver;
+}
+
+/** Issuer events the platform sends to `siRecepEvento` (HU-E8-04, HU-E8-05). */
+export type IssuerEvent = CancellationEvent | VoidingEvent | NominationEvent;
 
 /** The tenant as the receiver of a DE/DTE: a taxpayer (`iTipRec` 1) whose RUC is `base-dv`. */
 export interface ReceiverParty {

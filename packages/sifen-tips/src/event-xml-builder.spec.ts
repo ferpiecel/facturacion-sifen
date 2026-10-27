@@ -164,3 +164,102 @@ describe('TipsEventXmlBuilder', () => {
     expect(input).toEqual(copy);
   });
 });
+
+describe('TipsEventXmlBuilder nomination (NT 014, 015, 027)', () => {
+  const builder = new TipsEventXmlBuilder();
+  const base = { name: 'Juan Perez', country: 'PRY', operationType: 'B2C' } as const;
+  const nomination = (receiver: object): IssuerEventBuildInput => ({
+    eventId: 44,
+    event: {
+      kind: 'nomination',
+      cdc: CDC,
+      reason: 'El receptor pidio nombrar la factura',
+      receiver,
+    } as IssuerEventBuildInput['event'],
+  });
+
+  it('nominates a receiver that is not a taxpayer by its identity document', async () => {
+    const xml = await builder.build(
+      nomination({ ...base, kind: 'non-taxpayer', documentType: 1, documentNumber: '1234567' }),
+    );
+
+    expect(xml).toContain('<rEve Id="44">');
+    expect(xml).toContain(`<Id>${CDC}</Id>`);
+    expect(xml).toContain('<mOtEve>El receptor pidio nombrar la factura</mOtEve>');
+    expect(xml).toContain('<iNatRec>2</iNatRec>');
+    expect(xml).toContain('<iTiOpe>2</iTiOpe>');
+    expect(xml).toContain('<cPaisRec>PRY</cPaisRec>');
+    expect(xml).toContain('<iTipIDRec>1</iTipIDRec>');
+    expect(xml).toContain('<dNumIDRec>1234567</dNumIDRec>');
+    expect(xml).toContain('<dNomRec>Juan Perez</dNomRec>');
+    expect(xml).not.toContain('<dRucRec>');
+  });
+
+  it('nominates a taxpayer by its RUC and check digit', async () => {
+    const xml = await builder.build(
+      nomination({
+        ...base,
+        operationType: 'B2B',
+        kind: 'taxpayer',
+        ruc: '80012345-6',
+        taxpayerType: 2,
+      }),
+    );
+
+    expect(xml).toContain('<iNatRec>1</iNatRec>');
+    expect(xml).toContain('<iTiOpe>1</iTiOpe>');
+    expect(xml).toContain('<iTiContRec>2</iTiContRec>');
+    expect(xml).toContain('<dRucRec>80012345</dRucRec>');
+    expect(xml).toContain('<dDVRec>6</dDVRec>');
+    expect(xml).not.toContain('<iTipIDRec>');
+  });
+
+  it('carries the optional contact fields when informed', async () => {
+    const xml = await builder.build(
+      nomination({
+        ...base,
+        kind: 'non-taxpayer',
+        documentType: 2,
+        documentNumber: 'AB12345',
+        phone: '021123456',
+        email: 'juan@example.com',
+        customerCode: 'C-001',
+      }),
+    );
+
+    expect(xml).toContain('<dTelRec>021123456</dTelRec>');
+    expect(xml).toContain('<dEmailRec>juan@example.com</dEmailRec>');
+    expect(xml).toContain('<dCodCliente>C-001</dCodCliente>');
+  });
+
+  it('carries the event type of a nomination (15)', async () => {
+    const xml = await builder.build(
+      nomination({ ...base, kind: 'non-taxpayer', documentType: 1, documentNumber: '1' }),
+    );
+    expect(xml).toContain('<rGEveNom>');
+  });
+
+  it('carries the address block and the remaining contact fields when informed', async () => {
+    const xml = await builder.build(
+      nomination({
+        ...base,
+        kind: 'non-taxpayer',
+        documentType: 1,
+        documentNumber: '1234567',
+        tradeName: 'Perez SA',
+        address: 'Av. Mariscal Lopez',
+        houseNumber: '123',
+        departmentCode: 1,
+        districtCode: 1,
+        cityCode: 1,
+        mobile: '0981123456',
+      }),
+    );
+
+    expect(xml).toContain('<dNomFanRec>Perez SA</dNomFanRec>');
+    expect(xml).toContain('<dDirRec>Av. Mariscal Lopez</dDirRec>');
+    expect(xml).toContain('<dNumCasRec>123</dNumCasRec>');
+    expect(xml).toContain('<dCelRec>0981123456</dCelRec>');
+    expect(xml).toContain('<cDepRec>1</cDepRec>');
+  });
+});

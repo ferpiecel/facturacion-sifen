@@ -55,7 +55,7 @@ each kind and 3 corrections.
 ## Tasks
 - [x] T1 P1a request parsing (43be13c, PR #338)
 - [x] T1b P1b window and compatibility matrix
-- [ ] T2 P2 builder
+- [x] T2 P2 builder (PR below)
 - [ ] T3 P3 migration 0058
 - [ ] T4 P4 use case + store + signing wiring
 - [ ] T5 P5 endpoint + docs

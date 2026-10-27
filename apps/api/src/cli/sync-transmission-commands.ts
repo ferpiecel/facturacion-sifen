@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { tenantFiscalProfiles, withTenantTransaction, type Database } from '@sifen/db';
 import { recordAudit } from '../modules/audit/infrastructure/record-audit.js';
 
@@ -20,10 +20,11 @@ export async function setSyncTransmission(
   params: { tenantId: string; enabled: boolean },
 ): Promise<SyncTransmissionResult> {
   return await withTenantTransaction(db, params.tenantId, async (tx) => {
-    const [profile] = await tx
+    const profile = await tx
       .select({ enabled: tenantFiscalProfiles.syncTransmission })
       .from(tenantFiscalProfiles)
-      .where(eq(tenantFiscalProfiles.tenantId, params.tenantId));
+      .where(eq(tenantFiscalProfiles.tenantId, params.tenantId))
+      .then((rows) => rows.at(0));
     if (profile === undefined) throw new Error('the tenant has no fiscal profile');
     if (profile.enabled === params.enabled) {
       return { tenantId: params.tenantId, enabled: params.enabled, changed: false };
@@ -31,7 +32,7 @@ export async function setSyncTransmission(
     await tx
       .update(tenantFiscalProfiles)
       .set({ syncTransmission: params.enabled, updatedAt: new Date() })
-      .where(and(eq(tenantFiscalProfiles.tenantId, params.tenantId)));
+      .where(eq(tenantFiscalProfiles.tenantId, params.tenantId));
     await recordAudit(tx, {
       actor: OPERATOR,
       action: 'tenant.sync_transmission_set',

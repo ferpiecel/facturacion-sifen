@@ -107,7 +107,7 @@ export class SendLote {
   }: SendLoteCommand): Promise<LoteDispatchOutcome | LoteDeferred | undefined> {
     const sync = this.deps.sync;
     const [document] = lote.documents;
-    if (!sync || lote.documents.length !== 1 || !document || !(await sync.isEnabled())) {
+    if (!sync || lote.documents.length !== 1 || !(await sync.isEnabled())) {
       return undefined;
     }
     try {

@@ -55,6 +55,13 @@ BEGIN
     IF correcting AND (NEW.signed_xml IS NOT NULL OR NEW.signed_at IS NOT NULL) THEN
       RAISE EXCEPTION 'documents: a corrected document must be signed again';
     END IF;
+    -- The history comes first: the correction's row must already exist in this transaction.
+    IF correcting AND (
+      SELECT count(*) FROM public.document_corrections c
+      WHERE c.tenant_id = NEW.tenant_id AND c.document_id = NEW.id AND c.kind = 'same_cdc'
+    ) <> NEW.corrections_count THEN
+      RAISE EXCEPTION 'documents: a correction must be recorded in document_corrections first';
+    END IF;
     IF NEW.id IS DISTINCT FROM OLD.id
       OR NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
       OR NEW.environment IS DISTINCT FROM OLD.environment

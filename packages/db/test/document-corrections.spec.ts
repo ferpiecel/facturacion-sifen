@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
+import { fileURLToPath } from 'node:url';
 import type { DatabaseHandle } from '../src/client.js';
 import {
   documentCorrections,
@@ -79,9 +81,26 @@ describe('document corrections', () => {
     return { db, a: a.id, row };
   }
 
+  /** The history row the door requires to exist before the rewrite (same transaction in production). */
+  async function recordHistory(
+    { db, a, row }: Awaited<ReturnType<typeof seed>>,
+    idempotencyKey = 'hist-1',
+  ) {
+    await db.insert(documentCorrections).values({
+      tenantId: a,
+      documentId: row.id,
+      kind: 'same_cdc',
+      idempotencyKey,
+      requestHash: HASH,
+      previousPayload: row.payload,
+    });
+  }
+
   describe('documents_guard door', () => {
     it('rewrites a rejected document to accepted with the correction counted, keeping its CDC', async () => {
-      const { db, row } = await seed();
+      const seeded = await seed();
+      const { db, row } = seeded;
+      await recordHistory(seeded);
       const [after] = await db
         .update(documents)
         .set(door)
@@ -92,13 +111,21 @@ describe('document corrections', () => {
     });
 
     it('requires the signed XML to be cleared in the same step', async () => {
-      const { db, row } = await seed({
+      const seeded = await seed({
         signedXml: '<DE/>',
         signedAt: new Date('2026-01-01T12:01:00Z'),
       });
+      const { db, row } = seeded;
+      await recordHistory(seeded);
       const update = (set: object) => db.update(documents).set(set).where(eq(documents.id, row.id));
       expect(await causeOf(update(door))).toContain('signed again');
       await update({ ...door, signedXml: null, signedAt: null });
+    });
+
+    it('refuses the door without its history row', async () => {
+      const { db, row } = await seed();
+      const result = db.update(documents).set(door).where(eq(documents.id, row.id));
+      expect(await causeOf(result)).toContain('recorded in document_corrections first');
     });
 
     it('refuses to correct a document that is not rejected', async () => {
@@ -108,7 +135,9 @@ describe('document corrections', () => {
     });
 
     it('refuses the door when the correction is not counted exactly once', async () => {
-      const { db, row } = await seed();
+      const seeded = await seed();
+      const { db, row } = seeded;
+      await recordHistory(seeded);
       const update = (correctionsCount: number) =>
         db
           .update(documents)
@@ -130,7 +159,9 @@ describe('document corrections', () => {
       ['cdc', { cdc: CDC_B }],
       ['associated cdc', { associatedCdc: CDC_B }],
     ])('keeps %s immutable through the door', async (_label, change) => {
-      const { db, row } = await seed();
+      const seeded = await seed();
+      const { db, row } = seeded;
+      await recordHistory(seeded);
       const result = db
         .update(documents)
         .set({ ...door, ...change })
@@ -163,5 +194,49 @@ describe('document corrections', () => {
       const remove = db.execute(sql`DELETE FROM document_corrections WHERE id = ${stored.id}`);
       expect(await causeOf(remove)).toContain('append-only');
     });
+  });
+});
+
+/** Applies the manual rollback of 0065 statement by statement (the driver runs one statement per call). */
+describe('0065 rollback', () => {
+  it('leaves documents writable once the guard of 0034 is back', async () => {
+    const handle = await createTestDatabase();
+    try {
+      const file = fileURLToPath(
+        new URL('../migrations/rollback/0065_documents_corrections.down.sql', import.meta.url),
+      );
+      const text = readFileSync(file, 'utf8');
+      const end = text.indexOf('\n$$;') + '\n$$;'.length;
+      const fn = text.slice(text.indexOf('CREATE OR REPLACE FUNCTION'), end);
+      const rest = text
+        .slice(end)
+        .split(';\n')
+        .map((statement) => statement.trim())
+        .filter((statement) => statement !== '');
+      for (const statement of [fn, ...rest]) await handle.db.execute(sql.raw(statement));
+
+      const [tenant] = await handle.db.insert(tenants).values({ name: 'A' }).returning();
+      const [est] = await handle.db
+        .insert(tenantEstablishments)
+        .values({ tenantId: tenant.id, code: '001', ...ADDRESS })
+        .returning();
+      const [point] = await handle.db
+        .insert(tenantExpeditionPoints)
+        .values({ tenantId: tenant.id, establishmentId: est.id, code: '001' })
+        .returning();
+      const [timbrado] = await handle.db
+        .insert(tenantTimbrados)
+        .values({ tenantId: tenant.id, number: '12345678', validFrom: '2024-01-01' })
+        .returning();
+      // Raw SQL: the Drizzle schema already lists the column the rollback dropped.
+      await handle.db.execute(sql`
+        INSERT INTO documents (tenant_id, environment, cdc, document_type, timbrado_id, establishment_id,
+          expedition_point_id, number, security_code, issued_at, total_amount, payload)
+        VALUES (${tenant.id}, 'test', ${CDC_A}, 1, ${timbrado.id}, ${est.id}, ${point.id}, 1, '123456789',
+          now(), '110000', '{}'::jsonb)`);
+      await handle.db.execute(sql`UPDATE documents SET status = 'queued' WHERE cdc = ${CDC_A}`);
+    } finally {
+      await handle.close();
+    }
   });
 });

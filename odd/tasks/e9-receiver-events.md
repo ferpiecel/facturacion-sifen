@@ -72,39 +72,37 @@ each kind and 3 corrections.
 - [x] T5 P5 endpoint + OpenAPI + config
 - [x] T6a P6a migration 0059
 - [x] T6b P6b correction rules (116d329)
-- [ ] T6c P6c use case
-- [ ] T6d P6d Drizzle unit of work
-- [ ] T7 P7 correction endpoint + docs
+- [x] T6c P6c use case (ee54e21) and its idempotency (16ebd84)
+- [x] T6d P6d Drizzle unit of work (3d681d1)
+- [x] T7a HTTP error mapping, incl. `EventKeyCollisionError` -> 409 for both receiver endpoints (ad11645)
+- [x] T7b P7 correction endpoint + OpenAPI (72b6a2c)
+- [x] T7c integration guide for E9-01 and E9-02 (415161d)
 
 ## Progress and handoff
 
-Branch chain (each branches from the previous; worktree `e9-b` develops, `e9-a` is the detached push worktree so the
-9-minute pre-push verify does not block editing; push several branches in one `git push` to verify once):
+Branch chain (each branches from the previous; worktree `e9-b` develops, `e9-a` is the detached push worktree). Do not rebase onto
+main: the orchestrator restacks the chain and renumbers migrations 0058/0059 in the journal at merge time.
 
-| Branch | Tip | PR |
-|---|---|---|
-| feat/hu-e9-01-receiver-events (P1a) | 43be13c | #338 ready |
-| feat/hu-e9-01-receiver-rules (P1b) | 65a59a9 | #340 draft |
-| feat/hu-e9-01-receiver-xml (P2) | 50ee1d0 | #342 draft |
-| feat/hu-e9-01-receiver-store (P3, 0058) | acf7554 | #345 draft |
-| feat/hu-e9-01-receiver-signing (P4a) | d67fff9 | #348 draft |
-| feat/hu-e9-01-receiver-usecase (P4b) | ccec384 | pushing, PR missing |
-| feat/hu-e9-01-receiver-idempotency (P4c) | 22960df | pushing, PR missing |
-| feat/hu-e9-01-receiver-unit-of-work (P4d) | faea615 | pushing, PR missing |
-| feat/hu-e9-01-receiver-endpoint (P5) | ef2f8b9 | pushing, PR missing |
-| feat/hu-e9-02-correction-store (P6a, 0059) | 1539910 | not pushed |
-| feat/hu-e9-02-correction-rules (P6b) | 1fd3d7d + doc 601d7fa | not pushed |
+| Branch | PR |
+|---|---|
+| feat/hu-e9-01-receiver-events (P1a) | #338 |
+| feat/hu-e9-01-receiver-rules (P1b) | #340 |
+| feat/hu-e9-01-receiver-xml (P2) | #342 |
+| feat/hu-e9-01-receiver-store (P3, 0058) | #345 |
+| feat/hu-e9-01-receiver-signing (P4a) | #348 |
+| feat/hu-e9-01-receiver-usecase (P4b) | #350 |
+| feat/hu-e9-01-receiver-idempotency (P4c) | #351 |
+| feat/hu-e9-01-receiver-unit-of-work (P4d) | #352 |
+| feat/hu-e9-01-receiver-endpoint (P5) | #353 |
+| feat/hu-e9-02-correction-store (P6a, 0059) | #354 |
+| feat/hu-e9-02-correction-rules (P6b) | #355 |
+| feat/hu-e9-02-correction-usecase (P6c) | see PR list (PR numbers below) |
+| feat/hu-e9-02-correction-idempotency | |
+| feat/hu-e9-02-correction-store-uow (P6d) | |
+| feat/hu-e9-02-correction-http-errors | |
+| feat/hu-e9-02-correction-endpoint (P7) | |
+| feat/hu-e9-02-guide | |
 
-Next steps:
-1. Check `/tmp/claude-1000/e9a-push6.log` (ends with `done`); then open draft PRs (Spanish body from `.github/pull_request_template.md`,
-   `Depende de #<previous>`, base main) for the four pushed branches, and push P6a and P6b the same way from `e9-a`.
-2. Migration journal: the orchestrator says HU-E3-03 merges migration 0060 with journal idx 58. When rebasing this chain onto main,
-   renumber nothing but put 0058 and 0059 in `_journal.json` after it as idx 59 and 60 with `when` greater than 0060's, and regenerate
-   `meta/0058_snapshot.json` and `meta/0059_snapshot.json` so they chain (prevId). Re-check journal on origin/main before pushing.
-3. P6c: use case `CorrectReceiverEvent` (`validateCorrection`, `validateCorrectionReason`, port with: lock CDC, load original by id
-   with `isCorrection`/`alreadyCorrected`/`isLatestConclusive`, list history, insert replacement with `corrects_event_id` and
-   `correction_reason`, idempotency, audit). P6d: Drizzle unit of work + pglite spec. P7: `POST /v1/receiver-events/{id}/correct`,
-   OpenAPI + `pnpm --filter @sifen/api openapi > docs/api/openapi.json`, `docs/integracion/eventos.md` section for both stories,
-   backlog status. Each is about 300 to 380 lines; run RED first.
-4. Product questions: a correction of a correction is refused (stricter reading); dTiGDE absent in xmlgen output and codes 11 to 14 vs MT 10 to 13
-   need T0 (Prevalidador); battery of 3 events per kind and 3 corrections is not yet exercised (needs the test environment).
+Open items: a correction of a correction stays refused (product to confirm); dTiGDE absent in xmlgen output and codes 11 to 14 vs MT
+10 to 13 need T0 (Prevalidador); the battery (3 events per kind, 3 corrections) needs the test environment. No backlog status column
+exists, so none was changed.

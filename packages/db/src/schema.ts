@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  type AnyPgColumn,
   bigint,
   boolean,
   char,
@@ -1268,6 +1269,10 @@ export const issuerEvents = pgTable(
     targetCdc: char('target_cdc', { length: 44 }),
     /** Fields of the receiver event that its XML needs: dates, conformity type, total (HU-E9-01). */
     receiverData: jsonb('receiver_data'),
+    /** The approved receiver event this one corrects (HU-E9-02); each event is corrected at most once. */
+    correctsEventId: uuid('corrects_event_id').references((): AnyPgColumn => issuerEvents.id),
+    /** Why the receiver corrects the event (MT Tabla K: free text, 5 to 500 characters). */
+    correctionReason: text('correction_reason'),
     /** `Idempotency-Key` of the request that created the event (HU-E8-02), unique per tenant; null for older rows. */
     idempotencyKey: varchar('idempotency_key', { length: 255 }),
     /** sha-256 hex of the canonical request, to detect a reused key. */
@@ -1336,6 +1341,21 @@ export const issuerEvents = pgTable(
     check(
       'issuer_events_subject',
       sql`(${table.kind} = 'voiding') = (${table.voidRange} IS NOT NULL) AND (${table.kind} IN ('cancellation', 'nomination')) = (${table.documentId} IS NOT NULL) AND (${table.kind} IN ('conformity', 'disconformity', 'unawareness', 'receipt_notice')) = (${table.targetCdc} IS NOT NULL) AND (${table.targetCdc} IS NOT NULL) = (${table.receiverData} IS NOT NULL)`,
+    ),
+    uniqueIndex('issuer_events_correction_idx')
+      .on(table.correctsEventId)
+      .where(sql`${table.correctsEventId} IS NOT NULL AND ${table.status} <> 'rejected'`),
+    check(
+      'issuer_events_correction_pair',
+      sql`(${table.correctsEventId} IS NULL) = (${table.correctionReason} IS NULL)`,
+    ),
+    check(
+      'issuer_events_correction_reason_length',
+      sql`${table.correctionReason} IS NULL OR char_length(${table.correctionReason}) BETWEEN 5 AND 500`,
+    ),
+    check(
+      'issuer_events_correction_subject',
+      sql`${table.correctsEventId} IS NULL OR (${table.targetCdc} IS NOT NULL AND ${table.kind} <> 'receipt_notice' AND ${table.correctsEventId} <> ${table.id})`,
     ),
     check(
       'issuer_events_target_cdc_format',

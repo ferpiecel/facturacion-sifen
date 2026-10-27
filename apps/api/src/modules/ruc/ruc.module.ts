@@ -41,7 +41,11 @@ const RUC_ACTOR = { type: 'system', id: 'ruc-lookup' } as const;
                     purpose: 'sifen-mtls',
                   }),
               },
-              logger: { warn: (message) => console.warn(message) },
+              logger: {
+                warn: (message) => {
+                  console.warn(message);
+                },
+              },
             };
           },
         }),
@@ -54,8 +58,8 @@ const RUC_ACTOR = { type: 'system', id: 'ruc-lookup' } as const;
         if (!db || !gateways) return () => Promise.reject(new ServiceUnavailableException());
         let sequence = 0n;
         return createLookupRuc({
-          gatewayFor: gateways.gatewayFor,
-          environmentOf: gateways.environmentOf,
+          gatewayFor: (tenantId) => gateways.gatewayFor(tenantId),
+          environmentOf: (tenantId) => gateways.environmentOf(tenantId),
           cache: createDrizzleRucCache(db),
           ttlSeconds,
           now: () => new Date(),

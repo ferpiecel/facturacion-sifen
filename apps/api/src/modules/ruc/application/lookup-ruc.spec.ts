@@ -134,7 +134,7 @@ describe('LookupRuc', () => {
         gateways.set(tenantId, gateway);
         return gateway;
       },
-      environmentOf: (tenantId) => Promise.resolve(environments[tenantId] as 'test' | 'production'),
+      environmentOf: (tenantId) => Promise.resolve(environments[tenantId]),
       cache,
       ttlSeconds: 60,
       now: () => new Date('2026-10-27T12:00:00Z'),

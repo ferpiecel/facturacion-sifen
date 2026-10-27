@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { requestHash } from '../domain/request-hash.js';
 import { createAcceptCreditNote, type AcceptCreditNoteInput } from './accept-credit-note.js';
-import { IdempotencyKeyReusedError } from './accept-invoice.js';
+import { CertificateExpiringError, IdempotencyKeyReusedError } from './accept-invoice.js';
 import type {
   AcceptanceUnit,
   AssociatedInvoice,
@@ -36,7 +36,11 @@ const INVOICE: AssociatedInvoice = {
 
 /** Spec: HU-E7-01 (ADR-0019 D5). The idempotency key is read again once the FE row is locked. */
 describe('acceptCreditNote idempotency under concurrency', () => {
-  function run(keyLookups: (StoredAcceptance | null)[], credited = '600000') {
+  function run(
+    keyLookups: (StoredAcceptance | null)[],
+    credited = '600000',
+    certificateNotAfter?: Date,
+  ) {
     const insertDocument = vi.fn(() => Promise.resolve({ id: 'new' }));
     const nextNumber = vi.fn(() => Promise.resolve({ series: null, number: 1 }));
     const lookups = [...keyLookups];
@@ -51,6 +55,7 @@ describe('acceptCreditNote idempotency under concurrency', () => {
           timbradoId: 'tim',
           establishmentId: 'est',
           expeditionPointId: 'pt',
+          certificateNotAfter,
         }),
       findAssociatedInvoice: () => Promise.resolve(INVOICE),
       sumCreditNotes: () => Promise.resolve(credited),
@@ -83,5 +88,13 @@ describe('acceptCreditNote idempotency under concurrency', () => {
     const { accept } = run([null, stored]);
 
     await expect(accept(INPUT)).rejects.toBeInstanceOf(IdempotencyKeyReusedError);
+  });
+
+  /** Spec: HU-E3-03. */
+  it('refuses before numbering when the certificate expires within a day', async () => {
+    const { accept, nextNumber } = run([null], '0', new Date('2026-03-07T01:00:00Z'));
+
+    await expect(accept(INPUT)).rejects.toBeInstanceOf(CertificateExpiringError);
+    expect(nextNumber).not.toHaveBeenCalled();
   });
 });

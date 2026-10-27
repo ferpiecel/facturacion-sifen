@@ -4,6 +4,7 @@ import {
   dueAlertThreshold,
   isEmissionBlocked,
   parseAlertDays,
+  parseBlockDays,
 } from './certificate-expiry.js';
 
 const DAY = 86_400_000;
@@ -64,5 +65,22 @@ describe('isEmissionBlocked', () => {
   it('honours a configured number of block days', () => {
     expect(isEmissionBlocked(NOT_AFTER, daysBefore(3), 3)).toBe(true);
     expect(isEmissionBlocked(NOT_AFTER, daysBefore(4), 3)).toBe(false);
+  });
+});
+
+describe('parseBlockDays', () => {
+  it('defaults to one day when unset or blank', () => {
+    expect(parseBlockDays(undefined)).toBe(1);
+    expect(parseBlockDays(' ')).toBe(1);
+  });
+
+  it('reads whole days from 0 (no preventive block) to 30', () => {
+    expect(parseBlockDays('0')).toBe(0);
+    expect(parseBlockDays('3')).toBe(3);
+    expect(parseBlockDays('30')).toBe(30);
+  });
+
+  it.each(['abc', '-1', '1.5', '31'])('rejects %j', (raw) => {
+    expect(() => parseBlockDays(raw)).toThrow(/CERTIFICATE_EMISSION_BLOCK_DAYS/);
   });
 });

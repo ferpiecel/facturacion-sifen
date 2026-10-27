@@ -6,6 +6,7 @@ import {
   documents,
   tenantEstablishments,
   tenantExpeditionPoints,
+  tenantCertificates,
   tenantFiscalProfiles,
   tenants,
   tenantTimbrados,
@@ -106,6 +107,49 @@ describe('AcceptInvoice with the Drizzle unit of work', () => {
 
   const rows = () =>
     withTenantTransaction(handle.db, tenantId, (tx) => tx.select().from(documents));
+
+  /** Spec: HU-E3-03. The issuer carries the expiry of the active certificate for the tenant's environment. */
+  describe('certificate expiry in the issuer context', () => {
+    const NOT_AFTER = new Date('2026-12-31T00:00:00.000Z');
+    const sealed = {
+      v: 1,
+      keyId: 'k',
+      wrappedKey: 'AA==',
+      nonce: 'AA==',
+      tag: 'AA==',
+      ciphertext: 'AA==',
+    };
+    const certificate = (over: Partial<typeof tenantCertificates.$inferInsert> = {}) =>
+      handle.db.insert(tenantCertificates).values({
+        tenantId,
+        environment: 'test',
+        sealed,
+        fingerprint: 'a'.repeat(64),
+        subjectRuc: '80069563-1',
+        notBefore: new Date('2025-01-01T00:00:00.000Z'),
+        notAfter: NOT_AFTER,
+        ...over,
+      });
+    const issuer = (tenant = tenantId) =>
+      createDrizzleAcceptanceUnitOfWork(handle.db).run(tenant, (unit) =>
+        unit.resolveIssuer({
+          establishmentCode: '001',
+          expeditionPointCode: '002',
+          issueDate: '2026-03-05',
+        }),
+      );
+
+    it('is the notAfter of the active certificate', async () => {
+      await certificate();
+      expect((await issuer())?.certificateNotAfter).toEqual(NOT_AFTER);
+    });
+
+    it('is null without an active certificate for the tenant environment', async () => {
+      await certificate({ status: 'revoked', revokedAt: new Date('2026-01-01T00:00:00.000Z') });
+      await certificate({ environment: 'production', fingerprint: 'b'.repeat(64) });
+      expect((await issuer())?.certificateNotAfter).toBeNull();
+    });
+  });
 
   it('persists consecutive accepted documents under the active timbrado', async () => {
     const first = await accept()(input());

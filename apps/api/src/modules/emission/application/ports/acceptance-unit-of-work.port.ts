@@ -12,6 +12,11 @@ export interface IssuerContext {
   timbradoId: string;
   establishmentId: string;
   expeditionPointId: string;
+  /**
+   * `not_after` of the tenant's active certificate for its environment (HU-E3-03); `null` when it has
+   * none (signing then holds the document), absent in fakes that do not care.
+   */
+  certificateNotAfter?: Date | null;
 }
 
 export interface IssuerQuery {

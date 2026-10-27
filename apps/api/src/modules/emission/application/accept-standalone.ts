@@ -9,6 +9,7 @@ import {
   IdempotencyKeyReusedError,
   InvoiceValidationError,
   IssuerNotConfiguredError,
+  assertCertificateUsable,
   paraguayDate,
   type AcceptedInvoice,
 } from './accept-invoice.js';
@@ -44,6 +45,7 @@ export interface AcceptStandaloneDependencies {
   now?: () => Date;
   randomBytes?: RandomBytes;
   validation?: ValidationConfig;
+  certificateBlockDays?: number;
 }
 
 /**
@@ -91,6 +93,7 @@ export function createAcceptStandalone<Draft>(
         issueDate,
       });
       if (!issuer) throw new IssuerNotConfiguredError();
+      assertCertificateUsable(issuer, issuedAt, deps.certificateBlockDays);
 
       const { series, number } = await unit.nextNumber(issuer, kind.documentType);
       const securityCode = generateSecurityCode(number, deps.randomBytes);

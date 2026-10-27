@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { InvoiceValidationError } from './accept-invoice.js';
+import { CertificateExpiringError, InvoiceValidationError } from './accept-invoice.js';
 import { createAcceptSelfInvoice, type AcceptSelfInvoiceInput } from './accept-standalone.js';
 import type { AcceptanceUnit } from './ports/acceptance-unit-of-work.port.js';
 
@@ -29,7 +29,7 @@ const INPUT: AcceptSelfInvoiceInput = {
 
 /** Spec: HU-E7-03. An AFE is type 4, own numbering, and its receiver is the issuer (D206 = D101). */
 describe('acceptSelfInvoice', () => {
-  function run() {
+  function run(certificateNotAfter?: Date) {
     const insertDocument = vi.fn(() => Promise.resolve({ id: 'new' }));
     const nextNumber = vi.fn(() => Promise.resolve({ series: null, number: 9 }));
     const unit = {
@@ -43,6 +43,7 @@ describe('acceptSelfInvoice', () => {
           timbradoId: 'tim',
           establishmentId: 'est',
           expeditionPointId: 'pt',
+          certificateNotAfter,
         }),
       nextNumber,
       insertDocument,
@@ -79,6 +80,14 @@ describe('acceptSelfInvoice', () => {
     );
 
     expect(error).toBeInstanceOf(InvoiceValidationError);
+    expect(nextNumber).not.toHaveBeenCalled();
+  });
+
+  /** Spec: HU-E3-03. */
+  it('refuses before numbering when the certificate expires within a day', async () => {
+    const { accept, nextNumber } = run(new Date('2026-03-07T01:00:00Z'));
+
+    await expect(accept(INPUT)).rejects.toBeInstanceOf(CertificateExpiringError);
     expect(nextNumber).not.toHaveBeenCalled();
   });
 });

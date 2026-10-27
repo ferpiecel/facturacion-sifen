@@ -3,6 +3,7 @@ import { parseCdc } from '../domain/cdc.js';
 import type { InvoiceDraft } from '../domain/invoice-draft.js';
 import {
   createAcceptInvoice,
+  CertificateExpiringError,
   IdempotencyKeyReusedError,
   InvoiceValidationError,
   IssuerNotConfiguredError,
@@ -273,5 +274,36 @@ describe('acceptInvoice', () => {
       await expect(acceptInvoice(input)).rejects.toBeInstanceOf(IdempotencyKeyCollisionError);
       expect(mocks.run).toHaveBeenCalledTimes(2);
     });
+  });
+});
+
+/** Spec: HU-E3-03. Emission is refused from the day before the certificate expires. */
+describe('acceptInvoice with an expiring certificate', () => {
+  // The fixed clock is 2026-03-06T01:30Z.
+  const issuerExpiring = (notAfter: Date | null) => ({ ...ISSUER, certificateNotAfter: notAfter });
+
+  it('refuses before numbering when the certificate expires within a day', async () => {
+    const { acceptInvoice, input, mocks } = setup(issuerExpiring(new Date('2026-03-07T01:00:00Z')));
+
+    const error = await acceptInvoice(input).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(CertificateExpiringError);
+    expect((error as CertificateExpiringError).notAfter).toEqual(new Date('2026-03-07T01:00:00Z'));
+    expect(mocks.nextNumber).not.toHaveBeenCalled();
+  });
+
+  it('refuses an already expired certificate', async () => {
+    const { acceptInvoice, input } = setup(issuerExpiring(new Date('2026-03-01T00:00:00Z')));
+    await expect(acceptInvoice(input)).rejects.toBeInstanceOf(CertificateExpiringError);
+  });
+
+  it('accepts when the certificate has more than a day left', async () => {
+    const { acceptInvoice, input } = setup(issuerExpiring(new Date('2026-03-07T02:00:00Z')));
+    await expect(acceptInvoice(input)).resolves.toMatchObject({ documentId: 'doc-1' });
+  });
+
+  it('accepts when the tenant has no active certificate: signing parks the document instead', async () => {
+    const { acceptInvoice, input } = setup(issuerExpiring(null));
+    await expect(acceptInvoice(input)).resolves.toMatchObject({ documentId: 'doc-1' });
   });
 });

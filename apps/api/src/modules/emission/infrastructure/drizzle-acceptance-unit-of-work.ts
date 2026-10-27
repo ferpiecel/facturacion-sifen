@@ -5,6 +5,7 @@ import {
   tenantEstablishments,
   tenantExpeditionPoints,
   tenantFiscalProfiles,
+  tenantCertificates,
   tenants,
   tenantTimbrados,
   withTenantTransaction,
@@ -91,6 +92,18 @@ function createUnit(tx: TenantTx, tenantId: string): AcceptanceUnit {
         .limit(1)
         .then(first);
       if (!tenant || !profile || !point || !timbrado) return null;
+      // HU-E3-03: the expiry of the certificate that will sign, so emission can be refused ahead of it.
+      const certificate = await tx
+        .select({ notAfter: tenantCertificates.notAfter })
+        .from(tenantCertificates)
+        .where(
+          and(
+            eq(tenantCertificates.tenantId, tenantId),
+            eq(tenantCertificates.environment, tenant.environment),
+            eq(tenantCertificates.status, 'active'),
+          ),
+        )
+        .then(first);
       return {
         environment: tenant.environment,
         rucBase: profile.rucBase,
@@ -99,6 +112,7 @@ function createUnit(tx: TenantTx, tenantId: string): AcceptanceUnit {
         timbradoId: timbrado.id,
         establishmentId: point.establishmentId,
         expeditionPointId: point.pointId,
+        certificateNotAfter: certificate?.notAfter ?? null,
       };
     },
     async findAssociatedInvoice(cdc, environment) {

@@ -2,6 +2,7 @@ import { HttpException, HttpStatus } from '@nestjs/common';
 import { DocumentNumberExhaustedError } from '@sifen/db';
 import type { ValidationError } from '../../domain/invoice-draft.js';
 import {
+  CertificateExpiringError,
   IdempotencyKeyReusedError,
   InvoiceValidationError,
   IssuerNotConfiguredError,
@@ -41,6 +42,12 @@ export function toHttpException(error: unknown): HttpException | null {
   }
   if (error instanceof IssuerNotConfiguredError) {
     return problem(HttpStatus.UNPROCESSABLE_ENTITY, error.message);
+  }
+  if (error instanceof CertificateExpiringError) {
+    return problem(HttpStatus.UNPROCESSABLE_ENTITY, error.message, {
+      code: 'certificate_expiring',
+      notAfter: error.notAfter.toISOString(),
+    });
   }
   if (error instanceof IdempotencyKeyReusedError) {
     return problem(HttpStatus.CONFLICT, error.message);

@@ -103,6 +103,7 @@ export async function runOpsCommand(
       const result = await setSyncTransmission(db, {
         tenantId: command.tenantId,
         enabled: command.enabled,
+        actor: command.actor,
       });
       const state = result.enabled ? 'enabled' : 'disabled';
       return result.changed

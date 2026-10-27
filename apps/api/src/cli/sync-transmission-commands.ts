@@ -2,8 +2,6 @@ import { eq } from 'drizzle-orm';
 import { tenantFiscalProfiles, withTenantTransaction, type Database } from '@sifen/db';
 import { recordAudit } from '../modules/audit/infrastructure/record-audit.js';
 
-const OPERATOR = { type: 'operator', id: 'ops-cli' } as const;
-
 export interface SyncTransmissionResult {
   tenantId: string;
   enabled: boolean;
@@ -13,11 +11,11 @@ export interface SyncTransmissionResult {
 
 /**
  * Operator CLI (HU-E6-06): opts a tenant in or out of synchronous transmission (siRecepDE for a lote
- * of one DE). The worker clears the flag by itself on SIFEN code 1264; this is the only way to set it.
+ * of one DE). `actor` names the operator in the audit entry. The worker clears the flag by itself on SIFEN code 1264; this is the only way to set it.
  */
 export async function setSyncTransmission(
   db: Database,
-  params: { tenantId: string; enabled: boolean },
+  params: { tenantId: string; enabled: boolean; actor: string },
 ): Promise<SyncTransmissionResult> {
   return await withTenantTransaction(db, params.tenantId, async (tx) => {
     const profile = await tx
@@ -34,7 +32,7 @@ export async function setSyncTransmission(
       .set({ syncTransmission: params.enabled, updatedAt: new Date() })
       .where(eq(tenantFiscalProfiles.tenantId, params.tenantId));
     await recordAudit(tx, {
-      actor: OPERATOR,
+      actor: { type: 'operator', id: params.actor },
       action: 'tenant.sync_transmission_set',
       entity: { type: 'tenant', id: params.tenantId },
       before: { syncTransmission: profile.enabled },

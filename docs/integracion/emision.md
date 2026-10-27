@@ -296,3 +296,15 @@ Cuando SIFEN aprueba el documento (`approved` o `approved_with_observations`), l
 - Este endpoint emite **facturas (FE)**, **autofacturas (AFE)**, **notas de crédito (NCE)**, **notas de débito (NDE)** y **notas de remisión (NRE)** electrónicas. Otros tipos de documento no están disponibles por esta ruta.
 - La condición de venta es contado, con un único pago en efectivo; no hay forma de expresar crédito ni otros medios de pago.
 - Solo moneda `PYG`.
+
+### Validar un receptor por RUC
+
+`GET /v1/ruc/{ruc}` consulta el padrón de SIFEN (`siConsRUC`) con una API key válida, sin scope adicional. El RUC va sin dígito verificador (5 a 8 dígitos). Las respuestas se guardan en una caché compartida durante `RUC_CACHE_TTL_SECONDS` (por defecto un día; ver `docs/configuracion.md`); `cached` indica si la respuesta salió de ella.
+
+| Respuesta | Cuándo |
+|---|---|
+| `200 { ruc, cached, taxpayer: { legal_name, status, electronic_invoicer } }` | SIFEN encontró el RUC (`status`: `ACT`, `SUS`, `SAD`, `BLQ`, `CAN` o `CDE`) |
+| `400` | El RUC no tiene 5 a 8 dígitos |
+| `404` | SIFEN no conoce el RUC |
+| `502` | SIFEN rechazó la consulta (0501) o no respondió; nunca se reenvía su mensaje |
+| `503` | La API no tiene un adaptador SIFEN disponible |

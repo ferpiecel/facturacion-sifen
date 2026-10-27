@@ -293,6 +293,33 @@ export function buildOpenApiDocument() {
           },
         },
       },
+      '/v1/ruc/{ruc}': {
+        get: {
+          operationId: 'lookupRuc',
+          tags: ['Registry'],
+          summary: 'Looks a RUC up in the SIFEN registry (siConsRUC), with a cache',
+          description:
+            'Validates a receiver by RUC. Answers are cached for RUC_CACHE_TTL_SECONDS (default one day); `cached` tells whether this one came from the cache. Any valid API key works, no scope is needed.',
+          security: [{ apiKey: [] }],
+          parameters: [
+            {
+              name: 'ruc',
+              in: 'path',
+              required: true,
+              description: 'RUC without the check digit, 5 to 8 digits',
+              schema: { type: 'string', pattern: '^[0-9]{5,8}$' },
+            },
+          ],
+          responses: {
+            '200': json('The taxpayer', ref('RucLookup')),
+            '400': problem('The RUC is not 5 to 8 digits'),
+            '401': UNAUTHORIZED,
+            '404': problem('SIFEN has no such RUC'),
+            '502': problem('SIFEN refused or could not answer the query'),
+            '503': problem('No SIFEN adapter or database is available in this deployment'),
+          },
+        },
+      },
       '/v1/geo/departments': {
         get: {
           operationId: 'listGeoDepartments',
@@ -666,6 +693,26 @@ export function buildOpenApiDocument() {
             next_attempt_at: nullableDateTime,
             delivered_at: nullableDateTime,
             created_at: dateTime,
+          },
+        },
+        RucLookup: {
+          type: 'object',
+          required: ['ruc', 'cached', 'taxpayer'],
+          properties: {
+            ruc: { type: 'string' },
+            cached: { type: 'boolean' },
+            taxpayer: {
+              type: 'object',
+              required: ['legal_name', 'status', 'electronic_invoicer'],
+              properties: {
+                legal_name: { type: 'string' },
+                status: {
+                  type: 'string',
+                  description: 'ACT, SUS, SAD, BLQ, CAN or CDE (MT v150 schema 17)',
+                },
+                electronic_invoicer: { type: 'boolean' },
+              },
+            },
           },
         },
         GeoDepartmentList: geoList(),

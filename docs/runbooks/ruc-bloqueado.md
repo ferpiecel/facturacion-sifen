@@ -2,7 +2,7 @@
 
 ## Síntomas y detección
 
-- Log: `ERROR tenant <id> RUC blocked by SIFEN: sends paused until <hora>` y `metric sifen_ruc_block_total{tenant="<id>"} +1` (solo una línea de log).
+- Log: `ERROR tenant <id> RUC blocked by SIFEN: sends paused until <hora>` y el contador `sifen_ruc_blocks_total` (sin etiqueta de tenant).
 - Durante la pausa: `WARN tenant <id> sends paused until <hora>` en cada ciclo.
 - Fila nueva en `ruc_blocks` para el tenant.
 - Disparador: SIFEN rechaza un lote con 0301 cuyo mensaje contiene la raíz "bloque" (sin distinguir mayúsculas ni acentos, `application/ruc-block.ts`). El texto exacto de SIFEN está sin confirmar: puede haber bloqueos reales no detectados, o falsos positivos.

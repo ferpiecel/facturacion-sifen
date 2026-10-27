@@ -29,9 +29,16 @@ tenant's own certificate (ADR-0010) over mTLS. Simulator path and its guards unc
 - [x] T1 `CircuitBreakerGateway.around` (shared breakers)
 - [x] T2 PKCS#12 -> mTLS credential + tenant credential source (audit purpose `sifen-mtls`)
 - [x] T3 Tenant environment reader + `TenantSoapGatewayFactory` + mTLS stub integration test
-- [ ] T4 `SIFEN_GATEWAY=soap` config (fail-fast), worker wiring, cycle factory per-tenant gateway, docs, ADR-0022
+- [x] T4 `SIFEN_GATEWAY=soap` config (fail-fast), worker wiring, cycle factory per-tenant gateway, docs, ADR-0022
 - [ ] T5 RUC lookup per tenant over the factory; 503 only without gateway
 
 ## Progress / evidence
 
 Route: inline single writer (small, sequential, already understood). Chain: PR1 = T1-T3, PR2 = T4, PR3 = T5.
+
+## Handoff (writer 1 stopped at ~160k context)
+
+- PR1 #383 (`feat/sifen-soap-wiring`, T1-T3) open, ready. PR2 (`feat/sifen-soap-wiring-worker`, T4: soap config, `createWorkerSifen`, cycle factory per-tenant gateway, env reader, docs, ADR-0022) pushed as draft, depends on #383.
+- PR2 did not observe RED for `soap-gateway-config` and `drizzle-tenant-environment` (spec and impl written together); behaviour is covered.
+- Remaining T5: branch `feat/sifen-soap-wiring-rucs` from PR2. RUC: `lookup(ruc)` must take the calling tenant (`cls.get(TENANT_ID_CLS_KEY)` in `RucController`), use `TenantSoapGatewayFactory.forTenant(tenantId)` (module needs `CachedCertificateVault` via `createCertificateVault` from `cli/ops.ts`, `createDrizzleTenantEnvironment`, `loadSoapGatewayConfig`), cache key environment = the tenant's environment (today deployment `SIFEN_ENVIRONMENT`); keep the simulator path and 503 only when neither gateway is configured. Reuse a breaker via `CircuitBreakerGateway.around`. Update `docs/api/openapi.json` only if the contract changes (`pnpm --filter @sifen/api openapi`).
+- Build workspace packages (`pnpm --filter @sifen/db --filter @sifen/sifen-gateway --filter @sifen/sifen-xsd --filter @sifen/sifen-tips build`) before running api tests.

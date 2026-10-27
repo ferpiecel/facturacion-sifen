@@ -74,19 +74,39 @@ function setup(
     voidError?: Error;
     /** Transactions of one tenant run one at a time, as the document row lock makes them. */
     serialize?: boolean;
+    /** A correction another request already claimed (ADR-0021). */
+    claim?: { idempotencyKey: string; requestHash: string } | null;
+    /** The replacement is not issued until this resolves (a slow acceptance). */
+    acceptGate?: Promise<void>;
   } = {},
   certificateNotAfter?: Date,
 ) {
   let lookups = 0;
-  const rewriteDocument = vi.fn(() => Promise.resolve());
+  let status = options.document?.status ?? 'rejected';
+  let claim = options.claim ?? null;
+  const rewriteDocument = vi.fn(() => {
+    status = 'accepted';
+    return Promise.resolve();
+  });
+  const claimDocument = vi.fn((change: { idempotencyKey: string; requestHash: string }) => {
+    claim = { idempotencyKey: change.idempotencyKey, requestHash: change.requestHash };
+    return Promise.resolve();
+  });
+  const releaseClaim = vi.fn(() => {
+    claim = null;
+    return Promise.resolve();
+  });
   const recordAudit = vi.fn(() => Promise.resolve());
   let linked: { documentId: string; cdc: string } | null = null;
   const recordReissue = vi.fn(() => {
     linked = NEW_DOC;
     return Promise.resolve();
   });
-  const acceptFe = vi.fn<(input: { idempotencyKey: string }) => Promise<typeof NEW_DOC>>(() =>
-    Promise.resolve(NEW_DOC),
+  const acceptFe = vi.fn<(input: { idempotencyKey: string }) => Promise<typeof NEW_DOC>>(
+    async () => {
+      await options.acceptGate;
+      return NEW_DOC;
+    },
   );
   const voidNumbers = vi.fn(() =>
     options.voidError
@@ -97,8 +117,10 @@ function setup(
   const unit: CorrectionUnit = {
     findCorrectionByKey: () =>
       Promise.resolve(lookups++ === 0 && options.storedAfterLock ? null : (options.stored ?? null)),
-    lockDocument: () =>
-      Promise.resolve(options.document === undefined ? REJECTED : options.document),
+    lockDocument: () => {
+      const document = options.document === undefined ? REJECTED : options.document;
+      return Promise.resolve(document && { ...document, status });
+    },
     resolveIssuer: () =>
       Promise.resolve(
         options.noIssuer
@@ -129,6 +151,9 @@ function setup(
     recordAudit,
     findReissue: () => Promise.resolve(linked ?? options.reissued ?? null),
     recordReissue,
+    findClaim: () => Promise.resolve(claim),
+    claimDocument,
+    releaseClaim,
   };
   let tail: Promise<unknown> = Promise.resolve();
   const correct = createCorrectDocument({
@@ -152,6 +177,8 @@ function setup(
     recordReissue,
     acceptFe,
     voidNumbers,
+    claimDocument,
+    releaseClaim,
   };
 }
 
@@ -284,18 +311,103 @@ describe('correctDocument', () => {
       expect(acceptFe).not.toHaveBeenCalled();
     });
 
-    it('links the reissue under the document lock: a concurrent correction with another key is a 409', async () => {
+    it('a concurrent reissue with another key is a 409 before it issues anything', async () => {
       const { correct, acceptFe, recordReissue } = setup({ serialize: true });
       const other = { ...moved, idempotencyKey: 'key-2' };
       const results = await Promise.allSettled([correct(moved), correct(other)]);
       expect(results.map((r) => r.status)).toEqual(['fulfilled', 'rejected']);
       expect((results[1] as PromiseRejectedResult).reason).toEqual(
-        new DocumentNotCorrectableError('reissued'),
+        new DocumentNotCorrectableError('correction_in_progress'),
       );
-      // Both resolve to the one replacement: its key derives from the document, not from the correction's key.
-      const keys = acceptFe.mock.calls.map(([call]) => call.idempotencyKey);
-      expect(new Set(keys).size).toBe(1);
+      expect(acceptFe).toHaveBeenCalledOnce();
       expect(recordReissue).toHaveBeenCalledOnce();
+    });
+
+    describe('one in-flight correction per document', () => {
+      const rewrite = { ...INPUT, idempotencyKey: 'key-a' };
+      const reissueOf = { ...moved, idempotencyKey: 'key-b' };
+
+      it('claims the document before issuing anything', async () => {
+        const { correct, claimDocument, acceptFe } = setup();
+        await correct(reissueOf);
+        expect(claimDocument).toHaveBeenCalledWith(
+          expect.objectContaining({ document: REJECTED, idempotencyKey: 'key-b' }),
+        );
+        expect(claimDocument.mock.invocationCallOrder[0]).toBeLessThan(
+          acceptFe.mock.invocationCallOrder[0],
+        );
+      });
+
+      it('refuses a rewrite while a reissue holds the claim, before touching the row', async () => {
+        let release!: () => void;
+        const acceptGate = new Promise<void>((resolve) => (release = resolve));
+        const { correct, rewriteDocument, recordReissue } = setup({
+          serialize: true,
+          acceptGate,
+        });
+        const reissuing = correct(reissueOf);
+        // The reissue claimed in its first transaction and is waiting for the acceptance.
+        await new Promise((resolve) => setImmediate(resolve));
+        await expect(correct(rewrite)).rejects.toEqual(
+          new DocumentNotCorrectableError('correction_in_progress'),
+        );
+        expect(rewriteDocument).not.toHaveBeenCalled();
+        release();
+        await expect(reissuing).resolves.toEqual(NEW_DOC);
+        expect(recordReissue).toHaveBeenCalledOnce();
+      });
+
+      it('refuses a reissue after a rewrite committed, without issuing a replacement', async () => {
+        const { correct, rewriteDocument, acceptFe, claimDocument } = setup({ serialize: true });
+        const results = await Promise.allSettled([correct(rewrite), correct(reissueOf)]);
+        expect(results.map((r) => r.status)).toEqual(['fulfilled', 'rejected']);
+        expect((results[1] as PromiseRejectedResult).reason).toEqual(
+          new DocumentNotCorrectableError('accepted'),
+        );
+        expect(rewriteDocument).toHaveBeenCalledOnce();
+        expect(acceptFe).not.toHaveBeenCalled();
+        expect(claimDocument).not.toHaveBeenCalled();
+      });
+
+      it('refuses another key while a reissue is in flight, before issuing', async () => {
+        const claim = { idempotencyKey: 'key-b', requestHash: 'f'.repeat(64) };
+        const { correct, acceptFe } = setup({ claim });
+        await expect(correct({ ...moved, idempotencyKey: 'key-c' })).rejects.toEqual(
+          new DocumentNotCorrectableError('correction_in_progress'),
+        );
+        expect(acceptFe).not.toHaveBeenCalled();
+      });
+
+      it('resumes its own claim with the same key and body', async () => {
+        const claim = {
+          idempotencyKey: 'key-b',
+          requestHash: requestHash({ documentId: 'doc-1', payload: moved.payload }),
+        };
+        const { correct, claimDocument, recordReissue } = setup({ claim });
+        await expect(correct(reissueOf)).resolves.toEqual(NEW_DOC);
+        expect(claimDocument).not.toHaveBeenCalled();
+        expect(recordReissue).toHaveBeenCalledOnce();
+      });
+
+      it('refuses the claim key with another body', async () => {
+        const claim = { idempotencyKey: 'key-b', requestHash: 'f'.repeat(64) };
+        const { correct } = setup({ claim });
+        await expect(correct(reissueOf)).rejects.toBeInstanceOf(IdempotencyKeyReusedError);
+      });
+
+      it('releases the claim when the replacement is refused before it is issued', async () => {
+        const { correct, releaseClaim, acceptFe } = setup();
+        acceptFe.mockRejectedValueOnce(new InvoiceValidationError([]));
+        await expect(correct(reissueOf)).rejects.toBeInstanceOf(InvoiceValidationError);
+        expect(releaseClaim).toHaveBeenCalledOnce();
+      });
+
+      it('keeps the claim when the acceptance fails in an unknown way', async () => {
+        const { correct, releaseClaim, acceptFe } = setup();
+        acceptFe.mockRejectedValueOnce(new Error('connection reset'));
+        await expect(correct(reissueOf)).rejects.toThrow('connection reset');
+        expect(releaseClaim).not.toHaveBeenCalled();
+      });
     });
 
     it('keeps the correction and answers with the void refusal, the same on every retry', async () => {

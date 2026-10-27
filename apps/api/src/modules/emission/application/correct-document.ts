@@ -18,6 +18,7 @@ import {
   InvoiceValidationError,
   IssuerNotConfiguredError,
   assertCertificateUsable,
+  CertificateExpiringError,
   paraguayDate,
   type AcceptedInvoice,
 } from './accept-invoice.js';
@@ -206,6 +207,23 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
     if (!document) throw new DocumentNotFoundError();
     if (document.status !== 'rejected') throw new DocumentNotCorrectableError(document.status);
     if (await unit.findReissue(document.id)) throw new DocumentNotCorrectableError('reissued');
+    // At most one correction in flight per document: a reissue holds a claim while it issues the replacement,
+    // so a rewrite or another reissue is refused before it issues anything (ADR-0021).
+    const claim = await unit.findClaim(document.id);
+    if (claim && claim.idempotencyKey !== input.idempotencyKey) {
+      throw new DocumentNotCorrectableError('correction_in_progress');
+    }
+    if (claim && claim.requestHash !== hash) throw new IdempotencyKeyReusedError();
+    const reissuePlan = async (): Promise<Plan> => {
+      if (!claim) {
+        await unit.claimDocument({
+          document,
+          idempotencyKey: input.idempotencyKey,
+          requestHash: hash,
+        });
+      }
+      return { kind: 'reissue', document, replacement: null };
+    };
 
     const impact = classifyCorrection(document, {
       documentType: DOCUMENT_TYPE[input.correction.type],
@@ -217,9 +235,9 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
     if (impact.kind === 'type_changed') throw new CorrectionTypeChangedError();
     // The same CDC keeps the original issue date; past its 72 h window it cannot be resent (ADR-0008, ADR-0021).
     if (impact.kind === 'same_cdc' && at > transmissionDeadline(document.issuedAt)) {
-      return { kind: 'reissue', document, replacement: null };
+      return reissuePlan();
     }
-    if (impact.kind === 'reissue') return { kind: 'reissue', document, replacement: null };
+    if (impact.kind === 'reissue') return reissuePlan();
 
     const issuer = await unit.resolveIssuer({
       establishmentCode: input.establishmentCode,
@@ -302,7 +320,20 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
     document: CorrectableDocument,
     derived: string,
   ): Promise<AcceptedInvoice> {
-    const replacement = await acceptReplacement(input, `${derived}:reissue`);
+    let replacement: AcceptedInvoice;
+    try {
+      replacement = await acceptReplacement(input, `${derived}:reissue`);
+    } catch (error) {
+      // Refused before anything was issued: release the claim so the document can be corrected again. Any other
+      // failure may have issued the replacement, so the claim stays and a retry with the same key resumes it.
+      if (isRefusedBeforeIssuing(error)) {
+        await deps.unitOfWork.run(input.tenantId, async (unit) => {
+          await unit.lockDocument(document.id);
+          await unit.releaseClaim(document.id);
+        });
+      }
+      throw error;
+    }
     const link = () =>
       deps.unitOfWork.run(input.tenantId, async (unit) => {
         const current = await unit.lockDocument(document.id);
@@ -361,6 +392,14 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
         return deps.accept[correction.type]({ ...base, draft: correction.draft });
     }
   }
+}
+
+function isRefusedBeforeIssuing(error: unknown): boolean {
+  return (
+    error instanceof InvoiceValidationError ||
+    error instanceof IssuerNotConfiguredError ||
+    error instanceof CertificateExpiringError
+  );
 }
 
 type Plan =

@@ -1,6 +1,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import {
+  documentCorrectionClaims,
   documentCorrections,
   documents,
   tenantEstablishments,
@@ -160,6 +161,39 @@ export function createDrizzleCorrectionUnitOfWork(db: Database): CorrectionUnitO
               if (isReissueCollision(error)) throw new DocumentNotCorrectableError('reissued');
               throw error;
             }
+          },
+          async findClaim(documentId) {
+            const rows = await tx
+              .select({
+                idempotencyKey: documentCorrectionClaims.idempotencyKey,
+                requestHash: documentCorrectionClaims.requestHash,
+              })
+              .from(documentCorrectionClaims)
+              .where(
+                and(
+                  eq(documentCorrectionClaims.tenantId, tenantId),
+                  eq(documentCorrectionClaims.documentId, documentId),
+                ),
+              );
+            return rows.at(0) ?? null;
+          },
+          async claimDocument(change) {
+            await tx.insert(documentCorrectionClaims).values({
+              tenantId,
+              documentId: change.document.id,
+              idempotencyKey: change.idempotencyKey,
+              requestHash: change.requestHash,
+            });
+          },
+          async releaseClaim(documentId) {
+            await tx
+              .delete(documentCorrectionClaims)
+              .where(
+                and(
+                  eq(documentCorrectionClaims.tenantId, tenantId),
+                  eq(documentCorrectionClaims.documentId, documentId),
+                ),
+              );
           },
           async rewriteDocument(change) {
             try {

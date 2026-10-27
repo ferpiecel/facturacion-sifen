@@ -41,6 +41,12 @@ export interface CorrectionRewrite {
   requestHash: string;
 }
 
+/** The claim a reissue holds on a rejected document while it issues the replacement (ADR-0021). */
+export interface CorrectionClaim {
+  idempotencyKey: string;
+  requestHash: string;
+}
+
 export interface CorrectionReissue {
   document: CorrectableDocument;
   replacementDocumentId: string;
@@ -70,6 +76,12 @@ export interface CorrectionUnit extends Pick<
    * @throws IdempotencyKeyCollisionError when the key was taken by a concurrent commit.
    */
   recordReissue(change: CorrectionReissue): Promise<void>;
+  /** The claim a reissue holds on the document, or null: at most one correction is in flight (ADR-0021). */
+  findClaim(documentId: string): Promise<CorrectionClaim | null>;
+  /** Claims the locked document for a reissue; the claim outlives this transaction. */
+  claimDocument(claim: CorrectionClaim & { document: CorrectableDocument }): Promise<void>;
+  /** Releases the claim of a reissue that failed before issuing its replacement. */
+  releaseClaim(documentId: string): Promise<void>;
 }
 
 export interface CorrectionUnitOfWork {

@@ -308,6 +308,46 @@ export function buildOpenApiDocument() {
           },
         },
       },
+      '/v1/receiver-events/{id}/correct': {
+        post: {
+          operationId: 'correctReceiverEvent',
+          tags: ['Receiver events'],
+          summary: 'Correct a receiver event SIFEN approved by registering the opposite one',
+          description:
+            'The body is the replacement event (same fields and CDC as `ReceiverEventRequest`) plus `correctionReason` (5 to 500 characters). ' +
+            'Only a conformity, disconformity or unawareness SIFEN approved can be corrected: once, while it is the last conclusive event of the CDC, within 15 days (configurable) of its approval, by the opposite kind; a correction cannot be corrected. ' +
+            '422 `errors[].rule` names the failed rule (`correction-window-expired` carries `deadline`); a second correction is a 409. Same `Idempotency-Key` and body return the same response; another body is a 409.',
+          ...secured(['documents:write']),
+          parameters: [
+            idParam('Receiver event'),
+            {
+              name: 'Idempotency-Key',
+              in: 'header',
+              required: true,
+              description: '1 to 255 printable ASCII characters, no spaces',
+              schema: { type: 'string', pattern: '^[!-~]{1,255}$' },
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: { 'application/json': { schema: ref('ReceiverEventCorrectionRequest') } },
+          },
+          responses: {
+            '202': json('Accepted', ref('ReceiverEventCorrectionAccepted')),
+            '400': problem('id is not a UUID, or missing or malformed Idempotency-Key'),
+            '401': UNAUTHORIZED,
+            '403': FORBIDDEN,
+            '404': problem('The tenant has no such receiver event'),
+            '409': problem(
+              'Idempotency-Key reused with another body, or the event was already corrected',
+            ),
+            '422': problem(
+              'The request is invalid or a correction rule refuses it',
+              'ValidationProblem',
+            ),
+          },
+        },
+      },
       '/v1/documents/{id}/kude': {
         get: {
           operationId: 'downloadKude',
@@ -656,6 +696,27 @@ export function buildOpenApiDocument() {
               description: 'dFecRecep, required for an unawareness and a receipt notice',
             },
             totalPyg: { type: 'number', minimum: 0, description: 'Total in guaraníes (notice)' },
+          },
+        },
+        ReceiverEventCorrectionRequest: {
+          allOf: [
+            ref('ReceiverEventRequest'),
+            {
+              type: 'object',
+              required: ['correctionReason'],
+              properties: { correctionReason: { type: 'string', minLength: 5, maxLength: 500 } },
+            },
+          ],
+        },
+        ReceiverEventCorrectionAccepted: {
+          type: 'object',
+          required: ['event_id', 'corrects_event_id', 'kind', 'cdc', 'status'],
+          properties: {
+            event_id: { type: 'string', format: 'uuid' },
+            corrects_event_id: { type: 'string', format: 'uuid' },
+            kind: { type: 'string' },
+            cdc: { type: 'string', pattern: '^[0-9]{44}$' },
+            status: { type: 'string', enum: ['pending'] },
           },
         },
         ReceiverEventAccepted: {

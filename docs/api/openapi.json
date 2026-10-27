@@ -672,6 +672,128 @@
         }
       }
     },
+    "/v1/receiver-events/{id}/correct": {
+      "post": {
+        "operationId": "correctReceiverEvent",
+        "tags": [
+          "Receiver events"
+        ],
+        "summary": "Correct a receiver event SIFEN approved by registering the opposite one",
+        "description": "The body is the replacement event (same fields and CDC as `ReceiverEventRequest`) plus `correctionReason` (5 to 500 characters). Only a conformity, disconformity or unawareness SIFEN approved can be corrected: once, while it is the last conclusive event of the CDC, within 15 days (configurable) of its approval, by the opposite kind; a correction cannot be corrected. 422 `errors[].rule` names the failed rule (`correction-window-expired` carries `deadline`); a second correction is a 409. Same `Idempotency-Key` and body return the same response; another body is a 409.",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-required-scopes": [
+          "documents:write"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Receiver event id (UUID)",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "1 to 255 printable ASCII characters, no spaces",
+            "schema": {
+              "type": "string",
+              "pattern": "^[!-~]{1,255}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReceiverEventCorrectionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiverEventCorrectionAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "id is not a UUID, or missing or malformed Idempotency-Key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The tenant has no such receiver event",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency-Key reused with another body, or the event was already corrected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid or a correction rule refuses it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/documents/{id}/kude": {
       "get": {
         "operationId": "downloadKude",
@@ -2595,6 +2717,59 @@
             "type": "number",
             "minimum": 0,
             "description": "Total in guaraníes (notice)"
+          }
+        }
+      },
+      "ReceiverEventCorrectionRequest": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ReceiverEventRequest"
+          },
+          {
+            "type": "object",
+            "required": [
+              "correctionReason"
+            ],
+            "properties": {
+              "correctionReason": {
+                "type": "string",
+                "minLength": 5,
+                "maxLength": 500
+              }
+            }
+          }
+        ]
+      },
+      "ReceiverEventCorrectionAccepted": {
+        "type": "object",
+        "required": [
+          "event_id",
+          "corrects_event_id",
+          "kind",
+          "cdc",
+          "status"
+        ],
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "corrects_event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "cdc": {
+            "type": "string",
+            "pattern": "^[0-9]{44}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending"
+            ]
           }
         }
       },

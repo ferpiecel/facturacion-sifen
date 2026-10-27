@@ -5,6 +5,7 @@ import {
   createCreditNoteSchema,
   createDebitNoteSchema,
 } from '../../emission/infrastructure/http/credit-note.request.js';
+import { createRemissionSchema } from '../../emission/infrastructure/http/remission.request.js';
 import { createSelfInvoiceSchema } from '../../emission/infrastructure/http/self-invoice.request.js';
 import { WEBHOOK_EVENT_TYPES } from '../../webhooks/domain/webhook-event.js';
 
@@ -92,9 +93,9 @@ export function buildOpenApiDocument() {
           operationId: 'createDocument',
           tags: ['Documents'],
           summary:
-            'Accept an invoice (FE), a credit note (NCE), a debit note (NDE) or a self-invoice (AFE) for emission',
+            'Accept an invoice (FE), a credit note (NCE), a debit note (NDE), a self-invoice (AFE) or a remission note (NRE) for emission',
           description:
-            'The body is an FE unless `type` is `NCE` (credit note) or `NDE` (debit note), both associated to an approved FE whose receiver they take, or `AFE` (self-invoice: the issuer buys from a seller who is not a contribuyente; the receiver is the issuer, there is no VAT and the seller constancia is mandatory). ' +
+            'The body is an FE unless `type` is `NCE` (credit note) or `NDE` (debit note), both associated to an approved FE whose receiver they take, or `AFE` (self-invoice: the issuer buys from a seller who is not a contribuyente; the receiver is the issuer, there is no VAT and the seller constancia is mandatory) or `NRE` (remission note: goods in transit, with the motive, the kilometres, the places, the vehicle and the carrier; items carry a quantity and no price, and the document has no totals; motive 7 only to the issuer own RUC, 2606). ' +
             'From the day before the active certificate expires (`CERTIFICATE_EMISSION_BLOCK_DAYS`) the request answers 422 with `code: certificate_expiring` and `notAfter`, before any number is used. ' +
             'A credit note answers 422 with the rule of the failed check (for example `credit-note-sum-exceeds-invoice`, 2417) before any number is used. ' +
             'Returns 202 once the document is persisted with its CDC; signing and transmission to SIFEN are asynchronous. ' +
@@ -119,6 +120,7 @@ export function buildOpenApiDocument() {
                     ref('CreateCreditNoteRequest'),
                     ref('CreateDebitNoteRequest'),
                     ref('CreateSelfInvoiceRequest'),
+                    ref('CreateRemissionRequest'),
                   ],
                 },
               },
@@ -258,7 +260,7 @@ export function buildOpenApiDocument() {
           operationId: 'downloadKude',
           tags: ['Documents'],
           summary:
-            'Download the KuDE (PDF) of an FE, an AFE, an NCE or an NDE, available once the document is signed',
+            'Download the KuDE (PDF) of an FE, an AFE, an NCE, an NDE or an NRE, available once the document is signed',
           ...secured(['documents:read']),
           description:
             'Paper layout by `format`: `letter` (A4, default), `ticket-80` or `ticket-58` (paper roll of 80 or 58 mm, for thermal printers; MT v150 13.6).',
@@ -286,7 +288,7 @@ export function buildOpenApiDocument() {
             '403': FORBIDDEN,
             '404': NOT_FOUND,
             '409': problem('The document is not signed yet'),
-            '422': problem('The document type has no KuDE layout yet (an NDE, AFE or NRE)'),
+            '422': problem('The document type has no KuDE layout yet (for example a retention)'),
             '500': problem('The KuDE could not be generated'),
           },
         },
@@ -498,6 +500,10 @@ export function buildOpenApiDocument() {
           unrepresentable: 'any',
         }),
         CreateSelfInvoiceRequest: z.toJSONSchema(createSelfInvoiceSchema, {
+          io: 'input',
+          unrepresentable: 'any',
+        }),
+        CreateRemissionRequest: z.toJSONSchema(createRemissionSchema, {
           io: 'input',
           unrepresentable: 'any',
         }),

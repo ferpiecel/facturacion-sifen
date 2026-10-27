@@ -593,6 +593,86 @@ describe('POST /v1/documents (e2e)', () => {
     });
   });
 
+  describe('remission notes (HU-E7-04)', () => {
+    const place = {
+      address: 'Calle 1',
+      houseNumber: '10',
+      departmentCode: 11,
+      districtCode: 143,
+      cityCode: 3344,
+    };
+    const NRE = {
+      type: 'NRE',
+      establishment: '001',
+      expeditionPoint: '002',
+      motive: 1,
+      responsible: 1,
+      km: 120,
+      receiver: { ruc: '80000001-3', name: 'Empresa Real SA', ...place },
+      transport: {
+        type: 1,
+        modality: 1,
+        freightResponsible: 1,
+        startDate: '2026-11-02',
+        endDate: '2026-11-03',
+        departure: place,
+        delivery: place,
+        vehicle: { type: 'Camion', brand: 'Volvo', idType: 1, idNumber: 'ABC123' },
+        carrier: {
+          contributor: true,
+          name: 'Transportes SA',
+          ruc: '80000002-1',
+          address: 'Ruta 1',
+          driver: { name: 'Pedro Gomez', idNumber: '2345678', address: 'Calle 3' },
+        },
+      },
+      items: [{ code: 'M-1', description: 'Maiz', unitCode: 77, quantity: 2 }],
+    };
+
+    it('accepts an NRE with 202, a 07 CDC and its own number sequence', async () => {
+      const response = await post(NRE);
+
+      expect(response.statusCode).toBe(202);
+      const { document_id: id, cdc } = response.json<{ document_id: string; cdc: string }>();
+      expect(cdc).toMatch(/^07\d{42}$/);
+      const [row] = await handle.db.select().from(documents).where(eq(documents.id, id));
+      expect(row).toMatchObject({
+        documentType: 7,
+        number: 1,
+        associatedCdc: null,
+        receiverRuc: '80000001-3',
+        status: 'accepted',
+      });
+    });
+
+    it('answers 422 naming the rule that failed, burning no number', async () => {
+      const response = await post({ ...NRE, motive: 77 });
+
+      expect(response.statusCode).toBe(422);
+      expect(response.json<{ errors: Array<{ rule: string }> }>().errors).toEqual([
+        expect.objectContaining({ rule: expect.stringContaining('motive') as string }),
+      ]);
+      expect(
+        (await handle.db.select().from(documents)).filter((d) => d.documentType === 7),
+      ).toEqual([]);
+    });
+
+    it('refuses motive 7 addressed to another RUC (2606)', async () => {
+      const response = await post({ ...NRE, motive: 7 });
+      expect(response.statusCode).toBe(422);
+      expect(response.json<{ errors: Array<{ sifenCode?: string }> }>().errors[0]).toMatchObject({
+        sifenCode: '2606',
+      });
+    });
+
+    it('replays an NRE with the same Idempotency-Key and refuses another body with 409', async () => {
+      const first = await post(NRE, bearer, 'nre-key');
+      const again = await post(NRE, bearer, 'nre-key');
+      expect(again.json()).toEqual(first.json());
+      expect((await post({ ...NRE, km: 130 }, bearer, 'nre-key')).statusCode).toBe(409);
+    });
+  });
+
   describe('Idempotency-Key (HU-E5-02)', () => {
     it('answers 400 when the header is missing or malformed, persisting nothing', async () => {
       for (const key of [null, '', 'k'.repeat(256), 'has space']) {

@@ -146,6 +146,7 @@ describe('OpenAPI document', () => {
         { $ref: '#/components/schemas/CreateCreditNoteRequest' },
         { $ref: '#/components/schemas/CreateDebitNoteRequest' },
         { $ref: '#/components/schemas/CreateSelfInvoiceRequest' },
+        { $ref: '#/components/schemas/CreateRemissionRequest' },
       ],
     });
   });

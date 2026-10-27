@@ -7,10 +7,11 @@ export function createDrizzleRucCache(db: Database): RucCache {
   return {
     get: (environment, ruc) =>
       withAppRoleTransaction(db, async (tx) => {
-        const [row] = await tx
+        const rows = await tx
           .select()
           .from(rucLookupCache)
           .where(and(eq(rucLookupCache.environment, environment), eq(rucLookupCache.ruc, ruc)));
+        const row = rows.at(0);
         if (row === undefined) return null;
         const contribuyente = row.found
           ? {

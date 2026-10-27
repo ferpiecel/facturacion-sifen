@@ -1,5 +1,6 @@
 import { SIFEN_CODES, SifenCircuitOpenError, type SifenGateway } from '@sifen/sifen-gateway';
 import { EmptyLoteError, type Lote } from '../domain/lote-builder.js';
+import { documentStatusOf, type DocumentResolution } from './poll-lote-result.js';
 import { isRucBlockMessage } from './ruc-block.js';
 
 /** What SIFEN (or its silence) told us about a sent lote. */
@@ -12,8 +13,13 @@ export type LoteDispatchOutcome =
       /** The refusal says SIFEN blocked the RUC (HU-E6-05): the tenant's sends pause for a while. */
       readonly rucBlocked?: true;
     }
+  /** The synchronous send (HU-E6-06) answered with the document's final state. */
+  | { readonly status: 'processed'; readonly resolution: DocumentResolution }
   /** No usable answer: SIFEN may have the lote. Never resend; recover by querying (HU-E6-04). */
   | { readonly status: 'unknown'; readonly reason: string; readonly cause?: unknown };
+
+/** What `record` stores: a `processed` answer is settled by `SyncDispatch.recordSettled` instead. */
+export type RecordedOutcome = Exclude<LoteDispatchOutcome, { readonly status: 'processed' }>;
 
 /** Persistence of a lote's dispatch state; implemented over `lotes_sifen` later. */
 export interface LoteDispatchStore {
@@ -21,11 +27,22 @@ export interface LoteDispatchStore {
   claim(loteId: string): Promise<boolean>;
   /** Returns a claimed lote to `pending` when nothing was sent, with no attempt counted. */
   release(loteId: string): Promise<void>;
-  record(loteId: string, outcome: LoteDispatchOutcome): Promise<void>;
+  record(loteId: string, outcome: RecordedOutcome): Promise<void>;
+}
+
+/** The tenant's opt-in to siRecepDE (HU-E6-06); implemented over the fiscal profile and `lotes`. */
+export interface SyncDispatch {
+  isEnabled(): Promise<boolean>;
+  /** SIFEN answered 1264: clears the flag (audited) so later sends go by lote. */
+  disable(reason: string): Promise<void>;
+  /** Settles the claimed lote and its single document from the synchronous answer, in one transaction. */
+  recordSettled(loteId: string, resolution: DocumentResolution): Promise<void>;
 }
 
 export interface SendLoteDeps {
-  readonly gateway: Pick<SifenGateway, 'enviarLote'>;
+  readonly gateway: Pick<SifenGateway, 'enviarLote' | 'enviarDESincronico'>;
+  /** Absent: every lote goes by batch. */
+  readonly sync?: SyncDispatch;
   readonly store: LoteDispatchStore;
   /**
    * When the send endpoint is paused by its circuit breaker, the instant it may be tried again;
@@ -67,7 +84,9 @@ export class SendLote {
     if (retryAt) return { status: 'deferred', retryAt };
     if (!(await this.deps.store.claim(command.loteId))) return { status: 'already-claimed' };
 
-    const outcome = await this.dispatch(command);
+    const synchronous = await this.dispatchSync(command);
+    if (synchronous && synchronous.status === 'processed') return synchronous;
+    const outcome = synchronous ?? (await this.dispatch(command));
     if (outcome.status === 'deferred') {
       await this.deps.store.release(command.loteId);
       return outcome;
@@ -76,10 +95,51 @@ export class SendLote {
     return outcome;
   }
 
-  private async dispatch({
+  /**
+   * A lote of one DE of a flagged tenant goes through siRecepDE. Returns undefined when the batch path
+   * must run instead (no flag, several DEs, or 1264, which clears the flag first). After a 'processed'
+   * answer the settlement is already stored; any other outcome is recorded by the caller.
+   */
+  private async dispatchSync({
     dId,
     lote,
-  }: SendLoteCommand): Promise<LoteDispatchOutcome | LoteDeferred> {
+    loteId,
+  }: SendLoteCommand): Promise<LoteDispatchOutcome | LoteDeferred | undefined> {
+    const sync = this.deps.sync;
+    const [document] = lote.documents;
+    if (!sync || lote.documents.length !== 1 || !(await sync.isEnabled())) {
+      return undefined;
+    }
+    try {
+      const answer = await this.deps.gateway.enviarDESincronico({ dId, de: document.xml });
+      if (answer.dCodRes === SIFEN_CODES.RUC_NO_HABILITADO_SINCRONICO) {
+        await sync.disable(`${answer.dCodRes}: ${answer.dMsgRes}`.slice(0, 500));
+        return undefined;
+      }
+      const status = documentStatusOf(answer.dEstRes ?? '');
+      if (!status) {
+        return {
+          status: 'unknown',
+          reason: `Unexpected siRecepDE response ${answer.dCodRes}: ${answer.dMsgRes}`,
+        };
+      }
+      const resolution: DocumentResolution = {
+        cdc: document.cdc,
+        status,
+        messages: [{ code: answer.dCodRes, message: answer.dMsgRes }],
+      };
+      await sync.recordSettled(loteId, resolution);
+      return { status: 'processed', resolution };
+    } catch (error) {
+      if (error instanceof SifenCircuitOpenError) {
+        return { status: 'deferred', retryAt: error.retryAt };
+      }
+      const reason = error instanceof Error ? error.message : String(error);
+      return { status: 'unknown', reason, cause: error };
+    }
+  }
+
+  private async dispatch({ dId, lote }: SendLoteCommand): Promise<RecordedOutcome | LoteDeferred> {
     try {
       const receipt = await this.deps.gateway.enviarLote({
         dId,
@@ -102,7 +162,7 @@ function interpret(receipt: {
   dCodRes: string;
   dMsgRes: string;
   dProtConsLote: string | null;
-}): LoteDispatchOutcome {
+}): RecordedOutcome {
   if (receipt.dCodRes === SIFEN_CODES.LOTE_RECIBIDO && receipt.dProtConsLote) {
     return { status: 'sent', dProtConsLote: receipt.dProtConsLote };
   }

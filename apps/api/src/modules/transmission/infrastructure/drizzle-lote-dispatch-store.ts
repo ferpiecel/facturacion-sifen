@@ -11,7 +11,7 @@ import {
 import { DEFAULT_RUC_BLOCK_MS } from '../application/ruc-block.js';
 import { recordAudit } from '../../audit/infrastructure/record-audit.js';
 import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
-import type { LoteDispatchOutcome, LoteDispatchStore } from '../application/send-lote.js';
+import type { LoteDispatchStore, RecordedOutcome } from '../application/send-lote.js';
 import { DEFAULT_MAX_TRANSMISSION_ATTEMPTS } from './transmission-limits.js';
 import { RECOVERY_UNRESOLVED_HOLD } from './drizzle-lote-recovery-store.js';
 import { TRANSMISSION_WORKER_ACTOR } from './transmission-audit-actor.js';
@@ -194,7 +194,7 @@ export function createDrizzleLoteDispatchStore({
   }
 }
 
-function columnsFor(outcome: LoteDispatchOutcome, at: Date): Partial<typeof lotes.$inferInsert> {
+function columnsFor(outcome: RecordedOutcome, at: Date): Partial<typeof lotes.$inferInsert> {
   switch (outcome.status) {
     case 'sent':
       return {

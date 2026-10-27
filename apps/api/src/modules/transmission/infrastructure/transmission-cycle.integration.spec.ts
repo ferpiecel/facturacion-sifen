@@ -232,6 +232,53 @@ describe('TransmissionCycle end to end', () => {
     expect(gateway.callsTo('consultarLote')).toHaveLength(1);
   });
 
+  describe('synchronous transmission (HU-E6-06)', () => {
+    const enableSync = () => handle.db.update(tenantFiscalProfiles).set({ syncTransmission: true });
+    const readFlag = () =>
+      handle.db
+        .select({ on: tenantFiscalProfiles.syncTransmission })
+        .from(tenantFiscalProfiles)
+        .then((rows) => rows[0].on);
+
+    it("approves a flagged tenant's document in one run through siRecepDE, without a lote send", async () => {
+      await enableSync();
+      const gateway = new FakeSifenGateway();
+      const report = await buildCycle(gateway).run();
+
+      expect(report.sent.map((s) => s.status)).toEqual(['processed']);
+      expect((await readDocument()).status).toBe('approved');
+      expect(gateway.callsTo('enviarLote')).toEqual([]);
+      expect(gateway.callsTo('enviarDESincronico')).toHaveLength(1);
+      // Nothing left for the poll: the lote is already processed.
+      expect(await buildCycle(gateway).run()).toMatchObject({ sent: [], polled: [] });
+    });
+
+    it('on 1264 clears the flag, audits it and sends the same lote by batch', async () => {
+      await enableSync();
+      const gateway = new FakeSifenGateway();
+      gateway.enqueue('enviarDESincronico', {
+        dCodRes: '1264',
+        dMsgRes: 'RUC no habilitado',
+        dEstRes: 'Rechazado',
+        dProtAut: null,
+      });
+      gateway.enqueue('enviarLote', sifenScenarios.loteRecibido('4500123'));
+      const cycle = buildCycle(gateway);
+
+      const report = await cycle.run();
+
+      expect(report.sent.map((s) => s.status)).toEqual(['sent']);
+      expect((await readDocument()).status).toBe('submitted');
+      expect(await readFlag()).toBe(false);
+      const audited = await withTenantTransaction(handle.db, tenantId, (tx) =>
+        tx.select().from(auditLog).where(eq(auditLog.action, 'tenant.sync_transmission_disabled')),
+      );
+      expect(audited).toHaveLength(1);
+      // The flag stays off: the next document goes by batch directly.
+      expect(gateway.callsTo('enviarDESincronico')).toHaveLength(1);
+    });
+  });
+
   describe('unnamed receiver (innominado B2C, stored by an old build)', () => {
     beforeAll(() => {
       // Old payload: the unnamed receiver still carries the department the clients used to send.

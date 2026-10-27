@@ -104,6 +104,21 @@ describe('SendLote synchronous path', () => {
     expect(store.state).toBe('sent');
   });
 
+  it('still falls back to the lote when clearing the flag fails', async () => {
+    const { gateway, store, sync, send } = setup();
+    sync.disable = () => Promise.reject(new Error('db down'));
+    gateway.enqueue('enviarDESincronico', {
+      dCodRes: '1264',
+      dMsgRes: 'RUC no habilitado',
+      dEstRes: 'Rechazado',
+      dProtAut: null,
+    });
+    const outcome = await send.execute({ loteId: 'l', dId: 5n, lote: one });
+    expect(gateway.callsTo('enviarLote')).toHaveLength(1);
+    expect(outcome.status).toBe('sent');
+    expect(store.state).toBe('sent');
+  });
+
   it('never sends a lote of several DEs by sync', async () => {
     const { gateway, send } = setup();
     await send.execute({ loteId: 'l', dId: 5n, lote: two });

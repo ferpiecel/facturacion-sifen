@@ -20,6 +20,8 @@ export const SIFEN_CODES = {
   EVENTO_REGISTRADO: '0600',
   /** Autorización del DE satisfactoria (siRecepDE, synchronous). */
   DE_AUTORIZADO: '0260',
+  /** RUC not enabled for the synchronous service (siRecepDE, MT validation 1264; ADR-0007). */
+  RUC_NO_HABILITADO_SINCRONICO: '1264',
   /**
    * siConsDE codes follow MT v150 §9.4.2 Tabla G. MT §12.3.4.3 contradicts it by
    * listing 0421 as "CDC encontrado"; per ADR-0012 this stays pending confirmation

@@ -175,7 +175,7 @@ function resolve(answer: SifenLoteResult, cdcs: readonly string[]): LotePollOutc
 }
 
 /** `dEstRes` is Aprobado / Aprobado con observación / Rechazado (plan 8, MT Schema XML 4). */
-function documentStatusOf(dEstRes: string): DocumentResolutionStatus | null {
+export function documentStatusOf(dEstRes: string): DocumentResolutionStatus | null {
   const normalized = dEstRes
     .normalize('NFD')
     .replace(/\p{Diacritic}/gu, '')

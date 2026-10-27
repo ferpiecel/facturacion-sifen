@@ -228,6 +228,14 @@ Campos propios: `seller` (`nature` 1 no contribuyente o 2 extranjero, `idType` 1
 
 La respuesta es `202 { "document_id", "cdc" }`, con un CDC que empieza en `04` y numeración propia. Las reglas `422` llevan el prefijo `self-invoice-` (por ejemplo `self-invoice-certificate-number`). El KuDE (`GET /v1/documents/{id}/kude`) lleva el título "KuDE de Autofactura Electrónica", el vendedor, el lugar de la transacción y la constancia.
 
+## Emitir una nota de remisión
+
+Una nota de remisión electrónica (NRE) ampara el traslado de mercaderías. Se envía al mismo `POST /v1/documents` con `"type": "NRE"` y el mismo `Idempotency-Key`. No tiene importes, IVA ni totales.
+
+Campos propios: `motive` (E501: 1 a 14 o 99), `responsible` (E503: 1 a 5), `km` (kilómetros estimados, 1 a 99999), `invoiceDate` (opcional, `AAAA-MM-DD`), `receiver` (`ruc`, `name` y su dirección completa; solo en los motivos 3 y 5, exportación e importación, el receptor puede ir sin `ruc`, con `idType` 1 a 4, `idNumber` y `countryCode` ISO alfa-3), `transport` (`type`, `modality`, `freightResponsible`, `startDate`, `endDate`, los lugares `departure` y `delivery`, el `vehicle` y el `carrier` con su `driver`) e `items` con `code`, `description`, `unitCode` y `quantity`; un `unitPrice` se rechaza. El motivo 7 (traslado entre locales) solo se acepta hacia el RUC del propio emisor (regla 2606).
+
+La respuesta es `202 { "document_id", "cdc" }`, con un CDC que empieza en `07` y numeración propia. El KuDE (`GET /v1/documents/{id}/kude`) lleva el título "KuDE de Nota de Remisión Electrónica", el motivo, las fechas, los lugares, el vehículo y el transportista, sin precios ni totales.
+
 ## Idempotencia
 
 `Idempotency-Key` es obligatorio. Reintentar con la **misma clave y el mismo cuerpo** devuelve la misma respuesta sin crear otro documento; la misma clave con otro cuerpo responde `409`. Genere una clave nueva por documento y reutilícela solo para reintentar ese mismo documento.
@@ -285,7 +293,7 @@ Cuando SIFEN aprueba el documento (`approved` o `approved_with_observations`), l
 
 ## Alcance actual
 
-- Este endpoint emite **facturas (FE)**, **autofacturas (AFE)**, **notas de crédito (NCE)** y **notas de débito (NDE)** electrónicas. Otros tipos de documento no están disponibles por esta ruta.
+- Este endpoint emite **facturas (FE)**, **autofacturas (AFE)**, **notas de crédito (NCE)**, **notas de débito (NDE)** y **notas de remisión (NRE)** electrónicas. Otros tipos de documento no están disponibles por esta ruta.
 - La condición de venta es contado, con un único pago en efectivo; no hay forma de expresar crédito ni otros medios de pago.
 - Solo moneda `PYG`.
 

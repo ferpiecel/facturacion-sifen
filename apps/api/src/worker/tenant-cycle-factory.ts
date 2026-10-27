@@ -36,6 +36,7 @@ import { validateEventXml } from '../modules/transmission/infrastructure/event-x
 import { createDrizzleResendPreflightStore } from '../modules/transmission/infrastructure/drizzle-resend-preflight-store.js';
 import { createDrizzleLoteAssemblyStore } from '../modules/transmission/infrastructure/drizzle-lote-assembly-store.js';
 import { createDrizzleLoteDispatchStore } from '../modules/transmission/infrastructure/drizzle-lote-dispatch-store.js';
+import { createDrizzleSyncDispatch } from '../modules/transmission/infrastructure/drizzle-sync-dispatch.js';
 import { createDrizzleLoteRecoveryStore } from '../modules/transmission/infrastructure/drizzle-lote-recovery-store.js';
 import { createDrizzleLotePollStore } from '../modules/transmission/infrastructure/drizzle-lote-poll-store.js';
 import { createDrizzleTransmissionCycleStore } from '../modules/transmission/infrastructure/drizzle-transmission-cycle-store.js';
@@ -105,6 +106,7 @@ export function createTenantCycleFactory({
       sender: new SendLote({
         gateway,
         store: createDrizzleLoteDispatchStore({ db, tenantId, now }),
+        sync: createDrizzleSyncDispatch({ db, tenantId, now }),
         pausedUntil: sendPausedUntil,
       }),
       poller: new PollLoteResult({

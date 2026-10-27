@@ -118,7 +118,10 @@ export class SendLote {
     try {
       const answer = await this.deps.gateway.enviarDESincronico({ dId, de: document.xml });
       if (answer.dCodRes === SIFEN_CODES.RUC_NO_HABILITADO_SINCRONICO) {
-        await sync.disable(`${answer.dCodRes}: ${answer.dMsgRes}`.slice(0, 500));
+        // Nothing was processed: even if the flag cannot be cleared the lote still goes by batch.
+        await sync
+          .disable(`${answer.dCodRes}: ${answer.dMsgRes}`.slice(0, 500))
+          .catch(() => undefined);
         return undefined;
       }
       const status = documentStatusOf(answer.dEstRes ?? '');

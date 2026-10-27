@@ -343,6 +343,8 @@ export const tenantFiscalProfiles = pgTable(
     // ("Tabla 1 – Tipo de Régimen") not present in docs/referencia/dnit,
     // so only the format is enforced here.
     regimeCode: varchar('regime_code', { length: 2 }),
+    // HU-E6-06: opt-in to siRecepDE for single-DE lotes. SIFEN code 1264 (RUC not enabled) clears it.
+    syncTransmission: boolean('sync_transmission').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

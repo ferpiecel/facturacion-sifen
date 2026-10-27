@@ -26,9 +26,9 @@ tenant's own certificate (ADR-0010) over mTLS. Simulator path and its guards unc
 
 ## Tasks
 
-- [ ] T1 `CircuitBreakerGateway.around` (shared breakers)
-- [ ] T2 PKCS#12 -> mTLS credential + tenant credential source (audit purpose `sifen-mtls`)
-- [ ] T3 Tenant environment reader + `TenantSoapGatewayFactory` + mTLS stub integration test
+- [x] T1 `CircuitBreakerGateway.around` (shared breakers)
+- [x] T2 PKCS#12 -> mTLS credential + tenant credential source (audit purpose `sifen-mtls`)
+- [x] T3 Tenant environment reader + `TenantSoapGatewayFactory` + mTLS stub integration test
 - [ ] T4 `SIFEN_GATEWAY=soap` config (fail-fast), worker wiring, cycle factory per-tenant gateway, docs, ADR-0022
 - [ ] T5 RUC lookup per tenant over the factory; 503 only without gateway
 

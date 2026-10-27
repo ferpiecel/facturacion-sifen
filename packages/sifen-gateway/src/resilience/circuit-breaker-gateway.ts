@@ -1,4 +1,9 @@
-import { SifenTimeoutError, SifenTransportError } from '../errors.ts';
+import {
+  SifenClientCertificateError,
+  SifenTenantUnavailableError,
+  SifenTimeoutError,
+  SifenTransportError,
+} from '../errors.ts';
 import type { SifenGateway, SifenOperation } from '../port.ts';
 import {
   CircuitBreaker,
@@ -41,7 +46,7 @@ const OPERATIONS: readonly SifenOperation[] = [
 
 /**
  * Decorates a `SifenGateway` with one circuit breaker per endpoint (ADR-0008, HU-E6-08). Only
- * transport failures and timeouts count: any answer, even a SOAP fault, proves the endpoint is up.
+ * transport failures and timeouts count (a tenant-local failure counts for neither side): any answer, even a SOAP fault, proves the endpoint is up.
  */
 export class CircuitBreakerGateway implements SifenGateway {
   private readonly breakers = new Map<SifenOperation, CircuitBreaker>();
@@ -113,7 +118,13 @@ export class CircuitBreakerGateway implements SifenGateway {
       breaker.success(acquired.token);
       return result;
     } catch (error) {
-      if (error instanceof SifenTransportError || error instanceof SifenTimeoutError) {
+      if (
+        error instanceof SifenTenantUnavailableError ||
+        error instanceof SifenClientCertificateError
+      ) {
+        // One tenant's problem: not evidence about the endpoint either way.
+        breaker.release(acquired.token);
+      } else if (error instanceof SifenTransportError || error instanceof SifenTimeoutError) {
         breaker.failure(acquired.token);
       } else {
         // The endpoint answered (a fault, an unusable body) or the caller's request was invalid.

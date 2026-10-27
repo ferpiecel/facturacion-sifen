@@ -2,7 +2,12 @@ import { createServer, type Server } from 'node:https';
 import type { AddressInfo } from 'node:net';
 import type { TLSSocket } from 'node:tls';
 import { afterEach, describe, expect, it } from 'vitest';
-import { SifenCircuitOpenError, SifenFaultError, type SifenGateway } from '@sifen/sifen-gateway';
+import {
+  SifenFaultError,
+  SifenTenantUnavailableError,
+  SifenTransportError,
+  type SifenGateway,
+} from '@sifen/sifen-gateway';
 import { createTestAuthority, issueTestPkcs12 } from '../../../../test/support/test-pki.js';
 import { pkcs12ToMtlsCredential } from '../../certificates/infrastructure/pkcs12-mtls-credential.js';
 import { TenantSoapGatewayFactory } from './tenant-soap-gateway.js';
@@ -93,8 +98,10 @@ describe('TenantSoapGatewayFactory', () => {
       .forTenant('t-1')
       .consultarRUC(request)
       .catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(SifenCircuitOpenError);
-    expect((error as SifenCircuitOpenError).retryAt).toEqual(new Date(now().getTime() + 60_000));
+    expect(error).toBeInstanceOf(SifenTenantUnavailableError);
+    expect((error as SifenTenantUnavailableError).retryAt).toEqual(
+      new Date(now().getTime() + 60_000),
+    );
   });
 
   it('refuses a production tenant unless production is allowed, without touching the certificate', async () => {
@@ -102,9 +109,32 @@ describe('TenantSoapGatewayFactory', () => {
       environments: { environmentOf: () => Promise.resolve('production' as const) },
     });
     await expect(factory.forTenant('t-1').consultarRUC(request)).rejects.toBeInstanceOf(
-      SifenCircuitOpenError,
+      SifenTenantUnavailableError,
     );
     expect(opened).toEqual([]);
+  });
+
+  it('classifies a client certificate rejected at the handshake as tenant-local, not transport', async () => {
+    const { url } = await stub();
+    const otherRoot = createTestAuthority('Other Root');
+    const rogue = issueTestPkcs12(otherRoot);
+    const { factory } = build({
+      trustedRoots: root.pem,
+      endpointOverrides: { consultarRUC: url },
+      allowCustomHost: true,
+      certificates: {
+        open: () => Promise.resolve({ p12: Buffer.from(rogue.p12), password: rogue.password }),
+      },
+    });
+    const error = await factory
+      .forTenant('t-1')
+      .consultarRUC(request)
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SifenTenantUnavailableError);
+    expect(error).not.toBeInstanceOf(SifenTransportError);
+    expect((error as SifenTenantUnavailableError).retryAt).toEqual(
+      new Date(now().getTime() + 60_000),
+    );
   });
 
   it('is a SifenGateway for every operation', () => {

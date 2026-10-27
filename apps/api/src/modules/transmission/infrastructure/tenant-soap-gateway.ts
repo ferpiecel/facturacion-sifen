@@ -1,6 +1,7 @@
 import {
   createSoapSifenGateway,
-  SifenCircuitOpenError,
+  SifenClientCertificateError,
+  SifenTenantUnavailableError,
   type SifenGateway,
   type SifenOperation,
 } from '@sifen/sifen-gateway';
@@ -17,7 +18,7 @@ export interface TenantSoapGatewayDeps {
   };
   /** Production stays off until an operator opts in (`SIFEN_SOAP_ALLOW_PRODUCTION`). */
   readonly allowProduction: boolean;
-  /** How long a call that could not start is deferred (`SifenCircuitOpenError.retryAt`). */
+  /** How long a call that could not start is deferred (`SifenTenantUnavailableError.retryAt`). */
   readonly retryAfterMs: number;
   readonly timeoutMs?: number;
   /** Trust anchors for the SIFEN server (DNIT CA bundle); replaces the default roots when set. */
@@ -44,7 +45,8 @@ const OPERATIONS: readonly SifenOperation[] = [
  * certificate through the audited, short-TTL cache, converts it to PEM in memory and hands it to the
  * transport, which opens one fresh connection (no agent, no reuse across tenants). Nothing is kept
  * or logged. A call that cannot start (no certificate, production not enabled) sends nothing, so it
- * fails as `SifenCircuitOpenError`: callers leave the work queued instead of treating it as unknown.
+ * fails as `SifenTenantUnavailableError` (also when SIFEN rejects the certificate at the handshake): callers
+ * leave the work queued instead of treating it as unknown, and the shared circuit breaker ignores it.
  */
 export class TenantSoapGatewayFactory {
   constructor(private readonly deps: TenantSoapGatewayDeps) {}
@@ -98,9 +100,25 @@ export class TenantSoapGatewayFactory {
       deps.logger?.warn(
         `tenant ${tenantId}: SIFEN ${operation} not sent (${error instanceof Error ? error.name : 'unknown error'})`,
       );
-      const now = (deps.now ?? (() => new Date()))();
-      throw new SifenCircuitOpenError(operation, new Date(now.getTime() + deps.retryAfterMs));
+      throw this.unavailable(operation, error);
     }
-    return run(inner);
+    try {
+      return await run(inner);
+    } catch (error) {
+      if (error instanceof SifenClientCertificateError) {
+        deps.logger?.warn(`tenant ${tenantId}: SIFEN ${operation} rejected the client certificate`);
+        throw this.unavailable(operation, error);
+      }
+      throw error;
+    }
+  }
+
+  private unavailable(operation: SifenOperation, cause: unknown): SifenTenantUnavailableError {
+    const now = (this.deps.now ?? (() => new Date()))();
+    return new SifenTenantUnavailableError(
+      operation,
+      new Date(now.getTime() + this.deps.retryAfterMs),
+      { cause },
+    );
   }
 }

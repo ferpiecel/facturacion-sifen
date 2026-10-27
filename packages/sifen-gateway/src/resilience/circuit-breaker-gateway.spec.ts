@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { SifenFaultError, SifenTimeoutError, SifenTransportError } from '../errors.ts';
+import {
+  SifenFaultError,
+  SifenTenantUnavailableError,
+  SifenTimeoutError,
+  SifenTransportError,
+} from '../errors.ts';
 import { FakeSifenGateway } from '../fake/fake-sifen-gateway.ts';
 import { CircuitBreakerGateway, SifenCircuitOpenError } from './circuit-breaker-gateway.ts';
 import { loteRecibido } from '../fake/scenarios.ts';
@@ -126,5 +131,102 @@ describe('CircuitBreakerGateway', () => {
     t = 1_000;
     expect(gateway.pausedUntil('enviarLote')).toBeNull();
     expect(gateway.pausedUntil('enviarLote')).toBeNull();
+  });
+});
+
+describe('CircuitBreakerGateway.shared', () => {
+  it('guards gateways through around() and refuses direct calls', async () => {
+    const shared = CircuitBreakerGateway.shared(options);
+    await expect(shared.around(new FakeSifenGateway()).enviarLote(lote)).resolves.toBeDefined();
+    await expect(shared.enviarLote(lote)).rejects.toThrow(/around/);
+  });
+});
+
+describe('CircuitBreakerGateway.around', () => {
+  it('guards another gateway with the SAME breakers', async () => {
+    const { gateway } = build();
+    const other = new FakeSifenGateway();
+    other.setDefault('enviarLote', new SifenTransportError('enviarLote'));
+    const guarded = gateway.around(other);
+    await guarded.enviarLote(lote).catch(() => undefined);
+    await guarded.enviarLote(lote).catch(() => undefined);
+    expect(gateway.pausedUntil('enviarLote')).not.toBeNull();
+    await expect(gateway.enviarLote(lote)).rejects.toBeInstanceOf(SifenCircuitOpenError);
+    await expect(guarded.enviarLote(lote)).rejects.toBeInstanceOf(SifenCircuitOpenError);
+    expect(other.calls).toHaveLength(2);
+  });
+
+  describe('tenant-local failures', () => {
+    const unavailable = () =>
+      new SifenTenantUnavailableError('enviarLote', new Date(60_000), { cause: new Error('x') });
+
+    it('never open the shared circuit, however many repeat', async () => {
+      const { gateway } = build();
+      const bad = new FakeSifenGateway();
+      bad.setDefault('enviarLote', unavailable());
+      const good = new FakeSifenGateway();
+      const tenantA = gateway.around(bad);
+      const tenantB = gateway.around(good);
+      for (let i = 0; i < 5; i++) {
+        await expect(tenantA.enviarLote(lote)).rejects.toBeInstanceOf(SifenTenantUnavailableError);
+      }
+      expect(gateway.pausedUntil('enviarLote')).toBeNull();
+      await expect(tenantB.enviarLote(lote)).resolves.toBeDefined();
+    });
+
+    it('do not reset the failures of a real outage', async () => {
+      const { gateway } = build();
+      const down = new FakeSifenGateway();
+      down.setDefault('enviarLote', new SifenTransportError('enviarLote'));
+      const bad = new FakeSifenGateway();
+      bad.setDefault('enviarLote', unavailable());
+      await gateway
+        .around(down)
+        .enviarLote(lote)
+        .catch(() => undefined);
+      await gateway
+        .around(bad)
+        .enviarLote(lote)
+        .catch(() => undefined);
+      await gateway
+        .around(down)
+        .enviarLote(lote)
+        .catch(() => undefined);
+      expect(gateway.pausedUntil('enviarLote')).not.toBeNull();
+    });
+
+    it('cannot close a half-open circuit: only a real call does, and the probe is released', async () => {
+      let t = 0;
+      const { gateway } = build(() => new Date(t));
+      const down = new FakeSifenGateway();
+      down.setDefault('enviarLote', new SifenTransportError('enviarLote'));
+      await gateway
+        .around(down)
+        .enviarLote(lote)
+        .catch(() => undefined);
+      await gateway
+        .around(down)
+        .enviarLote(lote)
+        .catch(() => undefined);
+      t = 1_000;
+      const bad = new FakeSifenGateway();
+      bad.setDefault('enviarLote', unavailable());
+      await expect(gateway.around(bad).enviarLote(lote)).rejects.toBeInstanceOf(
+        SifenTenantUnavailableError,
+      );
+      // still not closed, and the probe slot is free for a healthy tenant
+      expect(gateway.pausedUntil('enviarLote')).toBeNull();
+      await expect(gateway.around(new FakeSifenGateway()).enviarLote(lote)).resolves.toBeDefined();
+      expect(gateway.pausedUntil('enviarLote')).toBeNull();
+      await gateway
+        .around(down)
+        .enviarLote(lote)
+        .catch(() => undefined);
+      await gateway
+        .around(down)
+        .enviarLote(lote)
+        .catch(() => undefined);
+      expect(gateway.pausedUntil('enviarLote')).not.toBeNull();
+    });
   });
 });

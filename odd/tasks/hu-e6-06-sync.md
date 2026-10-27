@@ -20,7 +20,11 @@ Opt-in synchronous send of a single DE through `siRecepDE`; SIFEN code 1264 (RUC
 
 - [x] A1 (PR #372, branch feat/hu-e6-06-sync, pushed, verify green): `SendLote` sync path behind an optional `SyncDispatch` port, `RUC_NO_HABILITADO_SINCRONICO` code (inert until A2 wires it)
 - [x] A2: migration 0064 + schema flag + `createDrizzleSyncDispatch` + worker wiring + cycle integration tests + fix: a failing flag clear on 1264 still falls back to batch (verify via push)
-- [x] B (PR chained on #376): `?wait=true`, `SYNC_WAIT_TIMEOUT_MS`, docs, OpenAPI regen (verify via push)
-- [ ] C: ops CLI `tenant:sync-transmission --tenant <id> --on|--off` + docs/operacion.md (separate PR to stay under 400 lines; written and green locally, committed on branch feat/hu-e6-06-sync-cli)
+- [x] B (PR #378, chained on #376): `?wait=true`, `SYNC_WAIT_TIMEOUT_MS`, docs, OpenAPI regen (verify via push)
+- [x] C (PR #380, pushed, verify green): ops CLI `tenant:sync-transmission --tenant <id> --on|--off` + docs/operacion.md (separate PR to stay under 400 lines; written and green locally, committed on branch feat/hu-e6-06-sync-cli)
 
 ## Progress and evidence
+
+## Handoff
+
+Chain: #372 (A1) <- #376 (A2, migration 0064) <- #378 (B, wait) <- #380 (C, ops CLI), all draft except #372. Remaining: review each PR, rebase onto main with `git rebase --onto main <previous branch>` as each merges, mark ready, merge. Nothing else pending.

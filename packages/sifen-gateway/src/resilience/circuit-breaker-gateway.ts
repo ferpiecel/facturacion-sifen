@@ -67,6 +67,25 @@ export class CircuitBreakerGateway implements SifenGateway {
   }
 
   /**
+   * Breakers with no gateway of their own, only for `around(...)`: calling the returned object
+   * directly fails instead of reaching any endpoint.
+   */
+  static shared(options: CircuitBreakerGatewayOptions = {}): CircuitBreakerGateway {
+    const unused = (): never => {
+      throw new Error('A shared CircuitBreakerGateway has no inner gateway: use around(gateway)');
+    };
+    const inner: SifenGateway = {
+      enviarLote: unused,
+      consultarLote: unused,
+      enviarDESincronico: unused,
+      consultarDE: unused,
+      enviarEventos: unused,
+      consultarRUC: unused,
+    };
+    return new CircuitBreakerGateway(inner, options);
+  }
+
+  /**
    * The instant a paused endpoint may be tried again, or null when a call would go through. Lets a
    * caller leave work queued before it claims it, instead of learning from a refusal.
    */

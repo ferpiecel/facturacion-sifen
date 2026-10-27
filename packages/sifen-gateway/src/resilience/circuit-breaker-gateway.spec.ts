@@ -134,6 +134,14 @@ describe('CircuitBreakerGateway', () => {
   });
 });
 
+describe('CircuitBreakerGateway.shared', () => {
+  it('guards gateways through around() and refuses direct calls', async () => {
+    const shared = CircuitBreakerGateway.shared(options);
+    await expect(shared.around(new FakeSifenGateway()).enviarLote(lote)).resolves.toBeDefined();
+    await expect(shared.enviarLote(lote)).rejects.toThrow(/around/);
+  });
+});
+
 describe('CircuitBreakerGateway.around', () => {
   it('guards another gateway with the SAME breakers', async () => {
     const { gateway } = build();

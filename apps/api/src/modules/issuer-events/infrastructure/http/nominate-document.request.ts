@@ -47,7 +47,7 @@ export function parseNominateBody(
   body: unknown,
 ): { ok: true; value: NominateDocumentBody } | { ok: false; errors: ValidationError[] } {
   const parsed = nominateDocumentSchema.safeParse(body);
-  if (parsed.success) return { ok: true, value: parsed.data as NominateDocumentBody };
+  if (parsed.success) return { ok: true, value: parsed.data };
   return {
     ok: false,
     errors: schemaErrors(parsed.error).map((e) => (e.field === '' ? { ...e, field: 'body' } : e)),

@@ -85,7 +85,7 @@ function setup(
     linked = NEW_DOC;
     return Promise.resolve();
   });
-  const acceptFe = vi.fn(() => Promise.resolve(NEW_DOC));
+  const acceptFe = vi.fn((_input: { idempotencyKey: string }) => Promise.resolve(NEW_DOC));
   const voidNumbers = vi.fn(() =>
     options.voidError
       ? Promise.reject(options.voidError)

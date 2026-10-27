@@ -2,7 +2,7 @@
 
 - Feature: `hu-e6-06-sync` · Refs: HU-E6-06 (F2, ADR-0007, plan 8.x sync) · Engram mirror: `odd/hu-e6-06-sync/tasks`
 - TDD: strict (`openspec/config.yaml`), runner Vitest (`pnpm --filter <pkg> exec vitest run`)
-- Delivery: `ask-on-risk`, chain `stacked-to-main`, PRs of 400 lines or less. Forecast ~600 lines, 2 PRs.
+- Delivery: `ask-on-risk`, chain `stacked-to-main`, PRs of 400 lines or less. Forecast ~900 lines, 3 PRs (A1 application, A2 persistence + wiring, B wait).
 - Route: inline (focused reads, 1 to 3 files per decision); no delegation triggers fired beyond the initial mapping, done inline.
 
 ## Objective
@@ -18,7 +18,8 @@ Opt-in synchronous send of a single DE through `siRecepDE`; SIFEN code 1264 (RUC
 
 ## Tasks
 
-- [ ] A: migration 0064 + schema flag + `SendLote` sync path + store (`recordSync`, flag disable audit) + cycle wiring + tests
+- [x] A1: `SendLote` sync path behind an optional `SyncDispatch` port, `RUC_NO_HABILITADO_SINCRONICO` code (inert until A2 wires it)
+- [ ] A2: migration 0064 + schema flag + `createDrizzleSyncDispatch` (flag read, audited disable, settle) + worker wiring + cycle integration tests + operacion.md
 - [ ] B: `?wait=true` in `POST /v1/documents`, `SYNC_WAIT_TIMEOUT_MS`, docs (`docs/configuracion.md`, `docs/integracion/emision.md`, openapi), battery scenario
 
 ## Progress and evidence

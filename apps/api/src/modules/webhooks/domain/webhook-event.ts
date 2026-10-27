@@ -14,6 +14,7 @@ export const WEBHOOK_EVENT_TYPES = [
   'document.rejected',
   'document.cancelled',
   'document.number_voided',
+  'document.nominated',
   'document.transmission_deadline_warning',
   'document.notification.delivered',
   'document.notification.failed',

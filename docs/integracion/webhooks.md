@@ -72,8 +72,16 @@ El helper de referencia es `verifyWebhookSignature` (`apps/api/src/modules/webho
 `created_at` va en UTC. `data` solo contiene JSON plano. Tipos (plan v1.0 §13 más las altas de v1.1 §19):
 `document.created`, `document.signed`, `document.submitted`, `document.approved`,
 `document.approved_with_observations` (v1.0: `approved_with_warnings`), `document.rejected`,
-`document.cancelled`, `document.number_voided`, `document.transmission_deadline_warning`,
+`document.cancelled`, `document.number_voided`, `document.nominated`, `document.transmission_deadline_warning`,
 `document.notification.delivered`, `document.notification.failed`, `certificate.expiring`. Un endpoint sin filtro recibe todos.
+
+### `document.nominated`
+
+SIFEN aprobó la nominación de una FE emitida a un receptor innominado (`POST /v1/documents/{id}/nominate`). El documento
+conserva su estado (`approved`): el evento solo avisa que ya tiene receptor. Una nominación rechazada no genera aviso.
+`data` lleva `document_id`, `cdc`, `document_type`, `status` y, si existen, los `sifen_messages` del documento; el receptor
+nominado no viaja en el webhook (se informa por la API). El `id` es determinista por documento: una sola nominación abierta
+por FE (4453), así que el aviso sale una vez.
 
 ### `document.transmission_deadline_warning`
 

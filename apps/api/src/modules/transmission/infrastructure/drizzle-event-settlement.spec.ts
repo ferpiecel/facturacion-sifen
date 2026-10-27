@@ -13,6 +13,14 @@ import { seedDocuments, seedWebhookEndpoint } from '../../../../test/support/doc
 import { createDrizzleEventBatchStore } from './drizzle-event-batch-store.js';
 
 const NOW = new Date('2026-10-17T12:00:00.000Z');
+const NOMINATION = {
+  kind: 'taxpayer',
+  ruc: '80012345-1',
+  taxpayerType: 2,
+  name: 'Cliente SA',
+  country: 'PRY',
+  operationType: 'B2B',
+};
 const RANGE = { timbrado: '12345678', establishment: '001', point: '001', from: 1, to: 5, type: 1 };
 
 /** Spec: HU-E8-04 (slice D). What settling an issuer event leaves behind: audit, document status, webhooks. */
@@ -90,6 +98,57 @@ describe('settling issuer events', () => {
       ]);
     },
   );
+
+  async function sendingNomination(documentId: string) {
+    seq += 1;
+    const [row] = await handle.db
+      .insert(issuerEvents)
+      .values({
+        tenantId,
+        environment: 'test',
+        kind: 'nomination',
+        eventId: BigInt(seq),
+        reason: 'Cliente identificado',
+        documentId,
+        nomination: NOMINATION,
+      })
+      .returning();
+    await handle.db
+      .update(issuerEvents)
+      .set({ status: 'signed', signedXml: '<a/>', signedAt: NOW })
+      .where(eq(issuerEvents.id, row.id));
+    await handle.db
+      .update(issuerEvents)
+      .set({ status: 'sending', batchDId: 3n, sendAttemptedAt: NOW })
+      .where(eq(issuerEvents.id, row.id));
+    return row.id;
+  }
+
+  it('queues document.nominated when a nomination is approved, leaving the document approved', async () => {
+    const [doc] = await seedDocuments(handle.db, tenantId, ['approved']);
+    await seedWebhookEndpoint(handle.db, tenantId);
+    const id = await sendingNomination(doc.id);
+
+    await store().record(new Map([[id, approved]]));
+
+    expect(await statusOf(doc.id)).toBe('approved');
+    const deliveries = await handle.db.select().from(webhookDeliveries);
+    expect(deliveries.map((d) => d.eventType)).toEqual(['document.nominated']);
+    expect(deliveries[0].payload).toMatchObject({
+      type: 'document.nominated',
+      data: { document_id: doc.id, status: 'approved' },
+    });
+  });
+
+  it('queues no webhook for a rejected nomination', async () => {
+    const [doc] = await seedDocuments(handle.db, tenantId, ['approved']);
+    await seedWebhookEndpoint(handle.db, tenantId);
+    const id = await sendingNomination(doc.id);
+
+    await store().record(new Map([[id, { status: 'rejected', code: '4453', message: 'dup' }]]));
+
+    expect(await handle.db.select().from(webhookDeliveries)).toEqual([]);
+  });
 
   it('leaves a document alone when it is no longer cancellable, and still settles the event', async () => {
     const [doc] = await seedDocuments(handle.db, tenantId, ['rejected']);

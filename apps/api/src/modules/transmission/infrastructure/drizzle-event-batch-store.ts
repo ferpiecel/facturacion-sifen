@@ -198,6 +198,15 @@ export function createDrizzleEventBatchStore({
               ),
             );
           }
+          if (outcome.status === 'approved' && event.kind === 'nomination' && event.documentId) {
+            // The document keeps its status: the nominated receiver is the approved event itself.
+            await enqueueDocumentEvents(tx, {
+              tenantId,
+              documentIds: [event.documentId],
+              at: now(),
+              eventType: 'document.nominated',
+            });
+          }
           if (outcome.status === 'approved' && event.kind === 'voiding' && event.voidRange) {
             await voidRejectedDocuments(
               tx,

@@ -2,6 +2,7 @@ import { HttpException } from '@nestjs/common';
 import { DocumentNumberExhaustedError } from '@sifen/db';
 import { describe, expect, it } from 'vitest';
 import {
+  CertificateExpiringError,
   IdempotencyKeyReusedError,
   InvoiceValidationError,
   IssuerNotConfiguredError,
@@ -26,6 +27,17 @@ describe('toHttpException', () => {
 
   it('maps an unconfigured issuer to 422', () => {
     expect(statusOf(new IssuerNotConfiguredError())).toBe(422);
+  });
+
+  /** Spec: HU-E3-03. */
+  it('maps an expiring certificate to 422 with the expiry date and a stable code', () => {
+    const error = new CertificateExpiringError(new Date('2027-01-01T00:00:00.000Z'));
+    expect(statusOf(error)).toBe(422);
+    expect(toHttpException(error)?.getResponse()).toMatchObject({
+      code: 'certificate_expiring',
+      message: expect.stringContaining('2027-01-01') as string,
+      notAfter: '2027-01-01T00:00:00.000Z',
+    });
   });
 
   it('maps a reused idempotency key with another payload to 409', () => {

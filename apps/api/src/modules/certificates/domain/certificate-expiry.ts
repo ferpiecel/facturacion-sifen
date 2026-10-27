@@ -1,6 +1,7 @@
 /** HU-E3-03: the expiry alert thresholds and the preventive emission block (RNF-02). */
 const DAY_MS = 86_400_000;
 const MAX_DAYS = 365;
+const MAX_BLOCK_DAYS = 30;
 
 export const DEFAULT_ALERT_DAYS: readonly number[] = [60, 30, 7];
 export const DEFAULT_EMISSION_BLOCK_DAYS = 1;
@@ -23,6 +24,23 @@ export function parseAlertDays(raw: string | undefined): readonly number[] {
     return value;
   });
   return [...new Set(days)].sort((a, b) => b - a);
+}
+
+/**
+ * `CERTIFICATE_EMISSION_BLOCK_DAYS`: whole days (0..30) before expiry from which emission is refused.
+ * Unset or blank means one day; 0 keeps only the hard stop at expiry.
+ * @throws Error naming the variable (never its value).
+ */
+export function parseBlockDays(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === '') return DEFAULT_EMISSION_BLOCK_DAYS;
+  const text = raw.trim();
+  const value = /^[0-9]+$/.test(text) ? Number(text) : Number.NaN;
+  if (!Number.isInteger(value) || value > MAX_BLOCK_DAYS) {
+    throw new Error(
+      `CERTIFICATE_EMISSION_BLOCK_DAYS must be whole days between 0 and ${String(MAX_BLOCK_DAYS)}`,
+    );
+  }
+  return value;
 }
 
 /**

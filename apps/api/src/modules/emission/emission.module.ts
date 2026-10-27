@@ -1,5 +1,6 @@
 import { Module, ServiceUnavailableException } from '@nestjs/common';
 import type { Database } from '@sifen/db';
+import { parseBlockDays } from '../certificates/domain/certificate-expiry.js';
 import { DATABASE } from '../database/database.module.js';
 import { createAcceptCreditNote, createAcceptDebitNote } from './application/accept-credit-note.js';
 import { createAcceptInvoice } from './application/accept-invoice.js';
@@ -21,11 +22,17 @@ import { createKudeRenderer } from './infrastructure/kude/kude-renderer.js';
 import { DocumentQueryController } from './infrastructure/http/document-query.controller.js';
 import { DocumentsController } from './infrastructure/http/documents.controller.js';
 
+/** `CERTIFICATE_EMISSION_BLOCK_DAYS` (HU-E3-03); an invalid value stops the API at startup. */
+function certificateBlockDays(): number {
+  return parseBlockDays(process.env.CERTIFICATE_EMISSION_BLOCK_DAYS);
+}
+
 /** Acceptance use case of the API, with the validation config shared with the worker. */
 export function acceptInvoiceFor(db: Database) {
   return createAcceptInvoice({
     unitOfWork: createDrizzleAcceptanceUnitOfWork(db),
     validation: emissionValidationConfig(),
+    certificateBlockDays: certificateBlockDays(),
   });
 }
 
@@ -62,6 +69,7 @@ export function acceptInvoiceFor(db: Database) {
           ? createAcceptCreditNote({
               unitOfWork: createDrizzleAcceptanceUnitOfWork(db),
               validation: emissionValidationConfig(),
+              certificateBlockDays: certificateBlockDays(),
             })
           : () => Promise.reject(new ServiceUnavailableException()),
       inject: [DATABASE],
@@ -73,6 +81,7 @@ export function acceptInvoiceFor(db: Database) {
           ? createAcceptDebitNote({
               unitOfWork: createDrizzleAcceptanceUnitOfWork(db),
               validation: emissionValidationConfig(),
+              certificateBlockDays: certificateBlockDays(),
             })
           : () => Promise.reject(new ServiceUnavailableException()),
       inject: [DATABASE],
@@ -84,6 +93,7 @@ export function acceptInvoiceFor(db: Database) {
           ? createAcceptSelfInvoice({
               unitOfWork: createDrizzleAcceptanceUnitOfWork(db),
               validation: emissionValidationConfig(),
+              certificateBlockDays: certificateBlockDays(),
             })
           : () => Promise.reject(new ServiceUnavailableException()),
       inject: [DATABASE],

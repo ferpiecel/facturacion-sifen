@@ -14,6 +14,7 @@ import {
   IdempotencyKeyReusedError,
   InvoiceValidationError,
   IssuerNotConfiguredError,
+  assertCertificateUsable,
   paraguayDate,
   type AcceptedInvoice,
 } from './accept-invoice.js';
@@ -42,6 +43,7 @@ export interface AcceptCreditNoteDependencies {
   now?: () => Date;
   randomBytes?: RandomBytes;
   validation?: ValidationConfig;
+  certificateBlockDays?: number;
   /** `credit` (NCE, the default) or `debit` (NDE, HU-E7-02: no 2417 sum, type 6). */
   kind?: NoteKind;
 }
@@ -87,6 +89,7 @@ export function createAcceptCreditNote(deps: AcceptCreditNoteDependencies) {
         issueDate,
       });
       if (!issuer) throw new IssuerNotConfiguredError();
+      assertCertificateUsable(issuer, issuedAt, deps.certificateBlockDays);
 
       const { associatedCdc } = input.draft;
       const invoice = await unit.findAssociatedInvoice(associatedCdc, issuer.environment);

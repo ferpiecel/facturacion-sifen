@@ -22,3 +22,4 @@
 | [0018](0018-precision-decimal-en-montos-y-cantidades.md) | Precisión decimal exacta en montos y cantidades | Aceptado |
 | [0019](0019-nota-de-credito-asociada-a-una-factura.md) | Nota de crédito electrónica asociada a una factura | Aceptado |
 | [0020](0020-eventos-del-emisor-almacenamiento-y-lotes.md) | Eventos del emisor, almacenamiento y envío en lotes | Aceptado |
+| [0022](0022-gateway-soap-por-tenant.md) | Gateway SOAP por tenant con el certificado del tenant | Aceptado |

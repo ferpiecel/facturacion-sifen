@@ -96,12 +96,12 @@ main: the orchestrator restacks the chain and renumbers migrations 0058/0059 in 
 | feat/hu-e9-01-receiver-endpoint (P5) | #353 |
 | feat/hu-e9-02-correction-store (P6a, 0059) | #354 |
 | feat/hu-e9-02-correction-rules (P6b) | #355 |
-| feat/hu-e9-02-correction-usecase (P6c) | see PR list (PR numbers below) |
-| feat/hu-e9-02-correction-idempotency | |
-| feat/hu-e9-02-correction-store-uow (P6d) | |
-| feat/hu-e9-02-correction-http-errors | |
-| feat/hu-e9-02-correction-endpoint (P7) | |
-| feat/hu-e9-02-guide | |
+| feat/hu-e9-02-correction-usecase (P6c) | #358 |
+| feat/hu-e9-02-correction-idempotency | #359 |
+| feat/hu-e9-02-correction-store-uow (P6d) | #360 |
+| feat/hu-e9-02-correction-http-errors | #361 |
+| feat/hu-e9-02-correction-endpoint (P7) | #362 |
+| feat/hu-e9-02-guide | #363 |
 
 Open items: a correction of a correction stays refused (product to confirm); dTiGDE absent in xmlgen output and codes 11 to 14 vs MT
 10 to 13 need T0 (Prevalidador); the battery (3 events per kind, 3 corrections) needs the test environment. No backlog status column

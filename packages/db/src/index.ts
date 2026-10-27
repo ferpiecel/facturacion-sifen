@@ -28,6 +28,7 @@ export {
   plans,
   portalRole,
   rucBlocks,
+  rucLookupCache,
   SUBSCRIPTION_STATUSES,
   subscriptions,
   TENANT_TABLES,

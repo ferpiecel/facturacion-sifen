@@ -1573,6 +1573,34 @@ export const rucBlocks = pgTable(
 );
 
 /**
+ * Cache of `siConsRUC` answers (HU-E6-09). Global on purpose: the taxpayer registry is the same for every
+ * tenant, so the table has no `tenant_id` (and no RLS); it is keyed by SIFEN environment and RUC. Only
+ * definite answers are stored (found 0502, not found 0500); freshness is judged at read from `fetched_at`.
+ */
+export const rucLookupCache = pgTable(
+  'ruc_lookup_cache',
+  {
+    environment: tenantEnvironment('environment').notNull(),
+    /** RUC base, 5 to 8 digits, without the check digit. */
+    ruc: text('ruc').notNull(),
+    found: boolean('found').notNull(),
+    razonSocial: text('razon_social'),
+    /** `dCodEstCons`: ACT, SUS, SAD, BLQ, CAN or CDE. */
+    estado: text('estado'),
+    facturadorElectronico: boolean('facturador_electronico'),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.environment, table.ruc] }),
+    check('ruc_lookup_cache_ruc_format', sql`${table.ruc} ~ '^[0-9]{5,8}$'`),
+    check(
+      'ruc_lookup_cache_found_shape',
+      sql`(${table.found} AND ${table.razonSocial} IS NOT NULL AND ${table.estado} IS NOT NULL AND ${table.facturadorElectronico} IS NOT NULL) OR (NOT ${table.found} AND ${table.razonSocial} IS NULL AND ${table.estado} IS NULL AND ${table.facturadorElectronico} IS NULL)`,
+    ),
+  ],
+);
+
+/**
  * Every table that carries a `tenant_id` column and MUST be covered by
  * `FORCE ROW LEVEL SECURITY` plus a tenant-isolation policy. The
  * `rls-coverage.spec.ts` drift check discovers these tables from the

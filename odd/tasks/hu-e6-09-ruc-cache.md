@@ -23,7 +23,7 @@ Query the taxpayer registry (`siConsRUC`) with a TTL cache so integrators can va
 
 ## Tasks
 
-- [ ] A: gateway codes 0500/0501/0502, simulator scenarios + default, tests
+- [x] A (a56538e): gateway codes 0500/0501/0502, simulator scenarios + default, tests
 - [ ] B: migration 0063 `ruc_lookup_cache`, Drizzle schema, `LookupRuc` use case + store + TTL config + docs/configuracion.md
 - [ ] C: `GET /v1/ruc/:ruc` controller/module, OpenAPI regenerated, docs
 

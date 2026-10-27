@@ -32,6 +32,7 @@ import {
   parseCreateDebitNote,
   toCreditNoteDraft,
 } from './http/credit-note.request.js';
+import { parseCreateRemission, toRemissionDraft } from './http/remission.request.js';
 import { parseCreateSelfInvoice, toSelfInvoiceDraft } from './http/self-invoice.request.js';
 import type { InvoiceXmlContext, XmlReceiver } from '../application/invoice-xml.js';
 import type { FiscalProfile } from '../../fiscal-config/domain/fiscal-profile.js';
@@ -159,6 +160,53 @@ function readSelfInvoicePayload(
   };
 }
 
+/**
+ * An NRE (HU-E7-04): the receiver is the named one of the payload, the draft is B2B with the
+ * receiver address and the items carry no price (quantity only, VAT exempt, as xmlgen needs them).
+ */
+function readRemissionPayload(payload: unknown): ReturnType<typeof readPayload> & {
+  remission: InvoiceXmlContext['remission'];
+} {
+  const base = parseCreateRemission(payload);
+  if (!base.ok) throw new SigningDataIncompleteError(base.errors.map((e) => e.field));
+  const detail = xmlDetailSchema.safeParse(payload);
+  if (!detail.success) {
+    throw new SigningDataIncompleteError(detail.error.issues.map((i) => pathOf(i.path)));
+  }
+  const { motive, responsible, km, invoiceDate, receiver, transport, items } = toRemissionDraft(
+    base.value,
+  );
+  const { ruc, name, address, houseNumber, districtCode, cityCode, departmentCode } = receiver;
+  const { idType, idNumber, countryCode } = receiver;
+  return {
+    draft: {
+      receiver: {
+        kind: 'named',
+        isPublicEntity: false,
+        address: { street: address, houseNumber, districtCode, cityCode },
+      },
+      // D202: xmlgen needs B2C (2) or B2F (4) for a non-taxpayer; B2F is not built yet (MVP), so B2C.
+      operationType: ruc === undefined ? 'B2C' : 'B2B',
+      location: { departmentCode },
+      items: items.map(({ quantity }) => ({ quantity, unitPrice: 0, vatRate: 0 as const })),
+      roundingPyg: 0,
+    },
+    receiver: {
+      ...(ruc === undefined ? {} : { ruc }),
+      ...(ruc === undefined && idType !== undefined && idNumber !== undefined
+        ? { document: { type: idType, number: idNumber, countryCode } }
+        : {}),
+      name,
+      address,
+      houseNumber,
+      districtCode,
+      cityCode,
+    },
+    items: detail.data.items,
+    remission: { motive, responsible, km, invoiceDate, transport },
+  };
+}
+
 const first = <T>(rows: T[]): T | undefined => rows.at(0);
 
 /** The XML data of an FE, or of an NCE or NDE together with the FE row it is associated to. */
@@ -172,10 +220,12 @@ async function readDocument(
     note?: NoteData;
     noteKind?: 'credit' | 'debit';
     selfInvoice?: InvoiceXmlContext['selfInvoice'];
+    remission?: InvoiceXmlContext['remission'];
   }
 > {
   if (document.documentType === 1) return readPayload(document.payload);
   if (document.documentType === 4) return readSelfInvoicePayload(document.payload, issuer);
+  if (document.documentType === 7) return readRemissionPayload(document.payload);
   // Explicit: a type added later must not fall into the credit note branch.
   if (document.documentType !== 5 && document.documentType !== 6) {
     throw new DocumentTypeNotSignableError(document.documentType);
@@ -230,8 +280,8 @@ export function createDrizzleSigningStore({
           if (document.status !== 'accepted') {
             return { documentId: document.id, status: document.status };
           }
-          // Only an FE (1), an AFE (4), an NCE (5) and an NDE (6) have an XML builder; any other type is held.
-          if (![1, 4, 5, 6].includes(document.documentType)) {
+          // Only an FE (1), an AFE (4), an NCE (5), an NDE (6) and an NRE (7) have an XML builder; any other type is held.
+          if (![1, 4, 5, 6, 7].includes(document.documentType)) {
             throw new DocumentTypeNotSignableError(document.documentType);
           }
           const tenant = first(
@@ -352,6 +402,7 @@ export function createDrizzleSigningStore({
               issuedAt: document.issuedAt,
               ...(receiver === undefined ? {} : { receiver }),
               ...(readable.selfInvoice === undefined ? {} : { selfInvoice: readable.selfInvoice }),
+              ...(readable.remission === undefined ? {} : { remission: readable.remission }),
               ...(readable.note === undefined
                 ? {}
                 : readable.noteKind === 'debit'

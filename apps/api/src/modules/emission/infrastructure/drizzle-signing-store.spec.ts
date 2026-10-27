@@ -269,14 +269,14 @@ describe('DrizzleSigningStore', () => {
     });
   });
 
-  it('holds a document of a type with no XML builder (an NRE), naming the type, not the payload', async () => {
-    // Only the FE (1), AFE (4), NCE (5) and NDE (6) have a builder; any other type waits with its own reason.
-    await seed({ documentType: 7, payload: { type: 'NRE' } });
+  it('holds a document of a type with no XML builder (a retention, 8), naming the type, not the payload', async () => {
+    // Only the FE (1), AFE (4), NCE (5), NDE (6) and NRE (7) have a builder; any other type waits with its own reason.
+    await seed({ documentType: 8, payload: { type: 'RET' } });
     const error = await storeFor(tenantId)
       .load(tenantId, documentId)
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(DocumentTypeNotSignableError);
-    expect((error as DocumentTypeNotSignableError).documentType).toBe(7);
+    expect((error as DocumentTypeNotSignableError).documentType).toBe(8);
   });
 
   it('names the establishment when it has no phone or email', async () => {

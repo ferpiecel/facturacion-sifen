@@ -36,13 +36,33 @@ describe('FakeSifenGateway defaults', () => {
     expect(result.dCodRes).toBe(SIFEN_CODES.CDC_INEXISTENTE);
   });
 
-  it('enviarEventos and consultarRUC reject when unscripted (no verified default)', async () => {
+  it('enviarEventos rejects when unscripted (no verified default)', async () => {
     await expect(gateway.enviarEventos({ dId, eventos: ['<evento/>'] })).rejects.toThrow(
       /No response configured/,
     );
-    await expect(gateway.consultarRUC({ dId, ruc: '80012345-6' })).rejects.toThrow(
-      /No response configured/,
+  });
+
+  it('consultarRUC resolves 0500 for an unscripted RUC', async () => {
+    const result = await gateway.consultarRUC({ dId, ruc: '80012345' });
+    expect(result).toMatchObject({ dCodRes: SIFEN_CODES.RUC_INEXISTENTE, contribuyente: null });
+  });
+
+  it('consultarRUC resolves the scripted 0502 and 0501 answers', async () => {
+    gateway.enqueue(
+      'consultarRUC',
+      scenarios.rucEncontrado({
+        ruc: '80012345',
+        razonSocial: 'ACME SA',
+        estado: 'ACT',
+        facturadorElectronico: true,
+      }),
+      scenarios.rucSinPermisoConsulta(),
     );
+    const found = await gateway.consultarRUC({ dId, ruc: '80012345' });
+    expect(found.dCodRes).toBe(SIFEN_CODES.RUC_ENCONTRADO);
+    expect(found.contribuyente?.razonSocial).toBe('ACME SA');
+    const denied = await gateway.consultarRUC({ dId, ruc: '80012345' });
+    expect(denied).toMatchObject({ dCodRes: SIFEN_CODES.RUC_SIN_PERMISO, contribuyente: null });
   });
 });
 

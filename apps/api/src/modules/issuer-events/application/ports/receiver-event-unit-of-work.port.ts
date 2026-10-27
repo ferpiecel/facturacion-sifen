@@ -30,6 +30,14 @@ export interface NewReceiverEvent {
   requestHash: string;
 }
 
+/** A receiver event stored by an earlier request that used the same `Idempotency-Key`. */
+export interface StoredReceiverEvent {
+  eventId: string;
+  kind: ReceiverEventKind;
+  cdc: string;
+  requestHash: string;
+}
+
 /** The unique index of open receiver events refused the insert: a concurrent request registered it first. */
 export class ReceiverEventDuplicateError extends Error {
   constructor() {
@@ -40,6 +48,7 @@ export class ReceiverEventDuplicateError extends Error {
 
 /** Operations that must share one tenant transaction. */
 export interface ReceiverEventUnit {
+  findByIdempotencyKey(key: string): Promise<StoredReceiverEvent | null>;
   /** Serializes concurrent registrations over one CDC of the tenant until the transaction ends. */
   lockCdc(cdc: string): Promise<void>;
   /** The tenant's current environment and its RUC and legal name; `party` is null without a fiscal profile. */
@@ -51,6 +60,7 @@ export interface ReceiverEventUnit {
   listEvents(cdc: string, environment: Environment): Promise<PriorReceiverEvent[]>;
   /**
    * Takes the next event id of the tenant and stores the event `pending`.
+   * @throws EventKeyCollisionError when the key was taken by a concurrent commit.
    * @throws ReceiverEventDuplicateError when an open event of that kind already exists.
    */
   insertEvent(event: NewReceiverEvent): Promise<{ id: string }>;

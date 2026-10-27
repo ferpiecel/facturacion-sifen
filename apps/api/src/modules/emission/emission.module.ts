@@ -7,6 +7,7 @@ import { createAcceptInvoice } from './application/accept-invoice.js';
 import { createAcceptRemission, createAcceptSelfInvoice } from './application/accept-standalone.js';
 import { createGetDocument } from './application/get-document.js';
 import { createGetKude } from './application/get-kude.js';
+import { createWaitForDocument } from './application/wait-for-document.js';
 import { emissionValidationConfig } from './emission-validation-config.js';
 import {
   ACCEPT_CREDIT_NOTE,
@@ -16,9 +17,12 @@ import {
   ACCEPT_SELF_INVOICE,
   GET_DOCUMENT,
   GET_KUDE,
+  WAIT_FOR_DOCUMENT,
 } from './emission.tokens.js';
 import { createDrizzleAcceptanceUnitOfWork } from './infrastructure/drizzle-acceptance-unit-of-work.js';
 import { createDrizzleDocumentReader } from './infrastructure/drizzle-document-reader.js';
+import { createDrizzleSyncFlagReader } from './infrastructure/drizzle-sync-flag-reader.js';
+import { parseSyncWaitTimeoutMs } from './sync-wait-config.js';
 import { createKudeRenderer } from './infrastructure/kude/kude-renderer.js';
 import { DocumentQueryController } from './infrastructure/http/document-query.controller.js';
 import { DocumentsController } from './infrastructure/http/documents.controller.js';
@@ -108,6 +112,21 @@ export function acceptInvoiceFor(db: Database) {
               validation: emissionValidationConfig(),
             })
           : () => Promise.reject(new ServiceUnavailableException()),
+      inject: [DATABASE],
+    },
+    {
+      // Read at boot so a bad SYNC_WAIT_TIMEOUT_MS stops the API (HU-E6-06).
+      provide: WAIT_FOR_DOCUMENT,
+      useFactory: (db: Database | null) => {
+        const timeoutMs = parseSyncWaitTimeoutMs(process.env);
+        return db
+          ? createWaitForDocument({
+              isSyncEnabled: createDrizzleSyncFlagReader(db),
+              getDocument: createGetDocument({ reader: createDrizzleDocumentReader(db) }),
+              timeoutMs,
+            })
+          : () => Promise.reject(new ServiceUnavailableException());
+      },
       inject: [DATABASE],
     },
     {

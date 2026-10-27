@@ -61,3 +61,16 @@ La API ve al portal como un proxy más, así que `AUTH_TRUST_PROXY_HOPS` debe co
 - Portal detrás de balanceadores que agregan a `X-Forwarded-For`: `AUTH_TRUST_PROXY_HOPS` = 1 + cantidad de balanceadores, y `PORTAL_TRUSTED_UPSTREAM_PROXY=true` en el portal.
 - Un valor mayor que la cadena real permite suplantar la IP con una cabecera enviada por el cliente; con `0` todos los usuarios comparten la IP del portal y un atacante bloquea el login de todos por el límite por IP.
 - Next solo completa `X-Forwarded-For` cuando falta y su rewrite no la modifica; por eso el portal fija la dirección en `instrumentation.ts` (el middleware corre demasiado tarde).
+
+## Gateway SIFEN del worker
+
+`SIFEN_GATEWAY` elige el adaptador y es obligatorio: el worker no arranca sin él.
+
+| Variable | Valores | Efecto |
+|---|---|---|
+| `SIFEN_GATEWAY` | `simulator` o `soap` | `simulator` solo con `NODE_ENV` `development` o `test`. `soap` habla con SIFEN por mTLS con el certificado de cada tenant ([ADR-0022](adr/0022-gateway-soap-por-tenant.md)). |
+| `SIFEN_SOAP_ALLOW_PRODUCTION` | `true` o `false` (por defecto `false`) | Sin `true`, los tenants en `production` no envían nada: su trabajo queda en cola. |
+| `SIFEN_SOAP_TIMEOUT_MS` | entero 1 a 120000 (por defecto 30000) | Plazo total de cada llamada SOAP. |
+| `SIFEN_SOAP_CA_FILE` | ruta a un PEM | Raíces de confianza del servidor SIFEN (CA de la DNIT); reemplaza las raíces por defecto. |
+
+Valores inválidos detienen el arranque. El ambiente de cada tenant sale de `tenants.environment`.

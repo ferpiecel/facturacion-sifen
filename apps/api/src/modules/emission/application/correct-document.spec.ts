@@ -8,7 +8,6 @@ import {
   IssuerNotConfiguredError,
 } from './accept-invoice.js';
 import {
-  CorrectionRequiresReissueError,
   CorrectionTypeChangedError,
   DocumentNotCorrectableError,
   DocumentNotFoundError,
@@ -56,7 +55,12 @@ const REJECTED: CorrectableDocument = {
   associatedCdc: null,
   payload: { old: true },
   sifenMessages: [{ code: '1000' }],
+  timbradoNumber: '12345678',
+  series: '',
+  number: 7,
+  issuedAt: new Date('2026-03-05T12:00:00Z'),
 };
+const NEW_DOC = { documentId: 'doc-2', cdc: '01800695631001002000000222026030611234567892' };
 
 function setup(
   options: {
@@ -64,6 +68,7 @@ function setup(
     stored?: StoredCorrection | null;
     /** The key is stored only once the document lock was taken (a concurrent retry committed). */
     storedAfterLock?: boolean;
+    reissued?: { documentId: string; cdc: string } | null;
     noIssuer?: boolean;
   } = {},
   certificateNotAfter?: Date,
@@ -71,6 +76,9 @@ function setup(
   let lookups = 0;
   const rewriteDocument = vi.fn(() => Promise.resolve());
   const recordAudit = vi.fn(() => Promise.resolve());
+  const recordReissue = vi.fn(() => Promise.resolve());
+  const acceptFe = vi.fn(() => Promise.resolve(NEW_DOC));
+  const voidNumbers = vi.fn(() => Promise.resolve({ eventId: 'ev', status: 'pending' as const }));
   const sumCreditNotes = vi.fn(() => Promise.resolve('0'));
   const unit: CorrectionUnit = {
     findCorrectionByKey: () =>
@@ -105,12 +113,24 @@ function setup(
     sumCreditNotes,
     rewriteDocument,
     recordAudit,
+    findReissue: () => Promise.resolve(options.reissued ?? null),
+    recordReissue,
   };
   const correct = createCorrectDocument({
     unitOfWork: { run: (_tenant, work) => work(unit) },
+    accept: { FE: acceptFe, AFE: vi.fn(), NCE: vi.fn(), NDE: vi.fn() },
+    voidNumbers,
     now: () => new Date('2026-03-06T15:00:00Z'),
   });
-  return { correct, rewriteDocument, recordAudit, sumCreditNotes };
+  return {
+    correct,
+    rewriteDocument,
+    recordAudit,
+    sumCreditNotes,
+    recordReissue,
+    acceptFe,
+    voidNumbers,
+  };
 }
 
 /** Spec: HU-E8-01, ADR-0021 (same-CDC path). */
@@ -185,11 +205,78 @@ describe('correctDocument', () => {
     await expect(correct(INPUT)).rejects.toBeInstanceOf(CorrectionTypeChangedError);
   });
 
-  it('asks for a reissue when the CDC would change (slice C handles it)', async () => {
-    const { correct, rewriteDocument } = setup();
-    const input = { ...INPUT, establishmentCode: '002' };
-    await expect(correct(input)).rejects.toBeInstanceOf(CorrectionRequiresReissueError);
-    expect(rewriteDocument).not.toHaveBeenCalled();
+  describe('reissue', () => {
+    const moved = {
+      ...INPUT,
+      establishmentCode: '002',
+      payload: { ...PAYLOAD, establishment: '002' },
+    };
+
+    it('issues the corrected body under a new number and voids the old one', async () => {
+      const { correct, acceptFe, recordReissue, voidNumbers, rewriteDocument } = setup();
+      await expect(correct(moved)).resolves.toEqual(NEW_DOC);
+      expect(rewriteDocument).not.toHaveBeenCalled();
+      expect(acceptFe).toHaveBeenCalledWith(
+        expect.objectContaining({
+          establishmentCode: '002',
+          payload: moved.payload,
+          receiverRuc: '80069563-1',
+          idempotencyKey: expect.stringContaining(':reissue') as string,
+        }),
+      );
+      expect(recordReissue).toHaveBeenCalledWith(
+        expect.objectContaining({ document: REJECTED, replacementDocumentId: 'doc-2' }),
+      );
+      expect(voidNumbers).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: expect.objectContaining({
+            timbrado: '12345678',
+            establishment: '001',
+            expeditionPoint: '001',
+            type: 1,
+            from: 7,
+            to: 7,
+          }) as object,
+          idempotencyKey: expect.stringContaining(':void') as string,
+        }),
+      );
+    });
+
+    it('resumes a stored reissue: no second document, the void is requested again', async () => {
+      const stored = {
+        documentId: 'doc-1',
+        cdc: CDC,
+        requestHash: requestHash({ documentId: 'doc-1', payload: moved.payload }),
+        replacement: NEW_DOC,
+      };
+      const { correct, acceptFe, recordReissue, voidNumbers } = setup({ stored });
+      await expect(correct(moved)).resolves.toEqual(NEW_DOC);
+      expect(acceptFe).not.toHaveBeenCalled();
+      expect(recordReissue).not.toHaveBeenCalled();
+      expect(voidNumbers).toHaveBeenCalledOnce();
+    });
+
+    it('refuses a document that was already reissued under another key', async () => {
+      const { correct, acceptFe } = setup({ reissued: NEW_DOC });
+      await expect(correct(moved)).rejects.toEqual(new DocumentNotCorrectableError('reissued'));
+      expect(acceptFe).not.toHaveBeenCalled();
+    });
+
+    it('keeps the same CDC up to 72 h after the issue date and reissues after it (ADR-0008)', async () => {
+      const at = (issuedAt: string) =>
+        setup({ document: { ...REJECTED, issuedAt: new Date(issuedAt) } });
+      // now = 2026-03-06T15:00Z: the 72 h deadline of this issue date is exactly now.
+      const edge = at('2026-03-03T15:00:00Z');
+      await edge.correct(INPUT);
+      expect(edge.rewriteDocument).toHaveBeenCalledOnce();
+      expect(edge.acceptFe).not.toHaveBeenCalled();
+
+      const late = at('2026-03-03T14:59:59Z');
+      await late.correct(INPUT);
+      expect(late.rewriteDocument).not.toHaveBeenCalled();
+      expect(late.acceptFe).toHaveBeenCalledOnce();
+      expect(late.voidNumbers).toHaveBeenCalledOnce();
+    });
   });
 
   it('validates the corrected draft before rewriting', async () => {

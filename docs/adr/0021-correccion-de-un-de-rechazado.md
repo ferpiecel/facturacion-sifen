@@ -21,3 +21,8 @@ HU-E8-01 (RF-07, MT 6.5): el integrador corrige un DE que SIFEN rechazó. Si la 
 - Un único trigger toca la identidad de `documents`; su prueba de base de datos cubre la puerta y cada columna que sigue inmutable.
 - Las filas reescritas conservan `resent_at` (escritura única) y el `request_hash` original: repetir el `POST /v1/documents` original sigue devolviendo la misma fila.
 - Costo: reemplazar `documents_guard` copia su cuerpo; una migración futura que lo cambie debe partir de la versión 0069.
+
+## Adenda: plazo de 72 h y reemisión
+
+- **El plazo cuenta desde la fecha de emisión.** La corrección con el mismo CDC conserva la fecha de emisión de la fila (decisión 4); pasadas 72 h desde ella ([ADR-0008](0008-sin-contingencia-cola-72h.md)) el reenvío con el mismo CDC ya no es válido. En ese caso la corrección sigue el camino de reemisión aunque ningún componente del CDC cambie: documento nuevo con número y fecha nuevos, y anulación del número viejo. El umbral sale de `TRANSMISSION_WINDOW_MS` (`transmissionDeadline`); en el límite exacto (72 h) todavía se reenvía con el mismo CDC.
+- **Reemisión.** El documento nuevo entra por la aceptación normal del tipo, con una clave de idempotencia derivada de la de la corrección. Después se registra la fila `reissue` del historial (una por documento rechazado: una segunda corrección con otra clave responde 409) y por último se anula el número viejo con el caso de uso de HU-E8-03, también con clave derivada. Cada paso es idempotente: un reintento con la misma clave retoma donde quedó y devuelve el documento nuevo. Si la anulación es rechazada, la respuesta es un error y el reintento la vuelve a pedir.

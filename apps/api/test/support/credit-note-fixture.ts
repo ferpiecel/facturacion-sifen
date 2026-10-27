@@ -77,12 +77,13 @@ export async function acceptInvoiceWithStatus(
   key: string,
   status = 'approved',
   body: unknown = FE_BODY,
+  issuedAt = new Date('2026-03-05T12:00:00Z'),
 ): Promise<{ documentId: string; cdc: string }> {
   const parsed = parseCreateDocument(body);
   if (!parsed.ok) throw new Error('invalid invoice fixture');
   const accepted = await createAcceptInvoice({
     unitOfWork: createDrizzleAcceptanceUnitOfWork(db),
-    now: () => new Date('2026-03-05T12:00:00Z'),
+    now: () => issuedAt,
   })(
     toAcceptInvoiceInput(parsed.value, {
       tenantId,

@@ -297,6 +297,16 @@ Cuando SIFEN aprueba el documento (`approved` o `approved_with_observations`), l
 - Un fallo transitorio (conexión, timeout, SMTP 4xx) se reintenta con espera creciente (1 min, 5 min, 30 min, 2 h y 6 h) y después queda sin enviar. Un rechazo permanente del servidor de correo, o un KuDE que no se pueda generar, no se reintenta.
 - Si el envío está apagado en la plataforma (`EMAIL_ENABLED=false`), no se envía nada.
 
+## Corregir un documento rechazado
+
+`POST /v1/documents/{id}/correct` recibe el cuerpo completo corregido (mismo formato que `POST /v1/documents`, sin cambiar el `type`) de un documento en estado `rejected`, con `Idempotency-Key`.
+
+- Si el cuerpo mantiene el establecimiento, el punto de expedición y, en notas, el `associatedCdc`, y no pasaron 72 h desde la fecha de emisión, el documento conserva su número y su CDC y se reenvía: `202 { document_id, cdc }` con los mismos ids. El cuerpo anterior y los mensajes de SIFEN quedan en el historial de correcciones.
+- Si cambia alguno de esos datos, o pasaron 72 h desde la emisión, el cuerpo se emite como documento nuevo (número y fecha nuevos; la respuesta trae el `document_id` y el `cdc` nuevos) y el número viejo se anula (webhook `document.number_voided`).
+- Errores: `404` documento inexistente, `409` documento no rechazado, ya reemitido o clave usada con otro cuerpo, `422` validación o cambio de tipo.
+
+Decisión: [ADR-0021](../adr/0021-correccion-de-un-de-rechazado.md).
+
 ## Alcance actual
 
 - Este endpoint emite **facturas (FE)**, **autofacturas (AFE)**, **notas de crédito (NCE)**, **notas de débito (NDE)** y **notas de remisión (NRE)** electrónicas. Otros tipos de documento no están disponibles por esta ruta.

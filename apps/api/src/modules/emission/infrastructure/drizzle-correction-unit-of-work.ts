@@ -1,9 +1,11 @@
 import { and, eq, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import {
   documentCorrections,
   documents,
   tenantEstablishments,
   tenantExpeditionPoints,
+  tenantTimbrados,
   withTenantTransaction,
   type Database,
 } from '@sifen/db';
@@ -17,6 +19,7 @@ import { createAcceptanceUnit, isIdempotencyCollision } from './drizzle-acceptan
 
 /** Runs the correction inside `withTenantTransaction`, so RLS scopes every query to the tenant. */
 export function createDrizzleCorrectionUnitOfWork(db: Database): CorrectionUnitOfWork {
+  const replacements = alias(documents, 'replacement');
   return {
     run: (tenantId, work) =>
       withTenantTransaction(db, tenantId, (tx) => {
@@ -32,6 +35,8 @@ export function createDrizzleCorrectionUnitOfWork(db: Database): CorrectionUnitO
                 documentId: documentCorrections.documentId,
                 cdc: documents.cdc,
                 requestHash: documentCorrections.requestHash,
+                replacementId: replacements.id,
+                replacementCdc: replacements.cdc,
               })
               .from(documentCorrections)
               .innerJoin(
@@ -41,13 +46,30 @@ export function createDrizzleCorrectionUnitOfWork(db: Database): CorrectionUnitO
                   eq(documents.id, documentCorrections.documentId),
                 ),
               )
+              .leftJoin(
+                replacements,
+                and(
+                  eq(replacements.tenantId, documentCorrections.tenantId),
+                  eq(replacements.id, documentCorrections.replacementDocumentId),
+                ),
+              )
               .where(
                 and(
                   eq(documentCorrections.tenantId, tenantId),
                   eq(documentCorrections.idempotencyKey, key),
                 ),
               );
-            return rows.at(0) ?? null;
+            const row = rows.at(0);
+            if (!row) return null;
+            return {
+              documentId: row.documentId,
+              cdc: row.cdc,
+              requestHash: row.requestHash,
+              replacement:
+                row.replacementId && row.replacementCdc
+                  ? { documentId: row.replacementId, cdc: row.replacementCdc }
+                  : null,
+            };
           },
           async lockDocument(documentId) {
             const rows = await tx
@@ -61,6 +83,10 @@ export function createDrizzleCorrectionUnitOfWork(db: Database): CorrectionUnitO
                 associatedCdc: documents.associatedCdc,
                 payload: documents.payload,
                 sifenMessages: documents.sifenMessages,
+                timbradoNumber: tenantTimbrados.number,
+                series: documents.series,
+                number: documents.number,
+                issuedAt: documents.issuedAt,
               })
               .from(documents)
               .innerJoin(
@@ -68,6 +94,13 @@ export function createDrizzleCorrectionUnitOfWork(db: Database): CorrectionUnitO
                 and(
                   eq(tenantExpeditionPoints.tenantId, documents.tenantId),
                   eq(tenantExpeditionPoints.id, documents.expeditionPointId),
+                ),
+              )
+              .innerJoin(
+                tenantTimbrados,
+                and(
+                  eq(tenantTimbrados.tenantId, documents.tenantId),
+                  eq(tenantTimbrados.id, documents.timbradoId),
                 ),
               )
               .innerJoin(
@@ -80,6 +113,44 @@ export function createDrizzleCorrectionUnitOfWork(db: Database): CorrectionUnitO
               .where(and(eq(documents.tenantId, tenantId), eq(documents.id, documentId)))
               .for('update', { of: documents });
             return rows.at(0) ?? null;
+          },
+          async findReissue(documentId) {
+            const rows = await tx
+              .select({ documentId: documentCorrections.replacementDocumentId, cdc: documents.cdc })
+              .from(documentCorrections)
+              .innerJoin(
+                documents,
+                and(
+                  eq(documents.tenantId, documentCorrections.tenantId),
+                  eq(documents.id, documentCorrections.replacementDocumentId),
+                ),
+              )
+              .where(
+                and(
+                  eq(documentCorrections.tenantId, tenantId),
+                  eq(documentCorrections.documentId, documentId),
+                  eq(documentCorrections.kind, 'reissue'),
+                ),
+              );
+            const row = rows.at(0);
+            return row?.documentId ? { documentId: row.documentId, cdc: row.cdc } : null;
+          },
+          async recordReissue(change) {
+            try {
+              await tx.insert(documentCorrections).values({
+                tenantId,
+                documentId: change.document.id,
+                kind: 'reissue',
+                idempotencyKey: change.idempotencyKey,
+                requestHash: change.requestHash,
+                previousPayload: change.document.payload,
+                previousSifenMessages: change.document.sifenMessages,
+                replacementDocumentId: change.replacementDocumentId,
+              });
+            } catch (error) {
+              if (isIdempotencyCollision(error)) throw new IdempotencyKeyCollisionError();
+              throw error;
+            }
           },
           async rewriteDocument(change) {
             try {

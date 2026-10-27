@@ -14,6 +14,13 @@ export interface CorrectableDocument {
   payload: unknown;
   /** The SIFEN messages of the rejection, kept in the correction history. */
   sifenMessages: unknown;
+  /** The number, to void it when the document is reissued. */
+  timbradoNumber: string;
+  /** `''` without a series. */
+  series: string;
+  number: number;
+  /** Start of the 72 h transmission window (ADR-0008). */
+  issuedAt: Date;
 }
 
 /** The outcome stored for an earlier correction request that used an `Idempotency-Key`. */
@@ -21,6 +28,8 @@ export interface StoredCorrection {
   documentId: string;
   cdc: string;
   requestHash: string;
+  /** The document a reissue created (`kind = reissue`); `undefined` for a same-CDC correction. */
+  replacement?: { documentId: string; cdc: string } | null;
 }
 
 export interface CorrectionRewrite {
@@ -28,6 +37,13 @@ export interface CorrectionRewrite {
   payload: unknown;
   receiverRuc: string | null;
   totalAmount: string;
+  idempotencyKey: string;
+  requestHash: string;
+}
+
+export interface CorrectionReissue {
+  document: CorrectableDocument;
+  replacementDocumentId: string;
   idempotencyKey: string;
   requestHash: string;
 }
@@ -47,6 +63,13 @@ export interface CorrectionUnit extends Pick<
    * @throws IdempotencyKeyCollisionError when the key was taken by a concurrent commit.
    */
   rewriteDocument(change: CorrectionRewrite): Promise<void>;
+  /** The document that replaced this one in a reissue, or null. */
+  findReissue(documentId: string): Promise<{ documentId: string; cdc: string } | null>;
+  /**
+   * Links the rejected document to its replacement in the history (`kind = reissue`).
+   * @throws IdempotencyKeyCollisionError when the key was taken by a concurrent commit.
+   */
+  recordReissue(change: CorrectionReissue): Promise<void>;
 }
 
 export interface CorrectionUnitOfWork {

@@ -4,7 +4,7 @@ import { parseBlockDays } from '../certificates/domain/certificate-expiry.js';
 import { DATABASE } from '../database/database.module.js';
 import { createAcceptCreditNote, createAcceptDebitNote } from './application/accept-credit-note.js';
 import { createAcceptInvoice } from './application/accept-invoice.js';
-import { createAcceptSelfInvoice } from './application/accept-standalone.js';
+import { createAcceptRemission, createAcceptSelfInvoice } from './application/accept-standalone.js';
 import { createGetDocument } from './application/get-document.js';
 import { createGetKude } from './application/get-kude.js';
 import { emissionValidationConfig } from './emission-validation-config.js';
@@ -12,6 +12,7 @@ import {
   ACCEPT_CREDIT_NOTE,
   ACCEPT_DEBIT_NOTE,
   ACCEPT_INVOICE,
+  ACCEPT_REMISSION,
   ACCEPT_SELF_INVOICE,
   GET_DOCUMENT,
   GET_KUDE,
@@ -94,6 +95,17 @@ export function acceptInvoiceFor(db: Database) {
               unitOfWork: createDrizzleAcceptanceUnitOfWork(db),
               validation: emissionValidationConfig(),
               certificateBlockDays: certificateBlockDays(),
+            })
+          : () => Promise.reject(new ServiceUnavailableException()),
+      inject: [DATABASE],
+    },
+    {
+      provide: ACCEPT_REMISSION,
+      useFactory: (db: Database | null) =>
+        db
+          ? createAcceptRemission({
+              unitOfWork: createDrizzleAcceptanceUnitOfWork(db),
+              validation: emissionValidationConfig(),
             })
           : () => Promise.reject(new ServiceUnavailableException()),
       inject: [DATABASE],

@@ -14,13 +14,18 @@ import type {
   createAcceptCreditNote,
   createAcceptDebitNote,
 } from '../../application/accept-credit-note.js';
-import type { createAcceptSelfInvoice } from '../../application/accept-standalone.js';
+import type {
+  createAcceptRemission,
+  createAcceptSelfInvoice,
+} from '../../application/accept-standalone.js';
 import {
   ACCEPT_CREDIT_NOTE,
   ACCEPT_DEBIT_NOTE,
   ACCEPT_INVOICE,
+  ACCEPT_REMISSION,
   ACCEPT_SELF_INVOICE,
 } from '../../emission.tokens.js';
+import { toRemissionDraft } from './remission.request.js';
 import { toSelfInvoiceDraft } from './self-invoice.request.js';
 import { toAcceptInvoiceInput } from './create-document.request.js';
 import { parseDocumentRequest, toCreditNoteDraft } from './credit-note.request.js';
@@ -39,11 +44,13 @@ export class DocumentsController {
     private readonly acceptDebitNote: ReturnType<typeof createAcceptDebitNote>,
     @Inject(ACCEPT_SELF_INVOICE)
     private readonly acceptSelfInvoice: ReturnType<typeof createAcceptSelfInvoice>,
+    @Inject(ACCEPT_REMISSION)
+    private readonly acceptRemission: ReturnType<typeof createAcceptRemission>,
     private readonly cls: ClsService<TenancyClsStore & IdentityClsStore>,
   ) {}
 
   /**
-   * Accepts an FE (`type` absent or `FE`): `202 { document_id, cdc }`. Signing and transmission happen asynchronously.
+   * Accepts an FE (`type` absent or `FE`), NCE, NDE, AFE or NRE: `202 { document_id, cdc }`. Signing and transmission happen asynchronously.
    * A retry with the same `Idempotency-Key` and body gets the same response; another body, 409.
    */
   @Post()
@@ -56,12 +63,6 @@ export class DocumentsController {
     const parsed = parseDocumentRequest(body);
     if (!parsed.ok) {
       throw validationProblem(parsed.errors);
-    }
-    if (parsed.type === 'NRE') {
-      // Routing arrives with R4 (HU-E7-04); until then the body is parsed but not accepted.
-      throw validationProblem([
-        { field: 'type', rule: 'type-not-supported', message: 'The NRE is not available yet' },
-      ]);
     }
     try {
       const context = {
@@ -80,12 +81,19 @@ export class DocumentsController {
                 expeditionPointCode: parsed.value.expeditionPoint,
                 draft: toSelfInvoiceDraft(parsed.value),
               })
-            : await (parsed.type === 'NCE' ? this.acceptCreditNote : this.acceptDebitNote)({
-                ...context,
-                establishmentCode: parsed.value.establishment,
-                expeditionPointCode: parsed.value.expeditionPoint,
-                draft: toCreditNoteDraft(parsed.value),
-              });
+            : parsed.type === 'NRE'
+              ? await this.acceptRemission({
+                  ...context,
+                  establishmentCode: parsed.value.establishment,
+                  expeditionPointCode: parsed.value.expeditionPoint,
+                  draft: toRemissionDraft(parsed.value),
+                })
+              : await (parsed.type === 'NCE' ? this.acceptCreditNote : this.acceptDebitNote)({
+                  ...context,
+                  establishmentCode: parsed.value.establishment,
+                  expeditionPointCode: parsed.value.expeditionPoint,
+                  draft: toCreditNoteDraft(parsed.value),
+                });
       return { document_id: accepted.documentId, cdc: accepted.cdc };
     } catch (error) {
       throw toHttpException(error) ?? error;

@@ -12,8 +12,8 @@
         "tags": [
           "Documents"
         ],
-        "summary": "Accept an invoice (FE), a credit note (NCE), a debit note (NDE) or a self-invoice (AFE) for emission",
-        "description": "The body is an FE unless `type` is `NCE` (credit note) or `NDE` (debit note), both associated to an approved FE whose receiver they take, or `AFE` (self-invoice: the issuer buys from a seller who is not a contribuyente; the receiver is the issuer, there is no VAT and the seller constancia is mandatory). From the day before the active certificate expires (`CERTIFICATE_EMISSION_BLOCK_DAYS`) the request answers 422 with `code: certificate_expiring` and `notAfter`, before any number is used. A credit note answers 422 with the rule of the failed check (for example `credit-note-sum-exceeds-invoice`, 2417) before any number is used. Returns 202 once the document is persisted with its CDC; signing and transmission to SIFEN are asynchronous. Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.",
+        "summary": "Accept an invoice (FE), a credit note (NCE), a debit note (NDE), a self-invoice (AFE) or a remission note (NRE) for emission",
+        "description": "The body is an FE unless `type` is `NCE` (credit note) or `NDE` (debit note), both associated to an approved FE whose receiver they take, or `AFE` (self-invoice: the issuer buys from a seller who is not a contribuyente; the receiver is the issuer, there is no VAT and the seller constancia is mandatory) or `NRE` (remission note: goods in transit, with the motive, the kilometres, the places, the vehicle and the carrier; items carry a quantity and no price, and the document has no totals; motive 7 only to the issuer own RUC, 2606). A credit note answers 422 with the rule of the failed check (for example `credit-note-sum-exceeds-invoice`, 2417) before any number is used. Returns 202 once the document is persisted with its CDC; signing and transmission to SIFEN are asynchronous. Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.",
         "security": [
           {
             "apiKey": []
@@ -51,6 +51,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/CreateSelfInvoiceRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/CreateRemissionRequest"
                   }
                 ]
               }
@@ -541,7 +544,7 @@
         "tags": [
           "Documents"
         ],
-        "summary": "Download the KuDE (PDF) of an FE, an AFE, an NCE or an NDE, available once the document is signed",
+        "summary": "Download the KuDE (PDF) of an FE, an AFE, an NCE, an NDE or an NRE, available once the document is signed",
         "security": [
           {
             "apiKey": []
@@ -641,7 +644,7 @@
             }
           },
           "422": {
-            "description": "The document type has no KuDE layout yet (an NDE, AFE or NRE)",
+            "description": "The document type has no KuDE layout yet (for example a retention)",
             "content": {
               "application/json": {
                 "schema": {
@@ -1900,6 +1903,306 @@
           "items"
         ]
       },
+      "CreateRemissionRequest": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "NRE"
+          },
+          "establishment": {
+            "type": "string",
+            "pattern": "^\\d{3}$"
+          },
+          "expeditionPoint": {
+            "type": "string",
+            "pattern": "^\\d{3}$"
+          },
+          "motive": {
+            "type": "number"
+          },
+          "responsible": {
+            "type": "number"
+          },
+          "km": {
+            "type": "number"
+          },
+          "invoiceDate": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "receiver": {
+            "type": "object",
+            "properties": {
+              "ruc": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 255
+              },
+              "address": {
+                "type": "string",
+                "maxLength": 255
+              },
+              "houseNumber": {
+                "type": "string",
+                "pattern": "^\\d{1,6}$"
+              },
+              "departmentCode": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "districtCode": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9999
+              },
+              "cityCode": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 99999
+              }
+            },
+            "required": [
+              "ruc",
+              "name",
+              "address",
+              "houseNumber",
+              "departmentCode",
+              "districtCode",
+              "cityCode"
+            ]
+          },
+          "transport": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "number"
+              },
+              "modality": {
+                "type": "number"
+              },
+              "freightResponsible": {
+                "type": "number"
+              },
+              "startDate": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "endDate": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "departure": {
+                "type": "object",
+                "properties": {
+                  "address": {
+                    "type": "string",
+                    "maxLength": 255
+                  },
+                  "houseNumber": {
+                    "type": "string",
+                    "pattern": "^\\d{1,6}$"
+                  },
+                  "departmentCode": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "districtCode": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9999
+                  },
+                  "cityCode": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 99999
+                  }
+                },
+                "required": [
+                  "address",
+                  "houseNumber",
+                  "departmentCode",
+                  "districtCode",
+                  "cityCode"
+                ]
+              },
+              "delivery": {
+                "type": "object",
+                "properties": {
+                  "address": {
+                    "type": "string",
+                    "maxLength": 255
+                  },
+                  "houseNumber": {
+                    "type": "string",
+                    "pattern": "^\\d{1,6}$"
+                  },
+                  "departmentCode": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "districtCode": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9999
+                  },
+                  "cityCode": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 99999
+                  }
+                },
+                "required": [
+                  "address",
+                  "houseNumber",
+                  "departmentCode",
+                  "districtCode",
+                  "cityCode"
+                ]
+              },
+              "vehicle": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "maxLength": 10
+                  },
+                  "brand": {
+                    "type": "string",
+                    "maxLength": 10
+                  },
+                  "idType": {
+                    "type": "number"
+                  },
+                  "idNumber": {
+                    "type": "string",
+                    "maxLength": 20
+                  }
+                },
+                "required": [
+                  "type",
+                  "brand",
+                  "idType",
+                  "idNumber"
+                ]
+              },
+              "carrier": {
+                "type": "object",
+                "properties": {
+                  "contributor": {
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "type": "string",
+                    "maxLength": 60
+                  },
+                  "ruc": {
+                    "type": "string"
+                  },
+                  "idType": {
+                    "type": "number"
+                  },
+                  "idNumber": {
+                    "type": "string",
+                    "maxLength": 20
+                  },
+                  "address": {
+                    "type": "string",
+                    "maxLength": 150
+                  },
+                  "driver": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "maxLength": 60
+                      },
+                      "idNumber": {
+                        "type": "string",
+                        "maxLength": 20
+                      },
+                      "address": {
+                        "type": "string",
+                        "maxLength": 150
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "idNumber",
+                      "address"
+                    ]
+                  }
+                },
+                "required": [
+                  "contributor",
+                  "name",
+                  "address",
+                  "driver"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "modality",
+              "freightResponsible",
+              "startDate",
+              "endDate",
+              "departure",
+              "delivery",
+              "vehicle",
+              "carrier"
+            ]
+          },
+          "items": {
+            "minItems": 1,
+            "maxItems": 999,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "maxLength": 50
+                },
+                "description": {
+                  "type": "string",
+                  "maxLength": 2000
+                },
+                "unitCode": {
+                  "type": "number"
+                },
+                "quantity": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "code",
+                "description",
+                "unitCode",
+                "quantity"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "type",
+          "establishment",
+          "expeditionPoint",
+          "motive",
+          "responsible",
+          "km",
+          "receiver",
+          "transport",
+          "items"
+        ]
+      },
       "DocumentAccepted": {
         "type": "object",
         "required": [
@@ -2166,8 +2469,7 @@
                 "document.number_voided",
                 "document.transmission_deadline_warning",
                 "document.notification.delivered",
-                "document.notification.failed",
-                "certificate.expiring"
+                "document.notification.failed"
               ]
             }
           }
@@ -2195,8 +2497,7 @@
                 "document.number_voided",
                 "document.transmission_deadline_warning",
                 "document.notification.delivered",
-                "document.notification.failed",
-                "certificate.expiring"
+                "document.notification.failed"
               ]
             }
           },

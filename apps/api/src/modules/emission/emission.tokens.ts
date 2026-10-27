@@ -13,3 +13,5 @@ export const ACCEPT_CREDIT_NOTE = Symbol('AcceptCreditNote');
 export const ACCEPT_DEBIT_NOTE = Symbol('AcceptDebitNote');
 /** Injection token for the `acceptSelfInvoice` application function (AFE). */
 export const ACCEPT_SELF_INVOICE = Symbol('AcceptSelfInvoice');
+/** Injection token for the `acceptRemission` application function (NRE). */
+export const ACCEPT_REMISSION = Symbol('AcceptRemission');

@@ -68,6 +68,8 @@ La API ve al portal como un proxy más, así que `AUTH_TRUST_PROXY_HOPS` debe co
 
 `SIFEN_GATEWAY` elige el adaptador y es obligatorio: el worker no arranca sin él.
 
+`GET /v1/ruc/:ruc` de la API usa la misma variable: con `soap` consulta a SIFEN con el certificado y el ambiente del tenant que llama (misma configuración SOAP que el worker; una configuración inválida impide arrancar la API); con `simulator` aplica la misma regla de `NODE_ENV`; sin adaptador disponible responde 503.
+
 | Variable | Valores | Efecto |
 |---|---|---|
 | `SIFEN_GATEWAY` | `simulator` o `soap` | `simulator` solo con `NODE_ENV` `development` o `test`. `soap` habla con SIFEN por mTLS con el certificado de cada tenant ([ADR-0022](adr/0022-gateway-soap-por-tenant.md)). |

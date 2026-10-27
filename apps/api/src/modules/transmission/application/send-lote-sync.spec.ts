@@ -109,6 +109,21 @@ describe('SendLote synchronous path', () => {
     expect(store.state).toBe('sent');
   });
 
+  it('still falls back to the lote when clearing the flag fails', async () => {
+    const { gateway, store, sync, send } = setup();
+    sync.disable = () => Promise.reject(new Error('db down'));
+    gateway.enqueue('enviarDESincronico', {
+      dCodRes: '1264',
+      dMsgRes: 'RUC no habilitado',
+      dEstRes: 'Rechazado',
+      dProtAut: null,
+    });
+    const outcome = await send.execute({ loteId: 'l', dId: 5n, lote: one });
+    expect(gateway.callsTo('enviarLote')).toHaveLength(1);
+    expect(outcome.status).toBe('sent');
+    expect(store.state).toBe('sent');
+  });
+
   it('never sends a lote of several DEs by sync', async () => {
     const { gateway, send } = setup();
     await send.execute({ loteId: 'l', dId: 5n, lote: two });
@@ -142,6 +157,22 @@ describe('SendLote synchronous path', () => {
     });
     expect((await send.execute({ loteId: 'l', dId: 5n, lote: one })).status).toBe('unknown');
     expect(store.state).toBe('unknown');
+  });
+
+  it('leaves the lote to recovery by CDC when storing the settlement fails, never resending', async () => {
+    const { gateway, store, sync, send } = setup();
+    gateway.enqueue('enviarDESincronico', {
+      dCodRes: '0260',
+      dMsgRes: 'Autorización del DE satisfactoria',
+      dEstRes: 'Aprobado',
+      dProtAut: '1',
+    });
+    sync.recordSettled = () => Promise.reject(new Error('db down'));
+    const outcome = await send.execute({ loteId: 'l', dId: 5n, lote: one });
+    expect(outcome.status).toBe('unknown');
+    expect(store.state).toBe('unknown');
+    expect(gateway.callsTo('enviarDESincronico')).toHaveLength(1);
+    expect(gateway.callsTo('enviarLote')).toEqual([]);
   });
 
   it('releases the claim and defers when the circuit is open', async () => {

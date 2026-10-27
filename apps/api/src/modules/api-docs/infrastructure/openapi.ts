@@ -99,6 +99,7 @@ export function buildOpenApiDocument() {
             'From the day before the active certificate expires (`CERTIFICATE_EMISSION_BLOCK_DAYS`) the request answers 422 with `code: certificate_expiring` and `notAfter`, before any number is used. ' +
             'A credit note answers 422 with the rule of the failed check (for example `credit-note-sum-exceeds-invoice`, 2417) before any number is used. ' +
             'Returns 202 once the document is persisted with its CDC; signing and transmission to SIFEN are asynchronous. ' +
+            'With `?wait=true`, a tenant that has synchronous transmission enabled gets the response held until SIFEN settles the document (up to `SYNC_WAIT_TIMEOUT_MS`, 30 s by default) and receives 200 with the final document; if the wait ends first, or the tenant has no synchronous transmission, the usual 202 comes back. Sending is still driven by the worker cycle, so the wait is bounded by `TRANSMISSION_CYCLE_INTERVAL_MS`. ' +
             'Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.',
           ...secured(['documents:write']),
           parameters: [
@@ -108,6 +109,14 @@ export function buildOpenApiDocument() {
               required: true,
               description: '1 to 255 printable ASCII characters, no spaces',
               schema: { type: 'string', pattern: '^[!-~]{1,255}$' },
+            },
+            {
+              name: 'wait',
+              in: 'query',
+              required: false,
+              description:
+                'Only `true` has an effect: hold the response for a tenant with synchronous transmission until the document is final.',
+              schema: { type: 'string', enum: ['true'] },
             },
           ],
           requestBody: {
@@ -127,6 +136,10 @@ export function buildOpenApiDocument() {
             },
           },
           responses: {
+            '200': json(
+              'Final document (only with `?wait=true` for a tenant with synchronous transmission)',
+              ref('Document'),
+            ),
             '202': json('Accepted', ref('DocumentAccepted')),
             '400': problem('Missing or malformed Idempotency-Key'),
             '401': UNAUTHORIZED,

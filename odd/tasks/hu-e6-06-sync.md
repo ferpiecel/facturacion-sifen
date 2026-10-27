@@ -18,10 +18,15 @@ Opt-in synchronous send of a single DE through `siRecepDE`; SIFEN code 1264 (RUC
 
 ## Tasks
 
-- [x] A1: `SendLote` sync path behind an optional `SyncDispatch` port, `RUC_NO_HABILITADO_SINCRONICO` code (inert until A2 wires it)
-- [ ] A2: migration 0064 + schema flag + `createDrizzleSyncDispatch` (flag read, audited disable, settle) + worker wiring + cycle integration tests + operacion.md
-- [ ] B: `?wait=true` in `POST /v1/documents`, `SYNC_WAIT_TIMEOUT_MS`, docs (`docs/configuracion.md`, `docs/integracion/emision.md`, openapi), battery scenario
+- [x] A1 (PR #372, branch feat/hu-e6-06-sync, pushed, verify green): `SendLote` sync path behind an optional `SyncDispatch` port, `RUC_NO_HABILITADO_SINCRONICO` code (inert until A2 wires it)
+- [x] A2: migration 0064 + schema flag + `createDrizzleSyncDispatch` + worker wiring + cycle integration tests + fix: a failing flag clear on 1264 still falls back to batch (verify via push)
+- [x] B (PR #378, chained on #376): `?wait=true`, `SYNC_WAIT_TIMEOUT_MS`, docs, OpenAPI regen (verify via push)
+- [x] C (PR #380, pushed, verify green): ops CLI `tenant:sync-transmission --tenant <id> --on|--off` + docs/operacion.md (separate PR to stay under 400 lines; written and green locally, committed on branch feat/hu-e6-06-sync-cli)
 
 ## Progress and evidence
 
-(none yet)
+- Restack (post #370 merge): chain rebased onto main (migration 0064 after 0063, snapshot prevId chained). Review fixes, each RED first where it failed: #376 test pinning recovery by CDC when `recordSettled` fails (already behaved correctly: lote goes `unknown`, no second submission); #378 `?wait=true` answers 202 if the hold throws (was 500); #380 `--actor <name>` required on `tenant:sync-transmission` (audit actor, was fixed `ops-cli`).
+
+## Handoff
+
+Chain: #376 (A2, migration 0064) <- #378 (B, wait) <- #380 (C, ops CLI), rebased on main, ready for review. Remaining: review, merge in order.

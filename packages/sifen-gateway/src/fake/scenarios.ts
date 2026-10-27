@@ -1,6 +1,8 @@
 import { SIFEN_CODES } from '../codes.ts';
 import type {
   SifenConsDE,
+  SifenConsRUC,
+  SifenContribuyente,
   SifenEventosResult,
   SifenResultadoEvento,
   SifenLoteReceipt,
@@ -105,5 +107,28 @@ export function eventosProcesados(resultados: readonly SifenResultadoEvento[]): 
     dCodRes: first?.dCodRes ?? SIFEN_CODES.EVENTO_REGISTRADO,
     dMsgRes: first?.dMsgRes ?? 'Evento registrado correctamente',
     resultados: [...resultados],
+  };
+}
+
+/** Builds a `siConsRUC` "RUC encontrado" (0502) response. */
+export function rucEncontrado(contribuyente: SifenContribuyente): SifenConsRUC {
+  return {
+    dCodRes: SIFEN_CODES.RUC_ENCONTRADO,
+    dMsgRes: 'RUC encontrado',
+    contribuyente: { ...contribuyente },
+  };
+}
+
+/** Builds a `siConsRUC` "RUC no existe" (0500) response. */
+export function rucInexistente(): SifenConsRUC {
+  return { dCodRes: SIFEN_CODES.RUC_INEXISTENTE, dMsgRes: 'RUC no existe', contribuyente: null };
+}
+
+/** Builds a `siConsRUC` "RUC sin permiso consulta WS" (0501) response. */
+export function rucSinPermisoConsulta(): SifenConsRUC {
+  return {
+    dCodRes: SIFEN_CODES.RUC_SIN_PERMISO,
+    dMsgRes: 'RUC sin permiso consulta WS',
+    contribuyente: null,
   };
 }

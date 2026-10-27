@@ -1,5 +1,11 @@
 import type { SifenCall, SifenGateway, SifenOperation, SifenResultOf } from '../port.ts';
-import { cdcInexistente, deAutorizado, loteInexistente, loteRecibido } from './scenarios.ts';
+import {
+  cdcInexistente,
+  deAutorizado,
+  loteInexistente,
+  loteRecibido,
+  rucInexistente,
+} from './scenarios.ts';
 
 /** A response to script: a resolved value, or an `Error` to reject the call with. */
 export type Scripted<T> = T | Error;
@@ -11,13 +17,14 @@ type Req<K extends SifenOperation> = Parameters<SifenGateway[K]>[0];
 type Queue = Partial<Record<SifenOperation, unknown[]>>;
 type Defaults = Partial<Record<SifenOperation, unknown>>;
 
-/** Built-in defaults when nothing is scripted. `enviarEventos`/`consultarRUC` have no verified code. */
+/** Built-in defaults when nothing is scripted. `enviarEventos` has no verified code. */
 function builtInDefaults(): Defaults {
   return {
     enviarLote: loteRecibido('1'),
     consultarLote: loteInexistente(),
     enviarDESincronico: deAutorizado('1'),
     consultarDE: cdcInexistente(),
+    consultarRUC: rucInexistente(),
   };
 }
 

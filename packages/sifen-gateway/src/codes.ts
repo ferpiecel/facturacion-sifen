@@ -33,6 +33,12 @@ export const SIFEN_CODES = {
   CDC_INEXISTENTE: '0420',
   /** RUC del certificado sin permiso para consultar el DE (siConsDE, Tabla G). */
   RUC_CERTIFICADO_SIN_PERMISO: '0421',
+  /** RUC consultado inexistente (siConsRUC, MT v150 Tabla H). */
+  RUC_INEXISTENTE: '0500',
+  /** El certificado no tiene permiso para usar el WS de consulta RUC (siConsRUC, Tabla H). */
+  RUC_SIN_PERMISO: '0501',
+  /** RUC encontrado (siConsRUC, Tabla H). */
+  RUC_ENCONTRADO: '0502',
   /** XML malformado (generic input validation). */
   XML_MALFORMADO: '0160',
 } as const;

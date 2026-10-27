@@ -1,8 +1,9 @@
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { documents, issuerEvents, tenants, withTenantTransaction, type Database } from '@sifen/db';
 import type {
   EventSigningStore,
   EventToSign,
+  StoredReceiverData,
   StoredVoidRange,
 } from '../application/sign-pending-event.js';
 
@@ -70,8 +71,9 @@ export function createDrizzleEventSigningStore({
             eventId: issuerEvents.eventId,
             kind: issuerEvents.kind,
             reason: issuerEvents.reason,
-            cdc: documents.cdc,
+            cdc: sql<string | null>`coalesce(${documents.cdc}, ${issuerEvents.targetCdc})`,
             voidRange: issuerEvents.voidRange,
+            receiverData: issuerEvents.receiverData,
           })
           .from(issuerEvents)
           .innerJoin(tenants, eq(tenants.id, issuerEvents.tenantId))
@@ -86,7 +88,11 @@ export function createDrizzleEventSigningStore({
           .then((rows) => rows.at(0)),
       );
       if (!row) return undefined;
-      const event: EventToSign = { ...row, voidRange: row.voidRange as StoredVoidRange | null };
+      const event: EventToSign = {
+        ...row,
+        voidRange: row.voidRange as StoredVoidRange | null,
+        receiverData: row.receiverData as StoredReceiverData | null,
+      };
       return event;
     },
 

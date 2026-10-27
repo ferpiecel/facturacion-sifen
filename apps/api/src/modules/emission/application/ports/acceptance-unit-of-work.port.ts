@@ -97,7 +97,12 @@ export interface AcceptanceUnit {
    * Sum of F014 of the credit notes of that FE that still count: every status except `cancelled` and
    * `number_voided` (a rejected NCE is resent with the same CDC). Exact decimal text.
    */
-  sumCreditNotes(cdc: string, environment: IssuerContext['environment']): Promise<string>;
+  sumCreditNotes(
+    cdc: string,
+    environment: IssuerContext['environment'],
+    /** A credit note's own CDC, left out of the sum when that note is corrected (ADR-0021 D5). */
+    excludeCdc?: string,
+  ): Promise<string>;
   nextNumber(
     issuer: IssuerContext,
     documentType: number,

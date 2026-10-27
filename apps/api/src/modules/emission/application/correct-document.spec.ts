@@ -62,15 +62,19 @@ function setup(
   options: {
     document?: CorrectableDocument | null;
     stored?: StoredCorrection | null;
+    /** The key is stored only once the document lock was taken (a concurrent retry committed). */
+    storedAfterLock?: boolean;
     noIssuer?: boolean;
   } = {},
   certificateNotAfter?: Date,
 ) {
+  let lookups = 0;
   const rewriteDocument = vi.fn(() => Promise.resolve());
   const recordAudit = vi.fn(() => Promise.resolve());
   const sumCreditNotes = vi.fn(() => Promise.resolve('0'));
   const unit: CorrectionUnit = {
-    findCorrectionByKey: () => Promise.resolve(options.stored ?? null),
+    findCorrectionByKey: () =>
+      Promise.resolve(lookups++ === 0 && options.storedAfterLock ? null : (options.stored ?? null)),
     lockDocument: () =>
       Promise.resolve(options.document === undefined ? REJECTED : options.document),
     resolveIssuer: () =>
@@ -139,6 +143,21 @@ describe('correctDocument', () => {
     };
     const { correct, rewriteDocument } = setup({
       stored,
+      document: { ...REJECTED, status: 'accepted' },
+    });
+    await expect(correct(INPUT)).resolves.toEqual({ documentId: 'doc-1', cdc: CDC });
+    expect(rewriteDocument).not.toHaveBeenCalled();
+  });
+
+  it('replays a concurrent retry that committed while this one waited for the lock', async () => {
+    const stored = {
+      documentId: 'doc-1',
+      cdc: CDC,
+      requestHash: requestHash({ documentId: 'doc-1', payload: PAYLOAD }),
+    };
+    const { correct, rewriteDocument } = setup({
+      stored,
+      storedAfterLock: true,
       document: { ...REJECTED, status: 'accepted' },
     });
     await expect(correct(INPUT)).resolves.toEqual({ documentId: 'doc-1', cdc: CDC });

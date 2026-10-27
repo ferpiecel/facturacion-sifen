@@ -20,7 +20,11 @@ import {
   type AcceptedInvoice,
 } from './accept-invoice.js';
 import { IdempotencyKeyCollisionError } from './ports/acceptance-unit-of-work.port.js';
-import type { CorrectionUnit, CorrectionUnitOfWork } from './ports/correction-unit-of-work.port.js';
+import type {
+  CorrectionUnit,
+  CorrectionUnitOfWork,
+  StoredCorrection,
+} from './ports/correction-unit-of-work.port.js';
 
 /** iTiDE of each correctable type (ADR-0021 D5). */
 const DOCUMENT_TYPE = { FE: 1, AFE: 4, NCE: 5, NDE: 6 } as const;
@@ -139,13 +143,18 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
   async function correctOnce(input: CorrectDocumentInput, hash: string): Promise<AcceptedInvoice> {
     const at = now();
     return deps.unitOfWork.run(input.tenantId, async (unit) => {
-      const stored = await unit.findCorrectionByKey(input.idempotencyKey);
-      if (stored) {
+      const replay = (stored: StoredCorrection | null): AcceptedInvoice | null => {
+        if (!stored) return null;
         if (stored.requestHash !== hash) throw new IdempotencyKeyReusedError();
         return { documentId: stored.documentId, cdc: stored.cdc };
-      }
+      };
+      const early = replay(await unit.findCorrectionByKey(input.idempotencyKey));
+      if (early) return early;
 
       const document = await unit.lockDocument(input.documentId);
+      // A concurrent retry with the same key may have committed while this one waited for the lock.
+      const late = replay(await unit.findCorrectionByKey(input.idempotencyKey));
+      if (late) return late;
       if (!document) throw new DocumentNotFoundError();
       if (document.status !== 'rejected') throw new DocumentNotCorrectableError(document.status);
 

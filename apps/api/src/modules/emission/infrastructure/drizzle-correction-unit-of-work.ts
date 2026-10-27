@@ -111,6 +111,7 @@ export function createDrizzleCorrectionUnitOfWork(db: Database): CorrectionUnitO
                 transmissionHold: null,
                 nextTransmissionAt: null,
                 sifenMessages: null,
+                updatedAt: sql`now()`,
               })
               .where(and(eq(documents.tenantId, tenantId), eq(documents.id, change.document.id)));
           },

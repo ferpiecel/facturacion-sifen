@@ -278,9 +278,30 @@ function isValidRounding(total: Decimal, rounding: Decimal | undefined, decimals
  * all or nothing; B2F requires it and forbids department and city.
  */
 function validateReceiverAddress(draft: InvoiceDraft, errors: ValidationError[]): void {
-  const address = draft.receiver.kind === 'named' ? draft.receiver.address : undefined;
-  const { departmentCode } = draft.location;
-  const isB2f = draft.operationType === 'B2F';
+  validateAddressBlock(
+    {
+      operationType: draft.operationType,
+      unnamed: draft.receiver.kind === 'unnamed',
+      address: draft.receiver.kind === 'named' ? draft.receiver.address : undefined,
+      departmentCode: draft.location.departmentCode,
+    },
+    errors,
+  );
+}
+
+/** What the receiver address rules look at, whatever document carries the receiver. */
+export interface AddressBlockInput {
+  operationType: OperationType;
+  /** An innominado receiver: no address rule applies. */
+  unnamed: boolean;
+  address: DraftReceiverAddress | undefined;
+  departmentCode: number | undefined;
+}
+
+/** The receiver address rules (shared with the nomination of HU-E8-05). */
+export function validateAddressBlock(input: AddressBlockInput, errors: ValidationError[]): void {
+  const { address, departmentCode } = input;
+  const isB2f = input.operationType === 'B2F';
 
   if (departmentCode !== undefined && DEPARTMENTS[departmentCode] === undefined) {
     errors.push({
@@ -293,7 +314,7 @@ function validateReceiverAddress(draft: InvoiceDraft, errors: ValidationError[])
   // Legacy clients always sent the department with an unnamed receiver: it still has to be a
   // valid code (checked above, as before), but no address rule applies and it is never informed
   // in the XML.
-  if (draft.receiver.kind === 'unnamed' && !isB2f) return;
+  if (input.unnamed && !isB2f) return;
 
   if (address === undefined) {
     if (isB2f) {
@@ -376,9 +397,22 @@ function validateReceiverGeography(
   catalog: GeoCatalog,
   errors: ValidationError[],
 ): void {
-  const address = draft.receiver.kind === 'named' ? draft.receiver.address : undefined;
+  validateGeography(
+    draft.receiver.kind === 'named' ? draft.receiver.address : undefined,
+    draft.location.departmentCode,
+    catalog,
+    errors,
+  );
+}
+
+/** The geography rules (shared with the nomination of HU-E8-05). */
+export function validateGeography(
+  address: DraftReceiverAddress | undefined,
+  departmentCode: number | undefined,
+  catalog: GeoCatalog,
+  errors: ValidationError[],
+): void {
   if (address === undefined) return;
-  const { departmentCode } = draft.location;
   const district =
     address.districtCode === undefined ? undefined : catalog.district(address.districtCode);
   const city = address.cityCode === undefined ? undefined : catalog.city(address.cityCode);

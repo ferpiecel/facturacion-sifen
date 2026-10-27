@@ -17,9 +17,20 @@ export const ABSENCE_NOTED_CODE = 'LOC-MISS';
 /** `response_code` of an `unknown` cancellation held for an operator after the 72 h window (ADR-0008). */
 export const OPERATOR_HOLD_CODE = 'LOC-HOLD';
 
-/** An `unknown` cancellation: the document it targets is the thing to query. */
+/** Event kinds that target a document, so the document query can settle them. */
+export type RecoverableEventKind = 'cancellation' | 'nomination';
+
+/** The element each recoverable kind leaves in the document's event list (`Id` holds the CDC). */
+const EVENT_ELEMENT: Record<RecoverableEventKind, string> = {
+  cancellation: 'rGeVeCan',
+  nomination: 'rGEveNom',
+};
+
+/** An `unknown` cancellation or nomination: the document it targets is the thing to query. */
 export interface UnresolvedCancellation {
   readonly id: string;
+  /** Defaults to a cancellation. */
+  readonly kind?: RecoverableEventKind;
   readonly cdc: string;
   /** When the send was attempted: the age the 72 h window counts from. */
   readonly sentAt: Date;
@@ -83,7 +94,7 @@ export interface ResolveUnknownEventsResult {
  * pass, at least `confirmAfterMs` after the first, finds it absent again (the event list may lag); anything
  * else (a failed query, a document SIFEN does not know) stays unknown for the next pass, until the 72 h window
  * ends and the event is held for an operator. One event failing never aborts the pass. Voidings and nominations
- * have no document to query and stay unknown until their own stories resolve them.
+ * have no document to query and stay unknown until their own story resolves them; a nomination is settled like a cancellation, by its own element on the document.
  */
 export class ResolveUnknownEvents {
   constructor(private readonly deps: ResolveUnknownEventsDeps) {}
@@ -107,7 +118,7 @@ export class ResolveUnknownEvents {
     let inconclusive = 0;
     for (const event of unresolved) {
       try {
-        const answer = await this.query(event.cdc);
+        const answer = await this.query(event.cdc, event.kind ?? 'cancellation');
         const outcome = this.decide(answer, event, now, confirmAfterMs);
         if (outcome.kind === 'settled') {
           await this.deps.store.record(new Map([[event.id, outcome.outcome]]));
@@ -162,7 +173,7 @@ export class ResolveUnknownEvents {
   }
 
   /** What the document query proved about the cancellation. */
-  private async query(cdc: string): Promise<Answer> {
+  private async query(cdc: string, kind: RecoverableEventKind): Promise<Answer> {
     let answer;
     try {
       answer = await this.deps.gateway.consultarDE({
@@ -183,7 +194,7 @@ export class ResolveUnknownEvents {
     }
     // Element names may carry a namespace prefix (`<ns2:rGeVeCan>`).
     const cancellation = new RegExp(
-      `<(?:[\\w.-]+:)?rGeVeCan[^>]*>\\s*<(?:[\\w.-]+:)?Id>\\s*${cdc}\\s*</`,
+      `<(?:[\\w.-]+:)?${EVENT_ELEMENT[kind]}[^>]*>\\s*<(?:[\\w.-]+:)?Id>\\s*${cdc}\\s*</`,
     );
     return answer.eventos.some((evento) => cancellation.test(evento))
       ? {
@@ -191,10 +202,10 @@ export class ResolveUnknownEvents {
           outcome: {
             status: 'approved',
             code: SIFEN_CODES.EVENTO_REGISTRADO,
-            message: 'SIFEN holds the cancellation (found by querying the document)',
+            message: `SIFEN holds the ${kind} (found by querying the document)`,
           },
         }
-      : { kind: 'absent', note: 'SIFEN holds no cancellation of the document (to confirm)' };
+      : { kind: 'absent', note: `SIFEN holds no ${kind} of the document (to confirm)` };
   }
 }
 

@@ -85,13 +85,13 @@ describe('DrizzleEventRecoveryStore', () => {
     status: 'sending' | 'unknown',
     sentMinutesAgo: number,
     overrides: Partial<typeof issuerEvents.$inferInsert> = {},
-    kind: 'cancellation' | 'voiding' = 'cancellation',
+    kind: 'cancellation' | 'voiding' | 'nomination' = 'cancellation',
   ) {
     seq += 1;
     const tenant = overrides.tenantId ?? tenantId;
     // One document per cancellation: an open event of a kind per document is unique.
     const documentId =
-      kind === 'cancellation'
+      kind !== 'voiding'
         ? (
             await handle.db
               .insert(documents)
@@ -119,6 +119,7 @@ describe('DrizzleEventRecoveryStore', () => {
         kind,
         eventId: BigInt(seq),
         ...(documentId ? { documentId } : { voidRange: RANGE }),
+        ...(kind === 'nomination' ? { nomination: { kind: 'non-taxpayer' } } : {}),
         reason: 'Error en los datos',
         ...overrides,
       })
@@ -180,6 +181,18 @@ describe('DrizzleEventRecoveryStore', () => {
       { id: older, cdc: cdcs.get(older) },
     ]);
     expect(listed[0]).toMatchObject({ sentAt: minutesAgo(50), missedAt: null });
+  });
+
+  it('lists an unknown nomination too, with its kind, so a lost answer does not block the document forever', async () => {
+    const nomination = await event('unknown', 60, {}, 'nomination');
+    const cancellation = await event('unknown', 59);
+
+    const listed = await storeFor(tenantId).unresolvedCancellations(minutesAgo(15), 10);
+
+    expect(listed.map(({ id, kind }) => ({ id, kind }))).toEqual([
+      { id: nomination, kind: 'nomination' },
+      { id: cancellation, kind: 'cancellation' },
+    ]);
   });
 
   it('claims what it lists: another worker, while the claim lasts, gets none of the same events', async () => {

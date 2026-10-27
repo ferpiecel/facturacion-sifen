@@ -11,6 +11,8 @@ import {
 const NOW = new Date('2026-10-17T12:00:00Z');
 const CDC = '01800695631001001000000112026010111234567891';
 const OTHER_CDC = '01800695631001001000000212026010111234567892';
+const nominationOf = (cdc: string) =>
+  `<xEvento><gGroupGesEve><rGesEve><rEve Id="5"><gGroupTiEvt><rGEveNom><Id>${cdc}</Id><mOtEve>x</mOtEve></rGEveNom></gGroupTiEvt></rEve></rGesEve></gGroupGesEve></xEvento>`;
 const cancellationOf = (cdc: string) =>
   `<xEvento><gGroupGesEve><rGesEve><rEve Id="5"><gGroupTiEvt><rGeVeCan><Id>${cdc}</Id><mOtEve>x</mOtEve></rGeVeCan></gGroupTiEvt></rEve></rGesEve></gGroupGesEve></xEvento>`;
 
@@ -87,6 +89,26 @@ const one: UnresolvedCancellation = {
 const missedLongAgo: UnresolvedCancellation = { ...one, missedAt: minutesAgo(30) };
 
 describe('ResolveUnknownEvents', () => {
+  it('settles as approved a nomination that SIFEN shows registered on the document', async () => {
+    const { gateway, store, resolve } = setup([{ ...one, kind: 'nomination' }]);
+    gateway.enqueue('consultarDE', sifenScenarios.cdcEncontrado('<rDE/>', [nominationOf(CDC)]));
+
+    const result = await resolve.execute();
+
+    expect(result).toMatchObject({ approved: 1 });
+    expect(store.outcomes.get('ev-1')).toMatchObject({ status: 'approved' });
+  });
+
+  it('does not take a cancellation of the document as proof of the nomination', async () => {
+    const { gateway, store, resolve } = setup([{ ...one, kind: 'nomination' }]);
+    gateway.enqueue('consultarDE', sifenScenarios.cdcEncontrado('<rDE/>', [cancellationOf(CDC)]));
+
+    const result = await resolve.execute();
+
+    expect(result).toMatchObject({ approved: 0, inconclusive: 1 });
+    expect(store.misses.has('ev-1')).toBe(true);
+  });
+
   it('turns orphan sending events older than the threshold into unknown, and asks only for settled ones', async () => {
     const { store, resolve } = setup([], 3);
 

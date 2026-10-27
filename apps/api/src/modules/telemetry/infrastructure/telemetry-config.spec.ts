@@ -56,6 +56,14 @@ describe('loadTelemetryConfig', () => {
     );
   });
 
+  it('does not treat an unset or unknown NODE_ENV as permissive', () => {
+    for (const NODE_ENV of [undefined, '', 'staging']) {
+      expect(() => loadTelemetryConfig({ METRICS_ENABLED: 'true', NODE_ENV })).toThrow(
+        'METRICS_TOKEN of at least 16 characters is required',
+      );
+    }
+  });
+
   it('bounds the worker metrics port and names the service', () => {
     expect(() => loadTelemetryConfig({ METRICS_PORT: '80' })).toThrow(
       'METRICS_PORT is out of range',

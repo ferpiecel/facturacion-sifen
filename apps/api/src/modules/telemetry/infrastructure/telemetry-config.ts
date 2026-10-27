@@ -68,7 +68,6 @@ export function loadTelemetryConfig(env: NodeJS.ProcessEnv): TelemetryConfig {
     metrics &&
     env.NODE_ENV !== 'development' &&
     env.NODE_ENV !== 'test' &&
-    env.NODE_ENV !== undefined &&
     (metricsToken?.length ?? 0) < MIN_TOKEN_LENGTH
   ) {
     throw new TelemetryConfigError(

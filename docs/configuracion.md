@@ -47,7 +47,7 @@ Todas tienen un valor por defecto, así que el entorno local funciona sin un arc
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | *(sin valor)* | `apps/api`, worker | URL base `http(s)://` del colector OTLP (se agrega `/v1/traces`). Obligatoria con `OTEL_ENABLED=true`. Es un secreto: nunca se registra en logs ni en errores. |
 | `OTEL_SERVICE_NAME` | `sifen-api` | `apps/api`, worker | Nombre del servicio en las trazas y métricas; el worker debe fijar `sifen-worker`. |
 | `METRICS_ENABLED` | `false` | `apps/api`, worker | `true` habilita las métricas Prometheus (`GET /metrics` en la API; listener propio del worker en `METRICS_PORT`). Sin él `/metrics` responde 404. |
-| `METRICS_TOKEN` | *(sin valor)* | `apps/api`, worker | Token Bearer que exige `/metrics`. Con `METRICS_ENABLED=true` y `NODE_ENV` distinto de `development` o `test` son obligatorios al menos 16 caracteres; la API no arranca sin él. |
+| `METRICS_TOKEN` | *(sin valor)* | `apps/api`, worker | Token Bearer que exige `/metrics`. Con `METRICS_ENABLED=true` y `NODE_ENV` distinto de `development` o `test` son obligatorios al menos 16 caracteres (también con `NODE_ENV` sin definir: solo `development` y `test` exactos son permisivos); la API no arranca sin él. |
 | `METRICS_PORT` | `9464` | worker | Puerto del listener de métricas del worker (1024 a 65535). |
 
 ## IP del cliente y proxies de confianza

@@ -6,6 +6,11 @@ import {
   DocumentNotFoundError,
   EventKeyReusedError,
 } from '../../application/cancel-document.js';
+import {
+  ReceiverEventInvalidError,
+  ReceiverEventRefusedError,
+  ReceiverProfileMissingError,
+} from '../../application/register-receiver-event.js';
 import { VoidRefusedError } from '../../application/void-numbers.js';
 import { EventIdExhaustedError } from '../drizzle-event-support.js';
 
@@ -52,6 +57,29 @@ export function toIssuerEventHttpException(error: unknown): HttpException | null
         sifenCode: '4003',
         message: error.message,
       },
+    ]);
+  }
+  if (error instanceof ReceiverEventInvalidError) {
+    return problem(HttpStatus.UNPROCESSABLE_ENTITY, 'Validation failed', error.issues);
+  }
+  if (error instanceof ReceiverEventRefusedError) {
+    const { message, ...details } = error.refusal;
+    const status =
+      details.rule === 'receiver-event-already-registered'
+        ? HttpStatus.CONFLICT
+        : HttpStatus.UNPROCESSABLE_ENTITY;
+    return problem(status, 'The receiver event was refused', [
+      {
+        field: 'event',
+        message,
+        ...details,
+        ...('deadline' in details ? { deadline: details.deadline.toISOString() } : {}),
+      },
+    ]);
+  }
+  if (error instanceof ReceiverProfileMissingError) {
+    return problem(HttpStatus.UNPROCESSABLE_ENTITY, error.message, [
+      { field: 'tenant', rule: 'receiver-profile-missing', message: error.message },
     ]);
   }
   if (error instanceof EventKeyReusedError) {

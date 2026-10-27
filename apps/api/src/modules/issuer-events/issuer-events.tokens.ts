@@ -1,2 +1,3 @@
 export const CANCEL_DOCUMENT = Symbol('CANCEL_DOCUMENT');
 export const VOID_NUMBERS = Symbol('VOID_NUMBERS');
+export const REGISTER_RECEIVER_EVENT = Symbol('REGISTER_RECEIVER_EVENT');

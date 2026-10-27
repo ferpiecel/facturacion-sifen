@@ -268,6 +268,46 @@ export function buildOpenApiDocument() {
           },
         },
       },
+      '/v1/receiver-events': {
+        post: {
+          operationId: 'registerReceiverEvent',
+          tags: ['Receiver events'],
+          summary: 'Register a conformity, disconformity, unawareness or receipt notice over a CDC',
+          description:
+            'The tenant acts as the RECEIVER of a DE/DTE issued by someone else. Asynchronous: 202 once the event is stored; the worker signs it with the tenant certificate and sends it to SIFEN with the other events. ' +
+            'Allowed within 45 days (configurable) of the issue date of a DE or of the approval of a DTE (`approvedAt`, NT 019), at most one event per kind (a partial conformity may precede the total one), and not after an unawareness. An event that contradicts the last one is a correction (`receiver-event-needs-correction`). ' +
+            'The 422 body carries `errors[].rule`, `sifenCode` when SIFEN defines one and, for an expired window, the `deadline`; an event of that kind already registered is a 409. ' +
+            'Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.',
+          ...secured(['documents:write']),
+          parameters: [
+            {
+              name: 'Idempotency-Key',
+              in: 'header',
+              required: true,
+              description: '1 to 255 printable ASCII characters, no spaces',
+              schema: { type: 'string', pattern: '^[!-~]{1,255}$' },
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: { 'application/json': { schema: ref('ReceiverEventRequest') } },
+          },
+          responses: {
+            '202': json('Accepted', ref('ReceiverEventAccepted')),
+            '400': problem('Missing or malformed Idempotency-Key'),
+            '401': UNAUTHORIZED,
+            '403': FORBIDDEN,
+            '409': problem(
+              'Idempotency-Key reused with another body, or the CDC already has an event of that kind',
+            ),
+            '422': problem(
+              'The request is invalid or a window or compatibility rule refuses it',
+              'ValidationProblem',
+            ),
+            '503': problem('The tenant ran out of event ids'),
+          },
+        },
+      },
       '/v1/documents/{id}/kude': {
         get: {
           operationId: 'downloadKude',
@@ -589,6 +629,43 @@ export function buildOpenApiDocument() {
             from: { type: 'integer', minimum: 1, maximum: 9999999 },
             to: { type: 'integer', minimum: 1, maximum: 9999999 },
             reason: { type: 'string', minLength: 5, maxLength: 150 },
+          },
+        },
+        ReceiverEventRequest: {
+          type: 'object',
+          required: ['kind', 'cdc', 'issuedAt'],
+          properties: {
+            kind: {
+              type: 'string',
+              enum: ['conformity', 'disconformity', 'unawareness', 'receipt_notice'],
+            },
+            cdc: { type: 'string', pattern: '^[0-9]{44}$', description: 'CDC of the DE/DTE' },
+            issuedAt: { type: 'string', description: 'dFecEmi, AAAA-MM-DDThh:mm:ss (Asunción)' },
+            approvedAt: {
+              type: 'string',
+              description: 'SIFEN approval of a DTE (ISO instant); the 45 days count from it',
+            },
+            conformityType: { type: 'string', enum: ['total', 'partial'] },
+            estimatedReceiptAt: {
+              type: 'string',
+              description: 'Required for a partial conformity (GCO004)',
+            },
+            reason: { type: 'string', minLength: 5, maxLength: 500 },
+            receivedAt: {
+              type: 'string',
+              description: 'dFecRecep, required for an unawareness and a receipt notice',
+            },
+            totalPyg: { type: 'number', minimum: 0, description: 'Total in guaraníes (notice)' },
+          },
+        },
+        ReceiverEventAccepted: {
+          type: 'object',
+          required: ['event_id', 'kind', 'cdc', 'status'],
+          properties: {
+            event_id: { type: 'string', format: 'uuid' },
+            kind: { type: 'string' },
+            cdc: { type: 'string', pattern: '^[0-9]{44}$' },
+            status: { type: 'string', enum: ['pending'] },
           },
         },
         VoidingAccepted: {

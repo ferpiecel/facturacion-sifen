@@ -177,6 +177,7 @@ function readRemissionPayload(payload: unknown): ReturnType<typeof readPayload> 
     base.value,
   );
   const { ruc, name, address, houseNumber, districtCode, cityCode, departmentCode } = receiver;
+  const { idType, idNumber, countryCode } = receiver;
   return {
     draft: {
       receiver: {
@@ -184,12 +185,23 @@ function readRemissionPayload(payload: unknown): ReturnType<typeof readPayload> 
         isPublicEntity: false,
         address: { street: address, houseNumber, districtCode, cityCode },
       },
-      operationType: 'B2B',
+      // D202: xmlgen needs B2C (2) or B2F (4) for a non-taxpayer; B2F is not built yet (MVP), so B2C.
+      operationType: ruc === undefined ? 'B2C' : 'B2B',
       location: { departmentCode },
       items: items.map(({ quantity }) => ({ quantity, unitPrice: 0, vatRate: 0 as const })),
       roundingPyg: 0,
     },
-    receiver: { ruc, name, address, houseNumber, districtCode, cityCode },
+    receiver: {
+      ...(ruc === undefined ? {} : { ruc }),
+      ...(ruc === undefined && idType !== undefined && idNumber !== undefined
+        ? { document: { type: idType, number: idNumber, countryCode } }
+        : {}),
+      name,
+      address,
+      houseNumber,
+      districtCode,
+      cityCode,
+    },
     items: detail.data.items,
     remission: { motive, responsible, km, invoiceDate, transport },
   };

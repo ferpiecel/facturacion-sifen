@@ -36,8 +36,10 @@ export class InvoiceXmlError extends Error {
 
 /** Named receiver data that the draft does not carry (D2 group of the MT). */
 export interface XmlReceiver {
-  /** `<base>-<dv>`. */
-  ruc: string;
+  /** `<base>-<dv>`; absent for a foreign or non-taxpayer NRE receiver, who carries `document`. */
+  ruc?: string;
+  /** D208-D210 and the country of a receiver without RUC (NRE motives 3 and 5). */
+  document?: { type: number; number: string; countryCode?: string | undefined };
   name: string;
   /** D213-D223 are optional (0-1); the draft rules decide which combinations reach this mapper. */
   address?: string;
@@ -215,6 +217,20 @@ function namedReceiverInput(
   operationType: number,
   departmentCode: number | undefined,
 ) {
+  if (receiver.ruc === undefined) {
+    const { document } = receiver;
+    if (document === undefined) throw new InvoiceXmlError('a receiver needs a RUC or a document');
+    return {
+      contribuyente: false,
+      razonSocial: receiver.name,
+      tipoOperacion: operationType,
+      ...receiverAddress(receiver, departmentCode),
+      pais: document.countryCode ?? 'PRY',
+      documentoTipo: document.type,
+      documentoNumero: document.number,
+      codigo: '0001',
+    };
+  }
   return {
     contribuyente: true,
     ruc: receiver.ruc,

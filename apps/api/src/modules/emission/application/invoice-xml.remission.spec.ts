@@ -86,6 +86,25 @@ describe('remission note XML', () => {
     }
   });
 
+  it('builds an XML for a foreign receiver identified by a passport (export)', async () => {
+    const foreign = {
+      name: 'Foreign Co',
+      document: { type: 2, number: 'P123456', countryCode: 'BRA' },
+      address: 'Rua 1',
+      ...geo,
+    };
+    const exportCtx = { ...ctx(), remission: { ...remission, motive: 3 }, receiver: foreign };
+    const { xml } = await generateInvoiceXml(
+      new TipsDeXmlBuilder(),
+      { ...draft, operationType: 'B2C' },
+      exportCtx,
+    );
+    expect(xml).toContain('<iNatRec>2</iNatRec>');
+    expect(xml).toContain('<dNumIDRec>P123456</dNumIDRec>');
+    expect(xml).toContain('<cPaisRec>BRA</cPaisRec>');
+    expect(xml).not.toContain('<dRucRec>');
+  });
+
   it('writes the DNIT catalog text for the departure and the delivery', async () => {
     const geoCatalog = createGeoCatalog({
       departments: [{ code: 11, name: 'ALTO PARANA' }],

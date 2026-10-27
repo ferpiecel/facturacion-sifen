@@ -146,3 +146,4 @@ pnpm --filter @sifen/api coverage
 | Normativa DNIT | [`docs/referencia/`](docs/referencia/README.md) |
 | Variables de entorno | [`docs/configuracion.md`](docs/configuracion.md) |
 | Operación y CLI | [`docs/operacion.md`](docs/operacion.md) |
+| Runbooks de incidentes | [`docs/runbooks/`](docs/runbooks/README.md) |

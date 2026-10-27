@@ -38,7 +38,7 @@ describe('issuer_events', () => {
   });
 
   it.each([
-    ['an unknown kind', { kind: 'conformity' }],
+    ['an unknown kind', { kind: 'endorsement' }],
     ['a cancellation without a document', { documentId: null }],
     ['a cancellation with a range', { voidRange: RANGE }],
     ['a reason of 4 characters', { reason: 'nope' }],

@@ -185,6 +185,11 @@ describe('SignPendingEvent', () => {
       EventKindNotSignableError,
     ],
     [
+      'a cancellation without its reason',
+      [cancellation({ reason: null })],
+      EventDataIncompleteError,
+    ],
+    [
       'a voiding without its range',
       [cancellation({ kind: 'voiding', cdc: null })],
       EventDataIncompleteError,

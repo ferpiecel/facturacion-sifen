@@ -1,11 +1,6 @@
 import { type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
-import {
-  createPgliteDatabase,
-  documents,
-  withTenantTransaction,
-  type DatabaseHandle,
-} from '@sifen/db';
+import { createPgliteDatabase, documents, type DatabaseHandle } from '@sifen/db';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTenant, issueApiKey } from '../src/cli/commands.js';

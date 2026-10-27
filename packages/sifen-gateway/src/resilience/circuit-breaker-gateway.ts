@@ -69,6 +69,22 @@ export class CircuitBreakerGateway implements SifenGateway {
     return this.breaker(operation).peek();
   }
 
+  /**
+   * Another gateway guarded by THESE breakers, so per-tenant gateways (each with its own
+   * credentials) still share one circuit per endpoint: an outage belongs to the endpoint.
+   */
+  around(other: SifenGateway): SifenGateway {
+    return {
+      enviarLote: (request) => this.guard('enviarLote', () => other.enviarLote(request)),
+      consultarLote: (request) => this.guard('consultarLote', () => other.consultarLote(request)),
+      enviarDESincronico: (request) =>
+        this.guard('enviarDESincronico', () => other.enviarDESincronico(request)),
+      consultarDE: (request) => this.guard('consultarDE', () => other.consultarDE(request)),
+      enviarEventos: (request) => this.guard('enviarEventos', () => other.enviarEventos(request)),
+      consultarRUC: (request) => this.guard('consultarRUC', () => other.consultarRUC(request)),
+    };
+  }
+
   enviarLote: SifenGateway['enviarLote'] = (request) =>
     this.guard('enviarLote', () => this.inner.enviarLote(request));
   consultarLote: SifenGateway['consultarLote'] = (request) =>

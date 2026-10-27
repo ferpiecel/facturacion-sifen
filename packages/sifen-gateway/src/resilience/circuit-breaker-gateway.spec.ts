@@ -128,3 +128,18 @@ describe('CircuitBreakerGateway', () => {
     expect(gateway.pausedUntil('enviarLote')).toBeNull();
   });
 });
+
+describe('CircuitBreakerGateway.around', () => {
+  it('guards another gateway with the SAME breakers', async () => {
+    const { gateway } = build();
+    const other = new FakeSifenGateway();
+    other.setDefault('enviarLote', new SifenTransportError('enviarLote'));
+    const guarded = gateway.around(other);
+    await guarded.enviarLote(lote).catch(() => undefined);
+    await guarded.enviarLote(lote).catch(() => undefined);
+    expect(gateway.pausedUntil('enviarLote')).not.toBeNull();
+    await expect(gateway.enviarLote(lote)).rejects.toBeInstanceOf(SifenCircuitOpenError);
+    await expect(guarded.enviarLote(lote)).rejects.toBeInstanceOf(SifenCircuitOpenError);
+    expect(other.calls).toHaveLength(2);
+  });
+});

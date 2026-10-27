@@ -11,6 +11,11 @@ import {
   ReceiverEventRefusedError,
   ReceiverProfileMissingError,
 } from '../../application/register-receiver-event.js';
+import {
+  ReceiverCorrectionRefusedError,
+  ReceiverEventNotFoundError,
+} from '../../application/correct-receiver-event.js';
+import { EventKeyCollisionError } from '../../application/ports/cancellation-unit-of-work.port.js';
 import { VoidRefusedError } from '../../application/void-numbers.js';
 import { EventIdExhaustedError } from '../drizzle-event-support.js';
 
@@ -82,8 +87,26 @@ export function toIssuerEventHttpException(error: unknown): HttpException | null
       { field: 'tenant', rule: 'receiver-profile-missing', message: error.message },
     ]);
   }
-  if (error instanceof EventKeyReusedError) {
-    return problem(HttpStatus.CONFLICT, error.message);
+  if (error instanceof ReceiverEventNotFoundError) {
+    return problem(HttpStatus.NOT_FOUND, error.message);
+  }
+  if (error instanceof ReceiverCorrectionRefusedError) {
+    const { message, ...details } = error.refusal;
+    const status =
+      details.rule === 'correction-already-requested'
+        ? HttpStatus.CONFLICT
+        : HttpStatus.UNPROCESSABLE_ENTITY;
+    return problem(status, 'The correction was refused', [
+      {
+        field: 'event',
+        message,
+        ...details,
+        ...('deadline' in details ? { deadline: details.deadline.toISOString() } : {}),
+      },
+    ]);
+  }
+  if (error instanceof EventKeyReusedError || error instanceof EventKeyCollisionError) {
+    return problem(HttpStatus.CONFLICT, 'The Idempotency-Key was already used by another event.');
   }
   if (error instanceof EventIdExhaustedError) {
     return problem(HttpStatus.SERVICE_UNAVAILABLE, error.message);

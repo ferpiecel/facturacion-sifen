@@ -24,12 +24,17 @@
 
 ## Tasks
 
-- [ ] A1 RED/GREEN: migration 0062 + schema + db test (nomination column, subject check, immutability)
-- [ ] A2 domain `nominate-rules.ts` (rules 4002/4454/4469, receiver fields by nature)
-- [ ] A3 `NominationEvent` in the gateway port + `TipsEventXmlBuilder` nomination (PR 1)
-- [ ] B1 use case `nominate-document` + Drizzle unit of work + signing mapping (`sign-pending-event`, signing store) (PR 2)
-- [ ] B2 controller `POST :id/nominate`, error mapping, module wiring, OpenAPI regenerated, `docs/integracion/emision.md` (PR 3)
-- [ ] B3 follow-ups if lines allow: NCE/NDE 2442 and `credit-note-unnamed-receiver`, `document.nominated` webhook (else open debt)
+- [x] A1 migration 0062 + schema + db spec (PR #356, `70ed097`)
+- [x] A2 domain `nominate-rules.ts` (PR #357)
+- [x] A3 `NominationEvent` in the gateway + `TipsEventXmlBuilder` nomination + XSD e2e (PR #357)
+- [x] B1a use case `nominate-document` + port (PR #365, branch `feat/hu-e8-05-nominate-use-case`)
+- [x] B1b Drizzle `drizzle-nomination-unit-of-work` + `SignPendingEvent`/signing store load the nomination (PR #364, branch `feat/hu-e8-05-nominate-persist`, stacked on use-case)
+- [ ] B2 controller `POST /v1/documents/:id/nominate` in `IssuerEventsController`, zod request schema for the receiver (fields by nature: taxpayer ruc with DV + taxpayerType; non-taxpayer documentType 1..5 + number; name 4..255; country 3 letters; operationType B2B only for taxpayers; reason 5..500), error mapping in `issuer-event-http-errors.ts` (`NominationReasonInvalidError` 422, `NominationRefusedError` 422 with rule+sifenCode, `NominationAlreadyRequestedError` 409 sifenCode 4453), `NOMINATE_DOCUMENT` token + module wiring, e2e test like the cancel one, `pnpm --filter @sifen/api openapi`, guide `docs/integracion/emision.md`; lector role refusal if the cancel endpoint enforces one
+- [ ] B3 NCE/NDE 2442 + `credit-note-unnamed-receiver` (approved nomination event = nominated receiver), `document.nominated` webhook; else record as open debt
+
+## Handoff
+
+Branch chain (all PRs target main): #356 `feat/hu-e8-05-nominate` (ready) <- #357 `...-rules` (draft) <- #365 `...-use-case` (draft) <- #364 `...-persist` (draft). Next: branch `feat/hu-e8-05-nominate-endpoint` from `feat/hu-e8-05-nominate-persist`, draft PR "Depende de #364". Worktree already has node_modules and builds. Verify in the pre-push hook needs a clean tree (stash untracked before pushing). No reviews posted yet (sifen-reviewer). Note: the Drizzle UoW spec was written together with its implementation (no observed RED).
 
 ## Delivery
 

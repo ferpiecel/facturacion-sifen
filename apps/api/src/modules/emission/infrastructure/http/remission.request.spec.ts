@@ -77,7 +77,8 @@ describe('parseCreateRemission', () => {
   });
 
   it('accepts a foreign receiver identified by a document instead of a RUC', () => {
-    const { ruc: _ruc, ...rest } = remissionBody.receiver;
+    const { name, ...place } = { ...remissionBody.receiver, ruc: undefined };
+    const rest = { name, ...place };
     const foreign = { ...rest, idType: 2, idNumber: 'P123456', countryCode: 'BRA' };
     const parsed = parseCreateRemission({ ...remissionBody, motive: 3, receiver: foreign });
     expect(parsed.ok).toBe(true);

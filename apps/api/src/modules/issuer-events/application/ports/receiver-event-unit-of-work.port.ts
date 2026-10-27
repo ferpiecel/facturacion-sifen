@@ -1,3 +1,4 @@
+import type { CorrectableEvent } from '../../domain/receiver-correction-rules.js';
 import type {
   ConformityType,
   PriorReceiverEvent,
@@ -28,6 +29,8 @@ export interface NewReceiverEvent {
   data: ReceiverEventData;
   idempotencyKey: string;
   requestHash: string;
+  /** Set when the event replaces an approved one (HU-E9-02): `corrects_event_id` and `correction_reason`. */
+  correction?: { originalEventId: string; reason: string };
 }
 
 /** A receiver event stored by an earlier request that used the same `Idempotency-Key`. */
@@ -69,4 +72,21 @@ export interface ReceiverEventUnit {
 
 export interface ReceiverEventUnitOfWork {
   run<T>(tenantId: string, work: (unit: ReceiverEventUnit) => Promise<T>): Promise<T>;
+}
+
+/** What a correction needs to know of the event it replaces. */
+export interface CorrectionTarget extends CorrectableEvent {
+  cdc: string;
+}
+
+/** The registration operations plus the lookups of the event being corrected (HU-E9-02). */
+export interface CorrectionUnit extends ReceiverEventUnit {
+  /** The CDC of the tenant's receiver event, so the caller can lock it before reading the rest; null if none. */
+  cdcOfEvent(eventId: string): Promise<string | null>;
+  /** The event with its correction flags; read after `lockCdc` so they cannot change under the caller. */
+  findCorrectable(eventId: string): Promise<CorrectionTarget | null>;
+}
+
+export interface CorrectionUnitOfWork {
+  run<T>(tenantId: string, work: (unit: CorrectionUnit) => Promise<T>): Promise<T>;
 }

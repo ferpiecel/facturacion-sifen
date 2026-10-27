@@ -65,14 +65,14 @@ export interface RegisterReceiverEventDependencies {
 }
 
 /** Codes of "already has an event of this kind" (NT 019), for a duplicate caught by the unique index. */
-const ALREADY_CODE: Record<ReceiverEventKind, string> = {
+export const ALREADY_CODE: Record<ReceiverEventKind, string> = {
   conformity: '4150',
   disconformity: '4200',
   unawareness: '4251',
   receipt_notice: '4101',
 };
 
-function toStored(request: ReceiverEventRequest): {
+export function toStored(request: ReceiverEventRequest): {
   reason: string | null;
   data: ReceiverEventData;
 } {

@@ -58,6 +58,7 @@ export function createRucGateways(
     logger: soap.logger,
     ...(config.timeoutMs === undefined ? {} : { timeoutMs: config.timeoutMs }),
     ...(config.trustedRoots === undefined ? {} : { trustedRoots: config.trustedRoots }),
+    ...(config.maxTlsVersion === undefined ? {} : { maxTlsVersion: config.maxTlsVersion }),
   });
   // One circuit per endpoint for every tenant of this process, like the worker (ADR-0008).
   const breaker = CircuitBreakerGateway.shared();

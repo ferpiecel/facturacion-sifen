@@ -663,6 +663,95 @@
         }
       }
     },
+    "/v1/ruc/{ruc}": {
+      "get": {
+        "operationId": "lookupRuc",
+        "tags": [
+          "Registry"
+        ],
+        "summary": "Looks a RUC up in the SIFEN registry (siConsRUC), with a cache",
+        "description": "Validates a receiver by RUC. Answers are cached for RUC_CACHE_TTL_SECONDS (default one day); `cached` tells whether this one came from the cache. Any valid API key works, no scope is needed.",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ruc",
+            "in": "path",
+            "required": true,
+            "description": "RUC without the check digit, 5 to 8 digits",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{5,8}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The taxpayer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RucLookup"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The RUC is not 5 to 8 digits",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SIFEN has no such RUC",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "SIFEN refused or could not answer the query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No SIFEN adapter or database is available in this deployment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/geo/departments": {
       "get": {
         "operationId": "listGeoDepartments",
@@ -2339,6 +2428,42 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "RucLookup": {
+        "type": "object",
+        "required": [
+          "ruc",
+          "cached",
+          "taxpayer"
+        ],
+        "properties": {
+          "ruc": {
+            "type": "string"
+          },
+          "cached": {
+            "type": "boolean"
+          },
+          "taxpayer": {
+            "type": "object",
+            "required": [
+              "legal_name",
+              "status",
+              "electronic_invoicer"
+            ],
+            "properties": {
+              "legal_name": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "description": "ACT, SUS, SAD, BLQ, CAN or CDE (MT v150 schema 17)"
+              },
+              "electronic_invoicer": {
+                "type": "boolean"
+              }
+            }
           }
         }
       },

@@ -23,6 +23,7 @@ import {
   type ValidationConfig,
 } from '../domain/invoice-draft.js';
 import { invoiceTotals, lineTotal, parseAmount } from '../domain/invoice-totals.js';
+import { REMISSION_MOTIVES, type RemissionDraft } from '../domain/remission-draft.js';
 import type { SelfInvoiceDraft } from '../domain/self-invoice-draft.js';
 
 /** The draft, the XSD check or the XML post-processing cannot produce a valid document. */
@@ -35,8 +36,10 @@ export class InvoiceXmlError extends Error {
 
 /** Named receiver data that the draft does not carry (D2 group of the MT). */
 export interface XmlReceiver {
-  /** `<base>-<dv>`. */
-  ruc: string;
+  /** `<base>-<dv>`; absent for a foreign or non-taxpayer NRE receiver, who carries `document`. */
+  ruc?: string;
+  /** D208-D210 and the country of a receiver without RUC (NRE motives 3 and 5). */
+  document?: { type: number; number: string; countryCode?: string | undefined };
   name: string;
   /** D213-D223 are optional (0-1); the draft rules decide which combinations reach this mapper. */
   address?: string;
@@ -79,11 +82,72 @@ export interface InvoiceXmlContext {
    * transaction and the constancia. The receiver is the issuer, passed as `receiver`.
    */
   selfInvoice?: Pick<SelfInvoiceDraft, 'seller' | 'place' | 'certificate'>;
+  /**
+   * Present when the document is an NRE (iTiDE 7, HU-E7-04): the motive, the kilometres and the
+   * transport. The receiver is named and the items carry a quantity only.
+   */
+  remission?: Pick<RemissionDraft, 'motive' | 'responsible' | 'km' | 'invoiceDate' | 'transport'>;
 }
 
-/** iTiDE of the document the context describes: 4 AFE, 5 NCE, 6 NDE, 1 FE. */
-const documentTypeOf = (ctx: InvoiceXmlContext): 1 | 4 | 5 | 6 =>
-  ctx.selfInvoice ? 4 : ctx.creditNote ? 5 : ctx.debitNote ? 6 : 1;
+/** iTiDE of the document the context describes: 4 AFE, 5 NCE, 6 NDE, 7 NRE, 1 FE. */
+const documentTypeOf = (ctx: InvoiceXmlContext): 1 | 4 | 5 | 6 | 7 =>
+  ctx.selfInvoice ? 4 : ctx.creditNote ? 5 : ctx.debitNote ? 6 : ctx.remission ? 7 : 1;
+
+/** E5 and E10 of an NRE for xmlgen: the motive, the kilometres and the transport (no E600). */
+function remissionInput({
+  motive,
+  responsible,
+  km,
+  invoiceDate,
+  transport: t,
+}: NonNullable<InvoiceXmlContext['remission']>) {
+  const stop = (p: RemissionDraft['transport']['departure']) => ({
+    direccion: p.address,
+    numeroCasa: p.houseNumber,
+    departamento: p.departmentCode,
+    distrito: p.districtCode,
+    ciudad: p.cityCode,
+  });
+  const { carrier } = t;
+  return {
+    // xmlgen requires the free text of a type 7 (dInfFisc); the motive text is the one it prints for it.
+    descripcion: REMISSION_MOTIVES[motive as keyof typeof REMISSION_MOTIVES],
+    remision: {
+      motivo: motive,
+      tipoResponsable: responsible,
+      kms: km,
+      ...(invoiceDate === undefined ? {} : { fechaFactura: invoiceDate }),
+    },
+    detalleTransporte: {
+      tipo: t.type,
+      modalidad: t.modality,
+      tipoResponsable: t.freightResponsible,
+      inicioEstimadoTranslado: t.startDate,
+      finEstimadoTranslado: t.endDate,
+      salida: stop(t.departure),
+      entrega: stop(t.delivery),
+      vehiculo: {
+        tipo: t.vehicle.type,
+        marca: t.vehicle.brand,
+        documentoTipo: t.vehicle.idType,
+        documentoNumero: t.vehicle.idNumber,
+      },
+      transportista: {
+        contribuyente: carrier.contributor,
+        nombre: carrier.name,
+        ...(carrier.contributor
+          ? { ruc: carrier.ruc }
+          : { documentoTipo: carrier.idType, documentoNumero: carrier.idNumber }),
+        direccion: carrier.address,
+        chofer: {
+          documentoNumero: carrier.driver.idNumber,
+          nombre: carrier.driver.name,
+          direccion: carrier.driver.address,
+        },
+      },
+    },
+  };
+}
 
 /** E300 and H of an AFE for xmlgen: the seller, the place of the transaction and the constancia. */
 function selfInvoiceInput({
@@ -153,6 +217,20 @@ function namedReceiverInput(
   operationType: number,
   departmentCode: number | undefined,
 ) {
+  if (receiver.ruc === undefined) {
+    const { document } = receiver;
+    if (document === undefined) throw new InvoiceXmlError('a receiver needs a RUC or a document');
+    return {
+      contribuyente: false,
+      razonSocial: receiver.name,
+      tipoOperacion: operationType,
+      ...receiverAddress(receiver, departmentCode),
+      pais: document.countryCode ?? 'PRY',
+      documentoTipo: document.type,
+      documentoNumero: document.number,
+      codigo: '0001',
+    };
+  }
   return {
     contribuyente: true,
     ruc: receiver.ruc,
@@ -369,11 +447,18 @@ export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext
         : {
             ...(ctx.selfInvoice
               ? selfInvoiceInput(ctx.selfInvoice)
-              : { factura: { presencia: 1 } }),
-            condicion: {
-              tipo: 1,
-              entregas: [{ tipo: 1, monto: net.toString(), moneda: 'PYG', cambio: 0 }],
-            },
+              : ctx.remission
+                ? remissionInput(ctx.remission)
+                : { factura: { presencia: 1 } }),
+            // An NRE has no condition either (E600 belongs to the types with amounts).
+            ...(ctx.remission
+              ? {}
+              : {
+                  condicion: {
+                    tipo: 1,
+                    entregas: [{ tipo: 1, monto: net.toString(), moneda: 'PYG', cambio: 0 }],
+                  },
+                }),
           }),
       items: draft.items.map((item, i) => ({
         codigo: ctx.lines[i]?.code,
@@ -460,7 +545,7 @@ function patchGeoGroup(
 }
 
 function geoExpectations(
-  suffix: 'Rec' | 'Emi' | 'Ven' | 'Prov',
+  suffix: 'Rec' | 'Emi' | 'Ven' | 'Prov' | 'Sal' | 'Ent',
   codes: { department?: number; district?: number; city?: number },
   catalog: GeoCatalog,
 ): GeoExpectation[] {
@@ -500,6 +585,32 @@ function patchSelfInvoiceGeo(
   );
 }
 
+/** gCamSal (E921-E930, suffix Sal) and gCamEnt (E941-E950, suffix Ent) of an NRE. */
+function patchRemissionGeo(
+  xml: string,
+  { transport }: NonNullable<InvoiceXmlContext['remission']>,
+  catalog: GeoCatalog,
+  strict: boolean,
+): string {
+  const codes = (p: { departmentCode: number; districtCode: number; cityCode: number }) => ({
+    department: p.departmentCode,
+    district: p.districtCode,
+    city: p.cityCode,
+  });
+  const departed = patchGeoGroup(
+    xml,
+    'gCamSal',
+    geoExpectations('Sal', codes(transport.departure), catalog),
+    strict,
+  );
+  return patchGeoGroup(
+    departed,
+    'gCamEnt',
+    geoExpectations('Ent', codes(transport.delivery), catalog),
+    strict,
+  );
+}
+
 function applyCatalogGeography(
   xml: string,
   draft: InvoiceDraft,
@@ -523,9 +634,12 @@ function applyCatalogGeography(
     ),
     strict,
   );
-  const withSeller = ctx.selfInvoice
-    ? patchSelfInvoiceGeo(issued, ctx.selfInvoice, catalog, strict)
+  const withPlaces = ctx.remission
+    ? patchRemissionGeo(issued, ctx.remission, catalog, strict)
     : issued;
+  const withSeller = ctx.selfInvoice
+    ? patchSelfInvoiceGeo(withPlaces, ctx.selfInvoice, catalog, strict)
+    : withPlaces;
   const address = draft.receiver.kind === 'named' ? draft.receiver.address : undefined;
   if (address === undefined) return withSeller;
   // The district falls back to the city's, which is what xmlgen derives when it is not informed.

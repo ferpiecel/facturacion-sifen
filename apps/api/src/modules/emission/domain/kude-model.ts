@@ -8,6 +8,7 @@ export const KUDE_TITLE = 'KuDE de Factura Electrónica';
 export const KUDE_DEBIT_NOTE_TITLE = 'KuDE de Nota de Débito Electrónica';
 /** MT v150 13.3: the KuDE denomination for an electronic self-invoice (AFE). */
 export const KUDE_SELF_INVOICE_TITLE = 'KuDE de Autofactura Electrónica';
+export const KUDE_REMISSION_TITLE = 'KuDE de Nota de Remisión Electrónica';
 export const KUDE_CREDIT_NOTE_TITLE = 'KuDE de Nota de Crédito Electrónica';
 
 /** MT v150 13.4.4: consultation portal per environment (with the trailing slash of the MT). */
@@ -101,6 +102,20 @@ export interface KudeInvoice {
     seller: { name: string; idType: string; idNumber: string; address: string };
     place: string;
     certificate: { type: string; number: string };
+  };
+  /** E5 and E10 of an NRE (iTiDE 7): the motive, the trip, the places, the vehicle and the carrier. */
+  remission?: {
+    motive: string;
+    responsible: string;
+    km: number;
+    invoiceDate?: string;
+    startDate?: string;
+    endDate?: string;
+    departure: string;
+    delivery: string;
+    vehicle: string;
+    carrier: string;
+    driver: string;
   };
   items: KudeItem[];
   totals: {

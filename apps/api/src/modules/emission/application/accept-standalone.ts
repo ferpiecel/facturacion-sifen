@@ -3,6 +3,7 @@ import type { ValidationConfig, ValidationError } from '../domain/invoice-draft.
 import { invoiceTotals } from '../domain/invoice-totals.js';
 import { requestHash } from '../domain/request-hash.js';
 import { generateSecurityCode, type RandomBytes } from '../domain/security-code.js';
+import { validateRemissionDraft, type RemissionDraft } from '../domain/remission-draft.js';
 import { validateSelfInvoiceDraft, type SelfInvoiceDraft } from '../domain/self-invoice-draft.js';
 import type { AuditEntry } from '../../audit/application/ports/record-audit.port.js';
 import {
@@ -28,6 +29,12 @@ export interface StandaloneKind<Draft> {
   validate(draft: Draft, config: ValidationConfig): ValidationError[];
   total(draft: Draft): string;
   receiverRuc(draft: Draft, issuer: IssuerContext): string | null;
+  /** Rules that need the issuer (known only inside the transaction); checked before numbering. */
+  validateWithIssuer?(
+    draft: Draft,
+    issuer: IssuerContext,
+    config: ValidationConfig,
+  ): ValidationError[];
 }
 
 export interface AcceptStandaloneInput<Draft> {
@@ -94,6 +101,8 @@ export function createAcceptStandalone<Draft>(
       });
       if (!issuer) throw new IssuerNotConfiguredError();
       assertCertificateUsable(issuer, issuedAt, deps.certificateBlockDays);
+      const issuerErrors = kind.validateWithIssuer?.(input.draft, issuer, deps.validation ?? {});
+      if (issuerErrors && issuerErrors.length > 0) throw new InvoiceValidationError(issuerErrors);
 
       const { series, number } = await unit.nextNumber(issuer, kind.documentType);
       const securityCode = generateSecurityCode(number, deps.randomBytes);
@@ -149,5 +158,22 @@ export function createAcceptSelfInvoice(deps: AcceptStandaloneDependencies) {
     validate: validateSelfInvoiceDraft,
     total: (draft) => invoiceTotals(draft).net.toString(),
     receiverRuc: (_draft, issuer) => `${issuer.rucBase}-${String(issuer.rucDv)}`,
+  });
+}
+
+export type AcceptRemissionInput = AcceptStandaloneInput<RemissionDraft>;
+
+/** Accepts an NRE (iTiDE 7): no money (total 0) and the receiver RUC of the draft (D206). */
+export function createAcceptRemission(deps: AcceptStandaloneDependencies) {
+  return createAcceptStandalone<RemissionDraft>(deps, {
+    documentType: 7,
+    validate: (draft, config) => validateRemissionDraft(draft, config),
+    // Only the rules that need the issuer are new here: the others already ran.
+    validateWithIssuer: (draft, issuer, config) =>
+      validateRemissionDraft(draft, config, `${issuer.rucBase}-${String(issuer.rucDv)}`).filter(
+        (error) => error.rule === 'remission-motive-7-receiver',
+      ),
+    total: () => '0',
+    receiverRuc: (draft) => draft.receiver.ruc ?? null,
   });
 }

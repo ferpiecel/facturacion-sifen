@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { create as openFont } from 'fontkit';
 import QRCode from 'qrcode';
-import type { KudeInvoice } from '../../domain/kude-model.js';
+import { formatDateDmy, type KudeInvoice } from '../../domain/kude-model.js';
 
 export const PT_PER_MM = 72 / 25.4;
 /** MT v150 13.8.1: printed QR at least 25 mm wide, 22 mm of content plus the quiet zone. */
@@ -54,4 +54,24 @@ export async function renderQr(invoice: KudeInvoice): Promise<{ png: Buffer; siz
     }),
     size: ((QR_CONTENT_MM * (modules + 2 * quiet)) / modules) * PT_PER_MM,
   };
+}
+
+/** The motive, the trip, the places, the vehicle and the carrier of an NRE, one printed row each. */
+export function remissionRows(remission: NonNullable<KudeInvoice['remission']>): string[] {
+  const day = (iso: string | undefined) => (iso === undefined ? '' : formatDateDmy(iso));
+  const trip = [day(remission.startDate), day(remission.endDate)].filter(Boolean).join(' - ');
+  return [
+    `Motivo del traslado: ${remission.motive}`,
+    `Responsable de la emisión: ${remission.responsible}`,
+    `Kilómetros estimados: ${String(remission.km)}`,
+    ...(remission.invoiceDate === undefined
+      ? []
+      : [`Fecha de la factura: ${day(remission.invoiceDate)}`]),
+    ...(trip === '' ? [] : [`Traslado: ${trip}`]),
+    `Salida: ${remission.departure}`,
+    `Entrega: ${remission.delivery}`,
+    `Vehículo: ${remission.vehicle}`,
+    `Transportista: ${remission.carrier}`,
+    `Conductor: ${remission.driver}`,
+  ];
 }

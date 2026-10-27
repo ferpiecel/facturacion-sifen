@@ -62,6 +62,19 @@ describe('validateRemissionDraft', () => {
     expect(rules(transport({ endDate: '2026-09-30' }))).toEqual(['remission-transport-dates']);
   });
 
+  it('accepts a receiver without RUC only for export and import (motives 3 and 5)', () => {
+    const foreign = { name: 'Foreign Co', idType: 2, idNumber: 'P123456', ...place };
+    expect(rules({ motive: 3, receiver: foreign })).toEqual([]);
+    expect(rules({ motive: 5, receiver: foreign })).toEqual([]);
+    expect(rules({ motive: 1, receiver: foreign })).toEqual(['remission-receiver-document']);
+    expect(rules({ motive: 3, receiver: { ...foreign, idType: 9 } })).toEqual([
+      'remission-receiver-document',
+    ]);
+    expect(rules({ motive: 3, receiver: { ...foreign, idNumber: '' } })).toEqual([
+      'remission-receiver-document',
+    ]);
+  });
+
   it('requires motive 7 to be addressed to the issuer itself (2606)', () => {
     const errors = validateRemissionDraft({ ...draft, motive: 7 }, {}, '80000001-3');
     expect(errors.map((e) => e.rule)).toEqual(['remission-motive-7-receiver']);

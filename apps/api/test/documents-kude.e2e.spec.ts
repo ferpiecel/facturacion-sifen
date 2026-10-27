@@ -11,7 +11,7 @@ import {
   type DatabaseHandle,
 } from '@sifen/db';
 import { eq } from 'drizzle-orm';
-import { selfInvoice, signedInvoiceWithQr } from './support/signed-invoice.js';
+import { remissionNote, selfInvoice, signedInvoiceWithQr } from './support/signed-invoice.js';
 import {
   pageSizes,
   pdfText,
@@ -289,10 +289,30 @@ describe('GET /v1/documents/{id}/kude (e2e)', () => {
     expect(text).toContain('Constancia: Constancia de no ser contribuyente Nº 12345678901');
   });
 
-  it('answers a clear 422, logged below error level, for a signed type with no KuDE yet (an NRE)', async () => {
+  it('returns the KuDE PDF of a signed NRE with its own title and the transport', async () => {
+    const { document_id: id } = await create(writer);
+    await handle.db
+      .update(documents)
+      .set({
+        status: 'signed',
+        signedXml: await signedInvoiceWithQr(remissionNote),
+        signedAt: new Date(),
+      })
+      .where(eq(documents.id, id));
+
+    const response = await get(`/v1/documents/${id}/kude`, reader);
+
+    expect(response.statusCode).toBe(200);
+    const text = await pdfText(new Uint8Array(response.rawPayload));
+    expect(text).toContain('KuDE de Nota de Remisión Electrónica');
+    expect(text).toContain('Motivo del traslado: Traslado por ventas');
+    expect(text).toContain('Transportista: Transportes SA');
+  });
+
+  it('answers a clear 422, logged below error level, for a signed type with no KuDE yet (a retention)', async () => {
     const errors = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     const { document_id: id, cdc } = await create(writer);
-    const afe = (await creditNoteXml(cdc)).replace('<iTiDE>5</iTiDE>', '<iTiDE>7</iTiDE>');
+    const afe = (await creditNoteXml(cdc)).replace('<iTiDE>5</iTiDE>', '<iTiDE>8</iTiDE>');
     await handle.db
       .update(documents)
       .set({ status: 'signed', signedXml: afe, signedAt: new Date() })

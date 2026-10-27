@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   exemptItem,
+  remissionNote,
   selfInvoice,
   signedInvoiceWithQr,
   unnamedReceiver,
@@ -154,8 +155,8 @@ describe('readKudeInvoice', () => {
     ).toThrow(/dSub10/);
   });
 
-  it('rejects documents of a type with no layout yet (an NRE)', () => {
-    expect(() => readKudeInvoice(xml.replace('<iTiDE>1</iTiDE>', '<iTiDE>7</iTiDE>'))).toThrow(
+  it('rejects documents of a type with no layout yet (a retention)', () => {
+    expect(() => readKudeInvoice(xml.replace('<iTiDE>1</iTiDE>', '<iTiDE>8</iTiDE>'))).toThrow(
       /unsupported/,
     );
   });
@@ -182,6 +183,30 @@ describe('readKudeInvoice', () => {
     expect(model.creditNote).toBeUndefined();
     expect(model.debitNote).toBeUndefined();
     expect(model.totals.totalVat).toBe(0);
+  });
+
+  it('reads an NRE: the motive, the dates, the places, the vehicle and the carrier, with no money', async () => {
+    const model = readKudeInvoice(await signedInvoiceWithQr(remissionNote));
+    expect(model).toMatchObject({
+      receiver: { kind: 'named', name: 'Receptor Prueba SA' },
+      remission: {
+        motive: 'Traslado por ventas',
+        responsible: 'Emisor de la factura',
+        km: 120,
+        invoiceDate: '2026-11-01',
+        startDate: '2026-11-02',
+        endDate: '2026-11-03',
+        vehicle: 'Camion Volvo ABC123',
+        carrier: 'Transportes SA',
+        driver: 'Pedro Gomez',
+      },
+      totals: { totalOperation: 0, totalVat: 0 },
+    });
+    expect(model.remission?.departure).toContain('Calle 1');
+    expect(model.remission?.delivery).toContain('Calle 2');
+    expect(model.operationCondition).toBeUndefined();
+    expect(model.transactionType).toBeUndefined();
+    expect(model.items[0]).toMatchObject({ unitPrice: 0, total: 0 });
   });
 
   it('reads each field only from its own group, ignoring look-alike elements elsewhere', () => {

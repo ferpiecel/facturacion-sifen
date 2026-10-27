@@ -23,6 +23,7 @@ import {
 } from './accept-invoice.js';
 import type { AcceptCreditNoteInput } from './accept-credit-note.js';
 import type { AcceptSelfInvoiceInput } from './accept-standalone.js';
+import { VoidRefusedError } from '../../issuer-events/application/void-numbers.js';
 import { IdempotencyKeyCollisionError } from './ports/acceptance-unit-of-work.port.js';
 import type {
   CorrectionUnit,
@@ -61,6 +62,11 @@ export class CorrectionTypeChangedError extends Error {
     this.name = 'CorrectionTypeChangedError';
   }
 }
+
+/** The document the correction left live; `voidRefused` carries the rules that refused voiding the old number. */
+export type CorrectionResult = AcceptedInvoice & {
+  voidRefused?: VoidRefusedError['errors'];
+};
 
 export interface CorrectDocumentInput {
   tenantId: string;
@@ -154,7 +160,7 @@ async function validateCorrection(
 export function createCorrectDocument(deps: CorrectDocumentDependencies) {
   const now = deps.now ?? (() => new Date());
 
-  return async function correctDocument(input: CorrectDocumentInput): Promise<AcceptedInvoice> {
+  return async function correctDocument(input: CorrectDocumentInput): Promise<CorrectionResult> {
     const hash = requestHash({ documentId: input.documentId, payload: input.payload });
     try {
       return await correctOnce(input, hash);
@@ -164,7 +170,7 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
     }
   };
 
-  async function correctOnce(input: CorrectDocumentInput, hash: string): Promise<AcceptedInvoice> {
+  async function correctOnce(input: CorrectDocumentInput, hash: string): Promise<CorrectionResult> {
     const at = now();
     const plan = await deps.unitOfWork.run(input.tenantId, (unit) =>
       planCorrection(unit, input, hash, at),
@@ -252,54 +258,83 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
   }
 
   /**
-   * The replacement is a normal acceptance (its own key, derived from the correction's), then it is linked
-   * in the history, then the old number is voided. Each step is idempotent, so a retry resumes where it stopped.
+   * The replacement is a normal acceptance whose key derives from the rejected document, not from the correction's
+   * key: concurrent corrections with other keys resolve to the same single replacement. The link is then recorded
+   * under the document lock, still `rejected` and without a reissue, and the unique "one reissue per document"
+   * makes the loser fail with a 409; the old number is voided last. Each step is idempotent, so a retry resumes
+   * where it stopped, and a refused voiding is reported with the replacement instead of failing.
    */
   async function reissue(
     input: CorrectDocumentInput,
     hash: string,
     document: CorrectableDocument,
     stored: AcceptedInvoice | null,
-  ): Promise<AcceptedInvoice> {
-    const derived = requestHash({ key: input.idempotencyKey });
-    const replacement = stored ?? (await acceptReplacement(input, `${derived}:reissue`));
-    if (!stored) {
-      try {
-        await deps.unitOfWork.run(input.tenantId, async (unit) => {
-          await unit.recordReissue({
-            document,
-            replacementDocumentId: replacement.documentId,
-            idempotencyKey: input.idempotencyKey,
-            requestHash: hash,
-          });
-          await unit.recordAudit({
-            actor: input.actor,
-            action: 'document.corrected',
-            entity: { type: 'document', id: document.id },
-            before: { status: 'rejected', cdc: document.cdc },
-            after: { correction: 'reissue', replacementDocumentId: replacement.documentId },
-          });
-        });
-      } catch (error) {
-        // A concurrent request with the same key linked the same replacement: nothing more to record.
-        if (!(error instanceof IdempotencyKeyCollisionError)) throw error;
-      }
+  ): Promise<CorrectionResult> {
+    const derived = requestHash({ reissueOf: document.id });
+    const replacement = stored ?? (await issueAndLink(input, hash, document, derived));
+    try {
+      await deps.voidNumbers({
+        tenantId: input.tenantId,
+        actor: input.actor,
+        body: {
+          timbrado: document.timbradoNumber,
+          establishment: document.establishmentCode,
+          expeditionPoint: document.expeditionPointCode,
+          type: document.documentType,
+          ...(document.series === '' ? {} : { series: document.series }),
+          from: document.number,
+          to: document.number,
+          reason: 'Reemision por correccion del documento rechazado',
+        },
+        idempotencyKey: `${derived}:void`,
+      });
+    } catch (error) {
+      // The replacement exists and is linked: the refusal is reported with it, and a retry reports it again.
+      if (error instanceof VoidRefusedError) return { ...replacement, voidRefused: error.errors };
+      throw error;
     }
-    await deps.voidNumbers({
-      tenantId: input.tenantId,
-      actor: input.actor,
-      body: {
-        timbrado: document.timbradoNumber,
-        establishment: document.establishmentCode,
-        expeditionPoint: document.expeditionPointCode,
-        type: document.documentType,
-        ...(document.series === '' ? {} : { series: document.series }),
-        from: document.number,
-        to: document.number,
-        reason: 'Reemision por correccion del documento rechazado',
-      },
-      idempotencyKey: `${derived}:void`,
-    });
+    return replacement;
+  }
+
+  async function issueAndLink(
+    input: CorrectDocumentInput,
+    hash: string,
+    document: CorrectableDocument,
+    derived: string,
+  ): Promise<AcceptedInvoice> {
+    const replacement = await acceptReplacement(input, `${derived}:reissue`);
+    const link = () =>
+      deps.unitOfWork.run(input.tenantId, async (unit) => {
+        const current = await unit.lockDocument(document.id);
+        if (!current) throw new DocumentNotFoundError();
+        // A concurrent retry with the same key may have linked this replacement while this one waited.
+        const done = await unit.findCorrectionByKey(input.idempotencyKey);
+        if (done) {
+          if (done.requestHash !== hash) throw new IdempotencyKeyReusedError();
+          return;
+        }
+        if (current.status !== 'rejected') throw new DocumentNotCorrectableError(current.status);
+        if (await unit.findReissue(current.id)) throw new DocumentNotCorrectableError('reissued');
+        await unit.recordReissue({
+          document: current,
+          replacementDocumentId: replacement.documentId,
+          idempotencyKey: input.idempotencyKey,
+          requestHash: hash,
+        });
+        await unit.recordAudit({
+          actor: input.actor,
+          action: 'document.corrected',
+          entity: { type: 'document', id: current.id },
+          before: { status: 'rejected', cdc: current.cdc },
+          after: { correction: 'reissue', replacementDocumentId: replacement.documentId },
+        });
+      });
+    try {
+      await link();
+    } catch (error) {
+      if (!(error instanceof IdempotencyKeyCollisionError)) throw error;
+      await link();
+    }
     return replacement;
   }
 
@@ -329,5 +364,5 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
 }
 
 type Plan =
-  | { kind: 'done'; result: AcceptedInvoice }
+  | { kind: 'done'; result: CorrectionResult }
   | { kind: 'reissue'; document: CorrectableDocument; replacement: AcceptedInvoice | null };

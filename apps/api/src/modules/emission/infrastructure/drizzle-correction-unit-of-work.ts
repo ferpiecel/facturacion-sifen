@@ -11,11 +11,18 @@ import {
 } from '@sifen/db';
 import { recordAudit } from '../../audit/infrastructure/record-audit.js';
 import { IdempotencyKeyCollisionError } from '../application/ports/acceptance-unit-of-work.port.js';
+import { DocumentNotCorrectableError } from '../application/correct-document.js';
 import type {
   CorrectionUnit,
   CorrectionUnitOfWork,
 } from '../application/ports/correction-unit-of-work.port.js';
 import { createAcceptanceUnit, isIdempotencyCollision } from './drizzle-acceptance-unit-of-work.js';
+
+function isReissueCollision(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const { constraint, cause } = error as { constraint?: unknown; cause?: unknown };
+  return constraint === 'document_corrections_reissue_idx' || isReissueCollision(cause);
+}
 
 /** Runs the correction inside `withTenantTransaction`, so RLS scopes every query to the tenant. */
 export function createDrizzleCorrectionUnitOfWork(db: Database): CorrectionUnitOfWork {
@@ -149,6 +156,8 @@ export function createDrizzleCorrectionUnitOfWork(db: Database): CorrectionUnitO
               });
             } catch (error) {
               if (isIdempotencyCollision(error)) throw new IdempotencyKeyCollisionError();
+              // One reissue per document: a concurrent correction under another key linked first.
+              if (isReissueCollision(error)) throw new DocumentNotCorrectableError('reissued');
               throw error;
             }
           },

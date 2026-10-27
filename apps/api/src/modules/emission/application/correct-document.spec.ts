@@ -7,6 +7,7 @@ import {
   InvoiceValidationError,
   IssuerNotConfiguredError,
 } from './accept-invoice.js';
+import { VoidRefusedError } from '../../issuer-events/application/void-numbers.js';
 import {
   CorrectionTypeChangedError,
   DocumentNotCorrectableError,
@@ -70,15 +71,26 @@ function setup(
     storedAfterLock?: boolean;
     reissued?: { documentId: string; cdc: string } | null;
     noIssuer?: boolean;
+    voidError?: Error;
+    /** Transactions of one tenant run one at a time, as the document row lock makes them. */
+    serialize?: boolean;
   } = {},
   certificateNotAfter?: Date,
 ) {
   let lookups = 0;
   const rewriteDocument = vi.fn(() => Promise.resolve());
   const recordAudit = vi.fn(() => Promise.resolve());
-  const recordReissue = vi.fn(() => Promise.resolve());
+  let linked: { documentId: string; cdc: string } | null = null;
+  const recordReissue = vi.fn(() => {
+    linked = NEW_DOC;
+    return Promise.resolve();
+  });
   const acceptFe = vi.fn(() => Promise.resolve(NEW_DOC));
-  const voidNumbers = vi.fn(() => Promise.resolve({ eventId: 'ev', status: 'pending' as const }));
+  const voidNumbers = vi.fn(() =>
+    options.voidError
+      ? Promise.reject(options.voidError)
+      : Promise.resolve({ eventId: 'ev', status: 'pending' as const }),
+  );
   const sumCreditNotes = vi.fn(() => Promise.resolve('0'));
   const unit: CorrectionUnit = {
     findCorrectionByKey: () =>
@@ -113,11 +125,19 @@ function setup(
     sumCreditNotes,
     rewriteDocument,
     recordAudit,
-    findReissue: () => Promise.resolve(options.reissued ?? null),
+    findReissue: () => Promise.resolve(linked ?? options.reissued ?? null),
     recordReissue,
   };
+  let tail: Promise<unknown> = Promise.resolve();
   const correct = createCorrectDocument({
-    unitOfWork: { run: (_tenant, work) => work(unit) },
+    unitOfWork: {
+      run: (_tenant, work) => {
+        if (!options.serialize) return work(unit);
+        const result = tail.then(() => work(unit));
+        tail = result.catch(() => undefined);
+        return result;
+      },
+    },
     accept: { FE: acceptFe, AFE: vi.fn(), NCE: vi.fn(), NDE: vi.fn() },
     voidNumbers,
     now: () => new Date('2026-03-06T15:00:00Z'),
@@ -260,6 +280,39 @@ describe('correctDocument', () => {
       const { correct, acceptFe } = setup({ reissued: NEW_DOC });
       await expect(correct(moved)).rejects.toEqual(new DocumentNotCorrectableError('reissued'));
       expect(acceptFe).not.toHaveBeenCalled();
+    });
+
+    it('links the reissue under the document lock: a concurrent correction with another key is a 409', async () => {
+      const { correct, acceptFe, recordReissue } = setup({ serialize: true });
+      const other = { ...moved, idempotencyKey: 'key-2' };
+      const results = await Promise.allSettled([correct(moved), correct(other)]);
+      expect(results.map((r) => r.status)).toEqual(['fulfilled', 'rejected']);
+      expect((results[1] as PromiseRejectedResult).reason).toEqual(
+        new DocumentNotCorrectableError('reissued'),
+      );
+      // Both resolve to the one replacement: its key derives from the document, not from the correction's key.
+      const keys = acceptFe.mock.calls.map(
+        ([call]) => (call as { idempotencyKey: string }).idempotencyKey,
+      );
+      expect(new Set(keys).size).toBe(1);
+      expect(recordReissue).toHaveBeenCalledOnce();
+    });
+
+    it('keeps the correction and answers with the void refusal, the same on every retry', async () => {
+      const errors = [{ field: 'from', rule: 'range-used', sifenCode: '4066', message: 'used' }];
+      const voidError = new VoidRefusedError(errors);
+      const first = setup({ voidError });
+      await expect(first.correct(moved)).resolves.toEqual({ ...NEW_DOC, voidRefused: errors });
+      expect(first.recordReissue).toHaveBeenCalledOnce();
+      const stored = {
+        documentId: 'doc-1',
+        cdc: CDC,
+        requestHash: requestHash({ documentId: 'doc-1', payload: moved.payload }),
+        replacement: NEW_DOC,
+      };
+      const retry = setup({ stored, voidError });
+      await expect(retry.correct(moved)).resolves.toEqual({ ...NEW_DOC, voidRefused: errors });
+      expect(retry.acceptFe).not.toHaveBeenCalled();
     });
 
     it('keeps the same CDC up to 72 h after the issue date and reissues after it (ADR-0008)', async () => {

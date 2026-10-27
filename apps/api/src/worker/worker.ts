@@ -130,7 +130,10 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
   });
 
   // The deadline watch only reads documents and writes the outbox (HU-E6-07): no run lock, no SIFEN.
-  const processDeadlineWatch = createDeadlineWatchProcessor({ db: appHandle.db });
+  const processDeadlineWatch = createDeadlineWatchProcessor({
+    db: appHandle.db,
+    certificateAlertDays: config.certificateAlertDays,
+  });
 
   // Document emails (HU-E11-02) only read approved documents and talk to SMTP: no run lock, no SIFEN.
   let processEmails: ReturnType<typeof createDocumentEmailProcessor> | undefined;

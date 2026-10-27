@@ -27,7 +27,7 @@ Delivery: `ask-on-risk`; PRs encadenados de <= 400 líneas. Migración: solo 006
 - [x] T1 (PR 1, 3efe37f) Migración 0060 + tipo de evento `certificate.expiring` (db, API, OpenAPI, docs), umbrales y bloqueo en el
       dominio (`certificate-expiry.ts`), id/payload del evento, con tests (RED observado).
 - [x] T2 (PR 2, 88ee493) Caso de uso `WarnCertificateExpiry`, store Drizzle y outbox `enqueueCertificateExpiry`, con tests sobre PGlite.
-- [ ] T3 (PR 3) Cableado en el processor `deadline-watch`, config `CERTIFICATE_ALERT_DAYS`, `docs/configuracion.md`.
+- [x] T3 (PR 3, f23d90c) Cableado en el processor `deadline-watch`, config `CERTIFICATE_ALERT_DAYS`, `docs/configuracion.md`.
 - [ ] T4 (PR 4) Bloqueo preventivo de emisión (422) en los cuatro casos de aceptación, `CERTIFICATE_EMISSION_BLOCK_DAYS`, OpenAPI y docs.
 
 ## Verificación

@@ -16,6 +16,11 @@ import {
   ReceiverEventNotFoundError,
 } from '../../application/correct-receiver-event.js';
 import { EventKeyCollisionError } from '../../application/ports/cancellation-unit-of-work.port.js';
+import {
+  NominationAlreadyRequestedError,
+  NominationReasonInvalidError,
+  NominationRefusedError,
+} from '../../application/nominate-document.js';
 import { VoidRefusedError } from '../../application/void-numbers.js';
 import { EventIdExhaustedError } from '../drizzle-event-support.js';
 
@@ -38,6 +43,26 @@ export function toIssuerEventHttpException(error: unknown): HttpException | null
   if (error instanceof CancelReasonInvalidError) {
     return problem(HttpStatus.UNPROCESSABLE_ENTITY, 'Validation failed', [
       { field: 'reason', rule: 'reason-length', message: error.message },
+    ]);
+  }
+  if (error instanceof NominationReasonInvalidError) {
+    return problem(HttpStatus.UNPROCESSABLE_ENTITY, 'Validation failed', [
+      { field: 'reason', rule: 'reason-length', message: error.message },
+    ]);
+  }
+  if (error instanceof NominationRefusedError) {
+    return problem(HttpStatus.UNPROCESSABLE_ENTITY, 'The nomination was refused', [
+      { field: 'document', ...error.refusal },
+    ]);
+  }
+  if (error instanceof NominationAlreadyRequestedError) {
+    return problem(HttpStatus.CONFLICT, error.message, [
+      {
+        field: 'document',
+        rule: 'nomination-already-requested',
+        sifenCode: '4453',
+        message: error.message,
+      },
     ]);
   }
   if (error instanceof CancellationRefusedError) {

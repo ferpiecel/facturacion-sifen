@@ -85,7 +85,9 @@ function setup(
     linked = NEW_DOC;
     return Promise.resolve();
   });
-  const acceptFe = vi.fn((_input: { idempotencyKey: string }) => Promise.resolve(NEW_DOC));
+  const acceptFe = vi.fn<(input: { idempotencyKey: string }) => Promise<typeof NEW_DOC>>(() =>
+    Promise.resolve(NEW_DOC),
+  );
   const voidNumbers = vi.fn(() =>
     options.voidError
       ? Promise.reject(options.voidError)
@@ -291,9 +293,7 @@ describe('correctDocument', () => {
         new DocumentNotCorrectableError('reissued'),
       );
       // Both resolve to the one replacement: its key derives from the document, not from the correction's key.
-      const keys = acceptFe.mock.calls.map(
-        ([call]) => (call as { idempotencyKey: string }).idempotencyKey,
-      );
+      const keys = acceptFe.mock.calls.map(([call]) => call.idempotencyKey);
       expect(new Set(keys).size).toBe(1);
       expect(recordReissue).toHaveBeenCalledOnce();
     });

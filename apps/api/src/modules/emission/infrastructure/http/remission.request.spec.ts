@@ -76,6 +76,21 @@ describe('parseCreateRemission', () => {
     );
   });
 
+  it('accepts a foreign receiver identified by a document instead of a RUC', () => {
+    const { ruc: _ruc, ...rest } = remissionBody.receiver;
+    const foreign = { ...rest, idType: 2, idNumber: 'P123456', countryCode: 'BRA' };
+    const parsed = parseCreateRemission({ ...remissionBody, motive: 3, receiver: foreign });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(toRemissionDraft(parsed.value).receiver).toMatchObject({
+      idType: 2,
+      idNumber: 'P123456',
+      countryCode: 'BRA',
+    });
+    // A receiver with neither a RUC nor a document is refused.
+    expect(parseCreateRemission({ ...remissionBody, receiver: rest }).ok).toBe(false);
+  });
+
   it('routes `type: NRE` through the dispatcher', () => {
     expect(parseDocumentRequest(remissionBody)).toMatchObject({ ok: true, type: 'NRE' });
     expect(parseDocumentRequest({ ...remissionBody, items: [] })).toMatchObject({ ok: false });

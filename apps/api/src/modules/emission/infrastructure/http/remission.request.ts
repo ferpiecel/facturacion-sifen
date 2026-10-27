@@ -35,12 +35,26 @@ export const createRemissionSchema = z.object({
   km: z.number(),
   /** dFecEm (E506): date of the invoice the goods travel with. */
   invoiceDate: day.optional(),
-  receiver: z.object({
-    ruc: rucText('Receiver RUC'),
-    /** dNomRec (D211): tdNombre, 4..255. */
-    name: text(255, 4),
-    ...placeFields,
-  }),
+  receiver: z
+    .object({
+      /** D206; omitted for a non-taxpayer receiver, who then gives `idType` and `idNumber`. */
+      ruc: rucText('Receiver RUC').optional(),
+      /** iTipIDRec (D208) and dNumIDRec (D210): the document of a receiver without RUC. */
+      idType: z.number().optional(),
+      idNumber: text(20).optional(),
+      /** cPaisRec: ISO 3166 alpha-3. */
+      countryCode: z
+        .string()
+        .regex(/^[A-Z]{3}$/)
+        .optional(),
+      /** dNomRec (D211): tdNombre, 4..255. */
+      name: text(255, 4),
+      ...placeFields,
+    })
+    .refine((r) => r.ruc !== undefined || (r.idType !== undefined && r.idNumber !== undefined), {
+      message: 'A receiver needs a RUC or a document type and number',
+      path: ['ruc'],
+    }),
   transport: z.object({
     /** iTipTrans (E901): 1 own, 2 third party. */
     type: z.number(),

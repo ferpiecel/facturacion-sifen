@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { InvoiceValidationError } from './accept-invoice.js';
+import { CertificateExpiringError, InvoiceValidationError } from './accept-invoice.js';
 import { createAcceptRemission, type AcceptRemissionInput } from './accept-standalone.js';
 import type { RemissionDraft } from '../domain/remission-draft.js';
 import type { AcceptanceUnit } from './ports/acceptance-unit-of-work.port.js';
@@ -47,7 +47,7 @@ const INPUT: AcceptRemissionInput = {
 
 /** Spec: HU-E7-04. An NRE is type 7, own numbering, no money, and motive 7 is checked against the issuer. */
 describe('acceptRemission', () => {
-  function run() {
+  function run(certificateNotAfter?: Date) {
     const insertDocument = vi.fn(() => Promise.resolve({ id: 'new' }));
     const nextNumber = vi.fn(() => Promise.resolve({ series: null, number: 9 }));
     const unit = {
@@ -61,6 +61,7 @@ describe('acceptRemission', () => {
           timbradoId: 'tim',
           establishmentId: 'est',
           expeditionPointId: 'pt',
+          certificateNotAfter,
         }),
       nextNumber,
       insertDocument,
@@ -112,5 +113,24 @@ describe('acceptRemission', () => {
   it('accepts motive 7 addressed to the issuer', async () => {
     const { accept } = run();
     await expect(accept({ ...INPUT, draft: { ...draft, motive: 7 } })).resolves.toBeDefined();
+  });
+
+  /** Spec: HU-E3-03. */
+  it('refuses before numbering when the certificate expires within a day', async () => {
+    const { accept, nextNumber } = run(new Date('2026-03-07T01:00:00Z'));
+
+    await expect(accept(INPUT)).rejects.toBeInstanceOf(CertificateExpiringError);
+    expect(nextNumber).not.toHaveBeenCalled();
+  });
+
+  it('accepts a foreign receiver for an export and stores no receiver RUC', async () => {
+    const { accept, insertDocument } = run();
+    const receiver = { name: 'Foreign Co', idType: 2, idNumber: 'P123456', ...place };
+
+    await accept({ ...INPUT, draft: { ...draft, motive: 3, receiver } });
+
+    expect(insertDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ documentType: 7, receiverRuc: null }),
+    );
   });
 });

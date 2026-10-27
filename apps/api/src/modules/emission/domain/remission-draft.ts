@@ -49,9 +49,18 @@ export const FREIGHT_RESPONSIBLES = {
 /** The NRE motive that moves goods between the issuer's own premises (E501 = 7). */
 export const OWN_PREMISES_MOTIVE = 7;
 
+/** Motives whose receiver may be a non-taxpayer or a foreigner: export and import (D201 = 2). */
+export const FOREIGN_RECEIVER_MOTIVES: readonly number[] = [3, 5];
+
 export interface RemissionReceiver extends Place {
-  /** `<base>-<dv>` (D206). */
-  ruc: string;
+  /** `<base>-<dv>` (D206); absent for a non-taxpayer receiver, who then carries a document. */
+  ruc?: string | undefined;
+  /** iTipIDRec (D208): 1 to 4, for a receiver without RUC (motives 3 and 5 only). */
+  idType?: number | undefined;
+  /** dNumIDRec (D210). */
+  idNumber?: string | undefined;
+  /** cPaisRec (D213): ISO 3166 alpha-3, defaults to PRY. */
+  countryCode?: string | undefined;
   /** dNomRec (D211): 4 to 255 characters. */
   name: string;
 }
@@ -172,6 +181,24 @@ export function validateRemissionDraft(
       'A transfer between the issuer premises (motive 7) must be addressed to the issuer RUC (E501)',
       '2606',
     );
+  }
+
+  const { receiver } = draft;
+  if (receiver.ruc === undefined) {
+    if (
+      !FOREIGN_RECEIVER_MOTIVES.includes(draft.motive) ||
+      receiver.idType === undefined ||
+      ![1, 2, 3, 4].includes(receiver.idType) ||
+      !receiver.idNumber
+    ) {
+      add(
+        'receiver.idNumber',
+        'remission-receiver-document',
+        'A receiver without RUC is allowed only for export or import (motives 3 and 5) and needs a document type (1 to 4) and number (D208, D210)',
+      );
+    }
+  } else if (!isValidRuc(receiver.ruc)) {
+    add('receiver.ruc', 'remission-receiver-ruc', 'The receiver RUC is not valid (D206)');
   }
 
   if (!has(TRANSPORT_TYPES, transport.type)) {

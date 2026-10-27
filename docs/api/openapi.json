@@ -2166,7 +2166,8 @@
                 "document.number_voided",
                 "document.transmission_deadline_warning",
                 "document.notification.delivered",
-                "document.notification.failed"
+                "document.notification.failed",
+                "certificate.expiring"
               ]
             }
           }
@@ -2194,7 +2195,8 @@
                 "document.number_voided",
                 "document.transmission_deadline_warning",
                 "document.notification.delivered",
-                "document.notification.failed"
+                "document.notification.failed",
+                "certificate.expiring"
               ]
             }
           },

@@ -728,6 +728,7 @@ export const WEBHOOK_EVENT_TYPES = [
   'document.transmission_deadline_warning',
   'document.notification.delivered',
   'document.notification.failed',
+  'certificate.expiring',
 ] as const;
 
 /**

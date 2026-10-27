@@ -4,6 +4,7 @@ import { eq, sql } from 'drizzle-orm';
 import { fileURLToPath } from 'node:url';
 import type { DatabaseHandle } from '../src/client.js';
 import {
+  documentCorrectionClaims,
   documentCorrections,
   documents,
   tenantEstablishments,
@@ -193,6 +194,21 @@ describe('document corrections', () => {
       expect(await causeOf(update)).toContain('append-only');
       const remove = db.execute(sql`DELETE FROM document_corrections WHERE id = ${stored.id}`);
       expect(await causeOf(remove)).toContain('append-only');
+    });
+  });
+
+  describe('document_correction_claims', () => {
+    it('holds at most one claim per document, released by deleting it', async () => {
+      const { db, a, row } = await seed();
+      const claim = (key: string) =>
+        db
+          .insert(documentCorrectionClaims)
+          .values({ tenantId: a, documentId: row.id, idempotencyKey: key, requestHash: HASH })
+          .returning();
+      const [first] = await claim('key-1');
+      expect(await causeOf(claim('key-2'))).toContain('document_correction_claims_document_key');
+      await db.delete(documentCorrectionClaims).where(eq(documentCorrectionClaims.id, first.id));
+      await expect(claim('key-2')).resolves.toHaveLength(1);
     });
   });
 });

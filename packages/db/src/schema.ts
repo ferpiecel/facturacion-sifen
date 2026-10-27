@@ -1120,6 +1120,34 @@ export const documentCorrections = pgTable(
   ],
 );
 
+/**
+ * The claim a reissue takes on a rejected document before it issues the replacement (HU-E8-01, ADR-0021): at most
+ * one in-flight correction per document, checked by the same-CDC rewrite and by the reissue. Deleted when the
+ * reissue fails before issuing anything; kept once the reissue is linked (the document is then final).
+ */
+export const documentCorrectionClaims = pgTable(
+  'document_correction_claims',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    documentId: uuid('document_id').notNull(),
+    idempotencyKey: varchar('idempotency_key', { length: 255 }).notNull(),
+    requestHash: char('request_hash', { length: 64 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.tenantId, table.documentId],
+      foreignColumns: [documents.tenantId, documents.id],
+      name: 'document_correction_claims_tenant_document_fk',
+    }),
+    unique('document_correction_claims_document_key').on(table.tenantId, table.documentId),
+    check('document_correction_claims_hash_format', sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`),
+  ],
+);
+
 export const LOTE_STATUSES = [
   'pending',
   'sending',
@@ -1718,6 +1746,7 @@ export const rucLookupCache = pgTable(
 export const TENANT_TABLES = [
   'api_keys',
   'audit_log',
+  'document_correction_claims',
   'document_corrections',
   'document_emails',
   'documents',

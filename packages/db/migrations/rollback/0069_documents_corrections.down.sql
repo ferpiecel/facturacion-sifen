@@ -104,6 +104,7 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+DROP TABLE IF EXISTS "document_correction_claims";
 DROP TABLE IF EXISTS "document_corrections";
 DROP FUNCTION IF EXISTS "document_corrections_append_only"();
 ALTER TABLE "documents" DROP CONSTRAINT IF EXISTS "documents_corrections_count_range";

@@ -179,3 +179,37 @@ $$;
 --> statement-breakpoint
 CREATE TRIGGER "document_corrections_append_only" BEFORE UPDATE OR DELETE ON "document_corrections"
 FOR EACH ROW EXECUTE FUNCTION "document_corrections_append_only"();
+--> statement-breakpoint
+-- The claim a reissue takes on a rejected document before issuing its replacement (ADR-0021): one per document.
+-- Unlike the history it is released by deleting it when the reissue fails before issuing anything.
+CREATE TABLE "document_correction_claims" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"tenant_id" uuid NOT NULL,
+	"document_id" uuid NOT NULL,
+	"idempotency_key" varchar(255) NOT NULL,
+	"request_hash" char(64) NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "document_correction_claims_document_key" UNIQUE("tenant_id","document_id"),
+	CONSTRAINT "document_correction_claims_hash_format" CHECK ("document_correction_claims"."request_hash" ~ '^[0-9a-f]{64}$')
+);
+--> statement-breakpoint
+ALTER TABLE "document_correction_claims" ADD CONSTRAINT "document_correction_claims_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "document_correction_claims" ADD CONSTRAINT "document_correction_claims_tenant_document_fk" FOREIGN KEY ("tenant_id","document_id") REFERENCES "public"."documents"("tenant_id","id") ON DELETE no action ON UPDATE no action;
+--> statement-breakpoint
+ALTER TABLE "document_correction_claims" ENABLE ROW LEVEL SECURITY;
+--> statement-breakpoint
+ALTER TABLE "document_correction_claims" FORCE ROW LEVEL SECURITY;
+--> statement-breakpoint
+GRANT SELECT, INSERT, DELETE ON "document_correction_claims" TO app_user;
+--> statement-breakpoint
+GRANT SELECT, INSERT, DELETE ON "document_correction_claims" TO platform_admin;
+--> statement-breakpoint
+CREATE POLICY "tenant_isolation" ON "document_correction_claims"
+  TO app_user
+  USING (tenant_id = nullif(current_setting('app.current_tenant', true), '')::uuid)
+  WITH CHECK (tenant_id = nullif(current_setting('app.current_tenant', true), '')::uuid);
+--> statement-breakpoint
+CREATE POLICY "platform_admin_all" ON "document_correction_claims"
+  TO platform_admin
+  USING (true)
+  WITH CHECK (true);

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Headers,
@@ -8,6 +9,7 @@ import {
   Post,
   Query,
   Res,
+  Param,
 } from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
 import { RequireScopes } from '../../../identity/infrastructure/decorators/require-scopes.decorator.js';
@@ -29,6 +31,7 @@ import type {
   createAcceptSelfInvoice,
 } from '../../application/accept-standalone.js';
 import type { createWaitForDocument } from '../../application/wait-for-document.js';
+import type { createCorrectDocument } from '../../application/correct-document.js';
 import {
   ACCEPT_CREDIT_NOTE,
   ACCEPT_DEBIT_NOTE,
@@ -36,10 +39,11 @@ import {
   ACCEPT_REMISSION,
   ACCEPT_SELF_INVOICE,
   WAIT_FOR_DOCUMENT,
+  CORRECT_DOCUMENT,
 } from '../../emission.tokens.js';
 import { toRemissionDraft } from './remission.request.js';
 import { toSelfInvoiceDraft } from './self-invoice.request.js';
-import { toAcceptInvoiceInput } from './create-document.request.js';
+import { toAcceptInvoiceInput, toInvoiceDraft } from './create-document.request.js';
 import { parseDocumentRequest, toCreditNoteDraft } from './credit-note.request.js';
 import { parseIdempotencyKey } from './idempotency-key.js';
 import { toHttpException, validationProblem } from './document-http-errors.js';
@@ -48,6 +52,8 @@ import { toHttpException, validationProblem } from './document-http-errors.js';
 interface StatusReply {
   status(code: number): unknown;
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 @Controller('v1/documents')
 @RequireScopes('documents:write')
@@ -65,6 +71,8 @@ export class DocumentsController {
     private readonly acceptRemission: ReturnType<typeof createAcceptRemission>,
     @Inject(WAIT_FOR_DOCUMENT)
     private readonly waitForDocument: ReturnType<typeof createWaitForDocument>,
+    @Inject(CORRECT_DOCUMENT)
+    private readonly correctDocument: ReturnType<typeof createCorrectDocument>,
     private readonly cls: ClsService<TenancyClsStore & IdentityClsStore>,
   ) {}
 
@@ -128,6 +136,50 @@ export class DocumentsController {
           return settled;
         }
       }
+      return { document_id: accepted.documentId, cdc: accepted.cdc };
+    } catch (error) {
+      throw toHttpException(error) ?? error;
+    }
+  }
+
+  /**
+   * Corrects a `rejected` document with the full corrected body (HU-E8-01, ADR-0021): `202 { document_id, cdc }`.
+   * The same number is kept and the row is sent again. Retrying with the same `Idempotency-Key` and body
+   * returns the same response.
+   */
+  @Post(':id/correct')
+  @HttpCode(HttpStatus.ACCEPTED)
+  async correct(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
+  ) {
+    const idempotencyKey = parseIdempotencyKey(idempotencyKeyHeader);
+    if (!UUID.test(id)) throw new BadRequestException('id must be a UUID');
+    const parsed = parseDocumentRequest(body);
+    if (!parsed.ok) throw validationProblem(parsed.errors);
+    try {
+      const { value } = parsed;
+      const accepted = await this.correctDocument({
+        tenantId: this.cls.get(TENANT_ID_CLS_KEY),
+        actor: { type: 'api_key', id: this.cls.get(API_KEY_ID_CLS_KEY) },
+        documentId: id,
+        establishmentCode: value.establishment,
+        expeditionPointCode: value.expeditionPoint,
+        payload: value,
+        idempotencyKey,
+        correction:
+          parsed.type === 'FE'
+            ? {
+                type: 'FE',
+                draft: toInvoiceDraft(parsed.value),
+                receiverRuc:
+                  parsed.value.receiver.kind === 'named' ? parsed.value.receiver.ruc : null,
+              }
+            : parsed.type === 'AFE'
+              ? { type: 'AFE', draft: toSelfInvoiceDraft(parsed.value) }
+              : { type: parsed.type, draft: toCreditNoteDraft(parsed.value) },
+      });
       return { document_id: accepted.documentId, cdc: accepted.cdc };
     } catch (error) {
       throw toHttpException(error) ?? error;

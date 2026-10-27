@@ -7,6 +7,12 @@ import {
   InvoiceValidationError,
   IssuerNotConfiguredError,
 } from '../../application/accept-invoice.js';
+import {
+  CorrectionRequiresReissueError,
+  CorrectionTypeChangedError,
+  DocumentNotCorrectableError,
+  DocumentNotFoundError,
+} from '../../application/correct-document.js';
 
 /** Postgres SQLSTATE unique_violation. */
 const UNIQUE_VIOLATION = '23505';
@@ -57,6 +63,23 @@ export function toHttpException(error: unknown): HttpException | null {
       HttpStatus.CONFLICT,
       'Document numbering is exhausted for this expedition point; use another point',
     );
+  }
+  if (error instanceof DocumentNotFoundError) {
+    return problem(HttpStatus.NOT_FOUND, error.message);
+  }
+  if (error instanceof DocumentNotCorrectableError) {
+    return problem(HttpStatus.CONFLICT, error.message, { code: 'document_not_correctable' });
+  }
+  if (error instanceof CorrectionTypeChangedError) {
+    return problem(HttpStatus.UNPROCESSABLE_ENTITY, error.message, {
+      code: 'correction_type_changed',
+    });
+  }
+  if (error instanceof CorrectionRequiresReissueError) {
+    return problem(HttpStatus.UNPROCESSABLE_ENTITY, error.message, {
+      code: 'correction_requires_reissue',
+      reasons: error.reasons,
+    });
   }
   if (isUniqueViolation(error)) {
     return problem(

@@ -188,6 +188,58 @@ export function buildOpenApiDocument() {
           },
         },
       },
+      '/v1/documents/{id}/correct': {
+        post: {
+          operationId: 'correctDocument',
+          tags: ['Documents'],
+          summary: 'Correct a rejected document and send it again',
+          description:
+            'Takes the full corrected body of a document SIFEN rejected (same shape as `POST /v1/documents`; the `type` cannot change). ' +
+            'When the correction keeps the establishment, the point and the associated CDC, the document keeps its number and CDC and is queued again (`202 { document_id, cdc }` with the same ids); the previous body and SIFEN messages are kept in the correction history. ' +
+            'Only a `rejected` document can be corrected (409 `document_not_correctable`). A correction that changes the establishment, the point or the associated CDC answers 422 `correction_requires_reissue` with the `reasons`. ' +
+            'Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.',
+          ...secured(['documents:write']),
+          parameters: [
+            idParam('Document'),
+            {
+              name: 'Idempotency-Key',
+              in: 'header',
+              required: true,
+              description: '1 to 255 printable ASCII characters, no spaces',
+              schema: { type: 'string', pattern: '^[!-~]{1,255}$' },
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  oneOf: [
+                    ref('CreateDocumentRequest'),
+                    ref('CreateCreditNoteRequest'),
+                    ref('CreateDebitNoteRequest'),
+                    ref('CreateSelfInvoiceRequest'),
+                  ],
+                },
+              },
+            },
+          },
+          responses: {
+            '202': json('Accepted', ref('DocumentAccepted')),
+            '400': problem('Missing or malformed Idempotency-Key, or id is not a UUID'),
+            '401': UNAUTHORIZED,
+            '403': FORBIDDEN,
+            '404': NOT_FOUND,
+            '409': problem(
+              'Idempotency-Key reused with another body, or the document is not rejected',
+            ),
+            '422': problem(
+              'Validation failed, the type changed, or the correction changes the number',
+              'ValidationProblem',
+            ),
+          },
+        },
+      },
       '/v1/documents/{id}/cancel': {
         post: {
           operationId: 'cancelDocument',

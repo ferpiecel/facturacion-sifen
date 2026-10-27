@@ -18,3 +18,5 @@ export const ACCEPT_REMISSION = Symbol('AcceptRemission');
 
 /** Injection token for the `waitForDocument` application function (HU-E6-06, `?wait=true`). */
 export const WAIT_FOR_DOCUMENT = Symbol('WaitForDocument');
+/** Injection token for the `correctDocument` application function (HU-E8-01). */
+export const CORRECT_DOCUMENT = Symbol('CorrectDocument');

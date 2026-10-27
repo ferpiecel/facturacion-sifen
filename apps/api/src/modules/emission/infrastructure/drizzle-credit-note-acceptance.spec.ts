@@ -4,6 +4,7 @@ import {
   auditLog,
   createPgliteDatabase,
   documents,
+  issuerEvents,
   tenants,
   usageCounters,
   withTenantTransaction,
@@ -18,6 +19,7 @@ import { InvoiceValidationError } from '../application/accept-invoice.js';
 import { parseCdc } from '../domain/cdc.js';
 import {
   acceptInvoiceWithStatus,
+  FE_BODY,
   seedIssuer,
 } from '../../../../test/support/credit-note-fixture.js';
 import { createDrizzleAcceptanceUnitOfWork } from './drizzle-acceptance-unit-of-work.js';
@@ -129,6 +131,81 @@ describe('AcceptCreditNote with the Drizzle unit of work', () => {
       tx.select().from(auditLog).where(eq(auditLog.entityId, documentId)),
     );
     expect(audit[0]).toMatchObject({ action: 'document.accepted' });
+  });
+
+  describe('over an FE issued to an unnamed receiver (HU-E8-05, 2442)', () => {
+    const NOMINATED = {
+      kind: 'taxpayer',
+      ruc: '80012345-1',
+      taxpayerType: 2,
+      name: 'Cliente Nominado SA',
+      country: 'PRY',
+      operationType: 'B2B',
+    };
+
+    async function unnamedFe() {
+      const body = { ...FE_BODY, operationType: 'B2C', receiver: { kind: 'unnamed' } };
+      const fe = await acceptInvoiceWithStatus(
+        handle.db,
+        tenantId,
+        `fe-${String(++keySeq)}`,
+        'approved',
+        body,
+      );
+      feCdc = fe.cdc;
+      return fe;
+    }
+
+    async function nominate(documentId: string, status: 'pending' | 'approved' | 'rejected') {
+      const [row] = await handle.db
+        .insert(issuerEvents)
+        .values({
+          tenantId,
+          environment: 'test',
+          kind: 'nomination',
+          eventId: BigInt(++keySeq),
+          reason: 'Cliente identificado',
+          documentId,
+          nomination: NOMINATED,
+        })
+        .returning();
+      const path = {
+        pending: [],
+        approved: ['signed', 'sending', 'approved'],
+        rejected: ['signed', 'sending', 'rejected'],
+      }[status];
+      for (const step of path) {
+        await handle.db
+          .update(issuerEvents)
+          .set({
+            status: step,
+            ...(step === 'signed' ? { signedXml: '<a/>', signedAt: new Date() } : {}),
+            ...(step === 'sending' ? { batchDId: 3n, sendAttemptedAt: new Date() } : {}),
+            ...(step === 'approved' || step === 'rejected'
+              ? { responseCode: '0600', responseMessage: 'ok', respondedAt: new Date() }
+              : {}),
+          })
+          .where(eq(issuerEvents.id, row.id));
+      }
+    }
+
+    it('still refuses it while the nomination is not approved (1331)', async () => {
+      const fe = await unnamedFe();
+      expect(await rulesOf(acceptCredit()(credit()))).toContain('credit-note-unnamed-receiver');
+      await nominate(fe.documentId, 'rejected');
+      await nominate(fe.documentId, 'pending');
+      expect(await rulesOf(acceptCredit()(credit()))).toContain('credit-note-unnamed-receiver');
+    });
+
+    it('accepts it once SIFEN approved the nomination, with the nominated receiver', async () => {
+      const fe = await unnamedFe();
+      await nominate(fe.documentId, 'approved');
+
+      const { documentId } = await acceptCredit()(credit());
+
+      const row = (await rows()).find((r) => r.id === documentId);
+      expect(row).toMatchObject({ documentType: 5, receiverRuc: '80012345-1' });
+    });
   });
 
   it('leaves the FE untouched: no association and its own sequence', async () => {

@@ -6,12 +6,19 @@ import {
   ReceiverCorrectionRefusedError,
   createCorrectReceiverEvent,
 } from './correct-receiver-event.js';
-import { ReceiverEventInvalidError } from './register-receiver-event.js';
+import {
+  ReceiverEventInvalidError,
+  ReceiverEventRefusedError,
+  ReceiverProfileMissingError,
+} from './register-receiver-event.js';
+import { EventKeyReusedError } from './cancel-document.js';
+import { EventKeyCollisionError } from './ports/cancellation-unit-of-work.port.js';
 import {
   ReceiverEventDuplicateError,
   type CorrectionTarget,
   type CorrectionUnit,
   type NewReceiverEvent,
+  type StoredReceiverEvent,
 } from './ports/receiver-event-unit-of-work.port.js';
 
 const NOW = new Date('2026-10-20T12:00:00Z');
@@ -65,16 +72,20 @@ function setup(
   overrides: {
     original?: CorrectionTarget | null;
     history?: PriorReceiverEvent[];
+    stored?: StoredReceiverEvent | null;
     party?: { ruc: string; name: string } | null;
+    collideOnce?: boolean;
     duplicate?: boolean;
   } = {},
 ) {
   const inserted: NewReceiverEvent[] = [];
   const audits: unknown[] = [];
   const locked: string[] = [];
+  let collide = overrides.collideOnce ?? false;
+  let stored = collide ? null : (overrides.stored ?? null);
   const original = overrides.original === undefined ? target() : overrides.original;
   const unit: CorrectionUnit = {
-    findByIdempotencyKey: () => Promise.resolve(null),
+    findByIdempotencyKey: () => Promise.resolve(stored),
     cdcOfEvent: () => Promise.resolve(original?.cdc ?? null),
     findCorrectable: () => Promise.resolve(original),
     lockCdc(cdc) {
@@ -100,6 +111,11 @@ function setup(
         ],
       ),
     insertEvent(event) {
+      if (collide) {
+        collide = false;
+        stored = overrides.stored ?? null;
+        return Promise.reject(new EventKeyCollisionError());
+      }
       if (overrides.duplicate) return Promise.reject(new ReceiverEventDuplicateError());
       inserted.push(event);
       return Promise.resolve({ id: 'new-event-uuid' });
@@ -195,5 +211,63 @@ describe('createCorrectReceiverEvent', () => {
     await expect(call()).rejects.toMatchObject({
       refusal: { rule: 'correction-window-expired' },
     });
+  });
+
+  it('needs the fiscal profile when the replacement names the receiver', async () => {
+    const { call } = setup({
+      original: target({ kind: 'disconformity', conformityType: undefined }),
+      history: [{ kind: 'disconformity', registeredAt: new Date('2026-10-17T12:00:00Z') }],
+      party: null,
+    });
+
+    await expect(
+      call(
+        body({ kind: 'unawareness', receivedAt: '2026-10-02T10:00:00', reason: 'No lo conozco' }),
+      ),
+    ).rejects.toBeInstanceOf(ReceiverProfileMissingError);
+  });
+
+  it('maps the unique index of open events to an already-registered refusal', async () => {
+    const { call } = setup({ duplicate: true });
+
+    await expect(call()).rejects.toBeInstanceOf(ReceiverEventRefusedError);
+  });
+
+  it('replays the stored result for the same key and body', async () => {
+    const first = setup();
+    await first.call();
+    const hash = first.inserted[0].requestHash;
+    const { call, inserted } = setup({
+      stored: { eventId: 'prev', kind: 'disconformity', cdc: CDC, requestHash: hash },
+    });
+
+    await expect(call()).resolves.toEqual({
+      eventId: 'prev',
+      correctsEventId: ORIGINAL,
+      kind: 'disconformity',
+      cdc: CDC,
+      status: 'pending',
+    });
+    expect(inserted).toHaveLength(0);
+  });
+
+  it('refuses a reused key with another body', async () => {
+    const { call } = setup({
+      stored: { eventId: 'prev', kind: 'disconformity', cdc: CDC, requestHash: 'x'.repeat(64) },
+    });
+
+    await expect(call()).rejects.toBeInstanceOf(EventKeyReusedError);
+  });
+
+  it('retries once when a concurrent commit took the key', async () => {
+    const first = setup();
+    await first.call();
+    const hash = first.inserted[0].requestHash;
+    const { call } = setup({
+      collideOnce: true,
+      stored: { eventId: 'prev', kind: 'disconformity', cdc: CDC, requestHash: hash },
+    });
+
+    await expect(call()).resolves.toMatchObject({ eventId: 'prev' });
   });
 });

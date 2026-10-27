@@ -18,10 +18,8 @@ Opt-in synchronous send of a single DE through `siRecepDE`; SIFEN code 1264 (RUC
 
 ## Tasks
 
-- [x] A1: `SendLote` sync path behind an optional `SyncDispatch` port, `RUC_NO_HABILITADO_SINCRONICO` code (inert until A2 wires it)
-- [ ] A2: migration 0064 + schema flag + `createDrizzleSyncDispatch` (flag read, audited disable, settle) + worker wiring + cycle integration tests + operacion.md
-- [ ] B: `?wait=true` in `POST /v1/documents`, `SYNC_WAIT_TIMEOUT_MS`, docs (`docs/configuracion.md`, `docs/integracion/emision.md`, openapi), battery scenario
+- [x] A1 (PR #372, branch feat/hu-e6-06-sync, pushed, verify green): `SendLote` sync path behind an optional `SyncDispatch` port, `RUC_NO_HABILITADO_SINCRONICO` code (inert until A2 wires it)
+- [x] A2: migration 0064 + schema flag + `createDrizzleSyncDispatch` + worker wiring + cycle integration tests + fix: a failing flag clear on 1264 still falls back to batch (verify via push)
+- [ ] B (also: ops CLI `tenant:sync-transmission --tenant <id> --on|--off` + docs/operacion.md, saved as patch in the writer scratchpad; rewrite from the A2 design: `setSyncTransmission` with withTenantTransaction + audit `tenant.sync_transmission_set`): `?wait=true` in `POST /v1/documents`, `SYNC_WAIT_TIMEOUT_MS`, docs (`docs/configuracion.md`, `docs/integracion/emision.md`, openapi), battery scenario
 
 ## Progress and evidence
-
-(none yet)

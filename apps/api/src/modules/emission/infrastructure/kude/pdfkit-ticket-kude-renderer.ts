@@ -10,13 +10,14 @@ import {
   KUDE_CONSULT_URL,
   KUDE_CREDIT_NOTE_TITLE,
   KUDE_DEBIT_NOTE_TITLE,
+  KUDE_REMISSION_TITLE,
   KUDE_SELF_INVOICE_TITLE,
   KUDE_TITLE,
   documentNumberOfCdc,
   type KudeInvoice,
   type KudeItem,
 } from '../../domain/kude-model.js';
-import { fonts, PT_PER_MM, renderQr, sanitize } from './kude-pdf-common.js';
+import { fonts, PT_PER_MM, remissionRows, renderQr, sanitize } from './kude-pdf-common.js';
 
 type TicketFormat = 'ticket-80' | 'ticket-58';
 type Doc = InstanceType<typeof PDFDocument>;
@@ -40,7 +41,9 @@ const titleOf = (invoice: KudeInvoice): string =>
       ? KUDE_CREDIT_NOTE_TITLE
       : invoice.selfInvoice
         ? KUDE_SELF_INVOICE_TITLE
-        : KUDE_TITLE;
+        : invoice.remission
+          ? KUDE_REMISSION_TITLE
+          : KUDE_TITLE;
 
 const rateLabel = (rate: KudeItem['vatRate']): string => (rate === 0 ? 'Ex.' : `${String(rate)}%`);
 
@@ -114,10 +117,12 @@ class Layout {
     this.rule();
     this.general(invoice);
     this.rule();
-    this.items(invoice.items);
+    this.items(invoice.items, invoice.remission !== undefined);
     this.rule();
-    this.totals(invoice);
-    this.rule();
+    if (!invoice.remission) {
+      this.totals(invoice);
+      this.rule();
+    }
     this.consult(invoice, qr);
     return this.y;
   }
@@ -178,7 +183,9 @@ class Layout {
           ? 'Nota de Crédito Electrónica'
           : invoice.selfInvoice
             ? 'Autofactura Electrónica'
-            : 'Factura Electrónica',
+            : invoice.remission
+              ? 'Nota de Remisión Electrónica'
+              : 'Factura Electrónica',
       { align: 'center', bold: true },
     );
     this.block(
@@ -214,6 +221,7 @@ class Layout {
         `Constancia: ${certificate.number}`,
       );
     }
+    if (invoice.remission) rows.push(...remissionRows(invoice.remission));
     const note = invoice.debitNote ?? invoice.creditNote;
     if (note) {
       const { reason, associatedCdc } = note;
@@ -226,9 +234,13 @@ class Layout {
     for (const row of rows) this.block(row);
   }
 
-  private items(items: KudeItem[]): void {
+  private items(items: KudeItem[], quantityOnly: boolean): void {
     for (const item of items) {
       this.block(`${item.code} ${item.description}`);
+      if (quantityOnly) {
+        this.block(`Cantidad: ${formatQuantity(item.quantity)} ${item.unit}`.trim());
+        continue;
+      }
       this.pair(
         `${formatQuantity(item.quantity)} x ${formatPyg(item.unitPrice)}`,
         `${formatPyg(item.total)} (${rateLabel(item.vatRate)})`,

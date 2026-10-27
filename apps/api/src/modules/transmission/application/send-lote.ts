@@ -1,4 +1,9 @@
-import { SIFEN_CODES, SifenCircuitOpenError, type SifenGateway } from '@sifen/sifen-gateway';
+import {
+  SIFEN_CODES,
+  SifenCircuitOpenError,
+  SifenTenantUnavailableError,
+  type SifenGateway,
+} from '@sifen/sifen-gateway';
 import { EmptyLoteError, type Lote } from '../domain/lote-builder.js';
 import { documentStatusOf, type DocumentResolution } from './poll-lote-result.js';
 import { isRucBlockMessage } from './ruc-block.js';
@@ -134,7 +139,7 @@ export class SendLote {
       await sync.recordSettled(loteId, resolution);
       return { status: 'processed', resolution };
     } catch (error) {
-      if (error instanceof SifenCircuitOpenError) {
+      if (error instanceof SifenCircuitOpenError || error instanceof SifenTenantUnavailableError) {
         return { status: 'deferred', retryAt: error.retryAt };
       }
       const reason = error instanceof Error ? error.message : String(error);
@@ -151,7 +156,7 @@ export class SendLote {
       return interpret(receipt);
     } catch (error) {
       // The breaker refused locally: nothing reached SIFEN, so the lote is not `unknown`.
-      if (error instanceof SifenCircuitOpenError) {
+      if (error instanceof SifenCircuitOpenError || error instanceof SifenTenantUnavailableError) {
         return { status: 'deferred', retryAt: error.retryAt };
       }
       // Once the call started SIFEN may hold the lote, whatever went wrong: never resend.

@@ -21,16 +21,16 @@ ADR-0021 did not exist when this story started (the plan says "ADR first"). It i
 - Types: FE, AFE, NCE, ND. Changing the document type is refused. Remission notes follow when their routing merges.
 
 ## Tasks
-- [x] A1 ADR-0021, migration 0065 (`document_corrections`, `corrections_count`, guard door), schema, db tests (branch feat/hu-e8-01-correct, see git log)
-- [ ] B1 CDC-impact classifier (pure) and `CorrectDocument` use case, same-CDC path, store, idempotency
-- [ ] B2 endpoint, HTTP errors, OpenAPI regeneration
-- [ ] C1 CDC-changing path: replacement accept plus void, webhook mapping, docs/integracion/emision.md
-
-## Slices (PRs)
-A: ADR + migration + db tests. B: use case + endpoint (same CDC). C: reissue + docs.
+- [x] A1 ADR-0021, migration 0065, db tests (PR #371; blocker fixed: rollback restores guard of 0034, door requires the history row)
+- [x] B1 classifier `classifyCorrection`, ports, `sumCreditNotes` excludeCdc, db table tests (PR #373, base main, Depende de #371)
+- [x] B2 `createCorrectDocument` use case + spec (PR #374, Depende de #373)
+- [x] B3a Drizzle `createDrizzleCorrectionUnitOfWork` + spec; `documentCorrections` exported from @sifen/db (branch feat/hu-e8-01-correct-endpoint, PR opened as #375 "Depende de #374")
+- [ ] B3b endpoint `POST /v1/documents/{id}/correct` (Idempotency-Key, documents:write): request parse by `type` (reuse parseDocumentRequest, toAcceptInvoiceInput/toSelfInvoiceDraft/toCreditNoteDraft), controller method, tokens + module wiring (CORRECT_DOCUMENT), toHttpException mapping (DocumentNotFoundError 404, DocumentNotCorrectableError 409, CorrectionTypeChangedError 422, CorrectionRequiresReissueError 422 until C), e2e with inject(), OpenAPI regen (`pnpm --filter @sifen/api openapi`). New branch from feat/hu-e8-01-correct-endpoint.
+- [ ] C1 CDC-changing path: in correctOnce, on `reissue` call the normal accept for the type with the new body (new key derived from the correction key), insert document_corrections kind=reissue with replacement_document_id, then void the old number via the E8-03 void-numbers use case (body from the rejected row: timbrado number, establishment/point codes, type, series, number); idempotent/resumable; docs/integracion/emision.md; replace CorrectionRequiresReissueError.
 
 ## Progress / evidence
-A1 done: RED observed (missing column), GREEN 9 db tests + rls-coverage. Table tests (isolation, unique key, one reissue per doc) were trimmed for the 400-line limit: add them with the store in B1.
+RED observed for every unit (module missing). Branch chain, all PRs base main, draft: #371 (A) <- #373 <- #374 <- #375. Each PR pushed with verify OK. B-slice pushes needed `pnpm verify` ~6 min (run foreground with timeout 590). Untracked files in the worktree break verify: keep the tree clean when pushing.
+Webhook events are not re-enqueued on correction (event id per doc+type already exists).
 
 ## Next step
-Slice B: branch from feat/hu-e8-01-correct. Read accept-invoice.ts/accept-credit-note.ts/accept-standalone.ts (extract validation shared with the correction), add `sumCreditNotes` exclude-own-CDC param, pure CDC-impact classifier, CorrectDocument use case + Drizzle unit (lock row FOR UPDATE, insert document_corrections, rewrite via the guard door: status accepted, corrections_count+1, signed_xml/at NULL, attempts 0, hold/next_transmission_at/sifen_messages NULL), endpoint POST /v1/documents/{id}/correct (Idempotency-Key, documents:write), OpenAPI regen. Slice C: reissue via accept + void-numbers (body from the rejected row: timbrado number, establishment/point codes, type, series, number), docs/integracion/emision.md. Void is async; rejected docs do not block the void range.
+B3b then C1 as above, each its own PR <=400 lines.

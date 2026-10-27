@@ -1,6 +1,6 @@
 # Operación
 
-Requiere el entorno de [`desarrollo.md`](desarrollo.md). Variables de entorno en [`configuracion.md`](configuracion.md).
+Requiere el entorno de [`desarrollo.md`](desarrollo.md). Variables de entorno en [`configuracion.md`](configuracion.md). Procedimientos ante incidentes (SIFEN caído, RUC bloqueado, certificado vencido, DE a 72 h, backup) en [`runbooks/`](runbooks/README.md).
 
 El operador crea partners, tenants y API keys con el CLI `apps/api/src/cli/ops.ts` (backlog HU-E1-05), nunca a mano en la base. El CLI exige `OPS_DATABASE_URL`: una conexión propia del operador, distinta de `DATABASE_URL` (el rol `app_login`, sujeto a RLS). Sin `OPS_DATABASE_URL` el CLI se niega a arrancar.
 

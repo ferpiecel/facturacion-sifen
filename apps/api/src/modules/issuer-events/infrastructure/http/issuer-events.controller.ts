@@ -21,7 +21,10 @@ import {
   type TenancyClsStore,
 } from '../../../tenancy/infrastructure/tenancy-cls-store.js';
 import type { createCancelDocument } from '../../application/cancel-document.js';
-import { CANCEL_DOCUMENT } from '../../issuer-events.tokens.js';
+import type { createNominateDocument } from '../../application/nominate-document.js';
+import { CANCEL_DOCUMENT, NOMINATE_DOCUMENT } from '../../issuer-events.tokens.js';
+import { validationProblem } from '../../../emission/infrastructure/http/document-http-errors.js';
+import { parseNominateBody } from './nominate-document.request.js';
 import { toIssuerEventHttpException } from './issuer-event-http-errors.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -33,6 +36,8 @@ export class IssuerEventsController {
   constructor(
     @Inject(CANCEL_DOCUMENT)
     private readonly cancelDocument: ReturnType<typeof createCancelDocument>,
+    @Inject(NOMINATE_DOCUMENT)
+    private readonly nominateDocument: ReturnType<typeof createNominateDocument>,
     private readonly cls: ClsService<TenancyClsStore & IdentityClsStore>,
   ) {}
 
@@ -58,6 +63,36 @@ export class IssuerEventsController {
         actor: { type: 'api_key', id: this.cls.get(API_KEY_ID_CLS_KEY) },
         documentId: id,
         reason,
+        idempotencyKey,
+      });
+      return { event_id: result.eventId, document_id: result.documentId, status: result.status };
+    } catch (error) {
+      throw toIssuerEventHttpException(error) ?? error;
+    }
+  }
+
+  /**
+   * Names the receiver of an approved FE issued to an unnamed receiver: `202 { event_id, document_id,
+   * status }`. The worker signs and sends the nomination event (HU-E8-05). Same idempotency as cancel.
+   */
+  @Post(':id/nominate')
+  @HttpCode(HttpStatus.ACCEPTED)
+  async nominate(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Headers('idempotency-key') idempotencyKeyHeader: string | undefined,
+  ) {
+    const idempotencyKey = parseIdempotencyKey(idempotencyKeyHeader);
+    if (!UUID.test(id)) throw new BadRequestException('id must be a UUID');
+    const parsed = parseNominateBody(body);
+    if (!parsed.ok) throw validationProblem(parsed.errors);
+    try {
+      const result = await this.nominateDocument({
+        tenantId: this.cls.get(TENANT_ID_CLS_KEY),
+        actor: { type: 'api_key', id: this.cls.get(API_KEY_ID_CLS_KEY) },
+        documentId: id,
+        reason: parsed.value.reason,
+        receiver: parsed.value.receiver,
         idempotencyKey,
       });
       return { event_id: result.eventId, document_id: result.documentId, status: result.status };

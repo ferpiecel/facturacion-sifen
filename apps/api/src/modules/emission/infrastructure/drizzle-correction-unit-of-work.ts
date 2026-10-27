@@ -22,12 +22,12 @@ export function createDrizzleCorrectionUnitOfWork(db: Database): CorrectionUnitO
       withTenantTransaction(db, tenantId, (tx) => {
         const acceptance = createAcceptanceUnit(tx, tenantId);
         const unit: CorrectionUnit = {
-          resolveIssuer: acceptance.resolveIssuer,
-          findAssociatedInvoice: acceptance.findAssociatedInvoice,
-          sumCreditNotes: acceptance.sumCreditNotes,
+          resolveIssuer: (query) => acceptance.resolveIssuer(query),
+          findAssociatedInvoice: (cdc, env) => acceptance.findAssociatedInvoice(cdc, env),
+          sumCreditNotes: (cdc, env, exclude) => acceptance.sumCreditNotes(cdc, env, exclude),
           recordAudit: (entry) => recordAudit(tx, entry),
           async findCorrectionByKey(key) {
-            const [row] = await tx
+            const rows = await tx
               .select({
                 documentId: documentCorrections.documentId,
                 cdc: documents.cdc,
@@ -47,10 +47,10 @@ export function createDrizzleCorrectionUnitOfWork(db: Database): CorrectionUnitO
                   eq(documentCorrections.idempotencyKey, key),
                 ),
               );
-            return row ?? null;
+            return rows.at(0) ?? null;
           },
           async lockDocument(documentId) {
-            const [row] = await tx
+            const rows = await tx
               .select({
                 id: documents.id,
                 cdc: documents.cdc,
@@ -79,7 +79,7 @@ export function createDrizzleCorrectionUnitOfWork(db: Database): CorrectionUnitO
               )
               .where(and(eq(documents.tenantId, tenantId), eq(documents.id, documentId)))
               .for('update', { of: documents });
-            return row ?? null;
+            return rows.at(0) ?? null;
           },
           async rewriteDocument(change) {
             try {

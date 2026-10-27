@@ -99,7 +99,7 @@ describe('CorrectDocument with the Drizzle unit of work', () => {
   it('replays the same key without a second correction', async () => {
     await correct()(input());
     await expect(correct()(input())).resolves.toEqual({ documentId, cdc });
-    expect((await row())?.correctionsCount).toBe(1);
+    expect((await row()).correctionsCount).toBe(1);
   });
 
   it('refuses a second correction once the document is no longer rejected', async () => {

@@ -1,4 +1,4 @@
-import { SifenCircuitOpenError } from '@sifen/sifen-gateway';
+import { SifenTenantUnavailableError } from '@sifen/sifen-gateway';
 import { describe, expect, it } from 'vitest';
 import { WorkerConfigError } from './worker-config.js';
 import { createWorkerSifen, type WorkerSifenDeps } from './worker-gateway.js';
@@ -51,6 +51,17 @@ describe('createWorkerSifen', () => {
     const sifen = createWorkerSifen({ SIFEN_GATEWAY: 'soap' }, deps);
     await expect(
       sifen.gatewayFor('t-1').enviarLote({ dId: 1n, des: ['<x/>'] }),
-    ).rejects.toBeInstanceOf(SifenCircuitOpenError);
+    ).rejects.toBeInstanceOf(SifenTenantUnavailableError);
+  });
+
+  it('never lets one tenant without a certificate pause sends for the others', async () => {
+    const sifen = createWorkerSifen({ SIFEN_GATEWAY: 'soap' }, deps);
+    for (let i = 0; i < 6; i++) {
+      await sifen
+        .gatewayFor('t-1')
+        .enviarLote({ dId: 1n, des: ['<x/>'] })
+        .catch(() => undefined);
+    }
+    expect(sifen.sendPausedUntil()).toBeNull();
   });
 });

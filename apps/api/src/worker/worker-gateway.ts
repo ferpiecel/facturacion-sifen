@@ -66,8 +66,7 @@ export function createWorkerSifen(env: NodeJS.ProcessEnv, deps: WorkerSifenDeps)
     ...(config.timeoutMs === undefined ? {} : { timeoutMs: config.timeoutMs }),
     ...(config.trustedRoots === undefined ? {} : { trustedRoots: config.trustedRoots }),
   });
-  // The breaker only needs an inner gateway to exist: every call goes through `around`.
-  const breaker = new CircuitBreakerGateway(factory.forTenant(''), { onStateChange });
+  const breaker = CircuitBreakerGateway.shared({ onStateChange });
   return {
     gatewayFor: (tenantId) => breaker.around(factory.forTenant(tenantId)),
     sendPausedUntil: () => breaker.pausedUntil('enviarLote'),

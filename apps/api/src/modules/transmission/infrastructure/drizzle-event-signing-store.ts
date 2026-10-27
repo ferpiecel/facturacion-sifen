@@ -1,5 +1,6 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import { documents, issuerEvents, tenants, withTenantTransaction, type Database } from '@sifen/db';
+import type { NominationEventReceiver } from '@sifen/sifen-gateway';
 import type {
   EventSigningStore,
   EventToSign,
@@ -74,6 +75,7 @@ export function createDrizzleEventSigningStore({
             cdc: sql<string | null>`coalesce(${documents.cdc}, ${issuerEvents.targetCdc})`,
             voidRange: issuerEvents.voidRange,
             receiverData: issuerEvents.receiverData,
+            nomination: issuerEvents.nomination,
           })
           .from(issuerEvents)
           .innerJoin(tenants, eq(tenants.id, issuerEvents.tenantId))
@@ -92,6 +94,7 @@ export function createDrizzleEventSigningStore({
         ...row,
         voidRange: row.voidRange as StoredVoidRange | null,
         receiverData: row.receiverData as StoredReceiverData | null,
+        nomination: row.nomination as NominationEventReceiver | null,
       };
       return event;
     },

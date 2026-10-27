@@ -25,6 +25,8 @@ Opt-in synchronous send of a single DE through `siRecepDE`; SIFEN code 1264 (RUC
 
 ## Progress and evidence
 
+- Restack (post #370 merge): chain rebased onto main (migration 0064 after 0063, snapshot prevId chained). Review fixes, each RED first where it failed: #376 test pinning recovery by CDC when `recordSettled` fails (already behaved correctly: lote goes `unknown`, no second submission); #378 `?wait=true` answers 202 if the hold throws (was 500); #380 `--actor <name>` required on `tenant:sync-transmission` (audit actor, was fixed `ops-cli`).
+
 ## Handoff
 
-Chain: #372 (A1) <- #376 (A2, migration 0064) <- #378 (B, wait) <- #380 (C, ops CLI), all draft except #372. Remaining: review each PR, rebase onto main with `git rebase --onto main <previous branch>` as each merges, mark ready, merge. Nothing else pending.
+Chain: #376 (A2, migration 0064) <- #378 (B, wait) <- #380 (C, ops CLI), rebased on main, ready for review. Remaining: review, merge in order.

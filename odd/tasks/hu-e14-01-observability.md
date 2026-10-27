@@ -26,8 +26,14 @@ apps/api (telemetry module, bootstrap, worker), docs, odd. Pinned exact deps (`@
 
 ## Progress / evidence
 
-(none yet)
+- Branch `full-e14` (local only, from an older main) holds the finished PR 2 and PR 3 code: the OTel adapter, `createTelemetryRuntime`, the Nest module, `/metrics`, the trace interceptor, `x-trace-id` and the e2e spec. All of it passed vitest, eslint, tsc and depcruise. Retrieve files with `git checkout full-e14 -- <path>`, and re-apply the `docs/configuracion.md` diff 3-way, because main moved.
+- PR 1 (T1a) is committed on `feat/hu-e14-01-observability` (4338dd37, 894f1d3a, 2bbef55a). The first push was still running `pnpm verify` when this was written, and the PR is not opened yet (body draft: `gh pr create`, Spanish, template, `PR 1/5`). One earlier push attempt failed on a depcruise violation (domain spec importing infrastructure), fixed in 2bbef55a. A later one failed only because two verifies ran at once and collided on the coverage directory: run exactly one push at a time.
+- Pinned deps used: `@opentelemetry/api` 1.10.0, `sdk-trace` 3.0.0 (`TracerProvider`, `SimpleSpanProcessor({ exporter })`), `sdk-metrics` 3.0.0, `exporter-prometheus` 0.300.0 (`preventServerStart: true`, `getMetricsRequestHandler`), `exporter-trace-otlp-http` 0.300.0, `resources` 3.0.0, `context-async-hooks` 3.0.0, `core` 3.0.0.
+- Gotchas: the app has no direct `fastify` dependency (use structural request/reply types); controllers hijack the reply to serve the Prometheus text; use a fresh `InMemorySpanExporter` per test; domain specs must not import infrastructure.
 
 ## Next step
 
-T1 branch feat/hu-e14-01-observability.
+1. Confirm PR 1 is pushed (`git ls-remote`), push 2bbef55a if not, open PR 1 ready.
+2. PR 2: branch `feat/hu-e14-01-otel-adapter` from PR 1; bring `otel-telemetry*.ts`, `telemetry-runtime.ts`, `apps/api/package.json` and the lockfile from `full-e14` (~300 lines).
+3. PR 3: Nest module, `/metrics`, interceptor, e2e, and the `app.module.ts` import (~190 lines).
+4. PR 4 (T2), PR 5 (T3) as listed above. Not started.

@@ -21,7 +21,7 @@ ADR-0021 did not exist when this story started (the plan says "ADR first"). It i
 - Types: FE, AFE, NCE, ND. Changing the document type is refused. Remission notes follow when their routing merges.
 
 ## Tasks
-- [ ] A1 ADR-0021, migration 0065 (`document_corrections`, `corrections_count`, guard door), schema, db tests
+- [x] A1 ADR-0021, migration 0065 (`document_corrections`, `corrections_count`, guard door), schema, db tests (branch feat/hu-e8-01-correct, see git log)
 - [ ] B1 CDC-impact classifier (pure) and `CorrectDocument` use case, same-CDC path, store, idempotency
 - [ ] B2 endpoint, HTTP errors, OpenAPI regeneration
 - [ ] C1 CDC-changing path: replacement accept plus void, webhook mapping, docs/integracion/emision.md
@@ -30,7 +30,7 @@ ADR-0021 did not exist when this story started (the plan says "ADR first"). It i
 A: ADR + migration + db tests. B: use case + endpoint (same CDC). C: reissue + docs.
 
 ## Progress / evidence
-(none yet)
+A1 done: RED observed (missing column), GREEN 9 db tests + rls-coverage. Table tests (isolation, unique key, one reissue per doc) were trimmed for the 400-line limit: add them with the store in B1.
 
 ## Next step
-Start A1: write the failing db test for the guard door.
+Slice B: branch from feat/hu-e8-01-correct. Read accept-invoice.ts/accept-credit-note.ts/accept-standalone.ts (extract validation shared with the correction), add `sumCreditNotes` exclude-own-CDC param, pure CDC-impact classifier, CorrectDocument use case + Drizzle unit (lock row FOR UPDATE, insert document_corrections, rewrite via the guard door: status accepted, corrections_count+1, signed_xml/at NULL, attempts 0, hold/next_transmission_at/sifen_messages NULL), endpoint POST /v1/documents/{id}/correct (Idempotency-Key, documents:write), OpenAPI regen. Slice C: reissue via accept + void-numbers (body from the rejected row: timbrado number, establishment/point codes, type, series, number), docs/integracion/emision.md. Void is async; rejected docs do not block the void range.

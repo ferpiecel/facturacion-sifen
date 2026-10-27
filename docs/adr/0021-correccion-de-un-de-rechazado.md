@@ -1,0 +1,23 @@
+# ADR-0021: Corrección y reenvío de un DE rechazado
+
+- **Estado:** Aceptado
+- **Fecha:** 2026-10-27
+
+## Contexto
+
+HU-E8-01 (RF-07, MT 6.5): el integrador corrige un DE que SIFEN rechazó. Si la corrección no toca ningún componente del CDC, el DE se reenvía con el mismo CDC; si lo toca, la plataforma inutiliza el número viejo ([ADR-0020](0020-eventos-del-emisor-almacenamiento-y-lotes.md), E8-03) y emite un DE nuevo. El obstáculo es `documents`: `payload` y `signed_xml` son inmutables o de escritura única (migración 0034), el estado solo avanza (`documents_status_rank`, `rejected` rank 4, `accepted` rank 0), y `(tenant_id, environment, cdc)` es único, así que una fila de reemplazo no puede repetir el CDC.
+
+## Decisión
+
+1. **Mismo CDC: reescritura en el lugar de una fila `rejected`, con una única puerta.** `documents_guard` (reemplazado en la migración 0069) acepta `rejected -> accepted` solo si `corrections_count` sube exactamente 1 y el XML firmado queda en NULL. Por esa puerta pueden cambiar `payload`, `receiver_ruc` y `total_amount`; todo lo demás sigue inmutable (CDC, número, timbrado, código de seguridad, fecha de emisión, `associated_cdc`, clave de idempotencia y su hash). `corrections_count` no se mueve por otra vía ni arranca en un valor distinto de 0. La puerta no está disponible para ningún otro estado. El firmado, el lote y los webhooks vuelven a correr desde `accepted` sin cambios.
+2. **Historial: tabla `document_corrections`** (solo `INSERT`, trigger de solo-anexado, RLS forzado). Guarda el cuerpo anterior, los mensajes de SIFEN del rechazo, la `Idempotency-Key` de la corrección (única por tenant) y su hash. Sirve a la idempotencia de la corrección y al audit de qué decía el DE antes. No se agrega otra columna de idempotencia a `documents` porque esa clave pertenece a la creación de la fila.
+3. **CDC distinto: emisión de reemplazo normal, enlazada.** El reemplazo pasa por la misma aceptación de cada tipo (nueva fila, número nuevo, CDC nuevo) y una fila `document_corrections` de tipo `reissue` apunta a él (`replacement_document_id`, una por documento rechazado). Luego se pide la inutilización del número viejo con el caso de uso de E8-03 (los documentos `rejected` no impiden el rango). Cada paso es idempotente y reanudable con la misma clave.
+4. **Qué cuenta como "toca el CDC".** Se comparan con el CDC del documento rechazado el tipo de documento, el establecimiento y el punto de expedición del cuerpo nuevo; el tipo no puede cambiar (se rechaza, no se reemite como otro tipo) y en una NCE/NDE el `associatedCdc` distinto también fuerza la reemisión, porque la asociación es inmutable ([ADR-0019](0019-nota-de-credito-asociada-a-una-factura.md)). RUC, tipo de contribuyente, fecha de emisión, código de seguridad y emisión se conservan de la fila. Descartado: abrir la fecha de emisión a corrección, porque el plazo de 72 h se cuenta desde ella.
+5. **Reglas.** Solo se corrige un documento `rejected`; cualquier otro estado da `409`. Se repiten las validaciones de dominio de cada tipo y `assertCertificateUsable`, y la corrección de una NCE excluye su propio monto de la suma de 2417 (un NCE rechazada cuenta, ADR-0019 D5). Alcance: FE, AFE, NCE y NDE; la nota de remisión se suma cuando su ruteo esté en `main`. Rol: el alcance `documents:write` y la matriz de roles del portal (`lector` no corrige).
+6. **Alternativa descartada: fila de reemplazo también para el mismo CDC.** Exigiría relajar la unicidad del CDC o mover el CDC viejo de fila, es decir, romper dos invariantes para evitar una puerta acotada y auditada.
+
+## Consecuencias
+
+- Un único trigger toca la identidad de `documents`; su prueba de base de datos cubre la puerta y cada columna que sigue inmutable.
+- Las filas reescritas conservan `resent_at` (escritura única) y el `request_hash` original: repetir el `POST /v1/documents` original sigue devolviendo la misma fila.
+- Costo: reemplazar `documents_guard` copia su cuerpo; una migración futura que lo cambie debe partir de la versión 0069.

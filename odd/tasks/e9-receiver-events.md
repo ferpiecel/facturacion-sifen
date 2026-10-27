@@ -53,8 +53,8 @@ each kind and 3 corrections.
 - The 4004-style "already confirmed" does not apply. Cancelled-document checks (4115, 4155, 4204, 4264) are SIFEN's: the receiver's platform does not hold the issuer's document.
 
 ## Tasks
-- [ ] T1 P1a request parsing
-- [ ] T1b P1b window and compatibility matrix
+- [x] T1 P1a request parsing (43be13c, PR #338)
+- [x] T1b P1b window and compatibility matrix
 - [ ] T2 P2 builder
 - [ ] T3 P3 migration 0058
 - [ ] T4 P4 use case + store + signing wiring

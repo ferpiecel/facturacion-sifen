@@ -39,3 +39,6 @@ All tasks done. If the C1 PR is over 400 lines (about 470 with docs/openapi.json
 
 ## Restack note
 Migration 0065 must be renumbered to 0068 at restack time (merge order: 0063 RUC, 0064 sync, 0065/0066 E9, 0067 E8-05, 0068 E8-01). Chain: #371 -> #373 -> #374 -> #375 -> #377 -> #379 -> #381. All three orchestrator review fixes done (key recheck, updated_at in #379; 72 h window + ADR adenda in #381).
+
+## Review fix: one correction in flight per document (re-review of #381)
+Race: a same-CDC rewrite and a reissue with another establishment could both pass; the loser of `link()` returned 409 but the replacement stayed live. Fix: table `document_correction_claims` (unique per document, migration 0065 edited on #371, renumbered to 0068 at merge, restacked chain). A reissue claims the document under its lock before issuing; the rewrite and other reissues check the claim and answer 409 `correction_in_progress` before issuing; released on pre-issue refusals; resumable with the same key. Tests: A+B interleaving in correct-document.spec.ts, claim lifecycle in the Drizzle spec and db spec. ADR-0021 adenda updated.

@@ -303,7 +303,7 @@ Cuando SIFEN aprueba el documento (`approved` o `approved_with_observations`), l
 
 - Si el cuerpo mantiene el establecimiento, el punto de expedición y, en notas, el `associatedCdc`, y no pasaron 72 h desde la fecha de emisión, el documento conserva su número y su CDC y se reenvía: `202 { document_id, cdc }` con los mismos ids. El cuerpo anterior y los mensajes de SIFEN quedan en el historial de correcciones.
 - Si cambia alguno de esos datos, o pasaron 72 h desde la emisión, el cuerpo se emite como documento nuevo (número y fecha nuevos; la respuesta trae el `document_id` y el `cdc` nuevos) y el número viejo se anula (webhook `document.number_voided`). Si la anulación es rechazada (p. ej. 4066), el documento nuevo queda vigente, la corrección queda registrada y la respuesta agrega `void: { status: "refused", errors }`; un reintento con la misma clave devuelve lo mismo.
-- Errores: `404` documento inexistente, `409` documento no rechazado, ya reemitido (también ante dos correcciones concurrentes con claves distintas: gana una) o clave usada con otro cuerpo, `422` validación o cambio de tipo.
+- Errores: `404` documento inexistente, `409` documento no rechazado, ya reemitido, o con otra corrección en curso (ante dos correcciones concurrentes con claves distintas gana una y la otra responde antes de emitir nada) o clave usada con otro cuerpo, `422` validación o cambio de tipo.
 
 Decisión: [ADR-0021](../adr/0021-correccion-de-un-de-rechazado.md).
 

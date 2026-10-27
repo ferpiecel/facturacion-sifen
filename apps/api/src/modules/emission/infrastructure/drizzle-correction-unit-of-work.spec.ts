@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import {
   createPgliteDatabase,
+  documentCorrectionClaims,
   documentCorrections,
   documents,
   issuerEvents,
@@ -154,5 +155,32 @@ describe('CorrectDocument with the Drizzle unit of work', () => {
     await expect(correct(later)(input('fix-other'))).rejects.toEqual(
       new DocumentNotCorrectableError('reissued'),
     );
+  });
+  it('refuses a rewrite while a reissue holds the claim, leaving the row rejected', async () => {
+    await handle.db.insert(documentCorrectionClaims).values({
+      tenantId,
+      documentId,
+      idempotencyKey: 'reissue-key',
+      requestHash: 'a'.repeat(64),
+    });
+    await expect(correct()(input())).rejects.toEqual(
+      new DocumentNotCorrectableError('correction_in_progress'),
+    );
+    expect((await row()).status).toBe('rejected');
+    expect(await handle.db.select().from(documentCorrections)).toHaveLength(0);
+  });
+
+  it('claims the document for a reissue and releases the claim when the replacement is refused', async () => {
+    const later = () => new Date('2026-03-20T12:00:00Z');
+    const base = input('fix-bad');
+    const invalid = {
+      ...base,
+      correction: { ...base.correction, draft: { ...base.correction.draft, items: [] } },
+    };
+    await expect(correct(later)(invalid as CorrectDocumentInput)).rejects.toBeInstanceOf(Error);
+    expect(await handle.db.select().from(documentCorrectionClaims)).toHaveLength(0);
+    await expect(correct(later)(input('fix-late'))).resolves.toMatchObject({});
+    // The linked reissue keeps its claim: the document is final.
+    expect(await handle.db.select().from(documentCorrectionClaims)).toHaveLength(1);
   });
 });

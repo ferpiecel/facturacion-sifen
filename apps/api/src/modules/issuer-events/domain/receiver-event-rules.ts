@@ -219,7 +219,7 @@ export function receiverEventDeadline(
   );
 }
 
-const OPPOSITE: Partial<Record<ReceiverEventKind, ReceiverEventKind[]>> = {
+export const OPPOSITE: Partial<Record<ReceiverEventKind, ReceiverEventKind[]>> = {
   conformity: ['disconformity', 'unawareness'],
   disconformity: ['conformity', 'unawareness'],
   unawareness: ['conformity', 'disconformity'],
@@ -285,6 +285,7 @@ export function validateReceiverEvent(
   history: readonly PriorReceiverEvent[],
   at: Date,
   config: ReceiverEventConfig = DEFAULT_RECEIVER_EVENT_CONFIG,
+  options: { correction?: boolean } = {},
 ): ReceiverEventRefusal | null {
   const refusal = compatibility(request, history);
   if (refusal) return refusal;
@@ -292,7 +293,7 @@ export function validateReceiverEvent(
     .filter((e) => CONCLUSIVE.includes(e.kind))
     .sort((a, b) => b.registeredAt.getTime() - a.registeredAt.getTime())
     .at(0);
-  if (last && OPPOSITE[last.kind]?.includes(request.kind)) {
+  if (!options.correction && last && OPPOSITE[last.kind]?.includes(request.kind)) {
     return {
       rule: 'receiver-event-needs-correction',
       message: 'This event contradicts the last one registered: register it as a correction.',

@@ -11,10 +11,13 @@ import {
   type ReceiverEventConfig,
   type ReceiverEventKind,
 } from '../domain/receiver-event-rules.js';
+import { EventKeyReusedError } from './cancel-document.js';
+import { EventKeyCollisionError } from './ports/cancellation-unit-of-work.port.js';
 import {
   ReceiverEventDuplicateError,
   type CorrectionUnitOfWork,
   type NewReceiverEvent,
+  type StoredReceiverEvent,
 } from './ports/receiver-event-unit-of-work.port.js';
 import {
   ALREADY_CODE,
@@ -67,10 +70,10 @@ export interface CorrectReceiverEventDependencies {
 /**
  * Corrects an approved receiver event (HU-E9-02): stores the opposite event `pending`, linked to the original
  * and with the justification, once the correction rules hold (original approved, latest, not a correction,
- * not corrected yet, inside the window). The worker signs and sends it like any receiver event.
+ * not corrected yet, inside the window). The worker signs and sends it like any receiver event. Idempotent by key.
  *
  * @throws ReceiverEventInvalidError, ReceiverEventNotFoundError, ReceiverCorrectionRefusedError,
- *   ReceiverEventRefusedError, ReceiverProfileMissingError
+ *   ReceiverEventRefusedError, ReceiverProfileMissingError, EventKeyReusedError
  */
 export function createCorrectReceiverEvent(deps: CorrectReceiverEventDependencies) {
   const now = deps.now ?? (() => new Date());
@@ -96,7 +99,13 @@ export function createCorrectReceiverEvent(deps: CorrectReceiverEventDependencie
       cdc: request.cdc,
       ...stored,
     });
-    return correctOnce(input, request, stored, reason.value, hash);
+    const once = () => correctOnce(input, request, stored, reason.value, hash);
+    try {
+      return await once();
+    } catch (error) {
+      if (!(error instanceof EventKeyCollisionError)) throw error;
+      return once();
+    }
   };
 
   async function correctOnce(
@@ -107,9 +116,16 @@ export function createCorrectReceiverEvent(deps: CorrectReceiverEventDependencie
     hash: string,
   ): Promise<CorrectedReceiverEvent> {
     return deps.unitOfWork.run(input.tenantId, async (unit) => {
+      const replayed = replay(await unit.findByIdempotencyKey(input.idempotencyKey), input, hash);
+      if (replayed) return replayed;
+
       const cdc = await unit.cdcOfEvent(input.eventId);
       if (!cdc) throw new ReceiverEventNotFoundError();
       await unit.lockCdc(cdc);
+      // A parallel request with the same key may have committed while this one waited for the lock.
+      const late = replay(await unit.findByIdempotencyKey(input.idempotencyKey), input, hash);
+      if (late) return late;
+
       const original = await unit.findCorrectable(input.eventId);
       if (!original) throw new ReceiverEventNotFoundError();
       if (request.cdc !== original.cdc) {
@@ -173,5 +189,21 @@ export function createCorrectReceiverEvent(deps: CorrectReceiverEventDependencie
         status: 'pending',
       };
     });
+  }
+
+  function replay(
+    existing: StoredReceiverEvent | null,
+    input: CorrectReceiverEventInput,
+    hash: string,
+  ): CorrectedReceiverEvent | null {
+    if (!existing) return null;
+    if (existing.requestHash !== hash) throw new EventKeyReusedError();
+    return {
+      eventId: existing.eventId,
+      correctsEventId: input.eventId,
+      kind: existing.kind,
+      cdc: existing.cdc,
+      status: 'pending',
+    };
   }
 }

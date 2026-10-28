@@ -18,6 +18,7 @@ interface XmlgenEventApi {
   generateXMLEventoDisconformidad(id: number, params: EventData, data: EventData): Promise<string>;
   generateXMLEventoDesconocimiento(id: number, params: EventData, data: EventData): Promise<string>;
   generateXMLEventoNotificacion(id: number, params: EventData, data: EventData): Promise<string>;
+  generateXMLEventoNominacion(id: number, params: EventData, data: EventData): Promise<string>;
 }
 
 const xmlgenApi = resolveCjsDefault(xmlgen) as XmlgenEventApi;
@@ -66,6 +67,34 @@ function assertVoidingRange(event: Extract<IssuerEvent, { kind: 'voiding' }>): v
   }
 }
 
+const OPERATION_TYPE = { B2B: 1, B2C: 2, B2F: 4 } as const;
+
+function nominationData(event: Extract<IssuerEvent, { kind: 'nomination' }>): EventData {
+  const r = event.receiver;
+  const identity =
+    r.kind === 'taxpayer'
+      ? { contribuyente: true, tipoReceptor: r.taxpayerType, ruc: r.ruc }
+      : { contribuyente: false, documentoTipo: r.documentType, documentoNumero: r.documentNumber };
+  return {
+    cdc: event.cdc,
+    motivo: event.reason,
+    pais: r.country,
+    tipoOperacion: OPERATION_TYPE[r.operationType],
+    razonSocial: r.name,
+    ...identity,
+    ...(r.tradeName === undefined ? {} : { nombreFantasia: r.tradeName }),
+    ...(r.address === undefined ? {} : { direccion: r.address }),
+    ...(r.houseNumber === undefined ? {} : { numeroCasa: r.houseNumber }),
+    ...(r.departmentCode === undefined ? {} : { departamento: r.departmentCode }),
+    ...(r.districtCode === undefined ? {} : { distrito: r.districtCode }),
+    ...(r.cityCode === undefined ? {} : { ciudad: r.cityCode }),
+    ...(r.phone === undefined ? {} : { telefono: r.phone }),
+    ...(r.mobile === undefined ? {} : { celular: r.mobile }),
+    ...(r.email === undefined ? {} : { email: r.email }),
+    ...(r.customerCode === undefined ? {} : { codigo: r.customerCode }),
+  };
+}
+
 function dataFor(event: IssuerEvent | ReceiverEvent, signedAt: Date): EventData {
   const common = { fechaFirmaDigital: asuncionWallClock(signedAt) };
   switch (event.kind) {
@@ -99,6 +128,8 @@ function dataFor(event: IssuerEvent | ReceiverEvent, signedAt: Date): EventData 
       return { ...common, ...receiverData(event), motivo: event.reason };
     case 'receipt_notice':
       return { ...common, ...receiverData(event), totalPYG: event.totalPyg };
+    case 'nomination':
+      return { ...common, ...nominationData(event) };
   }
 }
 
@@ -129,6 +160,8 @@ function generate(input: IssuerEventBuildInput, data: EventData): Promise<string
       return xmlgenApi.generateXMLEventoDesconocimiento(ENVELOPE_DID, params, data);
     case 'receipt_notice':
       return xmlgenApi.generateXMLEventoNotificacion(ENVELOPE_DID, params, data);
+    case 'nomination':
+      return xmlgenApi.generateXMLEventoNominacion(ENVELOPE_DID, params, data);
   }
 }
 

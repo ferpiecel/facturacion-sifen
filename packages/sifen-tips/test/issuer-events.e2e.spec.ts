@@ -21,6 +21,20 @@ const VOID: IssuerEvent = {
   reason: 'Numeros sin uso',
 };
 
+const NOMINATE: IssuerEvent = {
+  kind: 'nomination',
+  cdc: CDC,
+  reason: 'El receptor pidio nombrar la factura',
+  receiver: {
+    kind: 'non-taxpayer',
+    documentType: 1,
+    documentNumber: '1234567',
+    name: 'Juan Perez',
+    country: 'PRY',
+    operationType: 'B2C',
+  },
+};
+
 function certPemFrom(cert: LoadedCertificate): string {
   const binary = Buffer.from(cert.p12).toString('binary');
   const asn1 = forge.asn1.fromDer(forge.util.createBuffer(binary, 'raw'));
@@ -63,6 +77,7 @@ describe('Issuer events: TipsEventXmlBuilder + TipsEventSigner', () => {
   const cert = generateDevCertificate();
   let signedCancel: string;
   let signedVoid: string;
+  let signedNomination: string;
 
   beforeAll(async () => {
     const { TipsEventSigner, TipsEventXmlBuilder } = await import('../src/index.ts');
@@ -70,6 +85,10 @@ describe('Issuer events: TipsEventXmlBuilder + TipsEventSigner', () => {
     const signer = new TipsEventSigner();
     signedCancel = await signer.sign(await builder.build({ eventId: 11, event: CANCEL }), cert);
     signedVoid = await signer.sign(await builder.build({ eventId: 12, event: VOID }), cert);
+    signedNomination = await signer.sign(
+      await builder.build({ eventId: 13, event: NOMINATE }),
+      cert,
+    );
   });
 
   afterAll(() => {
@@ -88,8 +107,8 @@ describe('Issuer events: TipsEventXmlBuilder + TipsEventSigner', () => {
     expect(allSignaturesVerify(batchOf(signedCancel, signedVoid), cert)).toBe(true);
   });
 
-  it('validates against the vendored siRecepEvento schema, cancellation and voiding', () => {
-    for (const signed of [signedCancel, signedVoid]) {
+  it('validates against the vendored siRecepEvento schema, cancellation, voiding and nomination', () => {
+    for (const signed of [signedCancel, signedVoid, signedNomination]) {
       const inNamespace = signed.replace('<gGroupGesEve ', `<gGroupGesEve xmlns="${SIFEN_NS}" `);
 
       const result = validateXml(inNamespace, 'siRecepEvento');

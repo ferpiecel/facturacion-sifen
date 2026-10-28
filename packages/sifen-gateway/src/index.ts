@@ -18,6 +18,8 @@ export type {
   LoadedCertificate,
   QrConfig,
   QrGenerator,
+  NominationEvent,
+  NominationEventReceiver,
   VoidingEvent,
   XmlSigner,
 } from './emission-ports.ts';

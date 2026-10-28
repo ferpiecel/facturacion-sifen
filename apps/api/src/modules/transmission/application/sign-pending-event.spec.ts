@@ -24,6 +24,7 @@ const cancellation = (overrides: Partial<EventToSign> = {}): EventToSign => ({
   reason: 'Error en los datos',
   cdc: CDC,
   voidRange: null,
+  receiverData: null,
   ...overrides,
 });
 
@@ -105,6 +106,100 @@ describe('SignPendingEvent', () => {
     });
   });
 
+  describe('receiver events (HU-E9-01)', () => {
+    const receiver = { ruc: '80069563-1', name: 'Empresa SA' };
+    const stored = (overrides: Partial<EventToSign>): EventToSign =>
+      cancellation({ reason: null, ...overrides });
+
+    it.each([
+      [
+        'a total conformity',
+        stored({ kind: 'conformity', receiverData: { issuedAt: 'i', conformityType: 'total' } }),
+        { kind: 'conformity', cdc: CDC, conformityType: 'total' },
+      ],
+      [
+        'a partial conformity',
+        stored({
+          kind: 'conformity',
+          receiverData: { issuedAt: 'i', conformityType: 'partial', estimatedReceiptAt: 'e' },
+        }),
+        { kind: 'conformity', cdc: CDC, conformityType: 'partial', estimatedReceiptAt: 'e' },
+      ],
+      [
+        'a disconformity',
+        stored({ kind: 'disconformity', reason: 'Dañada', receiverData: { issuedAt: 'i' } }),
+        { kind: 'disconformity', cdc: CDC, reason: 'Dañada' },
+      ],
+      [
+        'an unawareness',
+        stored({
+          kind: 'unawareness',
+          reason: 'No la pedí',
+          receiverData: { issuedAt: 'i', receivedAt: 'r', receiver },
+        }),
+        {
+          kind: 'unawareness',
+          cdc: CDC,
+          reason: 'No la pedí',
+          issuedAt: 'i',
+          receivedAt: 'r',
+          receiver,
+        },
+      ],
+      [
+        'a receipt notice',
+        stored({
+          kind: 'receipt_notice',
+          receiverData: { issuedAt: 'i', receivedAt: 'r', totalPyg: 900, receiver },
+        }),
+        {
+          kind: 'receipt_notice',
+          cdc: CDC,
+          issuedAt: 'i',
+          receivedAt: 'r',
+          totalPyg: 900,
+          receiver,
+        },
+      ],
+    ])('builds %s from its stored data', async (_name, event, expected) => {
+      const { built, sign } = setup([event]);
+
+      await sign.execute({ tenantId: 't', eventId: 'ev-1' });
+
+      expect(built[0]?.event).toEqual(expected);
+    });
+
+    it.each([
+      ['without its data', stored({ kind: 'conformity', receiverData: null })],
+      [
+        'an unawareness without the receiver',
+        stored({
+          kind: 'unawareness',
+          reason: 'No la pedí',
+          receiverData: { issuedAt: 'i', receivedAt: 'r' },
+        }),
+      ],
+      [
+        'a notice without the total',
+        stored({
+          kind: 'receipt_notice',
+          receiverData: { issuedAt: 'i', receivedAt: 'r', receiver },
+        }),
+      ],
+      [
+        'a disconformity without its reason',
+        stored({ kind: 'disconformity', receiverData: { issuedAt: 'i' } }),
+      ],
+    ])('fails on %s', async (_name, event) => {
+      const { sign, opened } = setup([event]);
+
+      await expect(sign.execute({ tenantId: 't', eventId: 'ev-1' })).rejects.toThrow(
+        EventDataIncompleteError,
+      );
+      expect(opened).toEqual([]);
+    });
+  });
+
   it('builds a voiding from its stored range', async () => {
     const range = {
       timbrado: '12345678',
@@ -183,6 +278,11 @@ describe('SignPendingEvent', () => {
       'a nomination, which has no builder yet',
       [cancellation({ kind: 'nomination' })],
       EventKindNotSignableError,
+    ],
+    [
+      'a cancellation without its reason',
+      [cancellation({ reason: null })],
+      EventDataIncompleteError,
     ],
     [
       'a voiding without its range',

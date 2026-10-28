@@ -8,6 +8,11 @@ import {
   NotFoundException,
   Param,
 } from '@nestjs/common';
+import { ClsService } from 'nestjs-cls';
+import {
+  TENANT_ID_CLS_KEY,
+  type TenancyClsStore,
+} from '../../../tenancy/infrastructure/tenancy-cls-store.js';
 import type { createLookupRuc } from '../../application/lookup-ruc.js';
 import { RucLookupDeniedError, RucLookupFailedError } from '../../application/lookup-ruc.js';
 import { LOOKUP_RUC } from '../../ruc.tokens.js';
@@ -20,7 +25,10 @@ const RUC_PARAM = /^\d{5,8}$/;
  */
 @Controller('v1/ruc')
 export class RucController {
-  constructor(@Inject(LOOKUP_RUC) private readonly lookup: ReturnType<typeof createLookupRuc>) {}
+  constructor(
+    @Inject(LOOKUP_RUC) private readonly lookup: ReturnType<typeof createLookupRuc>,
+    private readonly cls: ClsService<TenancyClsStore>,
+  ) {}
 
   @Get(':ruc')
   async find(@Param('ruc') ruc: string) {
@@ -34,7 +42,7 @@ export class RucController {
       );
     }
     try {
-      const result = await this.lookup(ruc);
+      const result = await this.lookup(this.cls.get(TENANT_ID_CLS_KEY), ruc);
       if (!result.found || result.contribuyente === null)
         throw new NotFoundException('RUC not found');
       return {

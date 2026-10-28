@@ -1,4 +1,9 @@
-import { SifenTimeoutError, SifenTransportError } from '../errors.ts';
+import {
+  SifenClientCertificateError,
+  SifenTenantUnavailableError,
+  SifenTimeoutError,
+  SifenTransportError,
+} from '../errors.ts';
 import type { SifenGateway, SifenOperation } from '../port.ts';
 import {
   CircuitBreaker,
@@ -41,7 +46,7 @@ const OPERATIONS: readonly SifenOperation[] = [
 
 /**
  * Decorates a `SifenGateway` with one circuit breaker per endpoint (ADR-0008, HU-E6-08). Only
- * transport failures and timeouts count: any answer, even a SOAP fault, proves the endpoint is up.
+ * transport failures and timeouts count (a tenant-local failure counts for neither side): any answer, even a SOAP fault, proves the endpoint is up.
  */
 export class CircuitBreakerGateway implements SifenGateway {
   private readonly breakers = new Map<SifenOperation, CircuitBreaker>();
@@ -62,11 +67,46 @@ export class CircuitBreakerGateway implements SifenGateway {
   }
 
   /**
+   * Breakers with no gateway of their own, only for `around(...)`: calling the returned object
+   * directly fails instead of reaching any endpoint.
+   */
+  static shared(options: CircuitBreakerGatewayOptions = {}): CircuitBreakerGateway {
+    const unused = (): never => {
+      throw new Error('A shared CircuitBreakerGateway has no inner gateway: use around(gateway)');
+    };
+    const inner: SifenGateway = {
+      enviarLote: unused,
+      consultarLote: unused,
+      enviarDESincronico: unused,
+      consultarDE: unused,
+      enviarEventos: unused,
+      consultarRUC: unused,
+    };
+    return new CircuitBreakerGateway(inner, options);
+  }
+
+  /**
    * The instant a paused endpoint may be tried again, or null when a call would go through. Lets a
    * caller leave work queued before it claims it, instead of learning from a refusal.
    */
   pausedUntil(operation: SifenOperation): Date | null {
     return this.breaker(operation).peek();
+  }
+
+  /**
+   * Another gateway guarded by THESE breakers, so per-tenant gateways (each with its own
+   * credentials) still share one circuit per endpoint: an outage belongs to the endpoint.
+   */
+  around(other: SifenGateway): SifenGateway {
+    return {
+      enviarLote: (request) => this.guard('enviarLote', () => other.enviarLote(request)),
+      consultarLote: (request) => this.guard('consultarLote', () => other.consultarLote(request)),
+      enviarDESincronico: (request) =>
+        this.guard('enviarDESincronico', () => other.enviarDESincronico(request)),
+      consultarDE: (request) => this.guard('consultarDE', () => other.consultarDE(request)),
+      enviarEventos: (request) => this.guard('enviarEventos', () => other.enviarEventos(request)),
+      consultarRUC: (request) => this.guard('consultarRUC', () => other.consultarRUC(request)),
+    };
   }
 
   enviarLote: SifenGateway['enviarLote'] = (request) =>
@@ -97,7 +137,13 @@ export class CircuitBreakerGateway implements SifenGateway {
       breaker.success(acquired.token);
       return result;
     } catch (error) {
-      if (error instanceof SifenTransportError || error instanceof SifenTimeoutError) {
+      if (
+        error instanceof SifenTenantUnavailableError ||
+        error instanceof SifenClientCertificateError
+      ) {
+        // One tenant's problem: not evidence about the endpoint either way.
+        breaker.release(acquired.token);
+      } else if (error instanceof SifenTransportError || error instanceof SifenTimeoutError) {
         breaker.failure(acquired.token);
       } else {
         // The endpoint answered (a fault, an unusable body) or the caller's request was invalid.

@@ -22,28 +22,25 @@ export interface PlatformGaugesDeps {
   readonly now?: () => Date;
 }
 
-/**
- * Publishes the cross-tenant gauges of the alert rules (HU-E14-01, plan §13): documents pending by
- * age, tenants paused by a RUC block and the soonest certificate expiry. Read as `platform_admin`
- * (ADR-0005) in one transaction; the results are aggregates, so no tenant, CDC or certificate data
- * reaches a label or a value.
- */
-export async function publishPlatformGauges({
-  db,
-  telemetry,
-  now = () => new Date(),
-}: PlatformGaugesDeps): Promise<void> {
-  const at = now();
-  const { pending, blocked, soonest } = await db.transaction(async (tx) => {
+async function readAggregates(db: Database, at: Date) {
+  const hoursAgo = (hours: number) => new Date(at.getTime() - hours * HOUR_MS);
+  const [, h24, h48, h72] = BUCKETS.map((bucket) => hoursAgo(bucket.fromHours));
+  const bucket = sql<string>`case
+    when ${documents.signedAt} > ${h24} then ${BUCKETS[0].label}
+    when ${documents.signedAt} > ${h48} then ${BUCKETS[1].label}
+    when ${documents.signedAt} > ${h72} then ${BUCKETS[2].label}
+    else ${BUCKETS[3].label} end`;
+  return db.transaction(async (tx) => {
     await tx.execute(sql`SET LOCAL ROLE platform_admin`);
-    const signedAges = await tx
-      .select({ signedAt: documents.signedAt })
+    const rows = await tx
+      .select({ bucket, total: count() })
       .from(documents)
       .innerJoin(
         tenants,
         and(eq(tenants.id, documents.tenantId), eq(tenants.environment, documents.environment)),
       )
-      .where(and(inArray(documents.status, PENDING_STATUSES), isNotNull(documents.signedAt)));
+      .where(and(inArray(documents.status, PENDING_STATUSES), isNotNull(documents.signedAt)))
+      .groupBy(sql`1`);
     const [blockedRow] = await tx
       .select({ total: count(sql`distinct ${rucBlocks.tenantId}`) })
       .from(rucBlocks)
@@ -63,16 +60,40 @@ export async function publishPlatformGauges({
         ),
       )
       .where(eq(tenantCertificates.status, 'active'));
-    return { pending: signedAges, blocked: blockedRow.total, soonest: expiryRow.notAfter };
+    return {
+      counts: new Map(rows.map((row) => [row.bucket, row.total])),
+      blocked: blockedRow.total,
+      soonest: expiryRow.notAfter,
+    };
   });
+}
 
-  const ageHours = pending.flatMap((row) =>
-    row.signedAt ? [(at.getTime() - row.signedAt.getTime()) / HOUR_MS] : [],
-  );
-  for (const [i, bucket] of BUCKETS.entries()) {
-    const until = BUCKETS[i + 1]?.fromHours ?? Number.POSITIVE_INFINITY;
-    const total = ageHours.filter((h) => h >= bucket.fromHours && h < until).length;
-    telemetry.setGauge('de_pending_transmission', total, { bucket: bucket.label });
+/**
+ * Publishes the cross-tenant gauges of the alert rules (HU-E14-01, plan §13): documents pending by
+ * age, tenants paused by a RUC block and the soonest certificate expiry. Read as `platform_admin`
+ * (ADR-0005) in one transaction; the results are aggregates, so no tenant, CDC or certificate data
+ * reaches a label or a value.
+ */
+export async function publishPlatformGauges({
+  db,
+  telemetry,
+  now = () => new Date(),
+}: PlatformGaugesDeps): Promise<void> {
+  const at = now();
+  let result;
+  try {
+    result = await readAggregates(db, at);
+  } catch (error) {
+    // Deliberate: the previously published gauges stay (a stale value beats a false zero that would
+    // silence the alerts); the failure is visible through `platform_gauge_errors_total`.
+    telemetry.increment('platform_gauge_errors_total');
+    throw error;
+  }
+  const { counts, blocked, soonest } = result;
+  for (const bucket of BUCKETS) {
+    telemetry.setGauge('de_pending_transmission', counts.get(bucket.label) ?? 0, {
+      bucket: bucket.label,
+    });
   }
   telemetry.setGauge('sifen_ruc_blocked_tenants', blocked);
   if (soonest) {

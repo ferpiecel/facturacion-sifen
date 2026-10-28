@@ -19,11 +19,12 @@ Qué métricas emite el sistema y qué reglas de alerta las usan (HU-E14-01, pla
 | `sifen_rejections_total` | contador | `codigo` | Documentos rechazados por código (`other` si no es de 4 dígitos) |
 | `sifen_ruc_blocks_total` | contador | - | Bloqueos de RUC reportados por SIFEN |
 | `sifen_circuit_state` | gauge | `operation` | 0 cerrado, 1 semiabierto, 2 abierto (por proceso worker) |
+| `platform_gauge_errors_total` | contador | - | Refrescos fallidos de los gauges entre tenants; mientras falle, los gauges conservan el último valor publicado |
 | `de_pending_transmission` | gauge | `bucket` (`<24h`, `24-48h`, `48-72h`, `>72h`) | Documentos firmados sin aprobar, por antigüedad desde la firma |
 | `sifen_ruc_blocked_tenants` | gauge | - | Tenants con envíos pausados por bloqueo de RUC |
 | `certificate_expiry_days_min` | gauge | - | Días hasta el vencimiento del certificado activo más próximo |
 
-Los gauges de `de_pending_transmission`, `sifen_ruc_blocked_tenants` y `certificate_expiry_days_min` los publica el worker cada 60 s leyendo como `platform_admin`; solo se calculan con `METRICS_ENABLED=true`.
+Los gauges de `de_pending_transmission`, `sifen_ruc_blocked_tenants` y `certificate_expiry_days_min` los publica el worker cada 60 s leyendo como `platform_admin`; solo se calculan con `METRICS_ENABLED=true`. Se agregan en SQL (`COUNT`/`GROUP BY`), sin cargar filas en el worker. Si la consulta falla, se **conservan** los últimos valores (un cero falso silenciaría las alertas) y se incrementa `platform_gauge_errors_total`; alertar si crece sostenidamente.
 
 ## Reglas y runbooks
 

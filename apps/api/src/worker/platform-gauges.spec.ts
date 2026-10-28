@@ -26,14 +26,17 @@ const SEALED = {
 describe('publishPlatformGauges', () => {
   let handle: DatabaseHandle;
   const gauges: string[] = [];
+  const counters: string[] = [];
   const telemetry: Telemetry = {
     ...NOOP_TELEMETRY,
+    increment: (name, by = 1) => void counters.push(`${name}+${String(by)}`),
     setGauge: (name, value, labels) =>
       void gauges.push(`${name}${labels ? JSON.stringify(labels) : ''}=${String(value)}`),
   };
 
   beforeEach(async () => {
     gauges.length = 0;
+    counters.length = 0;
     handle = createPgliteDatabase();
     await handle.migrate();
   });
@@ -114,6 +117,37 @@ describe('publishPlatformGauges', () => {
       'de_pending_transmission{"bucket":">72h"}=1',
       'sifen_ruc_blocked_tenants=1',
       'certificate_expiry_days_min=12',
+    ]);
+  });
+
+  it('keeps the previous gauge values and counts the failure when a query fails', async () => {
+    await publishPlatformGauges({ db: handle.db, telemetry, now: () => NOW });
+    gauges.length = 0;
+    await handle.close();
+    await expect(
+      publishPlatformGauges({ db: handle.db, telemetry, now: () => NOW }),
+    ).rejects.toThrow();
+    expect(gauges).toEqual([]);
+    expect(counters).toEqual(['platform_gauge_errors_total+1']);
+    handle = createPgliteDatabase();
+    await handle.migrate();
+  });
+
+  it('aggregates in SQL: the document rows never reach the process', async () => {
+    const [a] = await handle.db
+      .insert(tenants)
+      .values([{ name: 'A' }])
+      .returning();
+    await seedDocuments(handle.db, a.id, ['signed', 'signed'], (i) => ({
+      signedAt: hoursAgo(i === 0 ? 0.5 : 71.9),
+      signedXml: '<x/>',
+    }));
+    await publishPlatformGauges({ db: handle.db, telemetry, now: () => NOW });
+    expect(gauges.slice(0, 4)).toEqual([
+      'de_pending_transmission{"bucket":"<24h"}=1',
+      'de_pending_transmission{"bucket":"24-48h"}=0',
+      'de_pending_transmission{"bucket":"48-72h"}=1',
+      'de_pending_transmission{"bucket":">72h"}=0',
     ]);
   });
 });

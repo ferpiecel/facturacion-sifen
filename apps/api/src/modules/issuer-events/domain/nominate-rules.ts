@@ -18,8 +18,8 @@ export type NominationIdentity =
     }
   | {
       readonly kind: 'non-taxpayer';
-      /** `iTipIDRec` (NT 027): 1 to 5. */
-      readonly documentType: 1 | 2 | 3 | 4 | 5;
+      /** `iTipIDRec` (NT 027): 1 to 4; 5 (innominado) is what the nomination replaces. */
+      readonly documentType: 1 | 2 | 3 | 4;
       readonly documentNumber: string;
     };
 

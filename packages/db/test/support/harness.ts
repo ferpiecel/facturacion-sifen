@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { inject } from 'vitest';
 import { Pool } from 'pg';
 import { PGlite } from '@electric-sql/pglite';
 import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
@@ -38,30 +40,29 @@ const MIGRATIONS_FOLDER = fileURLToPath(new URL('../../migrations', import.meta.
 
 /**
  * Applying every migration on a fresh WASM Postgres costs seconds of CPU
- * and tens of MB per instance; doing it for each of the ~40 databases a
- * worker creates, across parallel workers, starved the suite (30 s test
- * timeouts) and exhausted memory (workers SIGKILLed). Migrate once per
- * worker process, snapshot the data directory, and boot every later
- * database from that snapshot. `migrate()` on a snapshot is a cheap no-op
- * (drizzle's journal is part of the dump), so specs that call it still work.
+ * and tens of MB per instance; doing it per spec file (vitest isolates
+ * modules per file, so a module-level cache never survives) charged that
+ * cost to each file's first test and crossed the 30 s timeout on slow CI
+ * runners under coverage. `global-setup.ts` migrates once per run and
+ * writes the data-dir snapshot to disk; every database boots from it.
+ * `migrate()` on a snapshot is a cheap no-op (drizzle's journal is part of
+ * the dump), so specs that call it still work.
  */
-let migratedTemplate: Promise<Blob> | undefined;
-
 function migrateClient(client: PGlite): Promise<void> {
   return migratePglite(drizzlePglite(client, { schema }), {
     migrationsFolder: MIGRATIONS_FOLDER,
   });
 }
 
-async function getMigratedTemplate(): Promise<Blob> {
+let migratedTemplate: Promise<Blob> | undefined;
+
+function getMigratedTemplate(): Promise<Blob> {
   migratedTemplate ??= (async () => {
-    const seed = new PGlite({ extensions: { btree_gist } });
-    try {
-      await migrateClient(seed);
-      return await seed.dumpDataDir('none');
-    } finally {
-      await seed.close();
+    const path = inject('pgliteTemplatePath');
+    if (!path) {
+      throw new Error('pgliteTemplatePath is not provided. global-setup.ts did not build it.');
     }
+    return new Blob([await readFile(path)]);
   })();
   return migratedTemplate;
 }

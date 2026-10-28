@@ -2,6 +2,7 @@
 
 ## Síntomas y detección
 
+- Alerta de Prometheus: `CertificadoPorVencer` y `CertificadoVenceEstaSemana` ([reglas](../operacion/alertas.md)).
 - Webhook `certificate.expiring` (una vez por certificado y umbral de `CERTIFICATE_ALERT_DAYS`: 60, 30 y 7 días). Se revisa cada `DEADLINE_WATCH_INTERVAL_MS`. Un certificado ya vencido no genera aviso.
 - Desde `CERTIFICATE_EMISSION_BLOCK_DAYS` (1 día) antes del vencimiento: `POST /v1/documents` (y notas y autofactura) responde `422` con `code: certificate_expiring` y `notAfter`, sin consumir número.
 - Ya vencido: la firma falla con `CertificateValidityError` y el documento queda retenido con `transmission_hold = 'signing:CertificateValidityError'` (el pipeline no reintenta). Tras `certificate:revoke` sin reemplazo la retención es `signing:CertificateNotFoundError`.

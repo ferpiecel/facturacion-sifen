@@ -30,7 +30,7 @@ tenant's own certificate (ADR-0010) over mTLS. Simulator path and its guards unc
 - [x] T2 PKCS#12 -> mTLS credential + tenant credential source (audit purpose `sifen-mtls`)
 - [x] T3 Tenant environment reader + `TenantSoapGatewayFactory` + mTLS stub integration test
 - [x] T4 `SIFEN_GATEWAY=soap` config (fail-fast), worker wiring, cycle factory per-tenant gateway, docs, ADR-0022
-- [ ] T5 RUC lookup per tenant over the factory; 503 only without gateway
+- [x] T5 RUC lookup per tenant over the factory; 503 only without gateway
 
 ## Progress / evidence
 
@@ -42,3 +42,9 @@ Route: inline single writer (small, sequential, already understood). Chain: PR1 
 - PR2 did not observe RED for `soap-gateway-config` and `drizzle-tenant-environment` (spec and impl written together); behaviour is covered.
 - Remaining T5: branch `feat/sifen-soap-wiring-rucs` from PR2. RUC: `lookup(ruc)` must take the calling tenant (`cls.get(TENANT_ID_CLS_KEY)` in `RucController`), use `TenantSoapGatewayFactory.forTenant(tenantId)` (module needs `CachedCertificateVault` via `createCertificateVault` from `cli/ops.ts`, `createDrizzleTenantEnvironment`, `loadSoapGatewayConfig`), cache key environment = the tenant's environment (today deployment `SIFEN_ENVIRONMENT`); keep the simulator path and 503 only when neither gateway is configured. Reuse a breaker via `CircuitBreakerGateway.around`. Update `docs/api/openapi.json` only if the contract changes (`pnpm --filter @sifen/api openapi`).
 - Build workspace packages (`pnpm --filter @sifen/db --filter @sifen/sifen-gateway --filter @sifen/sifen-xsd --filter @sifen/sifen-tips build`) before running api tests.
+
+## Handoff 2 (writer 2)
+
+- Blocker fix done and pushed: #383 (`66e220c`, `2bcbbf3`: `SifenTenantUnavailableError`, `SifenClientCertificateError`, `CircuitBreaker.release`, TLS pinned 1.2, `CircuitBreakerGateway.shared`), #384 restacked (`d27ffe6`). Comments posted. verify green on both.
+- T5 WIP, local only, NOT pushed: branch `feat/sifen-soap-wiring-rucs` (from #384), commit `1c3e9d0`. Done: `lookup-ruc.ts` takes `(tenantId, ruc)` with `gatewayFor`/`environmentOf` (spec green); `modules/ruc/infrastructure/ruc-gateways.ts` + spec (green).
+- Remaining: (1) `ruc.module.ts`: replace `RUC_GATEWAY` with a provider of `createRucGateways(process.env, { readFile: readFileSync(utf8), soap })`, where `soap` returns null without DB, else `{ environments: createDrizzleTenantEnvironment(db), certificates: { open: (t, env) => cachedVault.open(db, t, env, { actor: { type: 'system', id: 'ruc-lookup' }, purpose: 'sifen-mtls' }) }, logger }` with `new CachedCertificateVault(createCertificateVault(env, readBoundedFile))`; lookup deps `gatewayFor/environmentOf`, 503 when provider null or no db; drop `parseSifenEnvironment` from module. (2) `ruc.controller.ts`: inject `ClsService<TenancyClsStore>`, pass `cls.get(TENANT_ID_CLS_KEY)` to `lookup(tenantId, ruc)`. (3) `apps/api/test/ruc.e2e.spec.ts`: override the new token with `{ gatewayFor: () => gateway, environmentOf: () => 'production' }`; add a 503 case. (4) docs: `docs/configuracion.md` (RUC uses SIFEN_GATEWAY=soap per tenant; invalid soap config stops the API), openapi unchanged unless contract changes. (5) check depcruise (ruc module importing transmission infra), tick T5, `pnpm verify` (VITEST_MAX_WORKERS=2, one verify at a time), push, open draft PR on #384 branch with `Depende de #384`.

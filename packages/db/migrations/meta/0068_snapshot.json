@@ -1,6 +1,6 @@
 {
-  "id": "345ab7c9-0faa-4e5b-827f-986e55e08169",
-  "prevId": "0542c4b8-0519-475e-8d59-693441ca6efd",
+  "id": "2b18f250-f26d-4783-b689-b546cdae6c4e",
+  "prevId": "fb65dfcb-b163-4470-b1a2-6f4d56187eec",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1115,17 +1115,41 @@
           "primaryKey": false,
           "notNull": false
         },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "target_cdc": {
+          "name": "target_cdc",
+          "type": "char(44)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "receiver_data": {
+          "name": "receiver_data",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "corrects_event_id": {
+          "name": "corrects_event_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "correction_reason": {
+          "name": "correction_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "nomination": {
           "name": "nomination",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
         },
         "idempotency_key": {
           "name": "idempotency_key",
@@ -1287,6 +1311,62 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "issuer_events_receiver_open_idx": {
+          "name": "issuer_events_receiver_open_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "environment",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "target_cdc",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "coalesce(\"receiver_data\"->>'conformityType', '')",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"issuer_events\".\"target_cdc\" IS NOT NULL AND \"issuer_events\".\"status\" <> 'rejected'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "issuer_events_correction_idx": {
+          "name": "issuer_events_correction_idx",
+          "columns": [
+            {
+              "expression": "corrects_event_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"issuer_events\".\"corrects_event_id\" IS NOT NULL AND \"issuer_events\".\"status\" <> 'rejected'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -1296,6 +1376,19 @@
           "tableTo": "tenants",
           "columnsFrom": [
             "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "issuer_events_corrects_event_id_issuer_events_id_fk": {
+          "name": "issuer_events_corrects_event_id_issuer_events_id_fk",
+          "tableFrom": "issuer_events",
+          "tableTo": "issuer_events",
+          "columnsFrom": [
+            "corrects_event_id"
           ],
           "columnsTo": [
             "id"
@@ -1339,7 +1432,7 @@
         },
         "issuer_events_kind_valid": {
           "name": "issuer_events_kind_valid",
-          "value": "\"issuer_events\".\"kind\" IN ('cancellation', 'voiding', 'nomination')"
+          "value": "\"issuer_events\".\"kind\" IN ('cancellation', 'voiding', 'nomination', 'conformity', 'disconformity', 'unawareness', 'receipt_notice')"
         },
         "issuer_events_status_valid": {
           "name": "issuer_events_status_valid",
@@ -1351,11 +1444,31 @@
         },
         "issuer_events_reason_length": {
           "name": "issuer_events_reason_length",
-          "value": "char_length(\"issuer_events\".\"reason\") BETWEEN 5 AND 500"
+          "value": "\"issuer_events\".\"reason\" IS NULL OR char_length(\"issuer_events\".\"reason\") BETWEEN 5 AND 500"
+        },
+        "issuer_events_reason_required": {
+          "name": "issuer_events_reason_required",
+          "value": "(\"issuer_events\".\"reason\" IS NULL) = (\"issuer_events\".\"kind\" IN ('conformity', 'receipt_notice'))"
         },
         "issuer_events_subject": {
           "name": "issuer_events_subject",
-          "value": "(\"issuer_events\".\"kind\" = 'voiding') = (\"issuer_events\".\"void_range\" IS NOT NULL) AND (\"issuer_events\".\"kind\" = 'voiding') = (\"issuer_events\".\"document_id\" IS NULL)"
+          "value": "(\"issuer_events\".\"kind\" = 'voiding') = (\"issuer_events\".\"void_range\" IS NOT NULL) AND (\"issuer_events\".\"kind\" IN ('cancellation', 'nomination')) = (\"issuer_events\".\"document_id\" IS NOT NULL) AND (\"issuer_events\".\"kind\" IN ('conformity', 'disconformity', 'unawareness', 'receipt_notice')) = (\"issuer_events\".\"target_cdc\" IS NOT NULL) AND (\"issuer_events\".\"target_cdc\" IS NOT NULL) = (\"issuer_events\".\"receiver_data\" IS NOT NULL)"
+        },
+        "issuer_events_correction_pair": {
+          "name": "issuer_events_correction_pair",
+          "value": "(\"issuer_events\".\"corrects_event_id\" IS NULL) = (\"issuer_events\".\"correction_reason\" IS NULL)"
+        },
+        "issuer_events_correction_reason_length": {
+          "name": "issuer_events_correction_reason_length",
+          "value": "\"issuer_events\".\"correction_reason\" IS NULL OR char_length(\"issuer_events\".\"correction_reason\") BETWEEN 5 AND 500"
+        },
+        "issuer_events_correction_subject": {
+          "name": "issuer_events_correction_subject",
+          "value": "\"issuer_events\".\"corrects_event_id\" IS NULL OR (\"issuer_events\".\"target_cdc\" IS NOT NULL AND \"issuer_events\".\"kind\" <> 'receipt_notice' AND \"issuer_events\".\"corrects_event_id\" <> \"issuer_events\".\"id\")"
+        },
+        "issuer_events_target_cdc_format": {
+          "name": "issuer_events_target_cdc_format",
+          "value": "\"issuer_events\".\"target_cdc\" IS NULL OR \"issuer_events\".\"target_cdc\" ~ '^[0-9]{44}$'"
         },
         "issuer_events_nomination_subject": {
           "name": "issuer_events_nomination_subject",
@@ -2200,6 +2313,80 @@
         "ruc_blocks_reason_length": {
           "name": "ruc_blocks_reason_length",
           "value": "char_length(\"ruc_blocks\".\"reason\") <= 500"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.ruc_lookup_cache": {
+      "name": "ruc_lookup_cache",
+      "schema": "",
+      "columns": {
+        "environment": {
+          "name": "environment",
+          "type": "tenant_environment",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ruc": {
+          "name": "ruc",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "found": {
+          "name": "found",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "razon_social": {
+          "name": "razon_social",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "estado": {
+          "name": "estado",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "facturador_electronico": {
+          "name": "facturador_electronico",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fetched_at": {
+          "name": "fetched_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "ruc_lookup_cache_environment_ruc_pk": {
+          "name": "ruc_lookup_cache_environment_ruc_pk",
+          "columns": [
+            "environment",
+            "ruc"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "ruc_lookup_cache_ruc_format": {
+          "name": "ruc_lookup_cache_ruc_format",
+          "value": "\"ruc_lookup_cache\".\"ruc\" ~ '^[0-9]{5,8}$'"
+        },
+        "ruc_lookup_cache_found_shape": {
+          "name": "ruc_lookup_cache_found_shape",
+          "value": "(\"ruc_lookup_cache\".\"found\" AND \"ruc_lookup_cache\".\"razon_social\" IS NOT NULL AND \"ruc_lookup_cache\".\"estado\" IS NOT NULL AND \"ruc_lookup_cache\".\"facturador_electronico\" IS NOT NULL) OR (NOT \"ruc_lookup_cache\".\"found\" AND \"ruc_lookup_cache\".\"razon_social\" IS NULL AND \"ruc_lookup_cache\".\"estado\" IS NULL AND \"ruc_lookup_cache\".\"facturador_electronico\" IS NULL)"
         }
       },
       "isRLSEnabled": false
@@ -3281,6 +3468,13 @@
           "type": "varchar(2)",
           "primaryKey": false,
           "notNull": false
+        },
+        "sync_transmission": {
+          "name": "sync_transmission",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
         },
         "created_at": {
           "name": "created_at",
@@ -4376,7 +4570,7 @@
         },
         "webhook_deliveries_event_type_valid": {
           "name": "webhook_deliveries_event_type_valid",
-          "value": "\"webhook_deliveries\".\"event_type\" IN ('document.created', 'document.signed', 'document.submitted', 'document.approved', 'document.approved_with_observations', 'document.rejected', 'document.cancelled', 'document.number_voided', 'document.nominated', 'document.transmission_deadline_warning', 'document.notification.delivered', 'document.notification.failed')"
+          "value": "\"webhook_deliveries\".\"event_type\" IN ('document.created', 'document.signed', 'document.submitted', 'document.approved', 'document.approved_with_observations', 'document.rejected', 'document.cancelled', 'document.number_voided', 'document.nominated', 'document.transmission_deadline_warning', 'document.notification.delivered', 'document.notification.failed', 'certificate.expiring')"
         },
         "webhook_deliveries_next_attempt_pair": {
           "name": "webhook_deliveries_next_attempt_pair",
@@ -4509,7 +4703,7 @@
         },
         "webhook_endpoints_events_valid": {
           "name": "webhook_endpoints_events_valid",
-          "value": "\"webhook_endpoints\".\"events\" <@ ARRAY['document.created', 'document.signed', 'document.submitted', 'document.approved', 'document.approved_with_observations', 'document.rejected', 'document.cancelled', 'document.number_voided', 'document.nominated', 'document.transmission_deadline_warning', 'document.notification.delivered', 'document.notification.failed']::text[]"
+          "value": "\"webhook_endpoints\".\"events\" <@ ARRAY['document.created', 'document.signed', 'document.submitted', 'document.approved', 'document.approved_with_observations', 'document.rejected', 'document.cancelled', 'document.number_voided', 'document.nominated', 'document.transmission_deadline_warning', 'document.notification.delivered', 'document.notification.failed', 'certificate.expiring']::text[]"
         },
         "webhook_endpoints_events_unique": {
           "name": "webhook_endpoints_events_unique",

@@ -1,6 +1,7 @@
 import { type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
 import { createPgliteDatabase, issuerEvents, type DatabaseHandle } from '@sifen/db';
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTenant, issueApiKey } from '../src/cli/commands.js';
 import { createHttpAdapter } from '../src/bootstrap/http.js';
@@ -162,5 +163,101 @@ describe('POST /v1/receiver-events (e2e)', () => {
   it('answers 400 without an Idempotency-Key and 403 for a read-only key', async () => {
     expect((await post(writer, conformity())).statusCode).toBe(400);
     expect((await post(reader, conformity(), 'k-9')).statusCode).toBe(403);
+  });
+
+  describe('POST /v1/receiver-events/{id}/correct (HU-E9-02)', () => {
+    const correctionBody = (extra: Record<string, unknown> = {}) => ({
+      kind: 'disconformity',
+      cdc: recent.cdc,
+      issuedAt: recent.issuedAt,
+      reason: 'Mercadería dañada al recibirla',
+      correctionReason: 'Se registró conformidad por error',
+      ...extra,
+    });
+    const correct = (key: string, id: string, body: unknown, idempotencyKey?: string) =>
+      app.inject({
+        method: 'POST',
+        url: `/v1/receiver-events/${id}/correct`,
+        payload: body as object,
+        headers: {
+          authorization: `Bearer ${key}`,
+          ...(idempotencyKey ? { 'idempotency-key': idempotencyKey } : {}),
+        },
+      });
+    const approvedConformity = async (): Promise<string> => {
+      const created = await post(writer, conformity(), 'k-conf');
+      const id = created.json<{ event_id: string }>().event_id;
+      const to = (set: Partial<typeof issuerEvents.$inferInsert>) =>
+        handle.db.update(issuerEvents).set(set).where(eq(issuerEvents.id, id));
+      await to({ status: 'signed', signedXml: '<g/>', signedAt: new Date() });
+      await to({ status: 'sending', batchDId: 1n, sendAttemptedAt: new Date() });
+      await to({ status: 'approved', responseCode: '0260', respondedAt: new Date() });
+      return id;
+    };
+
+    it('answers 202 and stores the replacement linked to the approved event', async () => {
+      const original = await approvedConformity();
+
+      const response = await correct(writer, original, correctionBody(), 'c-1');
+
+      expect(response.statusCode).toBe(202);
+      const body = response.json<{ event_id: string }>();
+      expect(body).toMatchObject({
+        corrects_event_id: original,
+        kind: 'disconformity',
+        cdc: recent.cdc,
+        status: 'pending',
+      });
+      const [row] = await handle.db
+        .select()
+        .from(issuerEvents)
+        .where(eq(issuerEvents.id, body.event_id));
+      expect(row).toMatchObject({ correctsEventId: original, kind: 'disconformity' });
+    });
+
+    it('answers 409 for a second correction and 422 for an event SIFEN has not approved', async () => {
+      const original = await approvedConformity();
+      await correct(writer, original, correctionBody(), 'c-1');
+
+      const second = await correct(writer, original, correctionBody(), 'c-2');
+      expect(second.statusCode).toBe(409);
+      expect(second.json<{ errors: { rule: string }[] }>().errors[0].rule).toBe(
+        'correction-already-requested',
+      );
+
+      const day = issuedDaysAgo(2);
+      const pending = await post(
+        writer,
+        conformity({ cdc: day.cdc, issuedAt: day.issuedAt }),
+        'k-p',
+      );
+      const refused = await correct(
+        writer,
+        pending.json<{ event_id: string }>().event_id,
+        correctionBody({ cdc: day.cdc, issuedAt: day.issuedAt }),
+        'c-3',
+      );
+      expect(refused.statusCode).toBe(422);
+      expect(refused.json<{ errors: { rule: string }[] }>().errors[0].rule).toBe(
+        'correction-original-not-approved',
+      );
+    });
+
+    it('answers 404 for an unknown event and 422 for a bad reason', async () => {
+      const original = await approvedConformity();
+
+      const unknown = '99999999-9999-4999-8999-999999999999';
+      expect((await correct(writer, unknown, correctionBody(), 'c-1')).statusCode).toBe(404);
+      const invalid = await correct(
+        writer,
+        original,
+        correctionBody({ correctionReason: 'no' }),
+        'c-4',
+      );
+      expect(invalid.statusCode).toBe(422);
+      expect(invalid.json<{ errors: { field: string }[] }>().errors[0].field).toBe(
+        'correctionReason',
+      );
+    });
   });
 });

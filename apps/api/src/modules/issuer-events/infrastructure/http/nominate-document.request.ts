@@ -13,7 +13,7 @@ const details = {
   name: z.string().min(4).max(255),
   tradeName: z.string().min(1).max(255).optional(),
   country: z.string().regex(/^[A-Za-z]{3}$/, 'The country must have three letters'),
-  address: z.string().min(1).max(255).optional(),
+  address: z.string().trim().min(1).max(255).optional(),
   /** `dNumCasRec` is `tdNumCas`: a number of up to six digits. */
   houseNumber: z
     .string()

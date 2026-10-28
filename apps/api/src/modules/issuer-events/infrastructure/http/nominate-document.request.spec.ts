@@ -165,6 +165,27 @@ describe('parseNominateBody', () => {
       { ...nonTaxpayer, receiver: { ...nonTaxpayer.receiver, ...address, operationType: 'B2F' } },
       'receiver.cityCode',
     ],
+    [
+      'a B2F receiver without address (D213, ADR-0017)',
+      { ...nonTaxpayer, receiver: { ...nonTaxpayer.receiver, operationType: 'B2F' } },
+      'receiver.address',
+    ],
+    [
+      'a B2F receiver with a blank address',
+      {
+        ...nonTaxpayer,
+        receiver: { ...nonTaxpayer.receiver, operationType: 'B2F', address: ' ', houseNumber: '1' },
+      },
+      'receiver.address',
+    ],
+    [
+      'a B2F receiver with an address but no house number',
+      {
+        ...nonTaxpayer,
+        receiver: { ...nonTaxpayer.receiver, operationType: 'B2F', address: 'Rua Foz' },
+      },
+      'receiver.houseNumber',
+    ],
     ['a missing receiver', { reason: 'El cliente pidió su factura' }, 'receiver'],
   ])('rejects %s', (_label, body, field) => {
     const parsed = parseNominateBody(body);

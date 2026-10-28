@@ -15,7 +15,14 @@ beforeEach(() => {
   replace.mockClear();
 });
 
-const region = () => screen.findByRole('region', { name: 'Indicadores del período' });
+// The section is always mounted; it is only ready once the summary finished loading.
+const region = async () => {
+  const section = await screen.findByRole('region', { name: 'Indicadores del período' });
+  await vi.waitFor(() => {
+    expect(section).toHaveAttribute('aria-busy', 'false');
+  });
+  return section;
+};
 
 describe('DocumentsKpis (period summary)', () => {
   it('shows a loading state, then the four indicators of the API summary', async () => {

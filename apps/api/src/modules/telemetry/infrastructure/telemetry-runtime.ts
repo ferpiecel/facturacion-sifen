@@ -8,6 +8,8 @@ import { loadTelemetryConfig, type TelemetryConfig } from './telemetry-config.js
 export interface TelemetryRuntime {
   readonly config: TelemetryConfig;
   readonly telemetry: Telemetry;
+  /** True only with `NODE_ENV` exactly `development` or `test`: the only place `/metrics` may be open. */
+  readonly metricsOpen: boolean;
   /** Present only when `METRICS_ENABLED=true`. */
   readonly metricsHandler:
     ((request: IncomingMessage, response: ServerResponse) => void) | undefined;
@@ -20,9 +22,11 @@ export function createTelemetryRuntime(
   options: { spanExporter?: SpanExporter } = {},
 ): TelemetryRuntime {
   const config = loadTelemetryConfig(env);
+  const metricsOpen = env.NODE_ENV === 'development' || env.NODE_ENV === 'test';
   if (!config.tracing && !config.metrics) {
     return {
       config,
+      metricsOpen,
       telemetry: NOOP_TELEMETRY,
       metricsHandler: undefined,
       shutdown: () => Promise.resolve(),
@@ -31,6 +35,7 @@ export function createTelemetryRuntime(
   const otel = createOtelTelemetry(config, options);
   return {
     config,
+    metricsOpen,
     telemetry: otel.telemetry,
     metricsHandler: config.metrics ? otel.metricsHandler : undefined,
     shutdown: () => otel.shutdown(),

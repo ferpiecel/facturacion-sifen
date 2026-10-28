@@ -29,6 +29,8 @@ export class MetricsController {
     const { metricsHandler } = this.runtime;
     if (!metricsHandler) throw new NotFoundException();
     const expected = this.runtime.config.metricsToken;
+    // Never open outside development/test: without a token the endpoint does not exist.
+    if (!expected && !this.runtime.metricsOpen) throw new NotFoundException();
     if (expected) {
       const given = /^Bearer (.+)$/.exec(String(request.headers.authorization ?? ''))?.[1] ?? '';
       if (!timingSafeEqual(digest(given), digest(expected))) throw new UnauthorizedException();

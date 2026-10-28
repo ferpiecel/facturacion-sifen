@@ -65,6 +65,7 @@ export function createWorkerSifen(env: NodeJS.ProcessEnv, deps: WorkerSifenDeps)
     logger: deps.logger,
     ...(config.timeoutMs === undefined ? {} : { timeoutMs: config.timeoutMs }),
     ...(config.trustedRoots === undefined ? {} : { trustedRoots: config.trustedRoots }),
+    ...(config.maxTlsVersion === undefined ? {} : { maxTlsVersion: config.maxTlsVersion }),
   });
   const breaker = CircuitBreakerGateway.shared({ onStateChange });
   return {

@@ -41,3 +41,7 @@ PRs: #385 (1/5, ready), #386, #387, #389 (draft chain), PR 5 branch `feat/hu-e14
 2. PR 2: branch `feat/hu-e14-01-otel-adapter` from PR 1; bring `otel-telemetry*.ts`, `telemetry-runtime.ts`, `apps/api/package.json` and the lockfile from `full-e14` (~300 lines).
 3. PR 3: Nest module, `/metrics`, interceptor, e2e, and the `app.module.ts` import (~190 lines).
 4. PR 4 (T2), PR 5 (T3) as listed above. Not started.
+
+## Review fixes (2026-10-27)
+
+Applied on each branch and restacked (no rebase onto main): #385 4e7c91ca (token required unless NODE_ENV development/test), #386 bb93fc92 (no debug log, endpoint normalized), #387 3ace9ade (/metrics 404 without token outside dev/test), #389 0f55a710 (METRICS_HOST default 127.0.0.1, worker service.name), #390 58ff6865 (SQL aggregation, keep last values on failure, platform_gauge_errors_total). Each pushed with verify OK; comments posted. Nothing pending.

@@ -4,7 +4,7 @@ import { readNominatedReceiver } from '../domain/nominated-receiver.js';
 
 /** The receiver named by the FE's approved nomination event, if any (one open nomination per FE, 4453). */
 export async function approvedNomination(tx: TenantTx, tenantId: string, documentId: string) {
-  const [row] = await tx
+  const rows = await tx
     .select({ nomination: issuerEvents.nomination })
     .from(issuerEvents)
     .where(
@@ -15,5 +15,6 @@ export async function approvedNomination(tx: TenantTx, tenantId: string, documen
         eq(issuerEvents.status, 'approved'),
       ),
     );
+  const row = rows.at(0);
   return row ? readNominatedReceiver(row.nomination) : null;
 }

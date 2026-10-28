@@ -1,7 +1,6 @@
 import { and, desc, eq, gte, isNull, lte, notInArray, or, sql } from 'drizzle-orm';
 import {
   documents,
-  issuerEvents,
   nextDocumentNumber,
   tenantEstablishments,
   tenantExpeditionPoints,

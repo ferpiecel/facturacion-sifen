@@ -27,14 +27,14 @@ function usableAddress(receiver: NominationEventReceiver): NominationEventReceiv
     address !== undefined &&
     houseNumber !== undefined &&
     (isB2f || (departmentCode !== undefined && cityCode !== undefined));
-  if (!complete) return rest as NominationEventReceiver;
+  if (!complete) return rest;
   return {
     ...rest,
     address,
     houseNumber,
     ...(districtCode === undefined ? {} : { districtCode }),
     ...(isB2f ? {} : { departmentCode, cityCode }),
-  } as NominationEventReceiver;
+  };
 }
 
 /** The receiver, operation and location the note rules and the XML take from the nominated FE. */

@@ -66,10 +66,13 @@ describe('nominated receiver', () => {
 
     it('keeps a complete address and drops the city and department of a B2F', () => {
       expect(readNominatedReceiver(full)).toEqual(full);
-      const { cityCode: _city, departmentCode: _department, ...rest } = full;
-      expect(readNominatedReceiver({ ...full, operationType: 'B2F' })).toEqual({
-        ...rest,
+      const b2f = readNominatedReceiver({ ...full, operationType: 'B2F' });
+      expect(b2f).toEqual({
+        ...TAXPAYER,
         operationType: 'B2F',
+        address: 'Avda 1',
+        houseNumber: '45',
+        districtCode: 143,
       });
     });
   });

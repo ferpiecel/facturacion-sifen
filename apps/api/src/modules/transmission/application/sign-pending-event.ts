@@ -1,4 +1,9 @@
-import type { EventSigner, EventXmlBuilder, IssuerEvent } from '@sifen/sifen-gateway';
+import type {
+  EventSigner,
+  EventXmlBuilder,
+  IssuerEvent,
+  ReceiverEvent,
+} from '@sifen/sifen-gateway';
 import type { CertificateSource } from '../../emission/application/ports/signing.port.js';
 import type { TenantEnvironment } from '../../fiscal-config/domain/document-environment.js';
 
@@ -13,6 +18,16 @@ export interface StoredVoidRange {
   readonly series?: string;
 }
 
+/** `issuer_events.receiver_data` of a receiver event (HU-E9-01). */
+export interface StoredReceiverData {
+  readonly issuedAt: string;
+  readonly receivedAt?: string;
+  readonly conformityType?: 'total' | 'partial';
+  readonly estimatedReceiptAt?: string;
+  readonly totalPyg?: number;
+  readonly receiver?: { readonly ruc: string; readonly name: string };
+}
+
 /** A stored issuer event with what is needed to build its XML. */
 export interface EventToSign {
   readonly id: string;
@@ -21,10 +36,12 @@ export interface EventToSign {
   readonly tenantEnvironment: TenantEnvironment;
   readonly eventId: bigint;
   readonly kind: string;
-  readonly reason: string;
-  /** CDC of the targeted document (cancellation, nomination); null for a voiding. */
+  /** `mOtEve`; null only on the receiver events that carry none. */
+  readonly reason: string | null;
+  /** CDC of the targeted document (cancellation, nomination) or of the foreign DE/DTE (receiver events); null for a voiding. */
   readonly cdc: string | null;
   readonly voidRange: StoredVoidRange | null;
+  readonly receiverData: StoredReceiverData | null;
 }
 
 /** Persistence of the events waiting to be signed; implemented over `issuer_events`. */
@@ -88,14 +105,14 @@ export type SignPendingEventResult =
   /** Nothing to do: the event is not (or no longer) `pending`. */
   | { readonly status: 'skipped'; readonly eventStatus: string };
 
-function toIssuerEvent(event: EventToSign): IssuerEvent {
+function toIssuerEvent(event: EventToSign): IssuerEvent | ReceiverEvent {
   if (event.kind === 'cancellation') {
-    if (event.cdc === null) throw new EventDataIncompleteError();
+    if (event.cdc === null || event.reason === null) throw new EventDataIncompleteError();
     return { kind: 'cancellation', cdc: event.cdc, reason: event.reason };
   }
   if (event.kind === 'voiding') {
     const range = event.voidRange;
-    if (range === null) throw new EventDataIncompleteError();
+    if (range === null || event.reason === null) throw new EventDataIncompleteError();
     return {
       kind: 'voiding',
       timbrado: range.timbrado,
@@ -108,7 +125,53 @@ function toIssuerEvent(event: EventToSign): IssuerEvent {
       ...(range.series === undefined ? {} : { series: range.series }),
     };
   }
-  throw new EventKindNotSignableError(event.kind);
+  return toReceiverEvent(event);
+}
+
+const RECEIVER_KINDS = ['conformity', 'disconformity', 'unawareness', 'receipt_notice'];
+
+function toReceiverEvent(event: EventToSign): IssuerEvent | ReceiverEvent {
+  if (!RECEIVER_KINDS.includes(event.kind)) throw new EventKindNotSignableError(event.kind);
+  const data = event.receiverData;
+  if (event.cdc === null || data === null) throw new EventDataIncompleteError();
+  const { cdc, reason } = event;
+  switch (event.kind) {
+    case 'conformity':
+      if (!data.conformityType) throw new EventDataIncompleteError();
+      return {
+        kind: 'conformity',
+        cdc,
+        conformityType: data.conformityType,
+        ...(data.estimatedReceiptAt ? { estimatedReceiptAt: data.estimatedReceiptAt } : {}),
+      };
+    case 'disconformity':
+      if (reason === null) throw new EventDataIncompleteError();
+      return { kind: 'disconformity', cdc, reason };
+    case 'unawareness':
+      if (reason === null || !data.receivedAt || !data.receiver)
+        throw new EventDataIncompleteError();
+      return {
+        kind: 'unawareness',
+        cdc,
+        reason,
+        issuedAt: data.issuedAt,
+        receivedAt: data.receivedAt,
+        receiver: data.receiver,
+      };
+    case 'receipt_notice':
+      if (!data.receivedAt || !data.receiver || data.totalPyg === undefined)
+        throw new EventDataIncompleteError();
+      return {
+        kind: 'receipt_notice',
+        cdc,
+        issuedAt: data.issuedAt,
+        receivedAt: data.receivedAt,
+        totalPyg: data.totalPyg,
+        receiver: data.receiver,
+      };
+    default:
+      throw new EventKindNotSignableError(event.kind);
+  }
 }
 
 /**

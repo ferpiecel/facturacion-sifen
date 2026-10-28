@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  type AnyPgColumn,
   bigint,
   boolean,
   char,
@@ -1164,6 +1165,14 @@ export const loteDocuments = pgTable(
 );
 
 export const ISSUER_EVENT_KINDS = ['cancellation', 'voiding', 'nomination'] as const;
+/** Events the tenant registers as the RECEIVER of someone else's DE/DTE (HU-E9-01); they target a CDC, not a document. */
+export const RECEIVER_EVENT_KINDS = [
+  'conformity',
+  'disconformity',
+  'unawareness',
+  'receipt_notice',
+] as const;
+export const EVENT_KINDS = [...ISSUER_EVENT_KINDS, ...RECEIVER_EVENT_KINDS] as const;
 export const ISSUER_EVENT_STATUSES = [
   'pending',
   'signed',
@@ -1254,8 +1263,16 @@ export const issuerEvents = pgTable(
     documentId: uuid('document_id'),
     /** `{ timbrado, establishment, point, from, to, type, series? }` of a voiding. */
     voidRange: jsonb('void_range'),
-    /** `mOtEve`, 5 to 500 characters. */
-    reason: text('reason').notNull(),
+    /** `mOtEve`, 5 to 500 characters; absent only on a conformity and a receipt notice, which carry none. */
+    reason: text('reason'),
+    /** CDC of the foreign DE/DTE a receiver event is about (HU-E9-01); null on issuer events. */
+    targetCdc: char('target_cdc', { length: 44 }),
+    /** Fields of the receiver event that its XML needs: dates, conformity type, total (HU-E9-01). */
+    receiverData: jsonb('receiver_data'),
+    /** The approved receiver event this one corrects (HU-E9-02); each event is corrected at most once. */
+    correctsEventId: uuid('corrects_event_id').references((): AnyPgColumn => issuerEvents.id),
+    /** Why the receiver corrects the event (MT Tabla K: free text, 5 to 500 characters). */
+    correctionReason: text('correction_reason'),
     /** `Idempotency-Key` of the request that created the event (HU-E8-02), unique per tenant; null for older rows. */
     idempotencyKey: varchar('idempotency_key', { length: 255 }),
     /** sha-256 hex of the canonical request, to detect a reused key. */
@@ -1294,19 +1311,55 @@ export const issuerEvents = pgTable(
     index('issuer_events_to_send_idx')
       .on(table.tenantId, table.environment, table.createdAt)
       .where(sql`${table.status} = 'signed'`),
+    // One open receiver event per CDC and kind; a partial and a total conformity count as different.
+    uniqueIndex('issuer_events_receiver_open_idx')
+      .on(
+        table.tenantId,
+        table.environment,
+        table.targetCdc,
+        table.kind,
+        sql`coalesce(${table.receiverData}->>'conformityType', '')`,
+      )
+      .where(sql`${table.targetCdc} IS NOT NULL AND ${table.status} <> 'rejected'`),
     check(
       'issuer_events_kind_valid',
-      sql`${table.kind} IN (${sql.raw(ISSUER_EVENT_KINDS.map((k) => `'${k}'`).join(', '))})`,
+      sql`${table.kind} IN (${sql.raw(EVENT_KINDS.map((k) => `'${k}'`).join(', '))})`,
     ),
     check(
       'issuer_events_status_valid',
       sql`${table.status} IN (${sql.raw(ISSUER_EVENT_STATUSES.map((s) => `'${s}'`).join(', '))})`,
     ),
     check('issuer_events_event_id_range', sql`${table.eventId} BETWEEN 1 AND 9999999999`),
-    check('issuer_events_reason_length', sql`char_length(${table.reason}) BETWEEN 5 AND 500`),
+    check(
+      'issuer_events_reason_length',
+      sql`${table.reason} IS NULL OR char_length(${table.reason}) BETWEEN 5 AND 500`,
+    ),
+    check(
+      'issuer_events_reason_required',
+      sql`(${table.reason} IS NULL) = (${table.kind} IN ('conformity', 'receipt_notice'))`,
+    ),
     check(
       'issuer_events_subject',
-      sql`(${table.kind} = 'voiding') = (${table.voidRange} IS NOT NULL) AND (${table.kind} = 'voiding') = (${table.documentId} IS NULL)`,
+      sql`(${table.kind} = 'voiding') = (${table.voidRange} IS NOT NULL) AND (${table.kind} IN ('cancellation', 'nomination')) = (${table.documentId} IS NOT NULL) AND (${table.kind} IN ('conformity', 'disconformity', 'unawareness', 'receipt_notice')) = (${table.targetCdc} IS NOT NULL) AND (${table.targetCdc} IS NOT NULL) = (${table.receiverData} IS NOT NULL)`,
+    ),
+    uniqueIndex('issuer_events_correction_idx')
+      .on(table.correctsEventId)
+      .where(sql`${table.correctsEventId} IS NOT NULL AND ${table.status} <> 'rejected'`),
+    check(
+      'issuer_events_correction_pair',
+      sql`(${table.correctsEventId} IS NULL) = (${table.correctionReason} IS NULL)`,
+    ),
+    check(
+      'issuer_events_correction_reason_length',
+      sql`${table.correctionReason} IS NULL OR char_length(${table.correctionReason}) BETWEEN 5 AND 500`,
+    ),
+    check(
+      'issuer_events_correction_subject',
+      sql`${table.correctsEventId} IS NULL OR (${table.targetCdc} IS NOT NULL AND ${table.kind} <> 'receipt_notice' AND ${table.correctsEventId} <> ${table.id})`,
+    ),
+    check(
+      'issuer_events_target_cdc_format',
+      sql`${table.targetCdc} IS NULL OR ${table.targetCdc} ~ '^[0-9]{44}$'`,
     ),
     check(
       'issuer_events_signed_pair',

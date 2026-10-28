@@ -9,6 +9,9 @@ export interface CreateSoapSifenGatewayOptions {
   readonly credentials: MtlsCredentialSource;
   readonly endpoints?: Partial<Record<SifenOperation, string>>;
   readonly timeoutMs?: number;
+  readonly maxTlsVersion?: 'TLSv1.2' | 'TLSv1.3';
+  /** Tests only: lets `endpoints` point at a non-official host. Never derive it from configuration. */
+  readonly allowCustomHost?: boolean;
   /**
    * Production stays refused until the PoC validates this adapter against sifen-test; the caller
    * must opt in explicitly, so a misconfigured environment cannot reach production by default.
@@ -27,7 +30,12 @@ export function createSoapSifenGateway(options: CreateSoapSifenGatewayOptions): 
     transport: createHttpsSoapTransport({
       credentials: options.credentials,
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+      ...(options.maxTlsVersion === undefined ? {} : { maxTlsVersion: options.maxTlsVersion }),
     }),
-    endpoints: sifenEndpoints(options.ambiente, options.endpoints),
+    endpoints: sifenEndpoints(options.ambiente, options.endpoints, {
+      ...(options.allowCustomHost === undefined
+        ? {}
+        : { allowCustomHost: options.allowCustomHost }),
+    }),
   });
 }

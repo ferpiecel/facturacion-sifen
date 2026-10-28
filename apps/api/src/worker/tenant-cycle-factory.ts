@@ -43,7 +43,8 @@ import { createDrizzleTransmissionCycleStore } from '../modules/transmission/inf
 
 export interface TenantCycleFactoryDeps {
   readonly db: Database;
-  readonly gateway: SifenGateway;
+  /** One gateway for every tenant, or a function giving each tenant its own (SOAP, ADR-0022). */
+  readonly gateway: SifenGateway | ((tenantId: string) => SifenGateway);
   /** When the send endpoint's circuit is open, the instant it may be tried again (HU-E6-08). */
   readonly sendPausedUntil?: () => Date | null;
   readonly certificates: CertificateSource;
@@ -63,7 +64,7 @@ export interface TenantCycleFactoryDeps {
  */
 export function createTenantCycleFactory({
   db,
-  gateway,
+  gateway: gatewayOrFactory,
   sendPausedUntil,
   certificates,
   cscs,
@@ -75,6 +76,8 @@ export function createTenantCycleFactory({
   // Fail when the worker is wired, not on the first tenant run.
   assertMaxQueries(recoveryMaxQueries);
   return (tenantId) => {
+    const gateway =
+      typeof gatewayOrFactory === 'function' ? gatewayOrFactory(tenantId) : gatewayOrFactory;
     const store = createDrizzleTransmissionCycleStore({ db, tenantId, now });
     const eventSigning = createDrizzleEventSigningStore({ db, tenantId });
     return new TransmissionCycle({

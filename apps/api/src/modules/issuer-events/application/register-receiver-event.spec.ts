@@ -7,10 +7,13 @@ import {
   ReceiverProfileMissingError,
   createRegisterReceiverEvent,
 } from './register-receiver-event.js';
+import { EventKeyReusedError } from './cancel-document.js';
+import { EventKeyCollisionError } from './ports/cancellation-unit-of-work.port.js';
 import {
   ReceiverEventDuplicateError,
   type NewReceiverEvent,
   type ReceiverEventUnit,
+  type StoredReceiverEvent,
 } from './ports/receiver-event-unit-of-work.port.js';
 
 const NOW = new Date('2026-10-20T12:00:00Z');
@@ -38,25 +41,46 @@ const body = (extra: Record<string, unknown> = {}) => ({
 function setup(
   overrides: {
     history?: PriorReceiverEvent[];
+    stored?: StoredReceiverEvent | null;
     party?: { ruc: string; name: string } | null;
+    collideOnce?: boolean;
     duplicate?: boolean;
   } = {},
 ) {
-  const party =
-    overrides.party === undefined ? { ruc: '80069563-1', name: 'Empresa SA' } : overrides.party;
   const inserted: NewReceiverEvent[] = [];
   const audits: unknown[] = [];
   const locked: string[] = [];
+  let collide = overrides.collideOnce ?? false;
+  let stored = collide ? null : (overrides.stored ?? null);
   const unit: ReceiverEventUnit = {
-    lockCdc: (cdc) => Promise.resolve(void locked.push(cdc)),
-    receiverIdentity: () => Promise.resolve({ environment: 'test', party }),
+    findByIdempotencyKey: () => Promise.resolve(stored),
+    lockCdc(cdc) {
+      locked.push(cdc);
+      return Promise.resolve();
+    },
+    receiverIdentity: () =>
+      Promise.resolve({
+        environment: 'test',
+        party:
+          overrides.party === undefined
+            ? { ruc: '80069563-1', name: 'Empresa SA' }
+            : overrides.party,
+      }),
     listEvents: () => Promise.resolve(overrides.history ?? []),
     insertEvent(event) {
+      if (collide) {
+        collide = false;
+        stored = overrides.stored ?? null;
+        return Promise.reject(new EventKeyCollisionError());
+      }
       if (overrides.duplicate) return Promise.reject(new ReceiverEventDuplicateError());
       inserted.push(event);
       return Promise.resolve({ id: 'event-uuid' });
     },
-    recordAudit: (entry) => Promise.resolve(void audits.push(entry)),
+    recordAudit(entry) {
+      audits.push(entry);
+      return Promise.resolve();
+    },
   };
   const register = createRegisterReceiverEvent({
     unitOfWork: { run: (_tenant, work) => work(unit) },
@@ -102,6 +126,14 @@ describe('createRegisterReceiverEvent', () => {
         after: { kind: 'conformity', cdc: CDC, status: 'pending' },
       }),
     ]);
+  });
+
+  it('stores the approval instant of a DTE as ISO text', async () => {
+    const { call, inserted } = setup();
+
+    await call(body({ approvedAt: '2026-10-01T11:00:00' }));
+
+    expect(inserted[0]?.data.approvedAt).toBe('2026-10-01T14:00:00.000Z');
   });
 
   it('refuses an invalid body with its issues and stores nothing', async () => {
@@ -151,6 +183,38 @@ describe('createRegisterReceiverEvent', () => {
         }),
       ),
     ).rejects.toBeInstanceOf(ReceiverProfileMissingError);
+  });
+
+  it('answers a retry with the same key and body with the first response, storing nothing again', async () => {
+    const first = setup();
+    await first.call();
+    const hash = first.inserted[0]?.requestHash ?? '';
+    const { call, inserted } = setup({
+      stored: { eventId: 'event-uuid', kind: 'conformity', cdc: CDC, requestHash: hash },
+    });
+
+    await expect(call()).resolves.toMatchObject({ eventId: 'event-uuid', status: 'pending' });
+    expect(inserted).toEqual([]);
+  });
+
+  it('refuses a key reused with another request', async () => {
+    const { call } = setup({
+      stored: { eventId: 'e', kind: 'conformity', cdc: CDC, requestHash: 'x'.repeat(64) },
+    });
+
+    await expect(call()).rejects.toBeInstanceOf(EventKeyReusedError);
+  });
+
+  it('re-reads the key when a concurrent request committed it first', async () => {
+    const first = setup();
+    await first.call();
+    const hash = first.inserted[0]?.requestHash ?? '';
+    const { call } = setup({
+      collideOnce: true,
+      stored: { eventId: 'winner', kind: 'conformity', cdc: CDC, requestHash: hash },
+    });
+
+    await expect(call()).resolves.toMatchObject({ eventId: 'winner' });
   });
 
   it('reports a concurrent duplicate of the same event as already registered', async () => {

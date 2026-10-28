@@ -42,7 +42,8 @@ each kind and 3 corrections.
 | P3 | Migration 0058 (`issuer_events`: kinds, `target_cdc`, `receiver_data`, nullable reason, constraints, open index, guard) + schema + rollback + db tests | about 300 |
 | P4a | Signing wiring: `toIssuerEvent` and the signing store load receiver events | about 220 |
 | P4b | Use case `RegisterReceiverEvent` + UoW port (in-memory spec) | about 400 |
-| P4c | Drizzle UoW (history, tenant identity, advisory lock, idempotency, audit) + pglite spec | about 300 |
+| P4c | Idempotency of the registration (replay, reused key, concurrent commit) | about 150 |
+| P4d | Drizzle UoW (history, tenant identity, advisory lock, idempotency, audit) + pglite spec | about 300 |
 | P5 | `POST /v1/receiver-events`, module wiring, OpenAPI, guide, `docs/configuracion.md` | about 350 |
 | P6 | HU-E9-02: migration 0059 (`corrects_event_id`, `correction_reason`, one per event) + correction rules + use case | about 400 |
 | P7 | HU-E9-02: `POST /v1/receiver-events/{id}/correct`, OpenAPI, guide, backlog status | about 300 |
@@ -60,8 +61,9 @@ each kind and 3 corrections.
 - [x] T2 P2 builder (PR below)
 - [x] T3 P3 migration 0058
 - [x] T4a P4a signing wiring
-- [ ] T4b P4b use case
-- [ ] T4c P4c Drizzle unit of work
+- [x] T4b P4b use case (ccec384)
+- [x] T4c P4c idempotency
+- [ ] T4d P4d Drizzle unit of work
 - [ ] T5 P5 endpoint + docs
 - [ ] T6 P6 correction (0059) rules + use case
 - [ ] T7 P7 correction endpoint + docs

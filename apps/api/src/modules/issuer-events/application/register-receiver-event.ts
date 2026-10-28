@@ -10,11 +10,14 @@ import {
   type ReceiverEventRequest,
   type RequestIssue,
 } from '../domain/receiver-event-rules.js';
+import { EventKeyReusedError } from './cancel-document.js';
+import { EventKeyCollisionError } from './ports/cancellation-unit-of-work.port.js';
 import {
   ReceiverEventDuplicateError,
   type NewReceiverEvent,
   type ReceiverEventData,
   type ReceiverEventUnitOfWork,
+  type StoredReceiverEvent,
 } from './ports/receiver-event-unit-of-work.port.js';
 
 /** The body is not a valid receiver event request; nothing was stored. */
@@ -96,9 +99,9 @@ function toStored(request: ReceiverEventRequest): {
  * Registers an event of the tenant as RECEIVER of a DE/DTE (HU-E9-01): inside one tenant transaction it locks
  * the CDC, applies the 45-day window and the compatibility rules of NT 019 against the events already
  * registered through the platform, and stores the event `pending` in `issuer_events` (ADR-0020). The worker
- * signs, batches and sends it like any other event.
+ * signs, batches and sends it like any other event. Idempotent by key.
  *
- * @throws ReceiverEventInvalidError, ReceiverEventRefusedError, ReceiverProfileMissingError
+ * @throws ReceiverEventInvalidError, ReceiverEventRefusedError, ReceiverProfileMissingError, EventKeyReusedError
  */
 export function createRegisterReceiverEvent(deps: RegisterReceiverEventDependencies) {
   const now = deps.now ?? (() => new Date());
@@ -117,7 +120,12 @@ export function createRegisterReceiverEvent(deps: RegisterReceiverEventDependenc
       cdc: request.cdc,
       ...stored,
     });
-    return registerOnce(input, request, stored, hash);
+    try {
+      return await registerOnce(input, request, stored, hash);
+    } catch (error) {
+      if (!(error instanceof EventKeyCollisionError)) throw error;
+      return registerOnce(input, request, stored, hash);
+    }
   };
 
   async function registerOnce(
@@ -127,7 +135,13 @@ export function createRegisterReceiverEvent(deps: RegisterReceiverEventDependenc
     hash: string,
   ): Promise<RegisteredReceiverEvent> {
     return deps.unitOfWork.run(input.tenantId, async (unit) => {
+      const replayed = replay(await unit.findByIdempotencyKey(input.idempotencyKey), hash);
+      if (replayed) return replayed;
+
       await unit.lockCdc(request.cdc);
+      // A parallel request with the same key may have committed while this one waited for the lock.
+      const late = replay(await unit.findByIdempotencyKey(input.idempotencyKey), hash);
+      if (late) return late;
 
       const { environment, party } = await unit.receiverIdentity();
       const history = await unit.listEvents(request.cdc, environment);
@@ -168,5 +182,14 @@ export function createRegisterReceiverEvent(deps: RegisterReceiverEventDependenc
       });
       return { eventId: id, kind: request.kind, cdc: request.cdc, status: 'pending' };
     });
+  }
+
+  function replay(
+    existing: StoredReceiverEvent | null,
+    hash: string,
+  ): RegisteredReceiverEvent | null {
+    if (!existing) return null;
+    if (existing.requestHash !== hash) throw new EventKeyReusedError();
+    return { eventId: existing.eventId, kind: existing.kind, cdc: existing.cdc, status: 'pending' };
   }
 }

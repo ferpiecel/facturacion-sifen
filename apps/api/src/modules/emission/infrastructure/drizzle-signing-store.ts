@@ -1,5 +1,6 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { z } from 'zod';
+import type { NominationEventReceiver } from '@sifen/sifen-gateway';
 import {
   documents,
   tenantEstablishments,
@@ -34,7 +35,13 @@ import {
 } from './http/credit-note.request.js';
 import { parseCreateRemission, toRemissionDraft } from './http/remission.request.js';
 import { parseCreateSelfInvoice, toSelfInvoiceDraft } from './http/self-invoice.request.js';
-import type { InvoiceXmlContext, XmlReceiver } from '../application/invoice-xml.js';
+import type {
+  InvoiceXmlContext,
+  NominatedXmlReceiver,
+  XmlReceiver,
+} from '../application/invoice-xml.js';
+import { nominatedFacts } from '../domain/nominated-receiver.js';
+import { approvedNomination } from './approved-nomination.js';
 import type { FiscalProfile } from '../../fiscal-config/domain/fiscal-profile.js';
 
 export interface DrizzleSigningStoreOptions {
@@ -69,7 +76,7 @@ const pathOf = (path: readonly PropertyKey[]): string =>
 
 function readPayload(payload: unknown): {
   draft: ReturnType<typeof toInvoiceDraft>;
-  receiver: XmlReceiver | undefined;
+  receiver: XmlReceiver | NominatedXmlReceiver | undefined;
   items: { code: string; description: string; unitCode: number }[];
 } {
   const base = parseCreateDocument(payload);
@@ -108,6 +115,7 @@ function readNotePayload(
   invoicePayload: unknown,
   associatedCdc: string,
   kind: 'credit' | 'debit',
+  nominated: NominationEventReceiver | null,
 ): ReturnType<typeof readPayload> & { note: NoteData } {
   const base = kind === 'credit' ? parseCreateCreditNote(payload) : parseCreateDebitNote(payload);
   if (!base.ok) throw new SigningDataIncompleteError(base.errors.map((e) => e.field));
@@ -117,15 +125,18 @@ function readNotePayload(
   }
   const invoice = readPayload(invoicePayload);
   const credit = toCreditNoteDraft(base.value);
+  // An FE issued to "Sin Nombre" whose nomination SIFEN approved: the note names the nominated receiver.
+  const facts =
+    nominated && invoice.draft.receiver.kind === 'unnamed' ? nominatedFacts(nominated) : null;
   return {
     draft: {
-      receiver: invoice.draft.receiver,
-      operationType: invoice.draft.operationType,
-      location: invoice.draft.location,
+      receiver: facts?.receiver ?? invoice.draft.receiver,
+      operationType: facts?.operationType ?? invoice.draft.operationType,
+      location: facts?.location ?? invoice.draft.location,
       items: credit.items,
       roundingPyg: credit.roundingPyg,
     },
-    receiver: invoice.receiver,
+    receiver: facts && nominated ? { nominated } : invoice.receiver,
     items: detail.data.items,
     note: { associatedCdc, reasonCode: credit.reasonCode },
   };
@@ -236,7 +247,7 @@ async function readDocument(
       ? undefined
       : first(
           await tx
-            .select({ payload: documents.payload })
+            .select({ id: documents.id, payload: documents.payload })
             .from(documents)
             .where(
               and(
@@ -251,8 +262,9 @@ async function readDocument(
     throw new SigningDataIncompleteError(['associatedCdc']);
   }
   const noteKind = document.documentType === 5 ? 'credit' : 'debit';
+  const nominated = await approvedNomination(tx, tenantId, invoice.id);
   return {
-    ...readNotePayload(document.payload, invoice.payload, associatedCdc, noteKind),
+    ...readNotePayload(document.payload, invoice.payload, associatedCdc, noteKind, nominated),
     noteKind,
   };
 }

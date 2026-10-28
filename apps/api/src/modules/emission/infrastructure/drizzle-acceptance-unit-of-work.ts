@@ -22,7 +22,8 @@ import {
   type AcceptanceUnit,
   type AcceptanceUnitOfWork,
 } from '../application/ports/acceptance-unit-of-work.port.js';
-import { nominatedFacts, readNominatedReceiver } from '../domain/nominated-receiver.js';
+import { nominatedFacts } from '../domain/nominated-receiver.js';
+import { approvedNomination } from './approved-nomination.js';
 import { parseCreateDocument, toInvoiceDraft } from './http/create-document.request.js';
 
 const IDEMPOTENCY_CONSTRAINT = 'documents_tenant_idempotency_key_key';
@@ -37,23 +38,6 @@ function isIdempotencyCollision(error: unknown): boolean {
 /** First row of a result, typed as possibly missing. */
 function first<T>(rows: T[]): T | undefined {
   return rows.at(0);
-}
-
-/** The receiver named by the FE's approved nomination event, if any (one open nomination per FE, 4453). */
-async function approvedNomination(tx: TenantTx, tenantId: string, documentId: string) {
-  const row = await tx
-    .select({ nomination: issuerEvents.nomination })
-    .from(issuerEvents)
-    .where(
-      and(
-        eq(issuerEvents.tenantId, tenantId),
-        eq(issuerEvents.documentId, documentId),
-        eq(issuerEvents.kind, 'nomination'),
-        eq(issuerEvents.status, 'approved'),
-      ),
-    )
-    .then(first);
-  return row ? readNominatedReceiver(row.nomination) : null;
 }
 
 function createUnit(tx: TenantTx, tenantId: string): AcceptanceUnit {

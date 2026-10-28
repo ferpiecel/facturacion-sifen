@@ -88,7 +88,9 @@ const builder = new TipsDeXmlBuilder();
 const noReceiver = (ctx: InvoiceXmlContext): InvoiceXmlContext => ({ ...ctx, receiver: undefined });
 
 function namedReceiver(ctx: InvoiceXmlContext): XmlReceiver {
-  if (ctx.receiver === undefined) throw new Error('the context has no named receiver');
+  if (ctx.receiver === undefined || 'nominated' in ctx.receiver) {
+    throw new Error('the context has no named receiver');
+  }
   return ctx.receiver;
 }
 

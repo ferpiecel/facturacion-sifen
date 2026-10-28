@@ -10,7 +10,31 @@ export function readNominatedReceiver(value: unknown): NominationEventReceiver |
   const candidate = value as Partial<NominationEventReceiver> | null;
   const kind = candidate?.kind;
   if (kind !== 'taxpayer' && kind !== 'non-taxpayer') return null;
-  return typeof candidate?.name === 'string' ? (candidate as NominationEventReceiver) : null;
+  return typeof candidate?.name === 'string'
+    ? usableAddress(candidate as NominationEventReceiver)
+    : null;
+}
+
+/**
+ * The nomination event accepts a partial address, but the note rules (D213-D223, 4470, 1324, 1327)
+ * need it whole, and a note that fails them could never be signed. An incomplete address block is
+ * left out of the note; a B2F never carries department or city.
+ */
+function usableAddress(receiver: NominationEventReceiver): NominationEventReceiver {
+  const { address, houseNumber, departmentCode, districtCode, cityCode, ...rest } = receiver;
+  const isB2f = receiver.operationType === 'B2F';
+  const complete =
+    address !== undefined &&
+    houseNumber !== undefined &&
+    (isB2f || (departmentCode !== undefined && cityCode !== undefined));
+  if (!complete) return rest as NominationEventReceiver;
+  return {
+    ...rest,
+    address,
+    houseNumber,
+    ...(districtCode === undefined ? {} : { districtCode }),
+    ...(isB2f ? {} : { departmentCode, cityCode }),
+  } as NominationEventReceiver;
 }
 
 /** The receiver, operation and location the note rules and the XML take from the nominated FE. */

@@ -10,6 +10,8 @@ export interface SoapGatewayConfig {
   readonly allowProduction: boolean;
   /** PEM bundle from `SIFEN_SOAP_CA_FILE` (DNIT CA); replaces the default roots. */
   readonly trustedRoots?: string;
+  /** `SIFEN_TLS_MAX_VERSION`: highest TLS version offered; the transport default (TLSv1.2) when unset. */
+  readonly maxTlsVersion?: 'TLSv1.2' | 'TLSv1.3';
 }
 
 const MAX_TIMEOUT_MS = 120_000;
@@ -41,6 +43,10 @@ export function loadSoapGatewayConfig(
   ) {
     throw new SoapGatewayConfigError('SIFEN_SOAP_ALLOW_PRODUCTION must be "true" or "false"');
   }
+  const rawTls = env.SIFEN_TLS_MAX_VERSION;
+  if (rawTls !== undefined && rawTls !== '' && rawTls !== 'TLSv1.2' && rawTls !== 'TLSv1.3') {
+    throw new SoapGatewayConfigError('SIFEN_TLS_MAX_VERSION must be "TLSv1.2" or "TLSv1.3"');
+  }
   let trustedRoots: string | undefined;
   const caFile = env.SIFEN_SOAP_CA_FILE;
   if (caFile !== undefined && caFile !== '') {
@@ -57,5 +63,6 @@ export function loadSoapGatewayConfig(
     ...(timeoutMs === undefined ? {} : { timeoutMs }),
     allowProduction: rawProduction === 'true',
     ...(trustedRoots === undefined ? {} : { trustedRoots }),
+    ...(rawTls === 'TLSv1.2' || rawTls === 'TLSv1.3' ? { maxTlsVersion: rawTls } : {}),
   };
 }

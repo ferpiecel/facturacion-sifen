@@ -46,6 +46,11 @@ import {
 import { createWorkerSifen } from './worker-gateway.js';
 import { createDrizzleTenantEnvironment } from '../modules/transmission/infrastructure/drizzle-tenant-environment.js';
 import { readFileSync } from 'node:fs';
+import { createTelemetryRuntime } from '../modules/telemetry/infrastructure/telemetry-runtime.js';
+import { TelemetryConfigError } from '../modules/telemetry/infrastructure/telemetry-config.js';
+import { startMetricsServer } from './metrics-server.js';
+import { publishPlatformGauges } from './platform-gauges.js';
+import { withTelemetry } from './tracing-gateway.js';
 import { loadWorkerConfig, WorkerConfigError } from './worker-config.js';
 
 // Worker process entrypoint (ADR-0003: same code as the API, a different entrypoint): wiring of
@@ -55,6 +60,7 @@ import { loadWorkerConfig, WorkerConfigError } from './worker-config.js';
 const RECONCILE_EVERY_MS = 5 * 60_000;
 const WEBHOOK_DELIVERY_EVERY_MS = 30_000;
 const DOCUMENT_EMAIL_EVERY_MS = 30_000;
+const GAUGES_EVERY_MS = 60_000;
 
 const logger: WorkerLogger = {
   info: (message) => {
@@ -79,6 +85,17 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
   // Fails closed at startup (HU-E11-02): production without SMTP settings and without an explicit
   // EMAIL_ENABLED=false never starts.
   const emailConfig = loadEmailConfig(env);
+  // Observability (HU-E14-01) is off unless OTEL_ENABLED / METRICS_ENABLED say otherwise.
+  const telemetryRuntime = createTelemetryRuntime(env, { defaultServiceName: 'sifen-worker' });
+  const { telemetry } = telemetryRuntime;
+  const metricsServer = telemetryRuntime.metricsHandler
+    ? await startMetricsServer({
+        port: telemetryRuntime.config.metricsPort,
+        host: telemetryRuntime.config.metricsHost,
+        token: telemetryRuntime.config.metricsToken,
+        handler: telemetryRuntime.metricsHandler,
+      })
+    : undefined;
 
   // Tenant work runs as app_login/app_user under RLS; only the tenant listing uses platform_admin.
   const appHandle = createNodePostgresDatabase(required(env, 'DATABASE_URL'));
@@ -100,8 +117,11 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
   );
   // One circuit breaker per SIFEN endpoint, shared by every tenant (HU-E6-08). With
   // SIFEN_GATEWAY=soap each tenant calls SIFEN with its own certificate (ADR-0022).
+  // The tracing decorator sits under the breaker, so only real SIFEN calls are timed and counted.
   const sifen = createWorkerSifen(env, {
     logger,
+    telemetry,
+    decorate: (gateway) => withTelemetry(gateway, telemetry),
     readFile: (path) => readFileSync(path, 'utf8'),
     environments: createDrizzleTenantEnvironment(appHandle.db),
     certificates: {
@@ -127,10 +147,7 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
       logger,
     }),
     logger,
-    // No metrics backend yet: counters go out as one parseable log line.
-    metric: (name, tenantId, by) => {
-      logger.info(`metric ${name}{tenant="${tenantId}"} +${String(by)}`);
-    },
+    telemetry,
   });
 
   // Webhook delivery needs neither the tenant run lock (the store claims rows with SKIP LOCKED and a
@@ -161,6 +178,20 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
     });
   } else {
     logger.info('document emails are disabled (EMAIL_ENABLED=false or no SMTP_HOST)');
+  }
+
+  // Cross-tenant gauges for the alert rules (HU-E14-01), only when someone scrapes the worker.
+  let gaugeTimer: NodeJS.Timeout | undefined;
+  if (metricsServer) {
+    const publish = () =>
+      publishPlatformGauges({ db: platformHandle.db, telemetry }).catch((error: unknown) => {
+        logger.warn(
+          `platform gauges failed: ${error instanceof Error ? error.name : 'unknown error'}`,
+        );
+      });
+    void publish();
+    gaugeTimer = setInterval(() => void publish(), GAUGES_EVERY_MS);
+    gaugeTimer.unref();
   }
 
   const running = await startTransmissionWorker({
@@ -226,7 +257,10 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
     // Order worker, queues, connection, databases; a failing step never skips the later ones.
     const closeAll = async () => {
       const steps = [
-        () => running.stop(),
+        () => {
+          clearInterval(gaugeTimer);
+          return running.stop();
+        },
         // After the cycles stopped: zeroize every cached certificate and cancel the sweep timer.
         () => {
           certificateCache.clear();
@@ -241,6 +275,8 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
           ]),
         () => connection.quit(),
         () => Promise.all([appHandle.close(), platformHandle.close()]),
+        () => metricsServer?.close(),
+        () => telemetryRuntime.shutdown(),
       ];
       let first: unknown;
       let failed = false;
@@ -277,7 +313,9 @@ if (isMainModule) {
   main(process.env).catch((error: unknown) => {
     // Only the class and, for config errors, the fixed message (variable names, never values): URLs and keys never reach the log.
     const detail =
-      error instanceof WorkerConfigError || error instanceof EmailConfigError
+      error instanceof WorkerConfigError ||
+      error instanceof EmailConfigError ||
+      error instanceof TelemetryConfigError
         ? `: ${error.message}`
         : '';
     logger.error(

@@ -2,6 +2,7 @@
 
 ## Síntomas y detección
 
+- Alerta de Prometheus: `DocumentosCercaDelPlazo72h` y `DocumentosFueraDelPlazo72h` ([reglas](../operacion/alertas.md)).
 SIFEN da 72 h desde la firma para transmitir un DE (ADR-0008). El worker revisa cada `DEADLINE_WATCH_INTERVAL_MS` (5 min) y emite el webhook `document.transmission_deadline_warning` **una vez a las 48 h y una vez a las 66 h** (`threshold_hours`, `transmission_deadline`, `hours_remaining`) para documentos aún `signed`, `queued` o `submitted`. Un documento ya vencido, aprobado, rechazado o cancelado no genera aviso; uno que ya pasó las 66 h al verlo recibe los dos.
 
 ## Impacto

@@ -1,6 +1,6 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { fakeDocumentsClient, ITEM, NOTE, PAGE, REJECTED } from '../documents/documents-fixtures';
 import { RecentDocuments } from './recent-documents';
@@ -12,6 +12,10 @@ const { replace, router } = vi.hoisted(() => {
   return { replace, router: { push: vi.fn(), replace } };
 });
 vi.mock('next/navigation', () => ({ useRouter: () => router }));
+
+beforeEach(() => {
+  replace.mockClear();
+});
 
 describe('RecentDocuments (documents API, last five)', () => {
   it('asks for the five newest documents and lists them with status, CDC and amount', async () => {

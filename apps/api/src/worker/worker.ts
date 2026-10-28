@@ -1,4 +1,3 @@
-import { FakeSifenGateway } from '@sifen/sifen-gateway';
 import { assertNonPrivilegedSession, createNodePostgresDatabase } from '@sifen/db';
 import { readBoundedFile } from '../cli/bounded-file.js';
 import { createCertificateVault, createCscVault } from '../cli/ops.js';
@@ -44,8 +43,9 @@ import {
   createWebhookDeliveryDeps,
   createWebhookDeliveryProcessor,
 } from './webhook-delivery.processor.js';
-import { withCircuitBreaker } from './resilient-gateway.js';
-import { createWorkerGateway } from './worker-gateway.js';
+import { createWorkerSifen } from './worker-gateway.js';
+import { createDrizzleTenantEnvironment } from '../modules/transmission/infrastructure/drizzle-tenant-environment.js';
+import { readFileSync } from 'node:fs';
 import { loadWorkerConfig, WorkerConfigError } from './worker-config.js';
 
 // Worker process entrypoint (ADR-0003: same code as the API, a different entrypoint): wiring of
@@ -79,9 +79,6 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
   // Fails closed at startup (HU-E11-02): production without SMTP settings and without an explicit
   // EMAIL_ENABLED=false never starts.
   const emailConfig = loadEmailConfig(env);
-  const baseGateway = createWorkerGateway(env);
-  // One circuit breaker per SIFEN endpoint, shared by every tenant (HU-E6-08).
-  const { gateway, sendPausedUntil } = withCircuitBreaker(baseGateway, { logger });
 
   // Tenant work runs as app_login/app_user under RLS; only the tenant listing uses platform_admin.
   const appHandle = createNodePostgresDatabase(required(env, 'DATABASE_URL'));
@@ -101,12 +98,26 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
       maxEntries: config.certificateCacheMaxEntries,
     },
   );
+  // One circuit breaker per SIFEN endpoint, shared by every tenant (HU-E6-08). With
+  // SIFEN_GATEWAY=soap each tenant calls SIFEN with its own certificate (ADR-0022).
+  const sifen = createWorkerSifen(env, {
+    logger,
+    readFile: (path) => readFileSync(path, 'utf8'),
+    environments: createDrizzleTenantEnvironment(appHandle.db),
+    certificates: {
+      open: (tenantId, environment) =>
+        certificateCache.open(appHandle.db, tenantId, environment, {
+          actor: TRANSMISSION_WORKER_ACTOR,
+          purpose: 'sifen-mtls',
+        }),
+    },
+  });
   const processor = new TransmissionCycleProcessor({
     lock: createRedisTenantRunLock(connection, { ttlMs: config.lockTtlMs }),
     createCycle: createTenantCycleFactory({
       db: appHandle.db,
-      gateway,
-      sendPausedUntil,
+      gateway: (tenantId) => sifen.gatewayFor(tenantId),
+      sendPausedUntil: () => sifen.sendPausedUntil(),
       certificates: createCertificateSource({
         db: appHandle.db,
         vault: certificateCache,
@@ -158,7 +169,7 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
     directory: createDrizzleTenantDirectory(platformHandle.db),
     schedules: createTenantScheduleStore(queue),
     process: guardSimulatorTenants({
-      simulator: baseGateway instanceof FakeSifenGateway,
+      simulator: sifen.simulator,
       environments: createDrizzleTenantEnvironments(platformHandle.db),
       logger,
       process: (data: TransmissionJobData) => processor.process(data),

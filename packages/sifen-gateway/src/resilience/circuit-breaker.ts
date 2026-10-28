@@ -103,6 +103,18 @@ export class CircuitBreaker {
     if (this.current !== 'closed') this.transition('closed');
   }
 
+  /**
+   * Gives back an acquisition whose outcome says nothing about the endpoint (a tenant-local
+   * failure): nothing is counted, and a half-open probe slot is freed for the next caller.
+   */
+  release(token?: number): void {
+    if (token !== undefined && token !== this.generation) return;
+    if (this.current === 'half-open') {
+      this.openUntil = this.clock();
+      this.transition('open');
+    }
+  }
+
   failure(token?: number): void {
     if (token !== undefined && token !== this.generation) return;
     if (this.current === 'open') return;

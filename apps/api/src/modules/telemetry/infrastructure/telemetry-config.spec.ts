@@ -10,6 +10,7 @@ describe('loadTelemetryConfig', () => {
       metrics: false,
       metricsToken: undefined,
       metricsPort: 9464,
+      metricsHost: '127.0.0.1',
       serviceName: 'sifen-api',
     });
   });
@@ -62,6 +63,19 @@ describe('loadTelemetryConfig', () => {
         'METRICS_TOKEN of at least 16 characters is required',
       );
     }
+  });
+
+  it('defaults the metrics host to loopback and the service name to the caller default', () => {
+    expect(loadTelemetryConfig({})).toMatchObject({
+      metricsHost: '127.0.0.1',
+      serviceName: 'sifen-api',
+    });
+    expect(
+      loadTelemetryConfig({ METRICS_HOST: '0.0.0.0' }, { defaultServiceName: 'sifen-worker' }),
+    ).toMatchObject({ metricsHost: '0.0.0.0', serviceName: 'sifen-worker' });
+    expect(
+      loadTelemetryConfig({ OTEL_SERVICE_NAME: 'x' }, { defaultServiceName: 'sifen-worker' }),
+    ).toMatchObject({ serviceName: 'x' });
   });
 
   it('bounds the worker metrics port and names the service', () => {

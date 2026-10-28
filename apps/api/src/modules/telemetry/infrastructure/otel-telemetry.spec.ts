@@ -9,6 +9,7 @@ const config = {
   metrics: true,
   metricsToken: undefined,
   metricsPort: 9464,
+  metricsHost: '127.0.0.1',
   serviceName: 'sifen-test',
 };
 
@@ -82,11 +83,6 @@ describe('createOtelTelemetry', () => {
     });
     await new Promise((r) => setTimeout(r, 20));
     const spans = exporter.getFinishedSpans();
-    console.log(
-      spans.map((s) => s.name),
-      exporter.getFinishedSpans().length,
-      carried,
-    );
     const child = must(spans.find((s) => s.name === 'sifen.enviarLote'));
     const root = must(spans.find((s) => s.name === 'cycle'));
     expect(child.spanContext().traceId).toBe(root.spanContext().traceId);

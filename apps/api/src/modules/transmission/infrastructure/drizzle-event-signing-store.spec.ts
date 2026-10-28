@@ -159,6 +159,7 @@ describe('DrizzleEventSigningStore', () => {
       cdc: CDC,
       voidRange: null,
       receiverData: null,
+      nomination: null,
     });
   });
 
@@ -178,6 +179,24 @@ describe('DrizzleEventSigningStore', () => {
       reason: null,
       cdc: FOREIGN,
       receiverData: data,
+    });
+  });
+
+  it('loads a nomination with the receiver it names and the CDC of its document', async () => {
+    const receiver = {
+      kind: 'non-taxpayer',
+      documentType: 1,
+      documentNumber: '1234567',
+      name: 'Juan Perez',
+      country: 'PRY',
+      operationType: 'B2C',
+    };
+    const id = await insertEvent({ kind: 'nomination', nomination: receiver });
+
+    expect(await storeFor(tenantId).load(id)).toMatchObject({
+      kind: 'nomination',
+      cdc: CDC,
+      nomination: receiver,
     });
   });
 

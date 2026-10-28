@@ -3,6 +3,7 @@ import type {
   EventXmlBuilder,
   IssuerEvent,
   ReceiverEvent,
+  NominationEventReceiver,
 } from '@sifen/sifen-gateway';
 import type { CertificateSource } from '../../emission/application/ports/signing.port.js';
 import type { TenantEnvironment } from '../../fiscal-config/domain/document-environment.js';
@@ -42,6 +43,8 @@ export interface EventToSign {
   readonly cdc: string | null;
   readonly voidRange: StoredVoidRange | null;
   readonly receiverData: StoredReceiverData | null;
+  /** The receiver a nomination names (`issuer_events.nomination`); null or absent on other kinds. */
+  readonly nomination?: NominationEventReceiver | null;
 }
 
 /** Persistence of the events waiting to be signed; implemented over `issuer_events`. */
@@ -76,7 +79,7 @@ export class EventEnvironmentMismatchError extends Error {
   }
 }
 
-/** The event kind has no XML builder yet (nomination arrives with HU-E8-05). */
+/** The event kind has no XML builder. */
 export class EventKindNotSignableError extends Error {
   constructor(kind: string) {
     super(`issuer events of kind ${kind} cannot be signed yet`);
@@ -124,6 +127,11 @@ function toIssuerEvent(event: EventToSign): IssuerEvent | ReceiverEvent {
       reason: event.reason,
       ...(range.series === undefined ? {} : { series: range.series }),
     };
+  }
+  if (event.kind === 'nomination') {
+    if (event.cdc === null || event.reason === null || !event.nomination)
+      throw new EventDataIncompleteError();
+    return { kind: 'nomination', cdc: event.cdc, reason: event.reason, receiver: event.nomination };
   }
   return toReceiverEvent(event);
 }

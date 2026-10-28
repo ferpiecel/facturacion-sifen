@@ -200,6 +200,27 @@ describe('SignPendingEvent', () => {
     });
   });
 
+  it('builds a nomination from the stored receiver', async () => {
+    const nomination = {
+      kind: 'non-taxpayer',
+      documentType: 1,
+      documentNumber: '1234567',
+      name: 'Juan Perez',
+      country: 'PRY',
+      operationType: 'B2C',
+    } as const;
+    const { sign, built } = setup([cancellation({ kind: 'nomination', nomination })]);
+
+    await sign.execute({ tenantId: 'tenant-1', eventId: 'ev-1' });
+
+    expect(built[0]?.event).toEqual({
+      kind: 'nomination',
+      cdc: CDC,
+      reason: 'Error en los datos',
+      receiver: nomination,
+    });
+  });
+
   it('builds a voiding from its stored range', async () => {
     const range = {
       timbrado: '12345678',
@@ -274,10 +295,11 @@ describe('SignPendingEvent', () => {
       [cancellation({ tenantEnvironment: 'production' })],
       EventEnvironmentMismatchError,
     ],
+    ['a kind with no builder', [cancellation({ kind: 'unknown_kind' })], EventKindNotSignableError],
     [
-      'a nomination, which has no builder yet',
+      'a nomination without its receiver',
       [cancellation({ kind: 'nomination' })],
-      EventKindNotSignableError,
+      EventDataIncompleteError,
     ],
     [
       'a cancellation without its reason',

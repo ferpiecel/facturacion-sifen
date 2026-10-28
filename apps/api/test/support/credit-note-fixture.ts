@@ -76,8 +76,9 @@ export async function acceptInvoiceWithStatus(
   tenantId: string,
   key: string,
   status = 'approved',
+  body: unknown = FE_BODY,
 ): Promise<{ documentId: string; cdc: string }> {
-  const parsed = parseCreateDocument(FE_BODY);
+  const parsed = parseCreateDocument(body);
   if (!parsed.ok) throw new Error('invalid invoice fixture');
   const accepted = await createAcceptInvoice({
     unitOfWork: createDrizzleAcceptanceUnitOfWork(db),

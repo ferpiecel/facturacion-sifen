@@ -74,6 +74,7 @@ export function createDrizzleEventRecoveryStore({
         const rows = await tx
           .select({
             id: issuerEvents.id,
+            kind: issuerEvents.kind,
             cdc: documents.cdc,
             sentAt: issuerEvents.sendAttemptedAt,
             responseCode: issuerEvents.responseCode,
@@ -98,7 +99,7 @@ export function createDrizzleEventRecoveryStore({
             and(
               eq(issuerEvents.tenantId, tenantId),
               eq(issuerEvents.status, 'unknown'),
-              eq(issuerEvents.kind, 'cancellation'),
+              inArray(issuerEvents.kind, ['cancellation', 'nomination']),
               lt(issuerEvents.sendAttemptedAt, sentBefore),
               or(
                 isNull(issuerEvents.responseCode),
@@ -128,6 +129,7 @@ export function createDrizzleEventRecoveryStore({
         }
         return rows.map((row): UnresolvedCancellation => ({
           id: row.id,
+          kind: row.kind === 'nomination' ? 'nomination' : 'cancellation',
           cdc: row.cdc,
           sentAt: row.sentAt ?? sentBefore,
           missedAt: row.responseCode === ABSENCE_NOTED_CODE ? row.respondedAt : null,

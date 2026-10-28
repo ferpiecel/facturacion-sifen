@@ -45,3 +45,7 @@ PRs: #385 (1/5, ready), #386, #387, #389 (draft chain), PR 5 branch `feat/hu-e14
 ## Review fixes (2026-10-27)
 
 Applied on each branch and restacked (no rebase onto main): #385 4e7c91ca (token required unless NODE_ENV development/test), #386 bb93fc92 (no debug log, endpoint normalized), #387 3ace9ade (/metrics 404 without token outside dev/test), #389 0f55a710 (METRICS_HOST default 127.0.0.1, worker service.name), #390 58ff6865 (SQL aggregation, keep last values on failure, platform_gauge_errors_total). Each pushed with verify OK; comments posted. Nothing pending.
+
+## Rebase onto main (2026-10-28)
+
+main replaced `createWorkerGateway`/`withCircuitBreaker` with `createWorkerSifen` (#383/#384/#388, ADR-0022). `resilient-gateway.ts` is gone. `createWorkerSifen` now takes `telemetry` (publishes `sifen_circuit_state` on each shared-breaker transition) and `decorate` (wraps the simulator or each tenant's SOAP gateway BENEATH the breaker; `worker.ts` passes `withTelemetry`). Covered in `worker-gateway.spec.ts` (RED first). PR 4 and PR 5 were rebased onto the squashed #385-#387.

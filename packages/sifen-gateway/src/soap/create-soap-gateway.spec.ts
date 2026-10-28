@@ -38,4 +38,14 @@ describe('createSoapSifenGateway', () => {
       /production/i,
     );
   });
+
+  it('accepts a custom host only when allowCustomHost is set (tests)', () => {
+    const endpoints = { enviarLote: 'https://localhost:9/x' };
+    expect(() => createSoapSifenGateway({ ambiente: 'test', credentials, endpoints })).toThrow(
+      RangeError,
+    );
+    expect(
+      createSoapSifenGateway({ ambiente: 'test', credentials, endpoints, allowCustomHost: true }),
+    ).toBeInstanceOf(SoapSifenGateway);
+  });
 });

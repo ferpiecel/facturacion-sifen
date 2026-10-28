@@ -22,4 +22,18 @@ describe('createTenantCycleFactory', () => {
     expect(() => createTenantCycleFactory(deps)).not.toThrow();
     expect(() => createTenantCycleFactory({ ...deps, recoveryMaxQueries: 5 })).not.toThrow();
   });
+
+  it("asks a gateway function for each tenant's own gateway", () => {
+    const asked: string[] = [];
+    const create = createTenantCycleFactory({
+      ...deps,
+      gateway: (tenantId: string) => {
+        asked.push(tenantId);
+        return {} as never;
+      },
+    });
+    create('tenant-a');
+    create('tenant-b');
+    expect(asked).toEqual(['tenant-a', 'tenant-b']);
+  });
 });

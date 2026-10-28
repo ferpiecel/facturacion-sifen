@@ -68,11 +68,14 @@ La API ve al portal como un proxy más, así que `AUTH_TRUST_PROXY_HOPS` debe co
 
 `SIFEN_GATEWAY` elige el adaptador y es obligatorio: el worker no arranca sin él.
 
+`GET /v1/ruc/:ruc` de la API usa la misma variable: con `soap` consulta a SIFEN con el certificado y el ambiente del tenant que llama (misma configuración SOAP que el worker; una configuración inválida impide arrancar la API); con `simulator` aplica la misma regla de `NODE_ENV`; sin adaptador disponible responde 503.
+
 | Variable | Valores | Efecto |
 |---|---|---|
 | `SIFEN_GATEWAY` | `simulator` o `soap` | `simulator` solo con `NODE_ENV` `development` o `test`. `soap` habla con SIFEN por mTLS con el certificado de cada tenant ([ADR-0022](adr/0022-gateway-soap-por-tenant.md)). |
 | `SIFEN_SOAP_ALLOW_PRODUCTION` | `true` o `false` (por defecto `false`) | Sin `true`, los tenants en `production` no envían nada: su trabajo queda en cola. |
 | `SIFEN_SOAP_TIMEOUT_MS` | entero 1 a 120000 (por defecto 30000) | Plazo total de cada llamada SOAP. |
+| `SIFEN_TLS_MAX_VERSION` | `TLSv1.2` (defecto) o `TLSv1.3` | Versión TLS máxima que ofrece el cliente SOAP. El MT v150 §7.4 indica TLS 1.2, y con 1.3 un certificado de tenant rechazado se ve como un reset de conexión; subirla solo si la DNIT lo exige. Un valor inválido impide arrancar. |
 | `SIFEN_SOAP_CA_FILE` | ruta a un PEM | Raíces de confianza del servidor SIFEN (CA de la DNIT); reemplaza las raíces por defecto. |
 
 Valores inválidos detienen el arranque. El ambiente de cada tenant sale de `tenants.environment`.

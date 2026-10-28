@@ -60,6 +60,8 @@ export interface HttpsTransportOptions {
   /** Whole-call deadline (connect + request + response). Default 30 s. */
   readonly timeoutMs?: number;
   readonly maxResponseBytes?: number;
+  /** Highest TLS version offered. Default `TLSv1.2` (MT v150 §7.4); see the comment at the request. */
+  readonly maxTlsVersion?: 'TLSv1.2' | 'TLSv1.3';
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -115,11 +117,11 @@ export function createHttpsSoapTransport(options: HttpsTransportOptions): SoapTr
             key: credential.key,
             cert: credential.cert,
             ...(credential.ca === undefined ? {} : { ca: credential.ca as string | Buffer }),
-            // MT v150 §7.4 specifies TLS 1.2. Pinned: in TLS 1.3 the client finishes the handshake before
+            // MT v150 §7.4 specifies TLS 1.2, the default maximum (configurable: SIFEN_TLS_MAX_VERSION). Pinned: in TLS 1.3 the client finishes the handshake before
             // the server judges its certificate, so a rejected tenant certificate would look like a
             // plain connection reset, indistinguishable from an endpoint failure.
             minVersion: 'TLSv1.2',
-            maxVersion: 'TLSv1.2',
+            maxVersion: options.maxTlsVersion ?? 'TLSv1.2',
             rejectUnauthorized: true,
             headers: {
               'content-type': 'application/soap+xml; charset=utf-8',

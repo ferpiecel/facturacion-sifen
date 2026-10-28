@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 import ActionRequiredPage from './page';
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
+// Stable router, as Next's is: useRemote depends on it, a fresh object per render re-runs its request.
+const { router } = vi.hoisted(() => ({ router: { push: vi.fn(), replace: vi.fn() } }));
+vi.mock('next/navigation', () => ({ useRouter: () => router }));
 vi.mock('../../../features/attention/attention-screen', () => ({
   AttentionScreen: () => <h1>Comprobantes que necesitan acción</h1>,
 }));

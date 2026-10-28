@@ -23,7 +23,7 @@ import {
   takeEventId,
 } from './drizzle-event-support.js';
 
-function createUnit(tx: TenantTx, tenantId: string): ReceiverEventUnit {
+export function createUnit(tx: TenantTx, tenantId: string): ReceiverEventUnit {
   return {
     async findByIdempotencyKey(key) {
       const row = await tx
@@ -105,6 +105,8 @@ function createUnit(tx: TenantTx, tenantId: string): ReceiverEventUnit {
             reason: event.reason,
             idempotencyKey: event.idempotencyKey,
             requestHash: event.requestHash,
+            correctsEventId: event.correction?.originalEventId ?? null,
+            correctionReason: event.correction?.reason ?? null,
           })
           .returning({ id: issuerEvents.id });
         return { id: row.id };

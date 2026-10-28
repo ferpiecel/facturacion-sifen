@@ -5,8 +5,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { fakeDocumentsClient, ITEM, NOTE, PAGE, REJECTED } from '../documents/documents-fixtures';
 import { RecentDocuments } from './recent-documents';
 
-const { replace } = vi.hoisted(() => ({ replace: vi.fn() }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), replace }) }));
+// The router must be referentially stable, as Next's is: useRemote depends on it, so a fresh object per
+// render would re-run the request on every render and race the assertions.
+const { replace, router } = vi.hoisted(() => {
+  const replace = vi.fn();
+  return { replace, router: { push: vi.fn(), replace } };
+});
+vi.mock('next/navigation', () => ({ useRouter: () => router }));
 
 describe('RecentDocuments (documents API, last five)', () => {
   it('asks for the five newest documents and lists them with status, CDC and amount', async () => {

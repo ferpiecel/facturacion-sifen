@@ -1,4 +1,4 @@
--- Manual rollback for 0063: removes `document.nominated` from the webhook event checks. Delete the queued deliveries of that type and remove it from every endpoint's filter first, or the constraints refuse to come back.
+-- Manual rollback for 0068: removes `document.nominated` from the webhook event checks. Delete the queued deliveries of that type and remove it from every endpoint's filter first, or the constraints refuse to come back.
 DELETE FROM "webhook_deliveries" WHERE "event_type" = 'document.nominated';
 UPDATE "webhook_endpoints" SET "events" = array_remove("events", 'document.nominated') WHERE 'document.nominated' = ANY("events");
 ALTER TABLE "webhook_deliveries" DROP CONSTRAINT "webhook_deliveries_event_type_valid";

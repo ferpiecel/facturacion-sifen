@@ -1,5 +1,12 @@
 import xmlgen from 'facturacionelectronicapy-xmlgen';
-import type { EventXmlBuilder, IssuerEvent, IssuerEventBuildInput } from '@sifen/sifen-gateway';
+import type {
+  EventXmlBuilder,
+  IssuerEvent,
+  IssuerEventBuildInput,
+  ReceiverEvent,
+  ReceiptNoticeEvent,
+  UnawarenessEvent,
+} from '@sifen/sifen-gateway';
 import { resolveCjsDefault } from './cjs-interop.ts';
 
 type EventData = Record<string, unknown>;
@@ -7,6 +14,10 @@ type EventData = Record<string, unknown>;
 interface XmlgenEventApi {
   generateXMLEventoCancelacion(id: number, params: EventData, data: EventData): Promise<string>;
   generateXMLEventoInutilizacion(id: number, params: EventData, data: EventData): Promise<string>;
+  generateXMLEventoConformidad(id: number, params: EventData, data: EventData): Promise<string>;
+  generateXMLEventoDisconformidad(id: number, params: EventData, data: EventData): Promise<string>;
+  generateXMLEventoDesconocimiento(id: number, params: EventData, data: EventData): Promise<string>;
+  generateXMLEventoNotificacion(id: number, params: EventData, data: EventData): Promise<string>;
 }
 
 const xmlgenApi = resolveCjsDefault(xmlgen) as XmlgenEventApi;
@@ -55,7 +66,7 @@ function assertVoidingRange(event: Extract<IssuerEvent, { kind: 'voiding' }>): v
   }
 }
 
-function dataFor(event: IssuerEvent, signedAt: Date): EventData {
+function dataFor(event: IssuerEvent | ReceiverEvent, signedAt: Date): EventData {
   const common = { fechaFirmaDigital: asuncionWallClock(signedAt) };
   switch (event.kind) {
     case 'cancellation':
@@ -73,6 +84,51 @@ function dataFor(event: IssuerEvent, signedAt: Date): EventData {
         motivo: event.reason,
         ...(event.series === undefined ? {} : { serie: event.series }),
       };
+    case 'conformity':
+      return {
+        ...common,
+        cdc: event.cdc,
+        tipoConformidad: event.conformityType === 'total' ? 1 : 2,
+        ...(event.estimatedReceiptAt === undefined
+          ? {}
+          : { fechaRecepcion: event.estimatedReceiptAt }),
+      };
+    case 'disconformity':
+      return { ...common, cdc: event.cdc, motivo: event.reason };
+    case 'unawareness':
+      return { ...common, ...receiverData(event), motivo: event.reason };
+    case 'receipt_notice':
+      return { ...common, ...receiverData(event), totalPYG: event.totalPyg };
+  }
+}
+
+/** Receiver of the DE/DTE as a taxpayer, with the dates the manual asks for the 45-day count (NT 019 1.1-1.2). */
+function receiverData(event: UnawarenessEvent | ReceiptNoticeEvent): EventData {
+  return {
+    cdc: event.cdc,
+    fechaEmision: event.issuedAt,
+    fechaRecepcion: event.receivedAt,
+    tipoReceptor: 1,
+    nombre: event.receiver.name,
+    ruc: event.receiver.ruc,
+  };
+}
+
+function generate(input: IssuerEventBuildInput, data: EventData): Promise<string> {
+  const params = { version: EVENT_FORMAT_VERSION };
+  switch (input.event.kind) {
+    case 'cancellation':
+      return xmlgenApi.generateXMLEventoCancelacion(ENVELOPE_DID, params, data);
+    case 'voiding':
+      return xmlgenApi.generateXMLEventoInutilizacion(ENVELOPE_DID, params, data);
+    case 'conformity':
+      return xmlgenApi.generateXMLEventoConformidad(ENVELOPE_DID, params, data);
+    case 'disconformity':
+      return xmlgenApi.generateXMLEventoDisconformidad(ENVELOPE_DID, params, data);
+    case 'unawareness':
+      return xmlgenApi.generateXMLEventoDesconocimiento(ENVELOPE_DID, params, data);
+    case 'receipt_notice':
+      return xmlgenApi.generateXMLEventoNotificacion(ENVELOPE_DID, params, data);
   }
 }
 
@@ -86,12 +142,8 @@ export class TipsEventXmlBuilder implements EventXmlBuilder {
     if (!Number.isInteger(input.eventId) || input.eventId < 1 || input.eventId > MAX_EVENT_ID) {
       throw new RangeError('The event id is a whole number of 1 to 10 digits');
     }
-    const params = { version: EVENT_FORMAT_VERSION };
     const data = dataFor(input.event, input.signedAt ?? new Date());
-    const envelope =
-      input.event.kind === 'cancellation'
-        ? await xmlgenApi.generateXMLEventoCancelacion(ENVELOPE_DID, params, data)
-        : await xmlgenApi.generateXMLEventoInutilizacion(ENVELOPE_DID, params, data);
+    const envelope = await generate(input, data);
     const group = EVENT_GROUP.exec(envelope)?.[0];
     if (!group?.includes(LIBRARY_EVENT_ID)) {
       throw new Error('The event generator returned no event group');

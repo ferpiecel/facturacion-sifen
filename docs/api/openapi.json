@@ -13,7 +13,7 @@
           "Documents"
         ],
         "summary": "Accept an invoice (FE), a credit note (NCE), a debit note (NDE), a self-invoice (AFE) or a remission note (NRE) for emission",
-        "description": "The body is an FE unless `type` is `NCE` (credit note) or `NDE` (debit note), both associated to an approved FE whose receiver they take, or `AFE` (self-invoice: the issuer buys from a seller who is not a contribuyente; the receiver is the issuer, there is no VAT and the seller constancia is mandatory) or `NRE` (remission note: goods in transit, with the motive, the kilometres, the places, the vehicle and the carrier; items carry a quantity and no price, and the document has no totals; motive 7 only to the issuer own RUC, 2606). From the day before the active certificate expires (`CERTIFICATE_EMISSION_BLOCK_DAYS`) the request answers 422 with `code: certificate_expiring` and `notAfter`, before any number is used. A credit note answers 422 with the rule of the failed check (for example `credit-note-sum-exceeds-invoice`, 2417) before any number is used. Returns 202 once the document is persisted with its CDC; signing and transmission to SIFEN are asynchronous. Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.",
+        "description": "The body is an FE unless `type` is `NCE` (credit note) or `NDE` (debit note), both associated to an approved FE whose receiver they take, or `AFE` (self-invoice: the issuer buys from a seller who is not a contribuyente; the receiver is the issuer, there is no VAT and the seller constancia is mandatory) or `NRE` (remission note: goods in transit, with the motive, the kilometres, the places, the vehicle and the carrier; items carry a quantity and no price, and the document has no totals; motive 7 only to the issuer own RUC, 2606). From the day before the active certificate expires (`CERTIFICATE_EMISSION_BLOCK_DAYS`) the request answers 422 with `code: certificate_expiring` and `notAfter`, before any number is used. A credit note answers 422 with the rule of the failed check (for example `credit-note-sum-exceeds-invoice`, 2417) before any number is used. Returns 202 once the document is persisted with its CDC; signing and transmission to SIFEN are asynchronous. With `?wait=true`, a tenant that has synchronous transmission enabled gets the response held until SIFEN settles the document (up to `SYNC_WAIT_TIMEOUT_MS`, 30 s by default) and receives 200 with the final document; if the wait ends first, or the tenant has no synchronous transmission, the usual 202 comes back. Sending is still driven by the worker cycle, so the wait is bounded by `TRANSMISSION_CYCLE_INTERVAL_MS`. Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.",
         "security": [
           {
             "apiKey": []
@@ -31,6 +31,18 @@
             "schema": {
               "type": "string",
               "pattern": "^[!-~]{1,255}$"
+            }
+          },
+          {
+            "name": "wait",
+            "in": "query",
+            "required": false,
+            "description": "Only `true` has an effect: hold the response for a tenant with synchronous transmission until the document is final.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true"
+              ]
             }
           }
         ],
@@ -61,6 +73,16 @@
           }
         },
         "responses": {
+          "200": {
+            "description": "Final document (only with `?wait=true` for a tenant with synchronous transmission)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            }
+          },
           "202": {
             "description": "Accepted",
             "content": {
@@ -531,6 +553,240 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/receiver-events": {
+      "post": {
+        "operationId": "registerReceiverEvent",
+        "tags": [
+          "Receiver events"
+        ],
+        "summary": "Register a conformity, disconformity, unawareness or receipt notice over a CDC",
+        "description": "The tenant acts as the RECEIVER of a DE/DTE issued by someone else. Asynchronous: 202 once the event is stored; the worker signs it with the tenant certificate and sends it to SIFEN with the other events. Allowed within 45 days (configurable) of the issue date of a DE or of the approval of a DTE (`approvedAt`, NT 019), at most one event per kind (a partial conformity may precede the total one), and not after an unawareness. An event that contradicts the last one is a correction (`receiver-event-needs-correction`). The 422 body carries `errors[].rule`, `sifenCode` when SIFEN defines one and, for an expired window, the `deadline`; an event of that kind already registered is a 409. Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-required-scopes": [
+          "documents:write"
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "1 to 255 printable ASCII characters, no spaces",
+            "schema": {
+              "type": "string",
+              "pattern": "^[!-~]{1,255}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReceiverEventRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiverEventAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or malformed Idempotency-Key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency-Key reused with another body, or the CDC already has an event of that kind",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid or a window or compatibility rule refuses it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The tenant ran out of event ids",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/receiver-events/{id}/correct": {
+      "post": {
+        "operationId": "correctReceiverEvent",
+        "tags": [
+          "Receiver events"
+        ],
+        "summary": "Correct a receiver event SIFEN approved by registering the opposite one",
+        "description": "The body is the replacement event (same fields and CDC as `ReceiverEventRequest`) plus `correctionReason` (5 to 500 characters). Only a conformity, disconformity or unawareness SIFEN approved can be corrected: once, while it is the last conclusive event of the CDC, within 15 days (configurable) of its approval, by the opposite kind; a correction cannot be corrected. 422 `errors[].rule` names the failed rule (`correction-window-expired` carries `deadline`); a second correction is a 409. Same `Idempotency-Key` and body return the same response; another body is a 409.",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-required-scopes": [
+          "documents:write"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Receiver event id (UUID)",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "1 to 255 printable ASCII characters, no spaces",
+            "schema": {
+              "type": "string",
+              "pattern": "^[!-~]{1,255}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReceiverEventCorrectionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiverEventCorrectionAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "id is not a UUID, or missing or malformed Idempotency-Key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The tenant has no such receiver event",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency-Key reused with another body, or the event was already corrected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is invalid or a correction rule refuses it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationProblem"
                 }
               }
             }
@@ -2404,6 +2660,144 @@
             "type": "string",
             "minLength": 5,
             "maxLength": 150
+          }
+        }
+      },
+      "ReceiverEventRequest": {
+        "type": "object",
+        "required": [
+          "kind",
+          "cdc",
+          "issuedAt"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "conformity",
+              "disconformity",
+              "unawareness",
+              "receipt_notice"
+            ]
+          },
+          "cdc": {
+            "type": "string",
+            "pattern": "^[0-9]{44}$",
+            "description": "CDC of the DE/DTE"
+          },
+          "issuedAt": {
+            "type": "string",
+            "description": "dFecEmi, AAAA-MM-DDThh:mm:ss (Asunción)"
+          },
+          "approvedAt": {
+            "type": "string",
+            "description": "SIFEN approval of a DTE (ISO instant); the 45 days count from it"
+          },
+          "conformityType": {
+            "type": "string",
+            "enum": [
+              "total",
+              "partial"
+            ]
+          },
+          "estimatedReceiptAt": {
+            "type": "string",
+            "description": "Required for a partial conformity (GCO004)"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 500
+          },
+          "receivedAt": {
+            "type": "string",
+            "description": "dFecRecep, required for an unawareness and a receipt notice"
+          },
+          "totalPyg": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Total in guaraníes (notice)"
+          }
+        }
+      },
+      "ReceiverEventCorrectionRequest": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ReceiverEventRequest"
+          },
+          {
+            "type": "object",
+            "required": [
+              "correctionReason"
+            ],
+            "properties": {
+              "correctionReason": {
+                "type": "string",
+                "minLength": 5,
+                "maxLength": 500
+              }
+            }
+          }
+        ]
+      },
+      "ReceiverEventCorrectionAccepted": {
+        "type": "object",
+        "required": [
+          "event_id",
+          "corrects_event_id",
+          "kind",
+          "cdc",
+          "status"
+        ],
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "corrects_event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "cdc": {
+            "type": "string",
+            "pattern": "^[0-9]{44}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending"
+            ]
+          }
+        }
+      },
+      "ReceiverEventAccepted": {
+        "type": "object",
+        "required": [
+          "event_id",
+          "kind",
+          "cdc",
+          "status"
+        ],
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "cdc": {
+            "type": "string",
+            "pattern": "^[0-9]{44}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending"
+            ]
           }
         }
       },

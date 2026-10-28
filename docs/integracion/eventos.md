@@ -1,4 +1,4 @@
-# Eventos del emisor
+# Eventos del emisor y del receptor
 
 Después de que SIFEN aprueba un documento, el emisor puede actuar sobre él con eventos (`siRecepEvento`, MT v150 sección 11). Todos son asíncronos como la emisión ([ADR-0011](../adr/0011-api-asincrona-202-webhooks-idempotencia.md)): la API guarda el evento y responde 202; el worker lo firma con el certificado del tenant, lo envía en lote de hasta 15 y el resultado de SIFEN se refleja en el documento y en un webhook.
 
@@ -54,3 +54,56 @@ Respuesta `202 { "event_id": "…", "status": "pending" }`. Con 0600 de SIFEN, l
 
 - Valores aún sin confirmar con el ambiente de pruebas y por eso configurables: el motivo admite 5 a 150 caracteres y un rango puede ser de un solo número (el MT dice "mayor", la librería TIPS acepta igual).
 - Un rechazo no consume número de evento.
+
+## Eventos del receptor
+
+Cuando el tenant es el **receptor** de un DE/DTE emitido por otra parte, registra su respuesta con `POST /v1/receiver-events` (scope `documents:write`, `Idempotency-Key` obligatoria). No hace falta tener el documento en la plataforma: se identifica por su CDC. Es asíncrono como el resto: responde `202` y el worker firma y envía el evento. Los datos del receptor (RUC y razón social) salen del perfil fiscal del tenant.
+
+```json
+{ "kind": "conformity", "conformityType": "total", "cdc": "0180…44 dígitos…", "issuedAt": "2026-10-01T10:00:00" }
+```
+
+Respuesta `202 { "event_id": "…", "kind": "conformity", "cdc": "…", "status": "pending" }`.
+
+| `kind` | Campos propios | Máximo por CDC |
+|---|---|---|
+| `conformity` | `conformityType` (`total` o `partial`); `estimatedReceiptAt` si es parcial | 2: parcial y luego total |
+| `disconformity` | `reason` (5 a 500 caracteres) | 1 |
+| `unawareness` | `reason`, `receivedAt` | 1 |
+| `receipt_notice` | `receivedAt`, `totalPyg` | 1 |
+
+Siempre: `cdc`, `issuedAt` (fecha de emisión del documento, `AAAA-MM-DDThh:mm:ss` hora de Asunción, coherente con el CDC) y, para un DTE, `approvedAt` (aprobación de SIFEN). Reglas (NT 019 y MT v150 11.6.3 a 11.6.6):
+
+| Regla | Respuesta |
+|---|---|
+| Plazo de 45 días (configurable) desde la emisión de un DE o la aprobación de un DTE | 422 `receiver-event-window-expired`, con `sifenCode` y `deadline` |
+| Un solo evento de cada tipo por CDC (4101, 4150, 4158, 4200, 4251) | 409 `receiver-event-already-registered` |
+| Compatibilidad entre eventos (por ejemplo, no hay conformidad tras un desconocimiento: 4156) | 422 `receiver-event-incongruent` |
+| Un evento contrario al último se registra como corrección | 422 `receiver-event-needs-correction` |
+| El tenant necesita perfil fiscal para `unawareness` y `receipt_notice` | 422 `receiver-profile-missing` |
+
+La plataforma solo conoce los eventos que registró ella: SIFEN, que también ve los registrados por otros medios, tiene la última palabra. Mismo `Idempotency-Key` y mismo cuerpo devuelven la misma respuesta; la misma clave con otro cuerpo, o ya usada por otro evento, 409.
+
+### Corregir un evento del receptor
+
+`POST /v1/receiver-events/{id}/correct`, mismo scope y cabecera. `{id}` es el `event_id` de un evento que SIFEN **aprobó**. El cuerpo es el evento que lo reemplaza, sobre el mismo CDC, más `correctionReason` (5 a 500 caracteres):
+
+```json
+{ "kind": "disconformity", "cdc": "0180…", "issuedAt": "2026-10-01T10:00:00", "reason": "Mercadería dañada", "correctionReason": "Se registró la conformidad por error" }
+```
+
+Respuesta `202 { "event_id": "…", "corrects_event_id": "…", "kind": "disconformity", "cdc": "…", "status": "pending" }`.
+
+| Regla (MT v150, Tabla K) | Respuesta |
+|---|---|
+| El original está aprobado | 422 `correction-original-not-approved` |
+| Solo conformidad, disconformidad y desconocimiento se corrigen | 422 `correction-kind-unsupported` |
+| Una corrección no se corrige | 422 `correction-of-correction` |
+| Una sola corrección por evento | 409 `correction-already-requested` |
+| El original sigue siendo el último evento concluyente del CDC | 422 `correction-original-superseded` |
+| El reemplazo es de tipo contrario al original | 422 `correction-kind-not-opposite` |
+| Hasta 15 días (configurable) desde la aprobación del original | 422 `correction-window-expired`, con `deadline` |
+| `correctionReason` de 5 a 500 caracteres | 422, campo `correctionReason` |
+| El evento no existe para el tenant | 404 |
+
+Además valen las reglas de registro del reemplazo. Plazos configurables: [`RECEIVER_EVENT_WINDOW_DAYS` y `RECEIVER_EVENT_CORRECTION_DAYS`](../configuracion.md). Pendiente de confirmar con producto: la corrección de una corrección se rechaza (lectura estricta de "una corrección por evento").

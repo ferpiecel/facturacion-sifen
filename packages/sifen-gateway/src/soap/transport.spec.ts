@@ -1,7 +1,12 @@
 import { createServer, type Server } from 'node:https';
 import type { AddressInfo } from 'node:net';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { SifenProtocolError, SifenTimeoutError, SifenTransportError } from '../errors.ts';
+import {
+  SifenClientCertificateError,
+  SifenProtocolError,
+  SifenTimeoutError,
+  SifenTransportError,
+} from '../errors.ts';
 import { createTestPki, type TestPki } from '../../test/support/test-pki.ts';
 import { createHttpsSoapTransport } from './transport.ts';
 
@@ -76,7 +81,19 @@ describe('createHttpsSoapTransport', () => {
     expect(seen).toHaveLength(1);
     expect(seen[0]).toMatchObject({ clientCn: 'tenant-client', body: '<soap/>' });
     expect(seen[0]?.contentType).toContain('application/soap+xml');
-    expect(['TLSv1.2', 'TLSv1.3']).toContain(seen[0]?.protocol);
+    expect(seen[0]?.protocol).toBe('TLSv1.2');
+  });
+
+  it('negotiates TLS 1.3 when the maximum version is raised', async () => {
+    const url = await start();
+
+    await transportFor({ maxTlsVersion: 'TLSv1.3' }).post({
+      operation: 'enviarLote',
+      url,
+      body: '<soap/>',
+    });
+
+    expect(seen[0]?.protocol).toBe('TLSv1.3');
   });
 
   it('returns non-2xx responses so SOAP Faults (HTTP 500) can be interpreted', async () => {
@@ -113,7 +130,7 @@ describe('createHttpsSoapTransport', () => {
 
     await expect(
       transport.post({ operation: 'enviarLote', url, body: 'x' }),
-    ).rejects.toBeInstanceOf(SifenTransportError);
+    ).rejects.toBeInstanceOf(SifenClientCertificateError);
   });
 
   it('maps a server that never answers to SifenTimeoutError', async () => {

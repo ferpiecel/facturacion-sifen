@@ -3,12 +3,18 @@ export type { SifenCode } from './codes.ts';
 export type {
   Ambiente,
   CancellationEvent,
+  ConformityEvent,
+  DisconformityEvent,
   DeXmlBuilder,
   EventSigner,
   EventXmlBuilder,
   FacturaPocInput,
   IssuerEvent,
   IssuerEventBuildInput,
+  ReceiptNoticeEvent,
+  ReceiverEvent,
+  ReceiverParty,
+  UnawarenessEvent,
   LoadedCertificate,
   QrConfig,
   QrGenerator,
@@ -16,8 +22,10 @@ export type {
   XmlSigner,
 } from './emission-ports.ts';
 export {
+  SifenClientCertificateError,
   SifenFaultError,
   SifenProtocolError,
+  SifenTenantUnavailableError,
   SifenTimeoutError,
   SifenTransportError,
 } from './errors.ts';

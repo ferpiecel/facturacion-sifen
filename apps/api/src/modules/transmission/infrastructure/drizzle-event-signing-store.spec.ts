@@ -158,6 +158,26 @@ describe('DrizzleEventSigningStore', () => {
       reason: 'Error en los datos',
       cdc: CDC,
       voidRange: null,
+      receiverData: null,
+    });
+  });
+
+  it('loads a receiver event with the foreign CDC it targets and its data', async () => {
+    const FOREIGN = '1'.repeat(44);
+    const data = { issuedAt: '2026-10-01T10:00:00', conformityType: 'total' };
+    const id = await insertEvent({
+      kind: 'conformity',
+      documentId: null,
+      reason: null,
+      targetCdc: FOREIGN,
+      receiverData: data,
+    });
+
+    expect(await storeFor(tenantId).load(id)).toMatchObject({
+      kind: 'conformity',
+      reason: null,
+      cdc: FOREIGN,
+      receiverData: data,
     });
   });
 

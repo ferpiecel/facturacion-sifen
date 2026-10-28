@@ -171,6 +171,12 @@ Respuesta `202`:
 { "document_id": "b3b8c2d6-0c1e-4c38-a5b4-6f2f9a1b7e10", "cdc": "01800695631001001000000712026101310000000019" }
 ```
 
+### Esperar el resultado (`?wait=true`)
+
+Un tenant con la transmisión síncrona activada (la activa operaciones con `tenant:sync-transmission`) puede enviar `POST /v1/documents?wait=true`. La respuesta se retiene hasta que SIFEN resuelve el documento o vence `SYNC_WAIT_TIMEOUT_MS` (30 s por defecto, de 1 a 30 s): si el documento llegó a `approved`, `approved_with_observations` o `rejected`, responde `200` con el documento (mismo cuerpo que `GET /v1/documents/{id}`); si no, o si el tenant no tiene el flag, responde el `202` de siempre y el resultado llega por webhook. El `Idempotency-Key` sigue valiendo: un reintento devuelve el mismo documento.
+
+El envío lo sigue haciendo el ciclo del worker (`TRANSMISSION_CYCLE_INTERVAL_MS`, 60 s por defecto): la espera solo observa el documento cada 500 ms. Para que `wait=true` alcance a resolverse dentro del plazo, el ciclo debe correr con un intervalo menor que `SYNC_WAIT_TIMEOUT_MS`.
+
 ## Emitir una nota de crédito
 
 Una nota de crédito electrónica (NCE) acredita total o parcialmente una FE que usted ya emitió y que SIFEN **aprobó** (`approved` o `approved_with_observations`). Se envía al mismo `POST /v1/documents`, con `"type": "NCE"` y el mismo `Idempotency-Key`.

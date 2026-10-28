@@ -15,3 +15,6 @@ export const ACCEPT_DEBIT_NOTE = Symbol('AcceptDebitNote');
 export const ACCEPT_SELF_INVOICE = Symbol('AcceptSelfInvoice');
 /** Injection token for the `acceptRemission` application function (NRE). */
 export const ACCEPT_REMISSION = Symbol('AcceptRemission');
+
+/** Injection token for the `waitForDocument` application function (HU-E6-06, `?wait=true`). */
+export const WAIT_FOR_DOCUMENT = Symbol('WaitForDocument');

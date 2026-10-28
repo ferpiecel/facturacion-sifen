@@ -12,11 +12,13 @@ import { PartnersModule } from './modules/partners/partners.module.js';
 import { PortalDocumentsModule } from './modules/portal-documents/portal-documents.module.js';
 import { IdentityModule } from './modules/identity/identity.module.js';
 import { PortalAuthModule } from './modules/identity/portal-auth.module.js';
+import { TelemetryModule } from './modules/telemetry/telemetry.module.js';
 import { WebhooksModule } from './modules/webhooks/webhooks.module.js';
 
 @Module({
   imports: [
     ClsModule.forRoot({ global: true, middleware: { mount: true } }),
+    TelemetryModule,
     DatabaseModule,
     CustodyModule,
     IdentityModule,

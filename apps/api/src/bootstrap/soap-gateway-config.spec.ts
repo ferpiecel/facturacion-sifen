@@ -22,11 +22,19 @@ describe('loadSoapGatewayConfig', () => {
     ).toEqual({ timeoutMs: 45_000, allowProduction: true, trustedRoots: PEM });
   });
 
+  it('reads the maximum TLS version', () => {
+    expect(loadSoapGatewayConfig({ SIFEN_TLS_MAX_VERSION: 'TLSv1.3' }, read)).toEqual({
+      allowProduction: false,
+      maxTlsVersion: 'TLSv1.3',
+    });
+  });
+
   it.each([
     { SIFEN_SOAP_TIMEOUT_MS: 'abc' },
     { SIFEN_SOAP_TIMEOUT_MS: '0' },
     { SIFEN_SOAP_TIMEOUT_MS: '600000' },
     { SIFEN_SOAP_ALLOW_PRODUCTION: 'yes' },
+    { SIFEN_TLS_MAX_VERSION: 'TLSv1.1' },
   ])('fails fast on %o', (env) => {
     expect(() => loadSoapGatewayConfig(env, read)).toThrow(SoapGatewayConfigError);
   });

@@ -21,6 +21,7 @@ export interface TenantSoapGatewayDeps {
   /** How long a call that could not start is deferred (`SifenTenantUnavailableError.retryAt`). */
   readonly retryAfterMs: number;
   readonly timeoutMs?: number;
+  readonly maxTlsVersion?: 'TLSv1.2' | 'TLSv1.3';
   /** Trust anchors for the SIFEN server (DNIT CA bundle); replaces the default roots when set. */
   readonly trustedRoots?: string;
   readonly logger?: { warn(message: string): void };
@@ -92,6 +93,7 @@ export class TenantSoapGatewayFactory {
             }),
         },
         ...(deps.timeoutMs === undefined ? {} : { timeoutMs: deps.timeoutMs }),
+        ...(deps.maxTlsVersion === undefined ? {} : { maxTlsVersion: deps.maxTlsVersion }),
         ...(deps.endpointOverrides === undefined ? {} : { endpoints: deps.endpointOverrides }),
         ...(deps.allowCustomHost === undefined ? {} : { allowCustomHost: deps.allowCustomHost }),
       });

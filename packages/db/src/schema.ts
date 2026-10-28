@@ -1273,6 +1273,8 @@ export const issuerEvents = pgTable(
     correctsEventId: uuid('corrects_event_id').references((): AnyPgColumn => issuerEvents.id),
     /** Why the receiver corrects the event (MT Tabla K: free text, 5 to 500 characters). */
     correctionReason: text('correction_reason'),
+    /** The receiver a nomination names (HU-E8-05), as requested; set on insert, immutable, only on a nomination. */
+    nomination: jsonb('nomination'),
     /** `Idempotency-Key` of the request that created the event (HU-E8-02), unique per tenant; null for older rows. */
     idempotencyKey: varchar('idempotency_key', { length: 255 }),
     /** sha-256 hex of the canonical request, to detect a reused key. */
@@ -1360,6 +1362,10 @@ export const issuerEvents = pgTable(
     check(
       'issuer_events_target_cdc_format',
       sql`${table.targetCdc} IS NULL OR ${table.targetCdc} ~ '^[0-9]{44}$'`,
+    ),
+    check(
+      'issuer_events_nomination_subject',
+      sql`(${table.kind} = 'nomination') = (${table.nomination} IS NOT NULL)`,
     ),
     check(
       'issuer_events_signed_pair',

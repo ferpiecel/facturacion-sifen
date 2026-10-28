@@ -19,9 +19,9 @@ export interface TelemetryRuntime {
 /** The API and the worker build their telemetry here: a no-op unless the environment turns it on. */
 export function createTelemetryRuntime(
   env: NodeJS.ProcessEnv,
-  options: { spanExporter?: SpanExporter } = {},
+  options: { spanExporter?: SpanExporter; defaultServiceName?: string } = {},
 ): TelemetryRuntime {
-  const config = loadTelemetryConfig(env);
+  const config = loadTelemetryConfig(env, { defaultServiceName: options.defaultServiceName });
   const metricsOpen = env.NODE_ENV === 'development' || env.NODE_ENV === 'test';
   if (!config.tracing && !config.metrics) {
     return {

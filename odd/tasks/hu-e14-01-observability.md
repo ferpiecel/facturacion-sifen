@@ -14,11 +14,11 @@
 
 ## Tasks
 
-- [ ] T1a (PR 1) Config validation (fail-fast), Telemetry port, metric catalog with label whitelist, no-op adapter, env docs
-- [ ] T1b (PR 2) OTel adapter (traces, Prometheus metrics) and `createTelemetryRuntime`, pinned deps
-- [ ] T1c (PR 3) Nest module: `/metrics` (bearer token, 404 when off), request span and `x-trace-id`
-- [ ] T2 (PR 4) Worker: SDK bootstrap and metrics port, `traceparent` in job data, spans per job, tracing SIFEN gateway decorator (latency, codes, lote/rejection counters), circuit state gauge, RUC block counter replaces the log-line metric
-- [ ] T3 (PR 5) Gauges `de_pending_transmission{bucket}`, RUC-blocked tenants, certificate expiry; `docs/operacion/alertas.md` + `docs/operacion/prometheus-alertas.yml`; link from every runbook in docs/runbooks and docs/operacion.md
+- [x] T1a (PR 1) Config validation (fail-fast), Telemetry port, metric catalog with label whitelist, no-op adapter, env docs
+- [x] T1b (PR 2) OTel adapter (traces, Prometheus metrics) and `createTelemetryRuntime`, pinned deps
+- [x] T1c (PR 3) Nest module: `/metrics` (bearer token, 404 when off), request span and `x-trace-id`
+- [x] T2 (PR 4) Worker: SDK bootstrap and metrics port, `traceparent` in job data, spans per job, tracing SIFEN gateway decorator (latency, codes, lote/rejection counters), circuit state gauge, RUC block counter replaces the log-line metric
+- [x] T3 (PR 5) Gauges `de_pending_transmission{bucket}`, RUC-blocked tenants, certificate expiry; `docs/operacion/alertas.md` + `docs/operacion/prometheus-alertas.yml`; link from every runbook in docs/runbooks and docs/operacion.md
 
 ## Authorized scope
 
@@ -31,9 +31,21 @@ apps/api (telemetry module, bootstrap, worker), docs, odd. Pinned exact deps (`@
 - Pinned deps used: `@opentelemetry/api` 1.10.0, `sdk-trace` 3.0.0 (`TracerProvider`, `SimpleSpanProcessor({ exporter })`), `sdk-metrics` 3.0.0, `exporter-prometheus` 0.300.0 (`preventServerStart: true`, `getMetricsRequestHandler`), `exporter-trace-otlp-http` 0.300.0, `resources` 3.0.0, `context-async-hooks` 3.0.0, `core` 3.0.0.
 - Gotchas: the app has no direct `fastify` dependency (use structural request/reply types); controllers hijack the reply to serve the Prometheus text; use a fresh `InMemorySpanExporter` per test; domain specs must not import infrastructure.
 
-## Next step
+## Status (final)
+
+PRs: #385 (1/5, ready), #386, #387, #389 (draft chain), PR 5 branch `feat/hu-e14-01-gauges-alerts` (platform gauges every 60 s as platform_admin, alert rules, runbook links). Gaps recorded in docs/operacion/alertas.md (rejection rate, lote_processing_seconds, API-to-worker trace).
+
+## Next step (superseded)
 
 1. Confirm PR 1 is pushed (`git ls-remote`), push 2bbef55a if not, open PR 1 ready.
 2. PR 2: branch `feat/hu-e14-01-otel-adapter` from PR 1; bring `otel-telemetry*.ts`, `telemetry-runtime.ts`, `apps/api/package.json` and the lockfile from `full-e14` (~300 lines).
 3. PR 3: Nest module, `/metrics`, interceptor, e2e, and the `app.module.ts` import (~190 lines).
 4. PR 4 (T2), PR 5 (T3) as listed above. Not started.
+
+## Review fixes (2026-10-27)
+
+Applied on each branch and restacked (no rebase onto main): #385 4e7c91ca (token required unless NODE_ENV development/test), #386 bb93fc92 (no debug log, endpoint normalized), #387 3ace9ade (/metrics 404 without token outside dev/test), #389 0f55a710 (METRICS_HOST default 127.0.0.1, worker service.name), #390 58ff6865 (SQL aggregation, keep last values on failure, platform_gauge_errors_total). Each pushed with verify OK; comments posted. Nothing pending.
+
+## Rebase onto main (2026-10-28)
+
+main replaced `createWorkerGateway`/`withCircuitBreaker` with `createWorkerSifen` (#383/#384/#388, ADR-0022). `resilient-gateway.ts` is gone. `createWorkerSifen` now takes `telemetry` (publishes `sifen_circuit_state` on each shared-breaker transition) and `decorate` (wraps the simulator or each tenant's SOAP gateway BENEATH the breaker; `worker.ts` passes `withTelemetry`). Covered in `worker-gateway.spec.ts` (RED first). PR 4 and PR 5 were rebased onto the squashed #385-#387.

@@ -49,6 +49,7 @@ import { readFileSync } from 'node:fs';
 import { createTelemetryRuntime } from '../modules/telemetry/infrastructure/telemetry-runtime.js';
 import { TelemetryConfigError } from '../modules/telemetry/infrastructure/telemetry-config.js';
 import { startMetricsServer } from './metrics-server.js';
+import { publishPlatformGauges } from './platform-gauges.js';
 import { withTelemetry } from './tracing-gateway.js';
 import { loadWorkerConfig, WorkerConfigError } from './worker-config.js';
 
@@ -59,6 +60,7 @@ import { loadWorkerConfig, WorkerConfigError } from './worker-config.js';
 const RECONCILE_EVERY_MS = 5 * 60_000;
 const WEBHOOK_DELIVERY_EVERY_MS = 30_000;
 const DOCUMENT_EMAIL_EVERY_MS = 30_000;
+const GAUGES_EVERY_MS = 60_000;
 
 const logger: WorkerLogger = {
   info: (message) => {
@@ -178,6 +180,20 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
     logger.info('document emails are disabled (EMAIL_ENABLED=false or no SMTP_HOST)');
   }
 
+  // Cross-tenant gauges for the alert rules (HU-E14-01), only when someone scrapes the worker.
+  let gaugeTimer: NodeJS.Timeout | undefined;
+  if (metricsServer) {
+    const publish = () =>
+      publishPlatformGauges({ db: platformHandle.db, telemetry }).catch((error: unknown) => {
+        logger.warn(
+          `platform gauges failed: ${error instanceof Error ? error.name : 'unknown error'}`,
+        );
+      });
+    void publish();
+    gaugeTimer = setInterval(() => void publish(), GAUGES_EVERY_MS);
+    gaugeTimer.unref();
+  }
+
   const running = await startTransmissionWorker({
     cycleIntervalMs: config.cycleIntervalMs,
     reconcileEveryMs: RECONCILE_EVERY_MS,
@@ -241,7 +257,10 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
     // Order worker, queues, connection, databases; a failing step never skips the later ones.
     const closeAll = async () => {
       const steps = [
-        () => running.stop(),
+        () => {
+          clearInterval(gaugeTimer);
+          return running.stop();
+        },
         // After the cycles stopped: zeroize every cached certificate and cancel the sweep timer.
         () => {
           certificateCache.clear();

@@ -47,6 +47,11 @@ export const METRIC_CATALOG = {
     description: 'Circuit breaker state per SIFEN operation (0 closed, 1 half-open, 2 open)',
     labels: ['operation'],
   },
+  platform_gauge_errors_total: {
+    kind: 'counter',
+    description: 'Failed refreshes of the cross-tenant gauges (the previous values stay published)',
+    labels: [],
+  },
   de_pending_transmission: {
     kind: 'gauge',
     description: 'Documents not yet approved by age bucket (<24h, 24-48h, 48-72h, >72h)',

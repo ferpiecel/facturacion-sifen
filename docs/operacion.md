@@ -89,6 +89,8 @@ No hay corte por cuota en el MVP: el uso se cuenta y se consulta, no se bloquea.
 
 ## Worker de transmisión
 
+Métricas, trazas y reglas de alerta: [`operacion/alertas.md`](operacion/alertas.md).
+
 El worker (`apps/api/src/worker/worker.ts`, mismo código que la API, otro punto de entrada: ADR-0003) corre el ciclo de transmisión de cada tenant (firmar los documentos aceptados, armar lotes, enviar los lotes pendientes y consultar los vencidos) como un job repetible por tenant en la cola BullMQ `lote-build` (ADR-0013). Postgres es la fuente de verdad: Redis solo coordina, y los jobs se reconstruyen al arrancar. Un candado en Redis por tenant evita que dos ciclos del mismo tenant corran a la vez, aunque haya varios procesos worker.
 
 ```bash

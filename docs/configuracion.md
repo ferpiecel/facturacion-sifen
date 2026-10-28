@@ -46,6 +46,12 @@ Todas tienen un valor por defecto, así que el entorno local funciona sin un arc
 | `API_DOCS_ENABLED` | *(sin valor)* | `apps/api` | `true` publica `/docs`, `/docs/openapi.json` y `/docs/guides` (documentación OpenAPI de la API de integradores, sin API key) aunque `NODE_ENV` no sea `development` o `test`; pensado para staging. Cualquier otro valor se ignora. Sin la variable, en producción o con `NODE_ENV` sin definir, ambas rutas responden `404`. |
 | `API_DOCS_GUIDES_DIR` | *(sin valor)* | `apps/api` | Carpeta de Markdown que `/docs/guides` publica como páginas HTML (índice por carpeta y una página por `.md`). Sin la variable se usa `docs/` en la raíz del workspace pnpm (se busca `pnpm-workspace.yaml` subiendo desde el directorio de trabajo). Los `.md` se listan una sola vez al arrancar y solo esos se sirven; si la carpeta no existe (p. ej. en una imagen de producción) el índice queda vacío. Sigue la misma compuerta que `/docs` (`NODE_ENV` o `API_DOCS_ENABLED`). |
 | `NODE_ENV` | *(sin valor)* | `apps/api` | Estándar de Node. En `production` exige `SIFEN_ENVIRONMENT` explícita. Además, solo con `development` o `test` la API puede arrancar sin `KMS_LOCAL_MASTER_KEY`; con cualquier otro valor (o sin valor) la exige. Para desarrollo local, exportá `NODE_ENV=development` o definí la clave. |
+| `OTEL_ENABLED` | `false` | `apps/api`, worker | `true` exporta trazas OpenTelemetry por OTLP/HTTP. Sin él no se exporta nada (los spans internos siguen dando `trace_id`). Debe ser `true` o `false`. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | *(sin valor)* | `apps/api`, worker | URL base `http(s)://` del colector OTLP (se agrega `/v1/traces`). Obligatoria con `OTEL_ENABLED=true`. Es un secreto: nunca se registra en logs ni en errores. |
+| `OTEL_SERVICE_NAME` | `sifen-api` | `apps/api`, worker | Nombre del servicio en las trazas y métricas; el worker debe fijar `sifen-worker`. |
+| `METRICS_ENABLED` | `false` | `apps/api`, worker | `true` habilita las métricas Prometheus (`GET /metrics` en la API; listener propio del worker en `METRICS_PORT`). Sin él `/metrics` responde 404. |
+| `METRICS_TOKEN` | *(sin valor)* | `apps/api`, worker | Token Bearer que exige `/metrics`. Con `METRICS_ENABLED=true` y `NODE_ENV` distinto de `development` o `test` son obligatorios al menos 16 caracteres (también con `NODE_ENV` sin definir: solo `development` y `test` exactos son permisivos); la API no arranca sin él. |
+| `METRICS_PORT` | `9464` | worker | Puerto del listener de métricas del worker (1024 a 65535). |
 
 ## IP del cliente y proxies de confianza
 

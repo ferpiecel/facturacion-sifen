@@ -1,0 +1,51 @@
+# Reglas de alerta de Prometheus para facturacion-sifen (HU-E14-01, plan v1.1 §13).
+# Se cargan con `rule_files`; el detalle y el runbook de cada una están en docs/operacion/alertas.md.
+# Las métricas salen del worker (`METRICS_PORT`) y de la API (`GET /metrics`) con el token Bearer.
+groups:
+  - name: facturacion-sifen
+    rules:
+      - alert: SifenCircuitAbierto
+        expr: max by (operation) (sifen_circuit_state) == 2
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "El circuit breaker de SIFEN ({{ $labels.operation }}) está abierto"
+          runbook: docs/runbooks/sifen-caido.md
+      - alert: SifenErroresDeTransporte
+        expr: sum by (operation) (rate(sifen_request_errors_total[5m])) > 0.05
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Llamadas a SIFEN fallando ({{ $labels.operation }})"
+          runbook: docs/runbooks/sifen-caido.md
+      - alert: RucBloqueado
+        expr: max(sifen_ruc_blocked_tenants) > 0 or increase(sifen_ruc_blocks_total[15m]) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: "SIFEN bloqueó el RUC de al menos un tenant"
+          runbook: docs/runbooks/ruc-bloqueado.md
+      - alert: DocumentosCercaDelPlazo72h
+        expr: sum(de_pending_transmission{bucket="48-72h"}) > 0
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Hay documentos firmados hace 48 h o más sin aprobar"
+          runbook: docs/runbooks/de-plazo-72h.md
+      - alert: DocumentosFueraDelPlazo72h
+        expr: sum(de_pending_transmission{bucket=">72h"}) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: "Hay documentos con más de 72 h sin aprobar"
+          runbook: docs/runbooks/de-plazo-72h.md
+      - alert: CertificadoPorVencer
+        expr: certificate_expiry_days_min < 30
+        labels: { severity: warning }
+        annotations:
+          summary: "Un certificado vence en menos de 30 días"
+          runbook: docs/runbooks/certificado-vencido.md
+      - alert: CertificadoVenceEstaSemana
+        expr: certificate_expiry_days_min < 7
+        labels: { severity: critical }
+        annotations:
+          summary: "Un certificado vence en menos de 7 días"
+          runbook: docs/runbooks/certificado-vencido.md

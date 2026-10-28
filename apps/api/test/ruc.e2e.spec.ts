@@ -45,7 +45,7 @@ describe('GET /v1/ruc/:ruc (e2e)', () => {
       .overrideProvider(DATABASE)
       .useValue(handle.db)
       .overrideProvider(RUC_GATEWAY)
-      .useValue(gateway)
+      .useValue({ gatewayFor: () => gateway, environmentOf: () => Promise.resolve('production') })
       .compile();
     app = moduleRef.createNestApplication<NestFastifyApplication>(createHttpAdapter());
     await app.init();
@@ -95,5 +95,21 @@ describe('GET /v1/ruc/:ruc (e2e)', () => {
   it('answers 502 on a gateway failure', async () => {
     gateway.enqueue('consultarRUC', new SifenTimeoutError('consultarRUC'));
     expect((await get('80012345')).statusCode).toBe(502);
+  });
+
+  it('answers 503 when no SIFEN adapter is available', async () => {
+    await app.close();
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(DATABASE_HANDLE)
+      .useValue(handle)
+      .overrideProvider(DATABASE)
+      .useValue(handle.db)
+      .overrideProvider(RUC_GATEWAY)
+      .useValue(null)
+      .compile();
+    app = moduleRef.createNestApplication<NestFastifyApplication>(createHttpAdapter());
+    await app.init();
+    await app.getHttpAdapter().getInstance().ready();
+    expect((await get('80012345')).statusCode).toBe(503);
   });
 });

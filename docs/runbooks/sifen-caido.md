@@ -2,6 +2,7 @@
 
 ## Síntomas y detección
 
+- Alerta de Prometheus: `SifenCircuitAbierto` y `SifenErroresDeTransporte` ([reglas](../operacion/alertas.md)).
 - Log del worker: `WARN SIFEN circuit <operación>: closed -> open`.
 - El resumen por ciclo muestra `deferred=<n>` (lotes `pending` sin reclamar) y, si persiste, `stalePending=<n> lotes not sent`.
 - Webhook `document.transmission_deadline_warning` a las 48 h y 66 h de documentos que siguen sin transmitirse.

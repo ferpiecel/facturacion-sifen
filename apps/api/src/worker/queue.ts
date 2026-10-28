@@ -22,6 +22,8 @@ export const TRANSMISSION_QUEUE = 'lote-build';
 /** The job carries only the tenant: Postgres is the source of truth and jobs are rebuildable. */
 export interface TransmissionJobData {
   readonly tenantId: string;
+  /** Optional W3C trace context of the producer; without it each cycle starts a root trace. */
+  readonly traceparent?: string;
 }
 
 /** Minimal logger the queue adapters need. */

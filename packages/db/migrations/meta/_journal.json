@@ -442,6 +442,13 @@
       "when": 1793106481775,
       "tag": "0066_issuer_events_correction",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1793205447357,
+      "tag": "0067_issuer_events_nomination",
+      "breakpoints": true
     }
   ]
 }

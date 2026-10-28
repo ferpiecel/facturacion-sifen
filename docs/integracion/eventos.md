@@ -33,6 +33,41 @@ Reglas (MT v150, 11.5.1 y 11.6.1):
 - La confirmación del receptor no impide cancelar (NT 025). Un rechazo no consume número de evento.
 - Mismo `Idempotency-Key` y mismo cuerpo devuelven la misma respuesta; la misma clave con otro cuerpo, 409.
 
+## Nominar una factura emitida a un receptor innominado
+
+`POST /v1/documents/{id}/nominate`, scope `documents:write`, cabecera `Idempotency-Key` obligatoria. Informa a SIFEN el receptor de una FE que se emitió como "Sin Nombre" (NT 014, 015 y 027).
+
+```json
+{
+  "receiver": {
+    "kind": "non-taxpayer",
+    "documentType": 1,
+    "documentNumber": "1234567",
+    "name": "Juan Pérez",
+    "country": "PRY",
+    "operationType": "B2C"
+  },
+  "reason": "El cliente pidió su factura a su nombre"
+}
+```
+
+- `kind: "taxpayer"`: `ruc` con dígito verificador (`80069563-1`) y `taxpayerType` (1 persona física, 2 jurídica). `operationType` admite `B2B`, `B2C` y `B2F`.
+- `kind: "non-taxpayer"`: `documentType` de 1 a 5 y `documentNumber`. `operationType` no admite `B2B`.
+- Opcionales: `tradeName`, `address`, `houseNumber`, `departmentCode`, `districtCode`, `cityCode`, `phone`, `mobile`, `email`, `customerCode`.
+
+Respuesta `202`: `{ "event_id": "…", "document_id": "…", "status": "pending" }`.
+
+| Regla | Código SIFEN | Respuesta |
+|---|---|---|
+| Solo una FE (tipo 1) | 4454 | 422 `nominate-requires-fe` |
+| La FE está aprobada | 4002 | 422 `document-not-approved` |
+| La FE se emitió a un receptor innominado | 4469 | 422 `nominate-receiver-named` |
+| Una sola nominación abierta por FE (una rechazada puede reintentarse) | 4453 | 409 `nomination-already-requested` |
+| El motivo tiene de 5 a 500 caracteres | GEC003 | 422 `reason-length` |
+| El receptor cumple el esquema | - | 422 `schema`, con el campo |
+
+Un documento de otro tenant responde 404 (4468). Mismo `Idempotency-Key` y mismo cuerpo devuelven la misma respuesta; la misma clave con otro cuerpo, 409.
+
 ## Inutilizar numeración
 
 `POST /v1/numbering/inutilize`, scope `documents:write`, `Idempotency-Key` obligatoria. Inutiliza un rango de números que no se usarán (MT v150, 11.1.1).

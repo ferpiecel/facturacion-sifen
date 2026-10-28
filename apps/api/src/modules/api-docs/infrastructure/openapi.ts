@@ -230,6 +230,49 @@ export function buildOpenApiDocument() {
           },
         },
       },
+      '/v1/documents/{id}/nominate': {
+        post: {
+          operationId: 'nominateDocument',
+          tags: ['Documents'],
+          summary: 'Name the receiver of an FE issued to an unnamed receiver',
+          description:
+            'Asynchronous like the cancellation: 202 once the nomination event is stored; the worker signs it with the tenant certificate and sends it to SIFEN (NT 014, 015, 027). ' +
+            'Only an approved FE (type 1) issued to an unnamed receiver ("Sin Nombre") can be nominated, once: a rejected nomination may be requested again. ' +
+            'The receiver is a `taxpayer` (RUC with its check digit and taxpayer type) or a `non-taxpayer` (document type 1 to 5 and number); the operation type B2B is only for taxpayers. ' +
+            'The 422 body carries `errors[0].rule` (`nominate-requires-fe` 4454, `document-not-approved` 4002, `nominate-receiver-named` 4469, `reason-length` or `schema`) and, when SIFEN defines one, `sifenCode`. ' +
+            'Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.',
+          ...secured(['documents:write']),
+          parameters: [
+            idParam('Document'),
+            {
+              name: 'Idempotency-Key',
+              in: 'header',
+              required: true,
+              description: '1 to 255 printable ASCII characters, no spaces',
+              schema: { type: 'string', pattern: '^[!-~]{1,255}$' },
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: { 'application/json': { schema: ref('NominateDocumentRequest') } },
+          },
+          responses: {
+            '202': json('Accepted', ref('EventAccepted')),
+            '400': problem('Missing or malformed Idempotency-Key, or id is not a UUID'),
+            '401': UNAUTHORIZED,
+            '403': FORBIDDEN,
+            '404': NOT_FOUND,
+            '409': problem(
+              'Idempotency-Key reused with another body, or the document already has a nomination (4453)',
+            ),
+            '422': problem(
+              'The receiver or the reason is invalid, or a nomination rule refuses it',
+              'ValidationProblem',
+            ),
+            '503': problem('The tenant ran out of event ids'),
+          },
+        },
+      },
       '/v1/numbering/inutilize': {
         post: {
           operationId: 'inutilizeNumbers',
@@ -639,6 +682,46 @@ export function buildOpenApiDocument() {
           type: 'object',
           required: ['reason'],
           properties: { reason: { type: 'string', minLength: 5, maxLength: 500 } },
+        },
+        NominationReceiver: {
+          type: 'object',
+          required: ['kind', 'name', 'country', 'operationType'],
+          properties: {
+            kind: { type: 'string', enum: ['taxpayer', 'non-taxpayer'] },
+            ruc: { type: 'string', description: 'taxpayer: RUC with check digit, 12345678-9' },
+            taxpayerType: {
+              type: 'integer',
+              enum: [1, 2],
+              description: 'taxpayer: 1 natural, 2 legal',
+            },
+            documentType: { type: 'integer', minimum: 1, maximum: 5, description: 'non-taxpayer' },
+            documentNumber: { type: 'string', description: 'non-taxpayer' },
+            operationType: {
+              type: 'string',
+              enum: ['B2B', 'B2C', 'B2F'],
+              description: 'B2B only for a taxpayer',
+            },
+            name: { type: 'string', minLength: 4, maxLength: 255 },
+            tradeName: { type: 'string' },
+            country: { type: 'string', pattern: '^[A-Za-z]{3}$' },
+            address: { type: 'string' },
+            houseNumber: { type: 'string' },
+            departmentCode: { type: 'integer' },
+            districtCode: { type: 'integer' },
+            cityCode: { type: 'integer' },
+            phone: { type: 'string' },
+            mobile: { type: 'string' },
+            email: { type: 'string', format: 'email' },
+            customerCode: { type: 'string' },
+          },
+        },
+        NominateDocumentRequest: {
+          type: 'object',
+          required: ['receiver', 'reason'],
+          properties: {
+            receiver: ref('NominationReceiver'),
+            reason: { type: 'string', minLength: 5, maxLength: 500 },
+          },
         },
         EventAccepted: {
           type: 'object',

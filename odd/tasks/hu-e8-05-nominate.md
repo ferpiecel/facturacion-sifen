@@ -29,8 +29,8 @@
 - [x] A3 `NominationEvent` in the gateway + `TipsEventXmlBuilder` nomination + XSD e2e (PR #357)
 - [x] B1a use case `nominate-document` + port (PR #365, branch `feat/hu-e8-05-nominate-use-case`)
 - [x] B1b Drizzle `drizzle-nomination-unit-of-work` + `SignPendingEvent`/signing store load the nomination (PR #364, branch `feat/hu-e8-05-nominate-persist`, stacked on use-case)
-- [ ] B2 controller `POST /v1/documents/:id/nominate` in `IssuerEventsController`, zod request schema for the receiver (fields by nature: taxpayer ruc with DV + taxpayerType; non-taxpayer documentType 1..5 + number; name 4..255; country 3 letters; operationType B2B only for taxpayers; reason 5..500), error mapping in `issuer-event-http-errors.ts` (`NominationReasonInvalidError` 422, `NominationRefusedError` 422 with rule+sifenCode, `NominationAlreadyRequestedError` 409 sifenCode 4453), `NOMINATE_DOCUMENT` token + module wiring, e2e test like the cancel one, `pnpm --filter @sifen/api openapi`, guide `docs/integracion/emision.md`; lector role refusal if the cancel endpoint enforces one
-- [ ] B3 NCE/NDE 2442 + `credit-note-unnamed-receiver` (approved nomination event = nominated receiver), `document.nominated` webhook; else record as open debt
+- [x] B2 request schema + error mapping (PR #367, `85a00f2`, branch `...-request`); controller, module wiring, e2e, OpenAPI, guide `docs/integracion/eventos.md` (PR #368, `8814794`, branch `...-endpoint`)
+- [ ] B3 (OPEN DEBT, not started; do after HU-E9 merges and the chain is restacked) NCE/NDE 2442 + `credit-note-unnamed-receiver` (approved nomination event = nominated receiver), `document.nominated` webhook; else record as open debt
 
 ## Handoff
 
@@ -42,4 +42,4 @@ Forecast about 1000 authored lines: chained PRs, each at most 400, first ready f
 
 ## Progress / evidence
 
-(none yet)
+PRs: #356 <- #357 <- #365 <- #364 <- #367 <- #368 (all target main; PR bodies say PR n/6). Do not rebase onto main until HU-E9 merges; the orchestrator restacks. Pre-push verify green on #367 and #368. Next: B3 (webhook `document.nominated`, NCE/NDE over a nominated FE 2442) on a branch from `feat/hu-e8-05-nominate-endpoint`, draft PR "Depende de #368".

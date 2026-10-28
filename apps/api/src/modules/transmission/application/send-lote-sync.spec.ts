@@ -1,4 +1,9 @@
-import { FakeSifenGateway, SifenCircuitOpenError, SifenTimeoutError } from '@sifen/sifen-gateway';
+import {
+  FakeSifenGateway,
+  SifenCircuitOpenError,
+  SifenTenantUnavailableError,
+  SifenTimeoutError,
+} from '@sifen/sifen-gateway';
 import { describe, expect, it } from 'vitest';
 import type { Lote } from '../domain/lote-builder.js';
 import type { DocumentResolution } from './poll-lote-result.js';
@@ -177,6 +182,19 @@ describe('SendLote synchronous path', () => {
       new SifenCircuitOpenError('enviarDESincronico', new Date(9)),
     );
     expect((await send.execute({ loteId: 'l', dId: 5n, lote: one })).status).toBe('deferred');
+    expect(store.state).toBe('pending');
+  });
+
+  it('defers (nothing processed) when the tenant cannot call SIFEN at all', async () => {
+    const { gateway, store, send } = setup();
+    gateway.enqueue(
+      'enviarDESincronico',
+      new SifenTenantUnavailableError('enviarDESincronico', new Date(9)),
+    );
+    expect(await send.execute({ loteId: 'l', dId: 5n, lote: one })).toMatchObject({
+      status: 'deferred',
+      retryAt: new Date(9),
+    });
     expect(store.state).toBe('pending');
   });
 });

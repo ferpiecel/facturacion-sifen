@@ -45,10 +45,11 @@ Todas tienen un valor por defecto, así que el entorno local funciona sin un arc
 | `NODE_ENV` | *(sin valor)* | `apps/api` | Estándar de Node. En `production` exige `SIFEN_ENVIRONMENT` explícita. Además, solo con `development` o `test` la API puede arrancar sin `KMS_LOCAL_MASTER_KEY`; con cualquier otro valor (o sin valor) la exige. Para desarrollo local, exportá `NODE_ENV=development` o definí la clave. |
 | `OTEL_ENABLED` | `false` | `apps/api`, worker | `true` exporta trazas OpenTelemetry por OTLP/HTTP. Sin él no se exporta nada (los spans internos siguen dando `trace_id`). Debe ser `true` o `false`. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | *(sin valor)* | `apps/api`, worker | URL base `http(s)://` del colector OTLP (se agrega `/v1/traces`). Obligatoria con `OTEL_ENABLED=true`. Es un secreto: nunca se registra en logs ni en errores. |
-| `OTEL_SERVICE_NAME` | `sifen-api` | `apps/api`, worker | Nombre del servicio en las trazas y métricas; el worker debe fijar `sifen-worker`. |
+| `OTEL_SERVICE_NAME` | `sifen-api` | `apps/api`, worker | Nombre del servicio en las trazas y métricas; el worker usa `sifen-worker` por defecto. |
 | `METRICS_ENABLED` | `false` | `apps/api`, worker | `true` habilita las métricas Prometheus (`GET /metrics` en la API; listener propio del worker en `METRICS_PORT`). Sin él `/metrics` responde 404. |
 | `METRICS_TOKEN` | *(sin valor)* | `apps/api`, worker | Token Bearer que exige `/metrics`. Con `METRICS_ENABLED=true` y `NODE_ENV` distinto de `development` o `test` son obligatorios al menos 16 caracteres (también con `NODE_ENV` sin definir: solo `development` y `test` exactos son permisivos); la API no arranca sin él. Como defensa adicional, `/metrics` responde `404` sin token fuera de `NODE_ENV` exactamente `development` o `test`. |
 | `METRICS_PORT` | `9464` | worker | Puerto del listener de métricas del worker (1024 a 65535). |
+| `METRICS_HOST` | `127.0.0.1` | worker | Interfaz en la que escucha el listener de métricas del worker. Por defecto solo loopback; para que Prometheus lo alcance desde otro host, definí la IP privada (o `0.0.0.0` solo detrás de red privada) y mantené `METRICS_TOKEN`. |
 
 ## IP del cliente y proxies de confianza
 

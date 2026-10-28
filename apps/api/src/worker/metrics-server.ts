@@ -4,6 +4,8 @@ import type { AddressInfo } from 'node:net';
 
 export interface MetricsServerOptions {
   readonly port: number;
+  /** Interface to bind; loopback by default so the listener is not exposed unless configured. */
+  readonly host?: string;
   /** Bearer token; without one the endpoint is open (only allowed outside production by the config). */
   readonly token: string | undefined;
   readonly handler: (request: IncomingMessage, response: ServerResponse) => void;
@@ -31,7 +33,7 @@ export async function startMetricsServer(
   });
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
-    server.listen(options.port, resolve);
+    server.listen(options.port, options.host ?? '127.0.0.1', resolve);
   });
   return {
     address: server.address() as AddressInfo,

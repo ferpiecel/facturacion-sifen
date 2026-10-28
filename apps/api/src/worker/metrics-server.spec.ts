@@ -20,6 +20,18 @@ describe('startMetricsServer', () => {
     return `http://127.0.0.1:${String(server.address.port)}`;
   }
 
+  it('binds to loopback unless a host is configured', async () => {
+    const server = await startMetricsServer({
+      port: 0,
+      token: undefined,
+      handler: (_request, response) => {
+        response.end('x');
+      },
+    });
+    closers.push(() => server.close());
+    expect(server.address.address).toBe('127.0.0.1');
+  });
+
   it('serves /metrics with the bearer token and rejects a missing or wrong one', async () => {
     const base = await start('s3cret-token-value');
     expect((await fetch(`${base}/metrics`)).status).toBe(401);

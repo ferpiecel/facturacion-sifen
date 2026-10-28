@@ -84,11 +84,12 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
   // EMAIL_ENABLED=false never starts.
   const emailConfig = loadEmailConfig(env);
   // Observability (HU-E14-01) is off unless OTEL_ENABLED / METRICS_ENABLED say otherwise.
-  const telemetryRuntime = createTelemetryRuntime(env);
+  const telemetryRuntime = createTelemetryRuntime(env, { defaultServiceName: 'sifen-worker' });
   const { telemetry } = telemetryRuntime;
   const metricsServer = telemetryRuntime.metricsHandler
     ? await startMetricsServer({
         port: telemetryRuntime.config.metricsPort,
+        host: telemetryRuntime.config.metricsHost,
         token: telemetryRuntime.config.metricsToken,
         handler: telemetryRuntime.metricsHandler,
       })

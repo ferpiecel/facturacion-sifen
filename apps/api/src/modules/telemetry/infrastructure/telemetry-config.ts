@@ -13,6 +13,8 @@ export interface TelemetryConfig {
   readonly metricsToken: string | undefined;
   /** Port of the worker's own metrics listener. */
   readonly metricsPort: number;
+  /** Interface of the worker's metrics listener (`METRICS_HOST`); loopback unless told otherwise. */
+  readonly metricsHost: string;
   readonly serviceName: string;
 }
 
@@ -54,7 +56,10 @@ function port(env: NodeJS.ProcessEnv): number {
 }
 
 /** Reads the observability settings (docs/configuracion.md); everything is off unless asked for. */
-export function loadTelemetryConfig(env: NodeJS.ProcessEnv): TelemetryConfig {
+export function loadTelemetryConfig(
+  env: NodeJS.ProcessEnv,
+  defaults: { defaultServiceName?: string } = {},
+): TelemetryConfig {
   const tracing = flag(env, 'OTEL_ENABLED');
   const metrics = flag(env, 'METRICS_ENABLED');
   const otlpEndpoint = endpoint(env);
@@ -80,6 +85,7 @@ export function loadTelemetryConfig(env: NodeJS.ProcessEnv): TelemetryConfig {
     metrics,
     metricsToken,
     metricsPort: port(env),
-    serviceName: env.OTEL_SERVICE_NAME || 'sifen-api',
+    metricsHost: env.METRICS_HOST || '127.0.0.1',
+    serviceName: env.OTEL_SERVICE_NAME || defaults.defaultServiceName || 'sifen-api',
   };
 }

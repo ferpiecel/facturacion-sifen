@@ -435,6 +435,13 @@
       "when": 1793106480775,
       "tag": "0065_issuer_events_receiver",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1793106481775,
+      "tag": "0066_issuer_events_correction",
+      "breakpoints": true
     }
   ]
 }

@@ -42,7 +42,9 @@ describe('acceptCreditNote idempotency under concurrency', () => {
     certificateNotAfter?: Date,
   ) {
     const insertDocument = vi.fn(() => Promise.resolve({ id: 'new' }));
-    const sumCreditNotes = vi.fn((..._args: unknown[]) => Promise.resolve(credited));
+    const sumCreditNotes = vi.fn<(cdc: string, env: string, exclude?: string) => Promise<string>>(
+      () => Promise.resolve(credited),
+    );
     const nextNumber = vi.fn(() => Promise.resolve({ series: null, number: 1 }));
     const lookups = [...keyLookups];
     const unit: AcceptanceUnit = {

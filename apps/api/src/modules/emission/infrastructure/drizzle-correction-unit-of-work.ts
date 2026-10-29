@@ -37,6 +37,7 @@ export function createDrizzleCorrectionUnitOfWork(db: Database): CorrectionUnitO
           findAssociatedInvoice: (cdc, env) => acceptance.findAssociatedInvoice(cdc, env),
           sumCreditNotes: (cdc, env, exclude) => acceptance.sumCreditNotes(cdc, env, exclude),
           recordAudit: (entry) => recordAudit(tx, entry),
+          findByIdempotencyKey: (key) => acceptance.findByIdempotencyKey(key),
           async findCorrectionByKey(key) {
             const rows = await tx
               .select({

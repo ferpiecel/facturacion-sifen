@@ -37,6 +37,7 @@ describe('POST /v1/documents/{id}/correct (e2e)', () => {
       tenantIds.get(key) ?? '',
       `c-${String(++sequence)}`,
       status,
+      FE_BODY,
       new Date(),
     );
   const correct = (id: string, key: string, body: unknown, idempotencyKey?: string) =>

@@ -30,6 +30,6 @@ the worker's tenant directory and platform gauges) leave no audit entry. `audit_
 ## Tasks
 
 - [x] T1 Migration + schema + `withPlatformAdminTransaction` + db tests + ADR (PR 1)
-- [ ] T2 Callers: CLI (`asPlatformAdmin`, 7 sites), worker tenant directory, platform gauges, docs (PR 2)
+- [x] T2 Callers: CLI (`asPlatformAdmin`, 7 sites), worker tenant directory, platform gauges, docs (PR 2)
 
 ## Evidence

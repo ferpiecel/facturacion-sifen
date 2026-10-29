@@ -51,58 +51,62 @@ export async function showUsage(
   assertValidTenantId(params.tenantId);
   const period = params.period === undefined ? billingPeriod(now) : parsePeriod(params.period);
   const periodEnd = nextMonthStart(period);
-  return await asPlatformAdmin(db, async (tx) => {
-    const usage = (
-      await tx
-        .select()
-        .from(usageCounters)
-        .where(and(eq(usageCounters.tenantId, params.tenantId), eq(usageCounters.period, period)))
-    ).at(0);
-    const row = (
-      await tx
-        .select({ subscription: subscriptions, planCode: plans.code })
-        .from(subscriptions)
-        .innerJoin(plans, eq(plans.id, subscriptions.planId))
-        .where(
-          and(
-            eq(subscriptions.tenantId, params.tenantId),
-            lt(subscriptions.startsAt, new Date(`${periodEnd}T00:00:00-03:00`)),
-            or(
-              isNull(subscriptions.endsAt),
-              gt(subscriptions.endsAt, new Date(`${period}T00:00:00-03:00`)),
+  return await asPlatformAdmin(
+    db,
+    { purpose: 'usage:show', scope: ['usage_counters', 'subscriptions', 'plans'] },
+    async (tx) => {
+      const usage = (
+        await tx
+          .select()
+          .from(usageCounters)
+          .where(and(eq(usageCounters.tenantId, params.tenantId), eq(usageCounters.period, period)))
+      ).at(0);
+      const row = (
+        await tx
+          .select({ subscription: subscriptions, planCode: plans.code })
+          .from(subscriptions)
+          .innerJoin(plans, eq(plans.id, subscriptions.planId))
+          .where(
+            and(
+              eq(subscriptions.tenantId, params.tenantId),
+              lt(subscriptions.startsAt, new Date(`${periodEnd}T00:00:00-03:00`)),
+              or(
+                isNull(subscriptions.endsAt),
+                gt(subscriptions.endsAt, new Date(`${period}T00:00:00-03:00`)),
+              ),
             ),
-          ),
-        )
-        .orderBy(subscriptions.startsAt)
-    ).at(-1);
-    const documentsIssued = usage?.documentsIssued ?? 0;
-    const { subscription } = row ?? {};
-    const terms =
-      row &&
-      subscription &&
-      subscription.documentQuota !== null &&
-      subscription.overagePrice !== null
-        ? {
-            id: subscription.id,
-            planCode: row.planCode,
-            documentQuota: subscription.documentQuota,
-            overagePrice: subscription.overagePrice,
-          }
-        : null;
-    const overageDocuments = terms ? Math.max(0, documentsIssued - terms.documentQuota) : 0;
-    return {
-      tenantId: params.tenantId,
-      period,
-      documentsIssued,
-      apiCalls: usage?.apiCalls ?? 0,
-      notificationsSent: usage?.notificationsSent ?? 0,
-      subscription: terms,
-      overageDocuments,
-      overageAmount: terms ? overageDocuments * terms.overagePrice : 0,
-      quotaWarning:
-        terms !== null &&
-        terms.documentQuota > 0 &&
-        documentsIssued * 10 >= terms.documentQuota * 8,
-    };
-  });
+          )
+          .orderBy(subscriptions.startsAt)
+      ).at(-1);
+      const documentsIssued = usage?.documentsIssued ?? 0;
+      const { subscription } = row ?? {};
+      const terms =
+        row &&
+        subscription &&
+        subscription.documentQuota !== null &&
+        subscription.overagePrice !== null
+          ? {
+              id: subscription.id,
+              planCode: row.planCode,
+              documentQuota: subscription.documentQuota,
+              overagePrice: subscription.overagePrice,
+            }
+          : null;
+      const overageDocuments = terms ? Math.max(0, documentsIssued - terms.documentQuota) : 0;
+      return {
+        tenantId: params.tenantId,
+        period,
+        documentsIssued,
+        apiCalls: usage?.apiCalls ?? 0,
+        notificationsSent: usage?.notificationsSent ?? 0,
+        subscription: terms,
+        overageDocuments,
+        overageAmount: terms ? overageDocuments * terms.overagePrice : 0,
+        quotaWarning:
+          terms !== null &&
+          terms.documentQuota > 0 &&
+          documentsIssued * 10 >= terms.documentQuota * 8,
+      };
+    },
+  );
 }

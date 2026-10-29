@@ -112,7 +112,7 @@ docker compose up -d postgres redis
 pnpm --filter @sifen/api build
 export REDIS_URL="redis://localhost:6379"
 export DATABASE_URL="<rol app_login>"                      # trabajo por tenant, sujeto a RLS
-export WORKER_PLATFORM_DATABASE_URL="<login que puede SET ROLE platform_admin>"  # solo lista tenants
+export WORKER_PLATFORM_DATABASE_URL="<login que puede SET ROLE platform_admin>"  # lista tenants y lee los gauges de plataforma
 export KMS_LOCAL_MASTER_KEY="<clave-maestra-base64>" PSC_TRUSTED_ROOTS_PATH=/etc/sifen/psc-roots.pem
 export SIFEN_GATEWAY=simulator NODE_ENV=development          # ver nota
 pnpm --filter @sifen/api worker
@@ -124,3 +124,7 @@ pnpm --filter @sifen/api worker
 - **Logs:** una línea por ciclo con conteos; advertencias (`WARN`) cuando hay documentos retenidos (`held`, usar `document:release-hold` tras corregir la causa), lotes pendientes viejos (`stalePending`) o fallos. Solo ids, conteos y nombres de error: nunca XML, certificados ni URLs.
 - **Apagado:** `SIGTERM`/`SIGINT` deja terminar los ciclos en curso antes de salir.
 - **Pruebas con Redis real:** `REDIS_URL=redis://localhost:6379 pnpm --filter @sifen/api exec vitest run src/worker`. Sin `REDIS_URL` esas pruebas se omiten; en CI las corre el job `worker-redis`.
+
+## Auditoría de `platform_admin`
+
+Cada uso del rol cross-tenant deja una fila en `platform_audit_log` (ADR-0023): actor (`ops-cli:<usuario del SO>` o `system:worker`), propósito (nombre del comando o del job), tablas tocadas, filas y hora, en una cadena de hashes append-only. Los comandos del CLI escriben una fila por ejecución. El worker (listado de tenants, ambiente de un tenant, gauges de plataforma) escribe a lo sumo una por propósito cada 15 minutos: la fila significa "usado al menos una vez en la ventana". Se consulta como `platform_admin`; ningún rol puede modificarla ni borrarla.

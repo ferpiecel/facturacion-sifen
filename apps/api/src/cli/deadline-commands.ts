@@ -95,6 +95,14 @@ export async function listNearDeadline(
     });
   };
   return params.tenantId === undefined
-    ? await asPlatformAdmin(db, read)
+    ? await asPlatformAdmin(
+        db,
+        {
+          purpose: 'document:deadline',
+          scope: ['documents', 'tenants'],
+          rowCount: (rows) => rows.length,
+        },
+        read,
+      )
     : await withTenantTransaction(db, params.tenantId, read);
 }

@@ -1,6 +1,7 @@
 import { and, count, eq, gt, inArray, isNotNull, isNull, min } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import { documents, rucBlocks, tenantCertificates, tenants, type Database } from '@sifen/db';
+import { asSystemPlatformAdmin } from './system-platform-use.js';
 import type { Telemetry } from '../modules/telemetry/application/ports/telemetry.port.js';
 
 /** Same set the portal summary and the deadline watch count as pending: signed, not yet settled. */
@@ -30,43 +31,47 @@ async function readAggregates(db: Database, at: Date) {
     when ${documents.signedAt} > ${h48} then ${BUCKETS[1].label}
     when ${documents.signedAt} > ${h72} then ${BUCKETS[2].label}
     else ${BUCKETS[3].label} end`;
-  return db.transaction(async (tx) => {
-    await tx.execute(sql`SET LOCAL ROLE platform_admin`);
-    const rows = await tx
-      .select({ bucket, total: count() })
-      .from(documents)
-      .innerJoin(
-        tenants,
-        and(eq(tenants.id, documents.tenantId), eq(tenants.environment, documents.environment)),
-      )
-      .where(and(inArray(documents.status, PENDING_STATUSES), isNotNull(documents.signedAt)))
-      .groupBy(sql`1`);
-    const [blockedRow] = await tx
-      .select({ total: count(sql`distinct ${rucBlocks.tenantId}`) })
-      .from(rucBlocks)
-      .innerJoin(
-        tenants,
-        and(eq(tenants.id, rucBlocks.tenantId), eq(tenants.environment, rucBlocks.environment)),
-      )
-      .where(and(gt(rucBlocks.blockedUntil, at), isNull(rucBlocks.liftedAt)));
-    const [expiryRow] = await tx
-      .select({ notAfter: min(tenantCertificates.notAfter), active: count() })
-      .from(tenantCertificates)
-      .innerJoin(
-        tenants,
-        and(
-          eq(tenants.id, tenantCertificates.tenantId),
-          eq(tenants.environment, tenantCertificates.environment),
-        ),
-      )
-      .where(eq(tenantCertificates.status, 'active'));
-    return {
-      counts: new Map(rows.map((row) => [row.bucket, row.total])),
-      blocked: blockedRow.total,
-      soonest: expiryRow.notAfter,
-      active: expiryRow.active,
-    };
-  });
+  return asSystemPlatformAdmin(
+    db,
+    'worker:platform-gauges',
+    ['documents', 'ruc_blocks', 'tenant_certificates', 'tenants'],
+    async (tx) => {
+      const rows = await tx
+        .select({ bucket, total: count() })
+        .from(documents)
+        .innerJoin(
+          tenants,
+          and(eq(tenants.id, documents.tenantId), eq(tenants.environment, documents.environment)),
+        )
+        .where(and(inArray(documents.status, PENDING_STATUSES), isNotNull(documents.signedAt)))
+        .groupBy(sql`1`);
+      const [blockedRow] = await tx
+        .select({ total: count(sql`distinct ${rucBlocks.tenantId}`) })
+        .from(rucBlocks)
+        .innerJoin(
+          tenants,
+          and(eq(tenants.id, rucBlocks.tenantId), eq(tenants.environment, rucBlocks.environment)),
+        )
+        .where(and(gt(rucBlocks.blockedUntil, at), isNull(rucBlocks.liftedAt)));
+      const [expiryRow] = await tx
+        .select({ notAfter: min(tenantCertificates.notAfter), active: count() })
+        .from(tenantCertificates)
+        .innerJoin(
+          tenants,
+          and(
+            eq(tenants.id, tenantCertificates.tenantId),
+            eq(tenants.environment, tenantCertificates.environment),
+          ),
+        )
+        .where(eq(tenantCertificates.status, 'active'));
+      return {
+        counts: new Map(rows.map((row) => [row.bucket, row.total])),
+        blocked: blockedRow.total,
+        soonest: expiryRow.notAfter,
+        active: expiryRow.active,
+      };
+    },
+  );
 }
 
 /**

@@ -56,7 +56,9 @@ export function setPlanPrice(
   db: Database,
   params: SetPlanPriceParams,
 ): Promise<{ changed: boolean }> {
-  return asPlatformAdmin(db, (tx) => setPlanPriceIn(tx, params));
+  return asPlatformAdmin(db, { purpose: 'plan:price-set', scope: ['plans', 'plan_prices'] }, (tx) =>
+    setPlanPriceIn(tx, params),
+  );
 }
 
 /** {@link setPlanPrice} inside a caller-owned `platform_admin` transaction. */
@@ -135,7 +137,11 @@ export interface PlanListing {
 
 /** Operator CLI: every plan with the price row in force on `now` (Paraguay day), tiers included. */
 export function listPlans(db: Database, now: Date): Promise<PlanListing[]> {
-  return asPlatformAdmin(db, (tx) => listPlansIn(tx, now));
+  return asPlatformAdmin(
+    db,
+    { purpose: 'plan:list', scope: ['plans', 'plan_prices'], rowCount: (plans) => plans.length },
+    (tx) => listPlansIn(tx, now),
+  );
 }
 
 async function listPlansIn(db: Database, now: Date): Promise<PlanListing[]> {

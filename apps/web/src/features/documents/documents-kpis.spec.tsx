@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -15,7 +15,15 @@ beforeEach(() => {
   replace.mockClear();
 });
 
-const region = () => screen.findByRole('region', { name: 'Indicadores del período' });
+// The section is always mounted; it is only ready once the summary finished loading.
+// Testing Library's waitFor honours the shared asyncUtilTimeout; vi.waitFor gives up after 1 s.
+const region = async () => {
+  const section = await screen.findByRole('region', { name: 'Indicadores del período' });
+  await waitFor(() => {
+    expect(section).toHaveAttribute('aria-busy', 'false');
+  });
+  return section;
+};
 
 describe('DocumentsKpis (period summary)', () => {
   it('shows a loading state, then the four indicators of the API summary', async () => {
@@ -101,7 +109,7 @@ describe('DocumentsKpis (period summary)', () => {
   it('sends the user back to the login when the session is gone', async () => {
     render(<DocumentsKpis client={fakeSummaryClient({ kind: 'unauthenticated' })} />);
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(replace).toHaveBeenCalledWith('/login');
     });
   });

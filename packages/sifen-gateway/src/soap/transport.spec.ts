@@ -84,6 +84,18 @@ describe('createHttpsSoapTransport', () => {
     expect(seen[0]?.protocol).toBe('TLSv1.2');
   });
 
+  it('negotiates TLS 1.3 when the maximum version is raised', async () => {
+    const url = await start();
+
+    await transportFor({ maxTlsVersion: 'TLSv1.3' }).post({
+      operation: 'enviarLote',
+      url,
+      body: '<soap/>',
+    });
+
+    expect(seen[0]?.protocol).toBe('TLSv1.3');
+  });
+
   it('returns non-2xx responses so SOAP Faults (HTTP 500) can be interpreted', async () => {
     const url = await start();
     respond = (res) => res.writeHead(500).end('<fault/>');

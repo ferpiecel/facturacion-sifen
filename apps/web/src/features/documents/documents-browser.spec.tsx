@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -85,7 +85,7 @@ describe('DocumentsBrowser (document list)', () => {
     const list = vi.fn(() => Promise.resolve({ kind: 'unauthenticated' as const }));
     render(<DocumentsBrowser client={fakeDocumentsClient({ list })} />);
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       expect(replace).toHaveBeenCalledWith('/login');
     });
   });

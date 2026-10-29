@@ -607,6 +607,33 @@ export const auditLog = pgTable(
 );
 
 /**
+ * Append-only, hash-chained record of every use of the `platform_admin` role (no `tenant_id`: it
+ * describes cross-tenant access, ADR-0023). Only `withPlatformAdminTransaction` writes it; `seq`,
+ * `prev_hash`, `hash` and `occurred_at` are set by database triggers.
+ */
+export const platformAuditLog = pgTable(
+  'platform_audit_log',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+    actor: varchar('actor', { length: 255 }).notNull(),
+    purpose: varchar('purpose', { length: 100 }).notNull(),
+    scope: jsonb('scope').notNull(),
+    rowCount: integer('row_count'),
+    seq: bigint('seq', { mode: 'number' }).notNull().default(0),
+    prevHash: text('prev_hash').notNull().default(''),
+    hash: text('hash').notNull().default(''),
+  },
+  (table) => [
+    unique('platform_audit_log_seq_unique').on(table.seq),
+    index('platform_audit_log_actor_purpose_idx').on(table.actor, table.purpose, table.occurredAt),
+    check('platform_audit_log_actor_not_blank', sql`btrim(${table.actor}) <> ''`),
+    check('platform_audit_log_purpose_not_blank', sql`btrim(${table.purpose}) <> ''`),
+    check('platform_audit_log_scope_array', sql`jsonb_typeof(${table.scope}) = 'array'`),
+  ],
+);
+
+/**
  * Last `dId` (SIFEN request id, numeric 1..15 digits) issued per tenant and
  * environment (HU-E4-03). Only advanced by `nextRequestId` inside the
  * caller's tenant transaction.

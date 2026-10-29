@@ -150,7 +150,9 @@ function setup(
       }),
     sumCreditNotes,
     findByIdempotencyKey: () =>
-      Promise.resolve(options.replacementIssued ? { ...NEW_DOC, requestHash: 'h'.repeat(64) } : null),
+      Promise.resolve(
+        options.replacementIssued ? { ...NEW_DOC, requestHash: 'h'.repeat(64) } : null,
+      ),
     rewriteDocument,
     recordAudit,
     findReissue: () => Promise.resolve(linked ?? options.reissued ?? null),

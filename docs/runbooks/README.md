@@ -8,6 +8,7 @@ Procedimientos para el operador ante incidentes. Cada uno parte de lo que el có
 | [RUC bloqueado](ruc-bloqueado.md) | Alerta `RUC blocked by SIFEN`, tenant con envíos pausados |
 | [Certificado vencido o por vencer](certificado-vencido.md) | Webhook `certificate.expiring`, `422 certificate_expiring`, retención `signing:CertificateValidityError` |
 | [DE cerca del plazo de 72 h](de-plazo-72h.md) | Webhook `document.transmission_deadline_warning` |
+| [Corrección con reclamo vencido](correccion-atascada.md) | `409 correction_in_progress` sin reintento del integrador |
 | [Restauración de backup](restauracion-backup.md) | Pérdida o corrupción de datos (**sin procedimiento todavía**: HU-E14-03) |
 
 ## Convenciones comunes

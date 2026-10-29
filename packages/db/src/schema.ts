@@ -989,6 +989,8 @@ export const documents = pgTable(
      * the status becomes approved. NULL on rows approved before the column existed (refreshed lazily).
      */
     approvedAt: timestamp('approved_at', { withTimezone: true }),
+    /** Times a rejected document was rewritten in place and requeued with the same CDC (ADR-0021, migration 0069). */
+    correctionsCount: integer('corrections_count').notNull().default(0),
     /** Not eligible for a new lote before this instant (backoff after 0301). */
     nextTransmissionAt: timestamp('next_transmission_at', { withTimezone: true }),
     /**
@@ -1035,6 +1037,7 @@ export const documents = pgTable(
       name: 'documents_tenant_point_fk',
     }),
     unique('documents_tenant_idempotency_key_key').on(table.tenantId, table.idempotencyKey),
+    check('documents_corrections_count_range', sql`${table.correctionsCount} >= 0`),
     check('documents_transmission_attempts_range', sql`${table.transmissionAttempts} >= 0`),
     check(
       'documents_transmission_hold_format',
@@ -1070,6 +1073,78 @@ export const documents = pgTable(
       'documents_status_valid',
       sql`${table.status} IN (${sql.raw(DOCUMENT_STATUSES.map((s) => `'${s}'`).join(', '))})`,
     ),
+  ],
+);
+
+/** Append-only history of the corrections of rejected documents (HU-E8-01, ADR-0021). */
+export const documentCorrections = pgTable(
+  'document_corrections',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    documentId: uuid('document_id').notNull(),
+    kind: varchar('kind', { length: 16 }).notNull(),
+    idempotencyKey: varchar('idempotency_key', { length: 255 }).notNull(),
+    requestHash: char('request_hash', { length: 64 }).notNull(),
+    previousPayload: jsonb('previous_payload').notNull(),
+    previousSifenMessages: jsonb('previous_sifen_messages'),
+    replacementDocumentId: uuid('replacement_document_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.tenantId, table.documentId],
+      foreignColumns: [documents.tenantId, documents.id],
+      name: 'document_corrections_tenant_document_fk',
+    }),
+    foreignKey({
+      columns: [table.tenantId, table.replacementDocumentId],
+      foreignColumns: [documents.tenantId, documents.id],
+      name: 'document_corrections_tenant_replacement_fk',
+    }),
+    unique('document_corrections_tenant_idempotency_key_key').on(
+      table.tenantId,
+      table.idempotencyKey,
+    ),
+    uniqueIndex('document_corrections_reissue_idx')
+      .on(table.tenantId, table.documentId)
+      .where(sql`${table.kind} = 'reissue'`),
+    check('document_corrections_kind_valid', sql`${table.kind} IN ('same_cdc', 'reissue')`),
+    check(
+      'document_corrections_replacement',
+      sql`(${table.kind} = 'reissue') = (${table.replacementDocumentId} IS NOT NULL)`,
+    ),
+    check('document_corrections_hash_format', sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`),
+  ],
+);
+
+/**
+ * The claim a reissue takes on a rejected document before it issues the replacement (HU-E8-01, ADR-0021): at most
+ * one in-flight correction per document, checked by the same-CDC rewrite and by the reissue. Deleted when the
+ * reissue fails before issuing anything; kept once the reissue is linked (the document is then final).
+ */
+export const documentCorrectionClaims = pgTable(
+  'document_correction_claims',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    documentId: uuid('document_id').notNull(),
+    idempotencyKey: varchar('idempotency_key', { length: 255 }).notNull(),
+    requestHash: char('request_hash', { length: 64 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.tenantId, table.documentId],
+      foreignColumns: [documents.tenantId, documents.id],
+      name: 'document_correction_claims_tenant_document_fk',
+    }),
+    unique('document_correction_claims_document_key').on(table.tenantId, table.documentId),
+    check('document_correction_claims_hash_format', sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`),
   ],
 );
 
@@ -1671,6 +1746,8 @@ export const rucLookupCache = pgTable(
 export const TENANT_TABLES = [
   'api_keys',
   'audit_log',
+  'document_correction_claims',
+  'document_corrections',
   'document_emails',
   'documents',
   'issuer_events',

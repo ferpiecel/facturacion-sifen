@@ -50,7 +50,7 @@ async function readAggregates(db: Database, at: Date) {
       )
       .where(gt(rucBlocks.blockedUntil, at));
     const [expiryRow] = await tx
-      .select({ notAfter: min(tenantCertificates.notAfter) })
+      .select({ notAfter: min(tenantCertificates.notAfter), active: count() })
       .from(tenantCertificates)
       .innerJoin(
         tenants,
@@ -64,13 +64,14 @@ async function readAggregates(db: Database, at: Date) {
       counts: new Map(rows.map((row) => [row.bucket, row.total])),
       blocked: blockedRow.total,
       soonest: expiryRow.notAfter,
+      active: expiryRow.active,
     };
   });
 }
 
 /**
  * Publishes the cross-tenant gauges of the alert rules (HU-E14-01, plan §13): documents pending by
- * age, tenants paused by a RUC block and the soonest certificate expiry. Read as `platform_admin`
+ * age, tenants paused by a RUC block and the soonest certificate expiry plus the active certificate count. Read as `platform_admin`
  * (ADR-0005) in one transaction; the results are aggregates, so no tenant, CDC or certificate data
  * reaches a label or a value.
  */
@@ -89,13 +90,16 @@ export async function publishPlatformGauges({
     telemetry.increment('platform_gauge_errors_total');
     throw error;
   }
-  const { counts, blocked, soonest } = result;
+  const { counts, blocked, soonest, active } = result;
   for (const bucket of BUCKETS) {
     telemetry.setGauge('de_pending_transmission', counts.get(bucket.label) ?? 0, {
       bucket: bucket.label,
     });
   }
   telemetry.setGauge('sifen_ruc_blocked_tenants', blocked);
+  telemetry.setGauge('certificate_active_count', active);
+  // With no active certificate there is no expiry to report: the gauge is not republished (the
+  // alert rules gate on `certificate_active_count`, so a stale value never fires).
   if (soonest) {
     const notAfter = new Date(soonest);
     telemetry.setGauge(

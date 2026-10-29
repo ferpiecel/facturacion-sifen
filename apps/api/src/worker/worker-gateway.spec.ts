@@ -7,7 +7,7 @@ import {
 import { describe, expect, it, vi } from 'vitest';
 import type { Telemetry } from '../modules/telemetry/application/ports/telemetry.port.js';
 import { WorkerConfigError } from './worker-config.js';
-import { createWorkerSifen, type WorkerSifenDeps } from './worker-gateway.js';
+import { createWorkerSifen, GATEWAY_CACHE_MAX, type WorkerSifenDeps } from './worker-gateway.js';
 
 const deps: WorkerSifenDeps = {
   logger: { warn: () => undefined },
@@ -69,6 +69,27 @@ describe('createWorkerSifen', () => {
         .catch(() => undefined);
     }
     expect(sifen.sendPausedUntil()).toBeNull();
+  });
+
+  describe('gateway memoization (HU-E14-01)', () => {
+    it('builds one decorated gateway per tenant and reuses it', () => {
+      const decorate = vi.fn((gateway: SifenGateway) => gateway);
+      const sifen = createWorkerSifen({ SIFEN_GATEWAY: 'soap' }, { ...deps, decorate });
+      expect(sifen.gatewayFor('t-1')).toBe(sifen.gatewayFor('t-1'));
+      expect(sifen.gatewayFor('t-2')).not.toBe(sifen.gatewayFor('t-1'));
+      expect(decorate).toHaveBeenCalledTimes(2);
+    });
+
+    it('evicts the least recently used tenant beyond the bound', () => {
+      const decorate = vi.fn((gateway: SifenGateway) => gateway);
+      const sifen = createWorkerSifen({ SIFEN_GATEWAY: 'soap' }, { ...deps, decorate });
+      for (let i = 0; i < GATEWAY_CACHE_MAX + 1; i++) sifen.gatewayFor(`t-${String(i)}`);
+      decorate.mockClear();
+      sifen.gatewayFor('t-0');
+      expect(decorate).toHaveBeenCalledTimes(1);
+      sifen.gatewayFor(`t-${String(GATEWAY_CACHE_MAX)}`);
+      expect(decorate).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('decorate (HU-E14-01)', () => {

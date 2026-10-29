@@ -62,6 +62,11 @@ export const METRIC_CATALOG = {
     description: 'Tenants whose sends are paused by a RUC block',
     labels: [],
   },
+  certificate_active_count: {
+    kind: 'gauge',
+    description: 'Active tenant certificates; certificate_expiry_days_min is absent when it is 0',
+    labels: [],
+  },
   certificate_expiry_days_min: {
     kind: 'gauge',
     description: 'Days until the soonest certificate expiry across tenants',

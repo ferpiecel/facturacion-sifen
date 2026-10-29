@@ -7,6 +7,12 @@ import {
   InvoiceValidationError,
   IssuerNotConfiguredError,
 } from '../../application/accept-invoice.js';
+import {
+  CorrectionRequiresReissueError,
+  CorrectionTypeChangedError,
+  DocumentNotCorrectableError,
+  DocumentNotFoundError,
+} from '../../application/correct-document.js';
 import { toHttpException } from './document-http-errors.js';
 
 function statusOf(error: unknown): number | undefined {
@@ -59,5 +65,17 @@ describe('toHttpException', () => {
   it('leaves unknown errors alone', () => {
     expect(toHttpException(new Error('boom'))).toBeNull();
     expect(toHttpException('nope')).toBeNull();
+  });
+
+  it('maps the correction failures (HU-E8-01)', () => {
+    expect(statusOf(new DocumentNotFoundError())).toBe(404);
+    expect(statusOf(new DocumentNotCorrectableError('accepted'))).toBe(409);
+    expect(statusOf(new CorrectionTypeChangedError())).toBe(422);
+    const reissue = toHttpException(new CorrectionRequiresReissueError(['point']));
+    expect(reissue?.getStatus()).toBe(422);
+    expect(reissue?.getResponse()).toMatchObject({
+      code: 'correction_requires_reissue',
+      reasons: ['point'],
+    });
   });
 });

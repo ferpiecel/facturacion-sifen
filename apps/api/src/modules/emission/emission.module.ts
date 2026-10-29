@@ -5,6 +5,7 @@ import { DATABASE } from '../database/database.module.js';
 import { createAcceptCreditNote, createAcceptDebitNote } from './application/accept-credit-note.js';
 import { createAcceptInvoice } from './application/accept-invoice.js';
 import { createAcceptRemission, createAcceptSelfInvoice } from './application/accept-standalone.js';
+import { createCorrectDocument } from './application/correct-document.js';
 import { createGetDocument } from './application/get-document.js';
 import { createGetKude } from './application/get-kude.js';
 import { createWaitForDocument } from './application/wait-for-document.js';
@@ -15,11 +16,13 @@ import {
   ACCEPT_INVOICE,
   ACCEPT_REMISSION,
   ACCEPT_SELF_INVOICE,
+  CORRECT_DOCUMENT,
   GET_DOCUMENT,
   GET_KUDE,
   WAIT_FOR_DOCUMENT,
 } from './emission.tokens.js';
 import { createDrizzleAcceptanceUnitOfWork } from './infrastructure/drizzle-acceptance-unit-of-work.js';
+import { createDrizzleCorrectionUnitOfWork } from './infrastructure/drizzle-correction-unit-of-work.js';
 import { createDrizzleDocumentReader } from './infrastructure/drizzle-document-reader.js';
 import { createDrizzleSyncFlagReader } from './infrastructure/drizzle-sync-flag-reader.js';
 import { parseSyncWaitTimeoutMs } from './sync-wait-config.js';
@@ -110,6 +113,18 @@ export function acceptInvoiceFor(db: Database) {
           ? createAcceptRemission({
               unitOfWork: createDrizzleAcceptanceUnitOfWork(db),
               validation: emissionValidationConfig(),
+            })
+          : () => Promise.reject(new ServiceUnavailableException()),
+      inject: [DATABASE],
+    },
+    {
+      provide: CORRECT_DOCUMENT,
+      useFactory: (db: Database | null) =>
+        db
+          ? createCorrectDocument({
+              unitOfWork: createDrizzleCorrectionUnitOfWork(db),
+              validation: emissionValidationConfig(),
+              certificateBlockDays: certificateBlockDays(),
             })
           : () => Promise.reject(new ServiceUnavailableException()),
       inject: [DATABASE],

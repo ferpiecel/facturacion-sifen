@@ -51,7 +51,11 @@ export class DocumentNotFoundError extends Error {
 /** Only a `rejected` document is corrected (ADR-0021 D5). */
 export class DocumentNotCorrectableError extends Error {
   constructor(readonly status: string) {
-    super(`Only a rejected document can be corrected; this one is ${status}`);
+    super(
+      status === 'correction_in_progress'
+        ? 'Another correction of this document is in flight or was refused: retry it with the same Idempotency-Key and body, or ask support to release it'
+        : `Only a rejected document can be corrected; this one is ${status}`,
+    );
     this.name = 'DocumentNotCorrectableError';
   }
 }
@@ -216,6 +220,22 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
     if (claim && claim.requestHash !== hash) throw new IdempotencyKeyReusedError();
     const reissuePlan = async (): Promise<Plan> => {
       if (!claim) {
+        // Refusals that depend only on the request are raised before the claim, so a body error holds nothing.
+        const issuer = await unit.resolveIssuer({
+          establishmentCode: input.establishmentCode,
+          expeditionPointCode: input.expeditionPointCode,
+          issueDate: paraguayDate(at),
+        });
+        if (!issuer) throw new IssuerNotConfiguredError();
+        assertCertificateUsable(issuer, at, deps.certificateBlockDays);
+        const { errors } = await validateCorrection(
+          unit,
+          input,
+          document.cdc,
+          issuer.environment,
+          deps.validation ?? {},
+        );
+        if (errors.length > 0) throw new InvoiceValidationError(errors);
         await unit.claimDocument({
           document,
           idempotencyKey: input.idempotencyKey,
@@ -323,17 +343,19 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
     const replacementKey = `${derived}:reissue`;
     let replacement: AcceptedInvoice;
     try {
-      replacement = await acceptReplacement(input, replacementKey);
+      replacement = await acceptReplacement(input, replacementKey, document.cdc);
     } catch (error) {
-      // Refused before anything was issued: release the claim so the document can be corrected again. Any other
-      // failure may have issued the replacement, so the claim stays and a retry with the same key resumes it.
       if (!isRefusedBeforeIssuing(error)) throw error;
+      // The claim is released only for a known-pure refusal (see `isPureRefusal`). Everything else keeps it: another
+      // attempt with the same derived key may be committing the replacement, which this call cannot see. A retry with
+      // the same key resumes a held claim; a stuck one is released with `ops correction:release-claim` (ADR-0021).
+      const deterministic = isPureRefusal(input.correction.type, error);
       // A retry can be refused (the validation runs before the key's replay) although an earlier attempt already
-      // issued the replacement: releasing the claim then would let a rewrite leave two live documents, so link it.
+      // issued the replacement: link it, so a rewrite cannot leave two live documents.
       const issued = await deps.unitOfWork.run(input.tenantId, async (unit) => {
         await unit.lockDocument(document.id);
         const existing = await unit.findByIdempotencyKey(replacementKey);
-        if (!existing) await unit.releaseClaim(document.id);
+        if (!existing && deterministic) await unit.releaseClaim(document.id);
         return existing;
       });
       if (!issued) throw error;
@@ -374,7 +396,11 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
     return replacement;
   }
 
-  function acceptReplacement(input: CorrectDocumentInput, idempotencyKey: string) {
+  function acceptReplacement(
+    input: CorrectDocumentInput,
+    idempotencyKey: string,
+    rejectedCdc: string,
+  ) {
     const base = {
       tenantId: input.tenantId,
       actor: input.actor,
@@ -393,6 +419,9 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
         });
       case 'AFE':
         return deps.accept.AFE({ ...base, draft: correction.draft });
+      case 'NCE':
+        // The rejected note does not count against the FE total it is replaced under (as in the pre-claim check).
+        return deps.accept.NCE({ ...base, draft: correction.draft, excludeCdc: rejectedCdc });
       default:
         return deps.accept[correction.type]({ ...base, draft: correction.draft });
     }
@@ -405,6 +434,16 @@ function isRefusedBeforeIssuing(error: unknown): boolean {
     error instanceof IssuerNotConfiguredError ||
     error instanceof CertificateExpiringError
   );
+}
+
+/**
+ * Allow-list of refusals that release the correction claim: an `InvoiceValidationError` raised while accepting an FE
+ * or AFE replacement. Their validation is pure (the body alone, no clock, no database state), so the same key fails
+ * the same way in every attempt. The default is to KEEP the claim: a note's refusal (2417 sums the credits of the FE,
+ * `associated-*` read it) depends on state that changes between attempts, and releasing there reopens the race.
+ */
+function isPureRefusal(type: CorrectDocumentInput['correction']['type'], error: unknown): boolean {
+  return (type === 'FE' || type === 'AFE') && error instanceof InvoiceValidationError;
 }
 
 type Plan =

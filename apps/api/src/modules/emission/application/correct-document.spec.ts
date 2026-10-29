@@ -110,6 +110,9 @@ function setup(
       return NEW_DOC;
     },
   );
+  const acceptNce = vi.fn<
+    (input: { idempotencyKey: string; excludeCdc?: string }) => Promise<typeof NEW_DOC>
+  >(() => Promise.resolve(NEW_DOC));
   const voidNumbers = vi.fn(() =>
     options.voidError
       ? Promise.reject(options.voidError)
@@ -171,7 +174,7 @@ function setup(
         return result;
       },
     },
-    accept: { FE: acceptFe, AFE: vi.fn(), NCE: vi.fn(), NDE: vi.fn() },
+    accept: { FE: acceptFe, AFE: vi.fn(), NCE: acceptNce, NDE: vi.fn() },
     voidNumbers,
     now: () => new Date('2026-03-06T15:00:00Z'),
   });
@@ -182,6 +185,7 @@ function setup(
     sumCreditNotes,
     recordReissue,
     acceptFe,
+    acceptNce,
     voidNumbers,
     claimDocument,
     releaseClaim,
@@ -401,14 +405,77 @@ describe('correctDocument', () => {
         await expect(correct(reissueOf)).rejects.toBeInstanceOf(IdempotencyKeyReusedError);
       });
 
-      it('releases the claim when the replacement is refused before it is issued', async () => {
+      it('keeps the claim when an external check refuses the replacement before it is issued', async () => {
+        const { correct, releaseClaim, acceptFe } = setup();
+        acceptFe.mockRejectedValueOnce(new CertificateExpiringError(new Date()));
+        await expect(correct(reissueOf)).rejects.toBeInstanceOf(CertificateExpiringError);
+        expect(releaseClaim).not.toHaveBeenCalled();
+      });
+
+      it('links the replacement a resumed retry finds when it is refused, without releasing the claim', async () => {
+        const claim = {
+          idempotencyKey: 'key-b',
+          requestHash: requestHash({ documentId: 'doc-1', payload: moved.payload }),
+        };
+        const { correct, releaseClaim, recordReissue, acceptFe } = setup({
+          claim,
+          replacementIssued: true,
+        });
+        acceptFe.mockRejectedValueOnce(new CertificateExpiringError(new Date()));
+        await expect(correct(reissueOf)).resolves.toEqual(NEW_DOC);
+        expect(releaseClaim).not.toHaveBeenCalled();
+        expect(recordReissue).toHaveBeenCalledOnce();
+      });
+
+      it('completes a retry with the same key once validation passes after a refusal', async () => {
+        const { correct, releaseClaim, recordReissue, acceptFe } = setup();
+        acceptFe.mockRejectedValueOnce(new CertificateExpiringError(new Date()));
+        await expect(correct(reissueOf)).rejects.toBeInstanceOf(CertificateExpiringError);
+        await expect(correct(reissueOf)).resolves.toEqual(NEW_DOC);
+        expect(releaseClaim).not.toHaveBeenCalled();
+        expect(recordReissue).toHaveBeenCalledOnce();
+      });
+
+      it('links the replacement an earlier attempt issued instead of releasing the claim when a retry is refused', async () => {
+        const { correct, releaseClaim, recordReissue, acceptFe } = setup({
+          replacementIssued: true,
+        });
+        acceptFe.mockRejectedValueOnce(new CertificateExpiringError(new Date()));
+        await expect(correct(reissueOf)).resolves.toEqual(NEW_DOC);
+        expect(releaseClaim).not.toHaveBeenCalled();
+        expect(recordReissue).toHaveBeenCalledOnce();
+      });
+
+      it('never releases a claim it resumed when its retry is refused, a concurrent retry may still link', async () => {
+        const claim = {
+          idempotencyKey: 'key-b',
+          requestHash: requestHash({ documentId: 'doc-1', payload: moved.payload }),
+        };
+        const { correct, releaseClaim, acceptFe } = setup({ claim });
+        // The first attempt is mid-commit on the replacement, so the retry finds no replacement yet.
+        acceptFe.mockRejectedValueOnce(new CertificateExpiringError(new Date()));
+        await expect(correct(reissueOf)).rejects.toBeInstanceOf(CertificateExpiringError);
+        expect(releaseClaim).not.toHaveBeenCalled();
+      });
+
+      it('takes no claim for a body the validation refuses, so a new key with the fixed body goes through', async () => {
+        const { correct, claimDocument, acceptFe } = setup();
+        const draft = { ...DRAFT, items: [] };
+        const bad = { ...reissueOf, correction: { type: 'FE' as const, draft, receiverRuc: null } };
+        await expect(correct(bad)).rejects.toBeInstanceOf(InvoiceValidationError);
+        expect(claimDocument).not.toHaveBeenCalled();
+        expect(acceptFe).not.toHaveBeenCalled();
+        await expect(correct({ ...reissueOf, idempotencyKey: 'key-c' })).resolves.toEqual(NEW_DOC);
+      });
+
+      it('releases the claim when the acceptance refuses the body and no replacement exists', async () => {
         const { correct, releaseClaim, acceptFe } = setup();
         acceptFe.mockRejectedValueOnce(new InvoiceValidationError([]));
         await expect(correct(reissueOf)).rejects.toBeInstanceOf(InvoiceValidationError);
         expect(releaseClaim).toHaveBeenCalledOnce();
       });
 
-      it('links the replacement an earlier attempt issued instead of releasing the claim when a retry is refused', async () => {
+      it('links an existing replacement instead of releasing when the body is refused', async () => {
         const { correct, releaseClaim, recordReissue, acceptFe } = setup({
           replacementIssued: true,
         });
@@ -416,6 +483,55 @@ describe('correctDocument', () => {
         await expect(correct(reissueOf)).resolves.toEqual(NEW_DOC);
         expect(releaseClaim).not.toHaveBeenCalled();
         expect(recordReissue).toHaveBeenCalledOnce();
+      });
+
+      describe('credit notes: a refusal after the claim is never known-pure', () => {
+        const note = { ...REJECTED, documentType: 5, associatedCdc: FE_CDC };
+        const nceDraft = {
+          associatedCdc: FE_CDC,
+          reasonCode: 2,
+          items: [{ quantity: 1, unitPrice: 1_000_000, vatRate: 10 as const }],
+          roundingPyg: 0,
+        };
+        const nceMoved = {
+          ...moved,
+          idempotencyKey: 'key-n',
+          correction: { type: 'NCE' as const, draft: nceDraft },
+        };
+
+        it('reissues a full-amount note leaving the rejected one out of the 2417 sum', async () => {
+          const { correct, acceptNce } = setup({ document: note });
+          await expect(correct(nceMoved)).resolves.toEqual(NEW_DOC);
+          expect(acceptNce).toHaveBeenCalledWith(expect.objectContaining({ excludeCdc: CDC }));
+        });
+
+        it('keeps the claim when the replacement is refused with 2417', async () => {
+          const { correct, releaseClaim, acceptNce } = setup({ document: note });
+          acceptNce.mockRejectedValueOnce(
+            new InvoiceValidationError([
+              { field: 'items', rule: 'credit-total', sifenCode: '2417', message: 'over' },
+            ]),
+          );
+          await expect(correct(nceMoved)).rejects.toBeInstanceOf(InvoiceValidationError);
+          expect(releaseClaim).not.toHaveBeenCalled();
+        });
+
+        it('keeps the claim when the replacement is refused for an associated-invoice rule', async () => {
+          const { correct, releaseClaim, acceptNce } = setup({ document: note });
+          acceptNce.mockRejectedValueOnce(
+            new InvoiceValidationError([
+              { field: 'associatedCdc', rule: 'associated-not-found', message: 'missing' },
+            ]),
+          );
+          await expect(correct(nceMoved)).rejects.toBeInstanceOf(InvoiceValidationError);
+          expect(releaseClaim).not.toHaveBeenCalled();
+        });
+      });
+
+      it('tells a new key to retry with the key that holds the claim', () => {
+        expect(new DocumentNotCorrectableError('correction_in_progress').message).toContain(
+          'same Idempotency-Key',
+        );
       });
 
       it('keeps the claim when the acceptance fails in an unknown way', async () => {

@@ -42,6 +42,9 @@ describe('acceptCreditNote idempotency under concurrency', () => {
     certificateNotAfter?: Date,
   ) {
     const insertDocument = vi.fn(() => Promise.resolve({ id: 'new' }));
+    const sumCreditNotes = vi.fn<(cdc: string, env: string, exclude?: string) => Promise<string>>(
+      () => Promise.resolve(credited),
+    );
     const nextNumber = vi.fn(() => Promise.resolve({ series: null, number: 1 }));
     const lookups = [...keyLookups];
     const unit: AcceptanceUnit = {
@@ -58,7 +61,7 @@ describe('acceptCreditNote idempotency under concurrency', () => {
           certificateNotAfter,
         }),
       findAssociatedInvoice: () => Promise.resolve(INVOICE),
-      sumCreditNotes: () => Promise.resolve(credited),
+      sumCreditNotes,
       nextNumber,
       insertDocument,
       recordAudit: () => Promise.resolve(),
@@ -67,7 +70,7 @@ describe('acceptCreditNote idempotency under concurrency', () => {
       unitOfWork: { run: (_tenant, work) => work(unit) },
       now: () => new Date('2026-03-06T01:30:00Z'),
     });
-    return { accept, insertDocument, nextNumber };
+    return { accept, insertDocument, nextNumber, sumCreditNotes };
   }
 
   it('replays the document a parallel request with the same key committed while this one waited for the lock', async () => {
@@ -96,5 +99,11 @@ describe('acceptCreditNote idempotency under concurrency', () => {
 
     await expect(accept(INPUT)).rejects.toBeInstanceOf(CertificateExpiringError);
     expect(nextNumber).not.toHaveBeenCalled();
+  });
+
+  it('leaves the document being reissued out of the 2417 sum', async () => {
+    const { accept, sumCreditNotes } = run([null, null], '0');
+    await accept({ ...INPUT, excludeCdc: 'rejected-cdc' });
+    expect(sumCreditNotes).toHaveBeenCalledWith(FE_CDC, 'test', 'rejected-cdc');
   });
 });

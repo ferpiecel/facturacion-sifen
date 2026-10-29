@@ -170,7 +170,7 @@ describe('CorrectDocument with the Drizzle unit of work', () => {
     expect(await handle.db.select().from(documentCorrections)).toHaveLength(0);
   });
 
-  it('claims the document for a reissue and releases the claim when the replacement is refused', async () => {
+  it('claims the document for a reissue and takes no claim for a refused body', async () => {
     const later = () => new Date('2026-03-20T12:00:00Z');
     const base = input('fix-bad');
     const invalid = {

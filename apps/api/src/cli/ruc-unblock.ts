@@ -1,5 +1,6 @@
 import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 import { assertValidTenantId, rucBlocks, tenants, type Database } from '@sifen/db';
+import { asPlatformAdmin } from './platform-admin.js';
 import { recordAudit } from '../modules/audit/infrastructure/record-audit.js';
 
 const MAX_REASON_LENGTH = 500;
@@ -17,7 +18,7 @@ export interface RucUnblockResult {
  * Operator CLI (HU-E6-05, HU-E14): lifts the tenant's active RUC pause early, so the next transmission
  * cycle sends again. Active means inside its window, not already lifted and earned in the tenant's
  * current environment (the same rule as the cycle's guard). The rows are never deleted: they get
- * `lifted_at/by/reason`, so the history stays. Runs as `platform_admin` (the only role with UPDATE on
+ * `lifted_at/by/reason`, so the history stays. Runs as `platform_admin` through `asPlatformAdmin`, so the use is recorded in `platform_audit_log` (the only role with UPDATE on
  * those columns) with the tenant bound, and audits `ruc_block.lifted` with the operator and the reason.
  * Refuses, writing nothing, when there is no active pause.
  */
@@ -35,8 +36,8 @@ export async function unblockRuc(
   if (reason === '' || reason.length > MAX_REASON_LENGTH) {
     throw new Error(`reason must be 1 to ${String(MAX_REASON_LENGTH)} characters`);
   }
-  return await db.transaction(async (tx) => {
-    await tx.execute(sql`SET LOCAL ROLE platform_admin`);
+  const use = { purpose: 'ruc:unblock', scope: ['ruc_blocks', 'tenants'] };
+  return await asPlatformAdmin(db, use, async (tx) => {
     // The audit row takes its tenant from this setting, like in withTenantTransaction.
     await tx.execute(sql`select set_config('app.current_tenant', ${params.tenantId}, true)`);
     const active = await tx

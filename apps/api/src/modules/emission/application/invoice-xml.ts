@@ -1,4 +1,4 @@
-import type { DeXmlBuilder, FacturaPocInput } from '@sifen/sifen-gateway';
+import type { DeXmlBuilder, FacturaPocInput, NominationEventReceiver } from '@sifen/sifen-gateway';
 import { validateXml } from '@sifen/sifen-xsd';
 import {
   resolveIssuerDocumentContent,
@@ -52,6 +52,15 @@ export interface XmlReceiver {
   email?: string;
 }
 
+/** The receiver SIFEN approved in the nomination of the FE an NCE or NDE is associated to (HU-E8-05). */
+export interface NominatedXmlReceiver {
+  nominated: NominationEventReceiver;
+}
+
+const isNominated = (
+  receiver: XmlReceiver | NominatedXmlReceiver,
+): receiver is NominatedXmlReceiver => 'nominated' in receiver;
+
 export interface InvoiceXmlContext {
   environment: TenantEnvironment;
   issuer: FiscalProfile;
@@ -65,7 +74,7 @@ export interface InvoiceXmlContext {
   /** Emission instant; dFeEmiDE and the CDC date are derived in America/Asuncion. */
   issuedAt: Date;
   /** Named receiver data; absent for an unnamed (innominado) receiver, which has none. */
-  receiver?: XmlReceiver;
+  receiver?: XmlReceiver | NominatedXmlReceiver;
   /** One entry per draft item, in order: dCodInt, dDesProSer, cUniMed. */
   lines: readonly { code: string; description: string; unitCode: number }[];
   /** Overrides the test literal (ADR-0012 D2). */
@@ -207,9 +216,55 @@ function receiverAddress(receiver: XmlReceiver, departmentCode: number | undefin
   };
 }
 
-function requireNamedReceiver(receiver: XmlReceiver | undefined): XmlReceiver {
+function requireNamedReceiver(
+  receiver: XmlReceiver | NominatedXmlReceiver | undefined,
+): XmlReceiver | NominatedXmlReceiver {
   if (receiver === undefined) throw new InvoiceXmlError('a named receiver needs its D2 data');
   return receiver;
+}
+
+/**
+ * D2 for the receiver of an approved nomination (NT 015): a taxpayer by RUC, anyone else by
+ * identity document. The geographic descriptions are not stored; the catalog patch fills them.
+ */
+function nominatedReceiverInput(
+  { nominated: r }: NominatedXmlReceiver,
+  operationType: number,
+  departmentCode: number | undefined,
+) {
+  const identity =
+    r.kind === 'taxpayer'
+      ? {
+          contribuyente: true,
+          ruc: r.ruc,
+          tipoContribuyente: r.taxpayerType,
+          documentoTipo: 1,
+          documentoNumero: r.ruc.split('-')[0],
+        }
+      : { contribuyente: false, documentoTipo: r.documentType, documentoNumero: r.documentNumber };
+  const withGeo = departmentCode !== undefined;
+  return {
+    ...identity,
+    razonSocial: r.name,
+    ...(r.tradeName === undefined ? {} : { nombreFantasia: r.tradeName }),
+    tipoOperacion: operationType,
+    pais: r.country,
+    paisDescripcion: r.country === 'PRY' ? 'Paraguay' : r.country,
+    ...(r.address === undefined ? {} : { direccion: r.address }),
+    ...(r.houseNumber === undefined ? {} : { numeroCasa: r.houseNumber }),
+    ...(withGeo
+      ? {
+          departamento: departmentCode,
+          departamentoDescripcion: getDepartmentDescription(departmentCode),
+        }
+      : {}),
+    ...(r.districtCode === undefined ? {} : { distrito: r.districtCode }),
+    ...(withGeo && r.cityCode !== undefined ? { ciudad: r.cityCode } : {}),
+    ...(r.phone === undefined ? {} : { telefono: r.phone }),
+    ...(r.mobile === undefined ? {} : { celular: r.mobile }),
+    ...(r.email === undefined ? {} : { email: r.email }),
+    ...(r.customerCode === undefined ? {} : { codigo: r.customerCode }),
+  };
 }
 
 function namedReceiverInput(
@@ -246,6 +301,15 @@ function namedReceiverInput(
     codigo: '0001',
   };
 }
+
+const namedReceiver = (
+  receiver: XmlReceiver | NominatedXmlReceiver,
+  operationType: number,
+  departmentCode: number | undefined,
+) =>
+  isNominated(receiver)
+    ? nominatedReceiverInput(receiver, operationType, departmentCode)
+    : namedReceiverInput(receiver, operationType, departmentCode);
 
 /**
  * Innominado receiver (MT v150 D201 = 2, D208 = 5, D210 = 0, D211 = "Sin Nombre"; B2C only, NT 024
@@ -432,7 +496,7 @@ export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext
       cliente:
         draft.receiver.kind === 'unnamed'
           ? unnamedReceiverInput(operationType)
-          : namedReceiverInput(
+          : namedReceiver(
               requireNamedReceiver(ctx.receiver),
               operationType,
               draft.operationType === 'B2F' ? undefined : departmentCode,

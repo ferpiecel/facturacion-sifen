@@ -215,7 +215,7 @@ La respuesta es la misma, `202 { "document_id", "cdc" }`, con un CDC que empieza
 | `associated-document-unreadable` | - | Los datos guardados de la FE no se pueden leer |
 | `credit-note-sum-exceeds-invoice` | 2417 | La suma de créditos supera el total de la FE |
 | `credit-note-currency-mismatch` | 2438 | Moneda distinta (hoy solo existe `PYG`) |
-| `credit-note-unnamed-receiver` | 1331 | La FE se emitió a un receptor innominado: no se puede acreditar |
+| `credit-note-unnamed-receiver` | 1331 | La FE se emitió a un receptor innominado y SIFEN todavía no aprobó su [nominación](eventos.md#nominar-una-factura-emitida-a-un-receptor-innominado): no se puede acreditar ni debitar. Una vez aprobada, la nota se acepta y se firma con el receptor nominado |
 | `credit-note-reason` | 1452 | `reasonCode` fuera de 1 a 8 |
 
 El KuDE de una NCE (`GET /v1/documents/{id}/kude`) lleva el título "KuDE de Nota de Crédito Electrónica", el motivo y la FE asociada.

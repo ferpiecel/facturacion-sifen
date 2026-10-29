@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import {
   createPgliteDatabase,
   documents,
+  issuerEvents,
   tenantEstablishments,
   tenantExpeditionPoints,
   tenantFiscalEconomicActivities,
@@ -254,6 +255,125 @@ describe('DrizzleSigningStore', () => {
       const loaded = asSignable(await storeFor(tenantId).load(tenantId, documentId));
       expect(loaded).toMatchObject({ environment: 'test', tenantEnvironment: 'production' });
     });
+  });
+
+  describe('an NCE or NDE over an FE issued to an unnamed receiver (HU-E8-05)', () => {
+    const NOMINATED = {
+      kind: 'taxpayer',
+      ruc: '80012345-1',
+      taxpayerType: 2,
+      name: 'Cliente Nominado SA',
+      country: 'PRY',
+      operationType: 'B2B',
+      address: 'Avda Nominada',
+      houseNumber: '12',
+      departmentCode: 11,
+      districtCode: 143,
+      cityCode: 3344,
+      email: 'nominado@test.com',
+    };
+    const NOTE_CDC = buildCdc({
+      documentType: '05',
+      rucBase: '80000001',
+      rucDv: 3,
+      establishment: '001',
+      point: '001',
+      documentNumber: '0000001',
+      taxpayerType: 2,
+      issueDate: '2026-09-30',
+      emissionType: 1,
+      securityCode: '111111111',
+    });
+
+    async function seedNote(nomination: 'approved' | 'pending' | 'none', documentType = 5) {
+      await seed({
+        payload: { ...PAYLOAD, operationType: 'B2C', receiver: { kind: 'unnamed' } },
+      });
+      const { db } = handle;
+      const [fe] = await db.select().from(documents).where(eq(documents.id, documentId));
+      if (nomination !== 'none') {
+        const [event] = await db
+          .insert(issuerEvents)
+          .values({
+            tenantId,
+            environment: 'test',
+            kind: 'nomination',
+            eventId: 7n,
+            reason: 'Cliente identificado',
+            documentId,
+            nomination: NOMINATED,
+          })
+          .returning();
+        if (nomination === 'approved') {
+          const steps = [
+            { status: 'signed', signedXml: '<a/>', signedAt: new Date() },
+            { status: 'sending', batchDId: 3n, sendAttemptedAt: new Date() },
+            {
+              status: 'approved',
+              responseCode: '0600',
+              responseMessage: 'ok',
+              respondedAt: new Date(),
+            },
+          ] as const;
+          for (const set of steps) {
+            await db.update(issuerEvents).set(set).where(eq(issuerEvents.id, event.id));
+          }
+        }
+      }
+      const [note] = await db
+        .insert(documents)
+        .values({
+          tenantId,
+          environment: 'test',
+          cdc: NOTE_CDC,
+          documentType,
+          timbradoId: fe.timbradoId,
+          establishmentId: fe.establishmentId,
+          expeditionPointId: fe.expeditionPointId,
+          number: 1,
+          securityCode: '111111111',
+          issuedAt: new Date('2026-09-30T14:00:00Z'),
+          totalAmount: '5000',
+          associatedCdc: CDC,
+          payload: {
+            type: documentType === 5 ? 'NCE' : 'NDE',
+            establishment: '001',
+            expeditionPoint: '001',
+            associatedCdc: CDC,
+            reasonCode: 2,
+            items: [PAYLOAD.items[0]],
+            roundingPyg: 0,
+          },
+        })
+        .returning();
+      documentId = note.id;
+    }
+
+    it.each([
+      ['an NCE', 5],
+      ['an NDE', 6],
+    ])('takes the nominated receiver for %s once the nomination is approved', async (_n, type) => {
+      await seedNote('approved', type);
+
+      const loaded = asSignable(await storeFor(tenantId).load(tenantId, documentId));
+
+      expect(loaded.draft.receiver).toMatchObject({ kind: 'named' });
+      expect(loaded.draft.operationType).toBe('B2B');
+      expect(loaded.draft.location).toEqual({ departmentCode: 11 });
+      expect(loaded.context.receiver).toMatchObject({ nominated: { ruc: '80012345-1' } });
+    });
+
+    it.each(['pending', 'none'] as const)(
+      'stays unsignable while the nomination is %s',
+      async (state) => {
+        await seedNote(state);
+
+        const loaded = asSignable(await storeFor(tenantId).load(tenantId, documentId));
+
+        expect(loaded.draft.receiver).toEqual({ kind: 'unnamed' });
+        expect(loaded.context.receiver).toBeUndefined();
+      },
+    );
   });
 
   it('returns early, without reading configuration or the payload, when not accepted', async () => {

@@ -68,6 +68,8 @@ Respuesta `202`: `{ "event_id": "…", "document_id": "…", "status": "pending"
 
 Un documento de otro tenant responde 404 (4468). Mismo `Idempotency-Key` y mismo cuerpo devuelven la misma respuesta; la misma clave con otro cuerpo, 409.
 
+Con 0600 de SIFEN la FE queda nominada: sale el webhook `document.nominated` y una NCE o NDE asociada a esa FE deja de responder 1331. La nota se emite y se firma con el receptor nominado (RUC o documento, nombre, dirección y contacto, y su tipo de operación). Una dirección incompleta (sin número de casa, o sin departamento o ciudad salvo en `B2F`) no se copia a la nota, porque el DE la rechazaría; el resto del receptor sí.
+
 ## Inutilizar numeración
 
 `POST /v1/numbering/inutilize`, scope `documents:write`, `Idempotency-Key` obligatoria. Inutiliza un rango de números que no se usarán (MT v150, 11.1.1).

@@ -5,6 +5,7 @@ import { CscVault } from '../modules/custody/infrastructure/csc-vault.js';
 import { MAX_PKCS12_BYTES } from '../modules/certificates/infrastructure/pkcs12-inspector.js';
 import { CertificateVault } from '../modules/certificates/infrastructure/certificate-vault.js';
 import { loadTrustedRoots } from '../modules/certificates/infrastructure/trusted-roots.js';
+import { DEFAULT_WITHIN_HOURS, listNearDeadline } from './deadline-commands.js';
 import { listAudit, verifyAudit } from './audit-commands.js';
 import { BoundedReadError, readBoundedFile } from './bounded-file.js';
 import { getOpsDatabaseUrl, OpsArgError, parseOpsArgs, type OpsCommand } from './args.js';
@@ -111,6 +112,19 @@ export async function runOpsCommand(
         ...lines,
         ...(page.nextAfterSeq === null ? [] : [`next: --after-seq ${String(page.nextAfterSeq)}`]),
       ].join('\n');
+    }
+    case 'document:deadline': {
+      const now = new Date();
+      const rows = await listNearDeadline(db, command, now);
+      if (rows.length === 0) {
+        return `no documents within ${String(command.withinHours ?? DEFAULT_WITHIN_HOURS)} hours of the 72 h deadline`;
+      }
+      return rows
+        .map(
+          (r) =>
+            `${r.tenantId} ${r.id} ${r.cdc} ${r.status} signed ${r.signedAt.toISOString()} deadline ${r.deadline.toISOString()} ${String(r.hoursRemaining)}h`,
+        )
+        .join('\n');
     }
     case 'audit:verify': {
       const result = await verifyAudit(db, command);

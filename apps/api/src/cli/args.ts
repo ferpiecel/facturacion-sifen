@@ -29,6 +29,12 @@ export class OpsArgError extends Error {}
 
 export type OpsCommand =
   | {
+      kind: 'document:deadline';
+      tenantId: string | undefined;
+      withinHours: number | undefined;
+      limit: number | undefined;
+    }
+  | {
       kind: 'audit:list';
       tenantId: string;
       action: string | undefined;
@@ -277,6 +283,25 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
           values['after-seq'] === undefined
             ? undefined
             : parseCount(values['after-seq'], 'after-seq'),
+      };
+    }
+    case 'document:deadline': {
+      const { values } = parseStrict({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          'within-hours': { type: 'string' },
+          limit: { type: 'string' },
+        },
+      });
+      return {
+        kind: 'document:deadline',
+        tenantId: values.tenant,
+        withinHours:
+          values['within-hours'] === undefined
+            ? undefined
+            : parseCount(values['within-hours'], 'within-hours'),
+        limit: values.limit === undefined ? undefined : parseCount(values.limit, 'limit'),
       };
     }
     case 'audit:verify': {

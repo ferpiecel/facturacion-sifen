@@ -449,6 +449,13 @@
       "when": 1793205447357,
       "tag": "0067_issuer_events_nomination",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1793205447358,
+      "tag": "0068_webhook_nominated_event",
+      "breakpoints": true
     }
   ]
 }

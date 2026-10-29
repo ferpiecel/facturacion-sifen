@@ -30,8 +30,9 @@
 - [x] B1a use case `nominate-document` + port (PR #365, branch `feat/hu-e8-05-nominate-use-case`)
 - [x] B1b Drizzle `drizzle-nomination-unit-of-work` + `SignPendingEvent`/signing store load the nomination (PR #364, branch `feat/hu-e8-05-nominate-persist`, stacked on use-case)
 - [x] B2 request schema + error mapping (PR #367, `85a00f2`, branch `...-request`); controller, module wiring, e2e, OpenAPI, guide `docs/integracion/eventos.md` (PR #368, `8814794`, branch `...-endpoint`)
-- [ ] B3 (OPEN DEBT, not started; do after HU-E9 merges and the chain is restacked) NCE/NDE 2442 + `credit-note-unnamed-receiver` (approved nomination event = nominated receiver), `document.nominated` webhook; else record as open debt
-
+- [x] B3a `document.nominated` webhook (migration 0068 widens the CHECKs; renumber at merge), branch `feat/hu-e8-05-nominate-effects` on #368
+- [x] B3b acceptance: NCE/NDE over an unnamed FE with an APPROVED nomination passes 1331 (`credit-note-unnamed-receiver`; MT v150 has no 2442 text in docs, plan v1.1 §8.6 says H004i/2442 = note receiver must equal the nominated one); `findAssociatedInvoice` swaps receiver/operationType/location/receiverRuc for the nominated ones (`domain/nominated-receiver.ts`)
+- [ ] B3c (NEXT) signing/XML: without it the NCE is accepted but cannot be signed (it would hit `invoice-xml.ts` 1331 guard / `requireNamedReceiver`). Steps: (1) RED in `drizzle-signing-store.spec.ts` (draft patch was at scratchpad `signing-spec.patch`; the NCE row must copy the FE's establishmentId/expeditionPointId/timbradoId, the last attempt failed with `SigningDataIncompleteError: establishment, expeditionPoint` because `...fe` spread lost the FK columns: set them explicitly and give the payload `establishment: '001', expeditionPoint: '001'`); (2) `readNotePayload` takes the FE's approved nomination (query `issuer_events` by FE id, kind nomination, status approved) and, when the FE receiver is unnamed, returns draft = `nominatedFacts(...)` + `receiver: { nominated }`; (3) `XmlReceiver` union in `invoice-xml.ts`: `{ nominated: NominationEventReceiver }` -> `nominatedReceiverInput` (xmlgen `cliente`: taxpayer -> contribuyente true, ruc, tipoContribuyente; non-taxpayer -> documentoTipo/Numero; razonSocial, nombreFantasia, pais, address block, telefono, celular, email, codigo), relax the 1331 guard at `invoice-xml.ts` ~597 for it, XSD spec; (4) docs `docs/integracion/emision.md` (1331 row: accepted once the nomination is approved) + `eventos.md` + openapi description + `pnpm --filter @sifen/api openapi`; (5) PR "Depende de #368".
 ## Handoff
 
 Branch chain (all PRs target main): #356 `feat/hu-e8-05-nominate` (ready) <- #357 `...-rules` (draft) <- #365 `...-use-case` (draft) <- #364 `...-persist` (draft). Next: branch `feat/hu-e8-05-nominate-endpoint` from `feat/hu-e8-05-nominate-persist`, draft PR "Depende de #364". Worktree already has node_modules and builds. Verify in the pre-push hook needs a clean tree (stash untracked before pushing). No reviews posted yet (sifen-reviewer). Note: the Drizzle UoW spec was written together with its implementation (no observed RED).
@@ -43,3 +44,6 @@ Forecast about 1000 authored lines: chained PRs, each at most 400, first ready f
 ## Progress / evidence
 
 PRs: #356 <- #357 <- #365 <- #364 <- #367 <- #368 (all target main; PR bodies say PR n/6). Do not rebase onto main until HU-E9 merges; the orchestrator restacks. Pre-push verify green on #367 and #368. Next: B3 (webhook `document.nominated`, NCE/NDE over a nominated FE 2442) on a branch from `feat/hu-e8-05-nominate-endpoint`, draft PR "Depende de #368".
+
+
+B3 progress: branch `feat/hu-e8-05-nominate-effects` holds B3a and B3b (PR to open as draft, Depende de #368). B3c remains.

@@ -6,7 +6,11 @@ import {
   documentEventId,
   eventTypeForDocumentStatus,
 } from '../domain/webhook-document-events.js';
-import { createWebhookEvent, matchesEventFilter } from '../domain/webhook-event.js';
+import {
+  createWebhookEvent,
+  matchesEventFilter,
+  type WebhookEventType,
+} from '../domain/webhook-event.js';
 
 export interface EnqueueDocumentEventsInput {
   readonly tenantId: string;
@@ -14,6 +18,11 @@ export interface EnqueueDocumentEventsInput {
   readonly documentIds: readonly string[];
   /** The transition time; also when the deliveries become due. */
   readonly at: Date;
+  /**
+   * An event that is not a status transition (`document.nominated`): sent as is, once per document, and
+   * without the receiver's email, which belongs to the status transitions.
+   */
+  readonly eventType?: WebhookEventType;
 }
 
 /**
@@ -25,11 +34,11 @@ export interface EnqueueDocumentEventsInput {
  */
 export async function enqueueDocumentEvents(
   tx: TenantTx,
-  { tenantId, documentIds, at }: EnqueueDocumentEventsInput,
+  { tenantId, documentIds, at, eventType }: EnqueueDocumentEventsInput,
 ): Promise<void> {
   if (documentIds.length === 0) return;
   // The receiver's email rides the same transition, in the same transaction (HU-E11-02).
-  await enqueueDocumentEmails(tx, { tenantId, documentIds, at });
+  if (eventType === undefined) await enqueueDocumentEmails(tx, { tenantId, documentIds, at });
   const endpoints = await tx
     .select({ id: webhookEndpoints.id, events: webhookEndpoints.events })
     .from(webhookEndpoints)
@@ -47,7 +56,7 @@ export async function enqueueDocumentEvents(
     .where(and(eq(documents.tenantId, tenantId), inArray(documents.id, [...documentIds])));
   const rows: (typeof webhookDeliveries.$inferInsert)[] = [];
   for (const doc of docs) {
-    const type = eventTypeForDocumentStatus(doc.status);
+    const type = eventType ?? eventTypeForDocumentStatus(doc.status);
     if (type === undefined) continue;
     const eventId = documentEventId(doc.id, type);
     const payload = createWebhookEvent({

@@ -1,0 +1,7 @@
+-- Manual rollback for 0068: removes `document.nominated` from the webhook event checks. Delete the queued deliveries of that type and remove it from every endpoint's filter first, or the constraints refuse to come back.
+DELETE FROM "webhook_deliveries" WHERE "event_type" = 'document.nominated';
+UPDATE "webhook_endpoints" SET "events" = array_remove("events", 'document.nominated') WHERE 'document.nominated' = ANY("events");
+ALTER TABLE "webhook_deliveries" DROP CONSTRAINT "webhook_deliveries_event_type_valid";
+ALTER TABLE "webhook_endpoints" DROP CONSTRAINT "webhook_endpoints_events_valid";
+ALTER TABLE "webhook_deliveries" ADD CONSTRAINT "webhook_deliveries_event_type_valid" CHECK ("event_type" IN ('document.created', 'document.signed', 'document.submitted', 'document.approved', 'document.approved_with_observations', 'document.rejected', 'document.cancelled', 'document.number_voided', 'document.transmission_deadline_warning', 'document.notification.delivered', 'document.notification.failed', 'certificate.expiring'));
+ALTER TABLE "webhook_endpoints" ADD CONSTRAINT "webhook_endpoints_events_valid" CHECK ("events" <@ ARRAY['document.created', 'document.signed', 'document.submitted', 'document.approved', 'document.approved_with_observations', 'document.rejected', 'document.cancelled', 'document.number_voided', 'document.transmission_deadline_warning', 'document.notification.delivered', 'document.notification.failed', 'certificate.expiring']::text[]);

@@ -26,6 +26,7 @@ describe('webhook event envelope (HU-E11-01)', () => {
       'document.rejected',
       'document.cancelled',
       'document.number_voided',
+      'document.nominated',
       'document.transmission_deadline_warning',
       'document.notification.delivered',
       'document.notification.failed',

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { eq, sql } from 'drizzle-orm';
+import { getTableConfig } from 'drizzle-orm/pg-core';
 import { fileURLToPath } from 'node:url';
 import type { DatabaseHandle } from '../src/client.js';
 import {
@@ -253,6 +254,21 @@ describe('0069 rollback', () => {
       await handle.db.execute(sql`UPDATE documents SET status = 'queued' WHERE cdc = ${CDC_A}`);
     } finally {
       await handle.close();
+    }
+  });
+});
+
+/** The declared constraints are what the migration creates: building the table config resolves each reference. */
+describe('correction tables as declared', () => {
+  it('declares the foreign keys, the uniqueness and the hash format of both tables', () => {
+    for (const table of [documentCorrections, documentCorrectionClaims]) {
+      const config = getTableConfig(table);
+      expect(config.foreignKeys.map((fk) => fk.getName())).toContain(
+        `${config.name}_tenant_document_fk`,
+      );
+      expect(config.checks.map((check) => check.name)).toContain(`${config.name}_hash_format`);
+      expect(config.uniqueConstraints.length + config.indexes.length).toBeGreaterThan(0);
+      for (const fk of config.foreignKeys) expect(fk.reference().foreignTable).toBeDefined();
     }
   });
 });

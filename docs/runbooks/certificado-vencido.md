@@ -45,4 +45,4 @@ PSC emisora del certificado: `<contacto-PSC>`. DNIT si SIFEN rechaza la firma de
 
 ## Post-incidente
 
-Revisar por qué el aviso a 60/30/7 días no se atendió (el tenant debe tener un endpoint de webhooks con `certificate.expiring`). El comando `ops` no lista certificados ni vencimientos por tenant: **Brecha**; hoy requiere SQL de solo lectura sobre `tenant_certificates` (`not_after`).
+Revisar por qué el aviso a 60/30/7 días no se atendió (el tenant debe tener un endpoint de webhooks con `certificate.expiring`). Para ver qué certificados vencen: `ops certificate:expiring [--tenant <id>] [--days <n>]` (ver `operacion.md`).

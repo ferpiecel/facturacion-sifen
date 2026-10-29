@@ -34,6 +34,7 @@ export type OpsCommand =
       withinHours: number | undefined;
       limit: number | undefined;
     }
+  | { kind: 'certificate:expiring'; tenantId: string | undefined; days: number | undefined }
   | {
       kind: 'audit:list';
       tenantId: string;
@@ -303,6 +304,17 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
             ? undefined
             : parseCount(values['within-hours'], 'within-hours'),
         limit: values.limit === undefined ? undefined : parseCount(values.limit, 'limit'),
+      };
+    }
+    case 'certificate:expiring': {
+      const { values } = parseStrict({
+        args: rest,
+        options: { tenant: { type: 'string' }, days: { type: 'string' } },
+      });
+      return {
+        kind: 'certificate:expiring',
+        tenantId: values.tenant,
+        days: values.days === undefined ? undefined : parseCount(values.days, 'days'),
       };
     }
     case 'audit:verify': {

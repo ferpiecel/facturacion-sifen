@@ -96,6 +96,13 @@ describe('CorrectDocument with the Drizzle unit of work', () => {
     });
   });
 
+  it('moves updated_at when it rewrites the row', async () => {
+    const before = (await row()).updatedAt;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await correct()(input());
+    expect((await row()).updatedAt.getTime()).toBeGreaterThan(before.getTime());
+  });
+
   it('replays the same key without a second correction', async () => {
     await correct()(input());
     await expect(correct()(input())).resolves.toEqual({ documentId, cdc });

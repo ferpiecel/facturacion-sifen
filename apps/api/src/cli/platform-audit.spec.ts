@@ -1,8 +1,9 @@
 import { userInfo } from 'node:os';
-import { createPgliteDatabase, type Database, type DatabaseHandle } from '@sifen/db';
+import { createPgliteDatabase, rucBlocks, type Database, type DatabaseHandle } from '@sifen/db';
 import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTenant } from './commands.js';
+import { unblockRuc } from './ruc-unblock.js';
 import { listExpiringCertificates } from './certificate-expiring.js';
 import { listNearDeadline } from './deadline-commands.js';
 import { listPlans, setPlanPrice } from './plan-commands.js';
@@ -84,5 +85,29 @@ describe('ops commands audit their platform_admin use', () => {
     await listExpiringCertificates(handle.db, { days: 30, tenantId }, NOW);
 
     expect(await purposes()).toEqual([]);
+  });
+
+  it('audits ruc:unblock, and writes no audit row when it is refused', async () => {
+    await expect(
+      unblockRuc(handle.db, { tenantId, actor: 'ana', reason: 'x' }, NOW),
+    ).rejects.toThrow('no active RUC block');
+    expect(await purposes()).toEqual([]);
+
+    await handle.db.insert(rucBlocks).values({
+      tenantId,
+      environment: 'test',
+      blockedAt: NOW,
+      blockedUntil: new Date(NOW.getTime() + 3_600_000),
+      reason: 'RUC bloqueado',
+    });
+    await unblockRuc(handle.db, { tenantId, actor: 'ana', reason: 'clear' }, NOW);
+
+    expect(await auditTrail(handle.db)).toMatchObject([
+      {
+        actor: `ops-cli:${userInfo().username}`,
+        purpose: 'ruc:unblock',
+        scope: ['ruc_blocks', 'tenants'],
+      },
+    ]);
   });
 });

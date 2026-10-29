@@ -5,6 +5,7 @@ import { CscVault } from '../modules/custody/infrastructure/csc-vault.js';
 import { MAX_PKCS12_BYTES } from '../modules/certificates/infrastructure/pkcs12-inspector.js';
 import { CertificateVault } from '../modules/certificates/infrastructure/certificate-vault.js';
 import { loadTrustedRoots } from '../modules/certificates/infrastructure/trusted-roots.js';
+import { listAudit, verifyAudit } from './audit-commands.js';
 import { BoundedReadError, readBoundedFile } from './bounded-file.js';
 import { getOpsDatabaseUrl, OpsArgError, parseOpsArgs, type OpsCommand } from './args.js';
 import { emissionValidationConfig } from '../modules/emission/emission-validation-config.js';
@@ -100,6 +101,24 @@ export async function runOpsCommand(
   certificates?: CertificateDeps,
 ): Promise<string> {
   switch (command.kind) {
+    case 'audit:list': {
+      const page = await listAudit(db, command);
+      if (page.entries.length === 0) return 'no audit entries';
+      const lines = page.entries.map(
+        (e) =>
+          `${String(e.seq)} ${e.id} ${e.occurredAt.toISOString()} ${e.actorType}:${e.actorId} ${e.action} ${e.entityType}:${e.entityId}`,
+      );
+      return [
+        ...lines,
+        ...(page.nextAfterSeq === null ? [] : [`next: --after-seq ${String(page.nextAfterSeq)}`]),
+      ].join('\n');
+    }
+    case 'audit:verify': {
+      const result = await verifyAudit(db, command);
+      return result.ok
+        ? `audit chain intact: ${String(result.rows)} rows (head seq ${String(result.headSeq)})`
+        : `audit chain BROKEN at seq ${String(result.brokenAt.seq)} (${result.brokenAt.reason}, entry ${result.brokenAt.id})`;
+    }
     case 'tenant:sync-transmission': {
       const result = await setSyncTransmission(db, {
         tenantId: command.tenantId,

@@ -37,7 +37,7 @@ Solo el tenant afectado. Antes del vencimiento, nada falla. Con el bloqueo de em
 
 - La emisión deja de responder `422 certificate_expiring`.
 - Los documentos liberados pasan de `accepted` a `signed` en el siguiente ciclo, y llegan sus webhooks.
-- Audit log: `certificate.revoked` (el anterior), `document.hold_released` (por liberación) y `certificate.accessed` (cada descifrado). No hay comando para consultarlo (ver README, brecha de audit log).
+- Audit log: `certificate.revoked` (el anterior), `document.hold_released` (por liberación) y `certificate.accessed` (cada descifrado). Se consulta con `ops audit:list --tenant <id> --action certificate.revoked` (ver `operacion.md`).
 
 ## Escalamiento
 

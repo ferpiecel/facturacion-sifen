@@ -15,6 +15,6 @@ Procedimientos para el operador ante incidentes. Cada uno parte de lo que el có
 
 - Los comandos del CLI exigen `OPS_DATABASE_URL` (ver `operacion.md`). Los logs del worker salen por stdout/stderr con una línea por ciclo; no hay backend de métricas ni alertas: las líneas `metric ...` son solo logs.
 - **Brecha transversal, contactos DNIT:** no hay contactos oficiales cargados en el repositorio. Donde un runbook dice `<contacto-DNIT-...>`, el equipo debe completarlo antes de producción.
-- **Brecha transversal, consulta del audit log:** el audit log existe (tabla con cadena de hashes, `verifyAuditChain` en `packages/db/src/audit-chain.ts`) pero no hay comando del CLI para consultarlo ni verificarlo; hoy se consulta con SQL de solo lectura como rol dueño.
+- **Audit log:** se consulta con `ops audit:list --tenant <id> [--action ...] [--from ...] [--to ...]` y se verifica con `ops audit:verify --tenant <id>` (ver `operacion.md`). Solo lectura, nunca imprime `before`/`after`.
 - **Brecha transversal, adaptador SIFEN real:** el worker solo arranca con `SIFEN_GATEWAY=simulator` y `NODE_ENV=development|test`; en producción se niega a arrancar. Los runbooks describen el comportamiento del código ya implementado y se validan contra SIFEN real cuando exista el adaptador.
 - Postmortem: plantilla mínima en cada runbook; guardar en `docs/` o el sistema de incidentes del equipo (no definido todavía).

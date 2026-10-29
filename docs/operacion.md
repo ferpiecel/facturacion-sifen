@@ -21,6 +21,8 @@ pnpm --filter @sifen/api ops fiscal:set --tenant <tenant-id> --ruc 4490207-7 --l
 pnpm --filter @sifen/api ops establishment:add --tenant <tenant-id> --code 001 --address "Avda. Siempre Viva 123" --house-number 123 --department 11 --district 145 --district-description "Ciudad del Este" --city 3383 --city-description "Ciudad del Este"
 pnpm --filter @sifen/api ops establishment:contact --tenant <tenant-id> --establishment 001 --phone 0973-000000 --email emisor@empresa.com.py --name "Casa Matriz"
 read -rs PW && printf '%s' "$PW" | pnpm --filter @sifen/api ops user:create --tenant <tenant-id> --email owner@empresa.com.py --name "Ana Pérez" --role owner --password -
+pnpm --filter @sifen/api ops audit:list --tenant <tenant-id> --action document.hold_released --from 2026-10-01 --to 2026-10-31 --limit 50
+pnpm --filter @sifen/api ops audit:verify --tenant <tenant-id>
 pnpm --filter @sifen/api ops document:release-hold --tenant <tenant-id> --document <document-id>
 pnpm --filter @sifen/api ops document:release-holds --tenant <tenant-id> --reason signing:CertificateNotFoundError
 pnpm --filter @sifen/api ops correction:release-claim --tenant <tenant-id> --document <document-id> --actor <operador>
@@ -56,6 +58,8 @@ pnpm --filter @sifen/api ops document:release-holds --tenant <tenant-id> --reaso
 `certificate:revoke --tenant <id> (--id <uuid> | --fingerprint <sha256-hex>) [--env test|production]` revoca un certificado del tenant (`status = 'revoked'`, `revoked_at`) sin tocar el blob sellado, para que los documentos ya firmados sigan siendo verificables. No necesita `KMS_LOCAL_MASTER_KEY` ni las raíces PSC. Es idempotente (si ya estaba revocado lo informa, no cambia la fecha y no audita de nuevo), un certificado de otro tenant se informa como no encontrado y, si la huella existe en ambos ambientes, exige `--env`. Cada revocación efectiva queda en el audit log (`certificate.revoked`, con id, ambiente y huella). Con el certificado revocado la firma falla con `CertificateNotFoundError` y el pipeline retiene los documentos (`signing:CertificateNotFoundError`) hasta cargar uno nuevo con `certificate:add` y liberarlos con `document:release-holds`.
 
 `user:create --tenant <id> --email <email> --name <nombre> --role owner|admin|emisor|lector [--password -]` da de alta un usuario del portal en el tenant. La contraseña solo se lee de stdin con `--password -` (nunca por argv). El MFA no se carga acá: el usuario lo enrola en su primer ingreso al portal. Si la cuenta (email) ya existía, solo se agrega al tenant con el rol indicado y se ignoran `--name` (que igual es obligatorio) y la contraseña.
+
+`audit:list --tenant <id> [--action <acción>] [--from <YYYY-MM-DD>] [--to <YYYY-MM-DD>] [--limit <1-500, 50 por defecto>] [--after-seq <n>]` lista las entradas del audit log del tenant, de la más vieja a la más nueva, con `seq`, id, fecha, actor (`tipo:id`), acción y entidad. Las fechas son del calendario de Paraguay (UTC-3) y ambos extremos son inclusivos. Pagina por `seq`: si hay más, la última línea es `next: --after-seq <n>`; repetí el comando con ese valor. Nunca imprime `before`/`after` ni el hash. Es solo lectura y corre bajo RLS del tenant. `audit:verify --tenant <id>` recalcula la cadena de hashes del tenant (`verifyAuditChain`, RNF-08) e imprime `audit chain intact: <n> rows (head seq <s>)` o el primer `seq` roto con su motivo; un resultado roto es un incidente de seguridad, no se reintenta ni se "repara".
 
 ## Alta de un tenant nuevo
 

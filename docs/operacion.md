@@ -24,6 +24,7 @@ read -rs PW && printf '%s' "$PW" | pnpm --filter @sifen/api ops user:create --te
 pnpm --filter @sifen/api ops audit:list --tenant <tenant-id> --action document.hold_released --from 2026-10-01 --to 2026-10-31 --limit 50
 pnpm --filter @sifen/api ops audit:verify --tenant <tenant-id>
 pnpm --filter @sifen/api ops document:deadline --within-hours 24
+pnpm --filter @sifen/api ops certificate:expiring --days 60
 pnpm --filter @sifen/api ops document:release-hold --tenant <tenant-id> --document <document-id>
 pnpm --filter @sifen/api ops document:release-holds --tenant <tenant-id> --reason signing:CertificateNotFoundError
 pnpm --filter @sifen/api ops correction:release-claim --tenant <tenant-id> --document <document-id> --actor <operador>
@@ -62,7 +63,7 @@ pnpm --filter @sifen/api ops document:release-holds --tenant <tenant-id> --reaso
 
 `audit:list --tenant <id> [--action <acción>] [--from <YYYY-MM-DD>] [--to <YYYY-MM-DD>] [--limit <1-500, 50 por defecto>] [--after-seq <n>]` lista las entradas del audit log del tenant, de la más vieja a la más nueva, con `seq`, id, fecha, actor (`tipo:id`), acción y entidad. Las fechas son del calendario de Paraguay (UTC-3) y ambos extremos son inclusivos. Pagina por `seq`: si hay más, la última línea es `next: --after-seq <n>`; repetí el comando con ese valor. Nunca imprime `before`/`after` ni el hash. Es solo lectura y corre bajo RLS del tenant. `audit:verify --tenant <id>` recalcula la cadena de hashes del tenant (`verifyAuditChain`, RNF-08) e imprime `audit chain intact: <n> rows (head seq <s>)` o el primer `seq` roto con su motivo; un resultado roto es un incidente de seguridad, no se reintenta ni se "repara".
 
-`document:deadline [--tenant <id>] [--within-hours <1-72, 24 por defecto>] [--limit <1-1000, 100 por defecto>]` lista los documentos firmados que SIFEN todavía no resolvió (`signed`, `queued`, `submitted`) y cuyo plazo de 72 h desde la firma (ADR-0008) vence dentro de la ventana, el más urgente primero, con tenant, id, CDC, estado, firma, vencimiento y horas restantes (los ya vencidos figuran con `0h`). Con `--tenant` lee bajo RLS de ese tenant; sin él recorre todos los tenants como `platform_admin`, el rol cross-tenant deliberado (ADR-0005), y solo lee.
+`document:deadline [--tenant <id>] [--within-hours <1-72, 24 por defecto>] [--limit <1-1000, 100 por defecto>]` lista los documentos firmados que SIFEN todavía no resolvió (`signed`, `queued`, `submitted`) y cuyo plazo de 72 h desde la firma (ADR-0008) vence dentro de la ventana, el más urgente primero, con tenant, id, CDC, estado, firma, vencimiento y horas restantes (los ya vencidos figuran con `0h`). Con `--tenant` lee bajo RLS de ese tenant; sin él recorre todos los tenants como `platform_admin`, el rol cross-tenant deliberado (ADR-0005), y solo lee. `certificate:expiring [--tenant <id>] [--days <1-365>]` lista los certificados activos del ambiente vigente de cada tenant que vencen dentro de la ventana (uno ya vencido pero todavía activo sale con días negativos), con tenant, ambiente, id, huella pública, fecha y días restantes. Sin `--days` usa el umbral mayor de `CERTIFICATE_ALERT_DAYS` (60 por defecto), es decir el primer aviso del worker. Nunca imprime el `.p12`, la contraseña, el XML ni URLs.
 
 ## Alta de un tenant nuevo
 

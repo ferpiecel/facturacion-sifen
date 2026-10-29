@@ -8,7 +8,8 @@ export interface CorrectionFacts {
   associatedCdc: string | null;
 }
 
-export type CorrectionReason = 'establishment' | 'expedition_point' | 'associated_cdc';
+export type CorrectionReason =
+  'establishment' | 'expedition_point' | 'associated_cdc' | 'transmission_window';
 
 export type CorrectionImpact =
   /** No CDC component changes: the same row is rewritten and resent. */

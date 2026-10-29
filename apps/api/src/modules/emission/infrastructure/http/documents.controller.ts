@@ -144,7 +144,8 @@ export class DocumentsController {
 
   /**
    * Corrects a `rejected` document with the full corrected body (HU-E8-01, ADR-0021): `202 { document_id, cdc }`.
-   * The same number is kept and the row is sent again. Retrying with the same `Idempotency-Key` and body
+   * The same number is kept and the row is sent again. When a reissue's old number cannot be voided (4066), the
+   * replacement stays and the response adds `void: { status: 'refused', errors }`. Retrying with the same `Idempotency-Key` and body
    * returns the same response.
    */
   @Post(':id/correct')
@@ -189,7 +190,13 @@ export class DocumentsController {
               ? { type: 'AFE', draft: toSelfInvoiceDraft(parsed.value) }
               : { type: parsed.type, draft: toCreditNoteDraft(parsed.value) },
       });
-      return { document_id: accepted.documentId, cdc: accepted.cdc };
+      return {
+        document_id: accepted.documentId,
+        cdc: accepted.cdc,
+        ...(accepted.voidRefused
+          ? { void: { status: 'refused', errors: accepted.voidRefused } }
+          : {}),
+      };
     } catch (error) {
       throw toHttpException(error) ?? error;
     }

@@ -8,7 +8,6 @@ import {
   IssuerNotConfiguredError,
 } from '../../application/accept-invoice.js';
 import {
-  CorrectionRequiresReissueError,
   CorrectionTypeChangedError,
   DocumentNotCorrectableError,
   DocumentNotFoundError,
@@ -71,11 +70,5 @@ describe('toHttpException', () => {
     expect(statusOf(new DocumentNotFoundError())).toBe(404);
     expect(statusOf(new DocumentNotCorrectableError('accepted'))).toBe(409);
     expect(statusOf(new CorrectionTypeChangedError())).toBe(422);
-    const reissue = toHttpException(new CorrectionRequiresReissueError(['point']));
-    expect(reissue?.getStatus()).toBe(422);
-    expect(reissue?.getResponse()).toMatchObject({
-      code: 'correction_requires_reissue',
-      reasons: ['point'],
-    });
   });
 });

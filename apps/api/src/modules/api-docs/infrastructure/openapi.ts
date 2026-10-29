@@ -195,8 +195,9 @@ export function buildOpenApiDocument() {
           summary: 'Correct a rejected document and send it again',
           description:
             'Takes the full corrected body of a document SIFEN rejected (same shape as `POST /v1/documents`; the `type` cannot change). ' +
-            'When the correction keeps the establishment, the point and the associated CDC, the document keeps its number and CDC and is queued again (`202 { document_id, cdc }` with the same ids); the previous body and SIFEN messages are kept in the correction history. ' +
-            'Only a `rejected` document can be corrected (409 `document_not_correctable`). A correction that changes the establishment, the point or the associated CDC answers 422 `correction_requires_reissue` with the `reasons`. ' +
+            'When the correction keeps the establishment, the point and the associated CDC and the 72 h window of the issue date is open, the document keeps its number and CDC and is queued again (`202 { document_id, cdc }` with the same ids); the previous body and SIFEN messages are kept in the correction history. ' +
+            'Otherwise the corrected body is issued as a new document (new number, new date: the response carries the new `document_id` and `cdc`) and the old number is voided (webhook `document.number_voided`); if that voiding is refused (for example 4066) the replacement stays, the correction is recorded and the response adds `void: { status: "refused", errors }`, the same on every retry. ' +
+            'Only a `rejected` document that was not reissued before can be corrected (409 `document_not_correctable`). ' +
             'Retrying with the same `Idempotency-Key` and body returns the same response; the same key with another body is a 409.',
           ...secured(['documents:write']),
           parameters: [
@@ -225,7 +226,7 @@ export function buildOpenApiDocument() {
             },
           },
           responses: {
-            '202': json('Accepted', ref('DocumentAccepted')),
+            '202': json('Accepted', ref('CorrectionAccepted')),
             '400': problem('Missing or malformed Idempotency-Key, or id is not a UUID'),
             '401': UNAUTHORIZED,
             '403': FORBIDDEN,
@@ -233,10 +234,7 @@ export function buildOpenApiDocument() {
             '409': problem(
               'Idempotency-Key reused with another body, or the document is not rejected',
             ),
-            '422': problem(
-              'Validation failed, the type changed, or the correction changes the number',
-              'ValidationProblem',
-            ),
+            '422': problem('Validation failed or the type changed', 'ValidationProblem'),
           },
         },
       },
@@ -728,6 +726,35 @@ export function buildOpenApiDocument() {
           properties: {
             document_id: { type: 'string', format: 'uuid' },
             cdc: { type: 'string', pattern: '^[0-9]{44}$' },
+          },
+        },
+        CorrectionAccepted: {
+          type: 'object',
+          required: ['document_id', 'cdc'],
+          properties: {
+            document_id: { type: 'string', format: 'uuid' },
+            cdc: { type: 'string', pattern: '^[0-9]{44}$' },
+            void: {
+              type: 'object',
+              description:
+                'Only when the old number of a reissue could not be voided: the replacement stays live and the correction is recorded',
+              required: ['status', 'errors'],
+              properties: {
+                status: { type: 'string', enum: ['refused'] },
+                errors: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      field: { type: 'string' },
+                      rule: { type: 'string' },
+                      sifenCode: { type: 'string' },
+                      message: { type: 'string' },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
         CancelDocumentRequest: {

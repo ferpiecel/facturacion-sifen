@@ -196,6 +196,54 @@ describe('document corrections', () => {
       const remove = db.execute(sql`DELETE FROM document_corrections WHERE id = ${stored.id}`);
       expect(await causeOf(remove)).toContain('append-only');
     });
+
+    it('keeps one correction per idempotency key and tenant', async () => {
+      const { db, a, row } = await seed();
+      const base = {
+        tenantId: a,
+        documentId: row.id,
+        kind: 'same_cdc',
+        idempotencyKey: 'key-1',
+        requestHash: HASH,
+        previousPayload: { items: [] },
+      };
+      await db.insert(documentCorrections).values(base);
+      const again = db.insert(documentCorrections).values(base);
+      expect(await causeOf(again)).toContain('document_corrections_tenant_idempotency_key_key');
+    });
+
+    it('allows one reissue per rejected document', async () => {
+      const { db, a, row } = await seed();
+      const [replacement] = await db
+        .insert(documents)
+        .values({
+          tenantId: a,
+          environment: 'test',
+          timbradoId: row.timbradoId,
+          establishmentId: row.establishmentId,
+          expeditionPointId: row.expeditionPointId,
+          documentType: 1,
+          number: 2,
+          cdc: CDC_B,
+          securityCode: '123456780',
+          issuedAt: new Date('2026-01-01T12:05:00Z'),
+          totalAmount: '110000',
+          payload: { items: [] },
+        })
+        .returning();
+      const reissue = (idempotencyKey: string) =>
+        db.insert(documentCorrections).values({
+          tenantId: a,
+          documentId: row.id,
+          kind: 'reissue',
+          idempotencyKey,
+          requestHash: HASH,
+          previousPayload: { items: [] },
+          replacementDocumentId: replacement.id,
+        });
+      await reissue('key-1');
+      expect(await causeOf(reissue('key-2'))).toContain('document_corrections_reissue_idx');
+    });
   });
 
   describe('document_correction_claims', () => {

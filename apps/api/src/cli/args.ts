@@ -92,6 +92,7 @@ export type OpsCommand =
       contact: EstablishmentContact;
     }
   | { kind: 'document:release-hold'; tenantId: string; documentId: string }
+  | { kind: 'correction:release-claim'; tenantId: string; documentId: string; actor: string }
   | { kind: 'document:release-holds'; tenantId: string; reason: string }
   | { kind: 'point:add'; tenantId: string; establishmentCode: string; point: ExpeditionPoint }
   | { kind: 'timbrado:add'; tenantId: string; timbrado: Timbrado }
@@ -546,6 +547,22 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
         kind: 'document:release-hold',
         tenantId: requireOption(values.tenant, 'tenant'),
         documentId: requireOption(values.document, 'document'),
+      };
+    }
+    case 'correction:release-claim': {
+      const { values } = parseStrict({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          document: { type: 'string' },
+          actor: { type: 'string' },
+        },
+      });
+      return {
+        kind: 'correction:release-claim',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        documentId: requireOption(values.document, 'document'),
+        actor: requireOption(values.actor, 'actor'),
       };
     }
     case 'document:release-holds': {

@@ -24,6 +24,7 @@ import {
   setFiscalProfile,
   setTenantEnvironment,
 } from './commands.js';
+import { releaseCorrectionClaim } from './correction-claim-commands.js';
 import { listPlans, setPlanPrice } from './plan-commands.js';
 import { seedPlans } from './plan-seed.js';
 import { assignSubscription, recordPayment } from './subscription-commands.js';
@@ -261,6 +262,14 @@ export async function runOpsCommand(
         documentId: command.documentId,
       });
       return `document hold released: ${result.id} (was ${result.hold})`;
+    }
+    case 'correction:release-claim': {
+      const result = await releaseCorrectionClaim(db, {
+        tenantId: command.tenantId,
+        documentId: command.documentId,
+        actor: command.actor,
+      });
+      return `correction claim released: ${result.documentId} (key ${result.idempotencyKey})`;
     }
     case 'document:release-holds': {
       const count = await releaseDocumentHolds(db, {

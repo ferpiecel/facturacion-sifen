@@ -14,7 +14,7 @@ Qué métricas emite el sistema y qué reglas de alerta las usan (HU-E14-01, pla
 | Métrica | Tipo | Etiquetas | Qué mide |
 |---|---|---|---|
 | `sifen_request_seconds` | histograma | `operation` | Latencia de cada llamada a SIFEN |
-| `sifen_request_errors_total` | contador | `operation`, `outcome` (`transport`, `timeout`, `error`) | Llamadas a SIFEN que fallaron |
+| `sifen_request_errors_total` | contador | `operation`, `outcome` (`transport`, `timeout`, `error`, `tenant_unavailable`) | Llamadas a SIFEN que fallaron. `tenant_unavailable` es una llamada que no salió (sin certificado vigente, producción deshabilitada): no registra latencia ni cuenta para `SifenErroresDeTransporte` |
 | `sifen_lote_status_total` | contador | `codigo` | Respuestas de lote por código (0300, 0301, 0361, 0362, 0364) |
 | `sifen_rejections_total` | contador | `codigo` | Documentos rechazados por código (`other` si no es de 4 dígitos) |
 | `sifen_ruc_blocks_total` | contador | - | Bloqueos de RUC reportados por SIFEN |
@@ -22,7 +22,8 @@ Qué métricas emite el sistema y qué reglas de alerta las usan (HU-E14-01, pla
 | `platform_gauge_errors_total` | contador | - | Refrescos fallidos de los gauges entre tenants; mientras falle, los gauges conservan el último valor publicado |
 | `de_pending_transmission` | gauge | `bucket` (`<24h`, `24-48h`, `48-72h`, `>72h`) | Documentos firmados sin aprobar, por antigüedad desde la firma |
 | `sifen_ruc_blocked_tenants` | gauge | - | Tenants con envíos pausados por bloqueo de RUC |
-| `certificate_expiry_days_min` | gauge | - | Días hasta el vencimiento del certificado activo más próximo |
+| `certificate_expiry_days_min` | gauge | - | Días hasta el vencimiento del certificado activo más próximo. No se publica si no hay certificados activos (conserva el último valor); las alertas lo condicionan a `certificate_active_count > 0` |
+| `certificate_active_count` | gauge | - | Certificados activos de tenants |
 
 Los gauges de `de_pending_transmission`, `sifen_ruc_blocked_tenants` y `certificate_expiry_days_min` los publica el worker cada 60 s leyendo como `platform_admin`; solo se calculan con `METRICS_ENABLED=true`. Se agregan en SQL (`COUNT`/`GROUP BY`), sin cargar filas en el worker. Si la consulta falla, se **conservan** los últimos valores (un cero falso silenciaría las alertas) y se incrementa `platform_gauge_errors_total`; alertar si crece sostenidamente.
 
@@ -32,10 +33,11 @@ Los gauges de `de_pending_transmission`, `sifen_ruc_blocked_tenants` y `certific
 |---|---|---|---|
 | `SifenCircuitAbierto` | circuito abierto 2 min | crítica | [SIFEN caído](../runbooks/sifen-caido.md) |
 | `SifenErroresDeTransporte` | más de 0,05 fallos/s durante 10 min | aviso | [SIFEN caído](../runbooks/sifen-caido.md) |
+| `SifenTenantsNoDisponibles` | tenants sin poder llamar a SIFEN durante 30 min | informativa | [Certificado vencido](../runbooks/certificado-vencido.md) |
 | `RucBloqueado` | algún tenant bloqueado o un bloqueo nuevo en 15 min | crítica | [RUC bloqueado](../runbooks/ruc-bloqueado.md) |
 | `DocumentosCercaDelPlazo72h` | documentos en `48-72h` durante 10 min | aviso | [DE cerca del plazo de 72 h](../runbooks/de-plazo-72h.md) |
 | `DocumentosFueraDelPlazo72h` | documentos en `>72h` | crítica | [DE cerca del plazo de 72 h](../runbooks/de-plazo-72h.md) |
-| `CertificadoPorVencer` | menos de 30 días | aviso | [Certificado vencido](../runbooks/certificado-vencido.md) |
+| `CertificadoPorVencer` | menos de 30 días (`min` entre réplicas del worker) | aviso | [Certificado vencido](../runbooks/certificado-vencido.md) |
 | `CertificadoVenceEstaSemana` | menos de 7 días | crítica | [Certificado vencido](../runbooks/certificado-vencido.md) |
 
 ## Brechas conocidas

@@ -21,6 +21,14 @@ export interface WorkerSifenDeps {
   readonly decorate?: (gateway: SifenGateway) => SifenGateway;
 }
 
+/**
+ * Upper bound of memoized per-tenant gateways (LRU). The gateway object holds no certificate or
+ * environment: `TenantSoapGatewayFactory` re-reads both on every call through the short-TTL audited
+ * cache, so a rotation or environment change never needs invalidation and a TTL would add nothing.
+ * Only the size needs a bound, so the map cannot outgrow the tenant population.
+ */
+export const GATEWAY_CACHE_MAX = 512;
+
 const CIRCUIT_STATE_VALUE = { closed: 0, 'half-open': 1, open: 2 } as const;
 
 export interface WorkerSifen {
@@ -81,8 +89,23 @@ export function createWorkerSifen(env: NodeJS.ProcessEnv, deps: WorkerSifenDeps)
     ...(config.maxTlsVersion === undefined ? {} : { maxTlsVersion: config.maxTlsVersion }),
   });
   const breaker = CircuitBreakerGateway.shared({ onStateChange });
+  const gateways = new Map<string, SifenGateway>();
+  const gatewayFor = (tenantId: string): SifenGateway => {
+    const cached = gateways.get(tenantId);
+    if (cached) {
+      gateways.delete(tenantId);
+      gateways.set(tenantId, cached);
+      return cached;
+    }
+    const gateway = breaker.around(decorate(factory.forTenant(tenantId)));
+    gateways.set(tenantId, gateway);
+    if (gateways.size > GATEWAY_CACHE_MAX) {
+      gateways.delete(gateways.keys().next().value as string);
+    }
+    return gateway;
+  };
   return {
-    gatewayFor: (tenantId) => breaker.around(decorate(factory.forTenant(tenantId))),
+    gatewayFor,
     sendPausedUntil: () => breaker.pausedUntil('enviarLote'),
     simulator: false,
   };

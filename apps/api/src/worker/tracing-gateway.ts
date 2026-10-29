@@ -1,4 +1,5 @@
 import {
+  SifenTenantUnavailableError,
   SifenTimeoutError,
   SifenTransportError,
   type SifenGateway,
@@ -24,6 +25,7 @@ function code(value: unknown): string {
 }
 
 function outcome(error: unknown): string {
+  if (error instanceof SifenTenantUnavailableError) return 'tenant_unavailable';
   if (error instanceof SifenTimeoutError) return 'timeout';
   if (error instanceof SifenTransportError) return 'transport';
   return 'error';
@@ -63,6 +65,7 @@ export function withTelemetry(inner: SifenGateway, telemetry: Telemetry): SifenG
     wrapped[operation] = (request) =>
       telemetry.withSpan(`sifen.${operation}`, { operation }, async () => {
         const startedAt = performance.now();
+        let reachedSifen = true;
         try {
           const response = (await (
             inner[operation] as (r: never) => Promise<SifenResultOf<typeof operation>>
@@ -70,15 +73,19 @@ export function withTelemetry(inner: SifenGateway, telemetry: Telemetry): SifenG
           countResponse(telemetry, operation, response);
           return response;
         } catch (error) {
+          // The call never left the process (no certificate, production off): no SIFEN latency.
+          reachedSifen = !(error instanceof SifenTenantUnavailableError);
           telemetry.increment('sifen_request_errors_total', 1, {
             operation,
             outcome: outcome(error),
           });
           throw error;
         } finally {
-          telemetry.observe('sifen_request_seconds', (performance.now() - startedAt) / 1000, {
-            operation,
-          });
+          if (reachedSifen) {
+            telemetry.observe('sifen_request_seconds', (performance.now() - startedAt) / 1000, {
+              operation,
+            });
+          }
         }
       });
   }

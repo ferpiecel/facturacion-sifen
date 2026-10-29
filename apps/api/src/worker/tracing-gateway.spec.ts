@@ -1,4 +1,9 @@
-import { FakeSifenGateway, SifenTimeoutError, SifenTransportError } from '@sifen/sifen-gateway';
+import {
+  FakeSifenGateway,
+  SifenTenantUnavailableError,
+  SifenTimeoutError,
+  SifenTransportError,
+} from '@sifen/sifen-gateway';
 import { describe, expect, it } from 'vitest';
 import type { Telemetry } from '../modules/telemetry/application/ports/telemetry.port.js';
 import { NOOP_TELEMETRY } from '../modules/telemetry/infrastructure/noop-telemetry.js';
@@ -84,5 +89,20 @@ describe('withTelemetry', () => {
       'inc sifen_request_errors_total {"operation":"enviarLote","outcome":"timeout"} 1',
     );
     expect(events.filter((e) => e.startsWith('obs'))).toHaveLength(2);
+  });
+
+  it('counts a call that could not start as tenant_unavailable and records no latency', async () => {
+    const { gateway, inner, events } = setup();
+    inner.enqueue(
+      'enviarLote',
+      new SifenTenantUnavailableError('enviarLote', new Date(60_000), { cause: new Error('x') }),
+    );
+    await expect(gateway.enviarLote({ dId: 1n, des: [] })).rejects.toBeInstanceOf(
+      SifenTenantUnavailableError,
+    );
+    expect(events).toContain(
+      'inc sifen_request_errors_total {"operation":"enviarLote","outcome":"tenant_unavailable"} 1',
+    );
+    expect(events.filter((e) => e.startsWith('obs'))).toHaveLength(0);
   });
 });

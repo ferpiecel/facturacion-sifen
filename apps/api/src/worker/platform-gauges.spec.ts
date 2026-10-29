@@ -52,6 +52,7 @@ describe('publishPlatformGauges', () => {
       'de_pending_transmission{"bucket":"48-72h"}=0',
       'de_pending_transmission{"bucket":">72h"}=0',
       'sifen_ruc_blocked_tenants=0',
+      'certificate_active_count=0',
     ]);
   });
 
@@ -116,6 +117,7 @@ describe('publishPlatformGauges', () => {
       'de_pending_transmission{"bucket":"48-72h"}=1',
       'de_pending_transmission{"bucket":">72h"}=1',
       'sifen_ruc_blocked_tenants=1',
+      'certificate_active_count=2',
       'certificate_expiry_days_min=12',
     ]);
   });

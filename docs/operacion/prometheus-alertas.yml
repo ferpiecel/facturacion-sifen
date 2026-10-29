@@ -12,12 +12,21 @@ groups:
           summary: "El circuit breaker de SIFEN ({{ $labels.operation }}) está abierto"
           runbook: docs/runbooks/sifen-caido.md
       - alert: SifenErroresDeTransporte
-        expr: sum by (operation) (rate(sifen_request_errors_total[5m])) > 0.05
+        expr: sum by (operation) (rate(sifen_request_errors_total{outcome!="tenant_unavailable"}[5m])) > 0.05
         for: 10m
         labels: { severity: warning }
         annotations:
           summary: "Llamadas a SIFEN fallando ({{ $labels.operation }})"
           runbook: docs/runbooks/sifen-caido.md
+      - alert: SifenTenantsNoDisponibles
+        # Llamadas que no salieron (sin certificado vigente o producción deshabilitada): problema de
+        # un tenant, no de SIFEN; no cuentan para SifenErroresDeTransporte.
+        expr: sum(rate(sifen_request_errors_total{outcome="tenant_unavailable"}[15m])) > 0
+        for: 30m
+        labels: { severity: info }
+        annotations:
+          summary: "Hay tenants que no pueden llamar a SIFEN (certificado ausente o vencido)"
+          runbook: docs/runbooks/certificado-vencido.md
       - alert: RucBloqueado
         expr: max(sifen_ruc_blocked_tenants) > 0 or increase(sifen_ruc_blocks_total[15m]) > 0
         labels: { severity: critical }
@@ -38,13 +47,14 @@ groups:
           summary: "Hay documentos con más de 72 h sin aprobar"
           runbook: docs/runbooks/de-plazo-72h.md
       - alert: CertificadoPorVencer
-        expr: certificate_expiry_days_min < 30
+        # min() por réplica del worker evita alertas duplicadas; sin certificados activos no hay alerta.
+        expr: min(certificate_expiry_days_min) < 30 and on() max(certificate_active_count) > 0
         labels: { severity: warning }
         annotations:
           summary: "Un certificado vence en menos de 30 días"
           runbook: docs/runbooks/certificado-vencido.md
       - alert: CertificadoVenceEstaSemana
-        expr: certificate_expiry_days_min < 7
+        expr: min(certificate_expiry_days_min) < 7 and on() max(certificate_active_count) > 0
         labels: { severity: critical }
         annotations:
           summary: "Un certificado vence en menos de 7 días"

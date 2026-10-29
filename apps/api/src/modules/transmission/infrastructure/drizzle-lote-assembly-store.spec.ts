@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import {
   auditLog,
   createPgliteDatabase,
@@ -382,6 +382,42 @@ describe('DrizzleLoteAssemblyStore', () => {
       withTenantTransaction(handle.db, tenantId, (tx) =>
         tx.select().from(documents).where(eq(documents.id, id)),
       ).then((rows) => rows[0]);
+
+    it('counts a lote created after the resend as carrying the document even when the clock stepped back', async () => {
+      const doc = await addDocument('queued');
+      await stamp(doc.id, new Date());
+      const newer = await addLote('pending', [doc.id]);
+      await handle.db.execute(sql`alter table lotes disable trigger user`);
+      try {
+        await handle.db.execute(
+          sql`update lotes set created_at = '2000-01-01T00:00:00Z' where id = ${newer.id}`,
+        );
+      } finally {
+        await handle.db.execute(sql`alter table lotes enable trigger user`);
+      }
+      expect(await storeFor(tenantId).readyDocuments()).toEqual([]);
+      expect(await storeFor(tenantId).cdcsInProcess([doc.cdc])).toEqual(new Set([doc.cdc]));
+    });
+
+    it('does not count the lote it left as carrying the document even when that lote is ahead of the clock', async () => {
+      const doc = await addDocument('queued');
+      const old = await addLote('recovery', [doc.id]);
+      await handle.db.execute(sql`alter table lotes disable trigger user`);
+      try {
+        await handle.db.execute(
+          sql`update lotes set created_at = now() + interval '1 hour' where id = ${old.id}`,
+        );
+      } finally {
+        await handle.db.execute(sql`alter table lotes enable trigger user`);
+      }
+      await handle.db
+        .update(documents)
+        .set({ resentAt: new Date(), transmissionAttempts: 1 })
+        .where(eq(documents.id, doc.id));
+      expect((await storeFor(tenantId).readyDocuments()).map((r) => r.documentId)).toEqual([
+        doc.id,
+      ]);
+    });
 
     it('returns when it was queued again', async () => {
       const doc = await addDocument('queued');

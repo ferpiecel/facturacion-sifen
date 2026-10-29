@@ -155,6 +155,7 @@ describe('DrizzleLoteRecoveryStore', () => {
         r.transmissionHold === null &&
         r.resentAt === null,
     );
+    await handle.db.execute(sql`alter table documents disable trigger documents_resent_seq`);
     for (const row of waiting.filter((r) => cdc === undefined || r.cdc === cdc)) {
       await withTenantTransaction(handle.db, tenantId, async (tx) => {
         await tx
@@ -162,6 +163,8 @@ describe('DrizzleLoteRecoveryStore', () => {
           .set({
             status: 'queued',
             resentAt: new Date('2026-01-01T00:00:00Z'),
+            // Left behind only the lotes before this one: the watermark trigger would pick this lote.
+            resentAfterSeq: 0,
             transmissionAttempts: row.transmissionAttempts + 1,
           })
           .where(eq(documents.id, row.id));
@@ -170,6 +173,7 @@ describe('DrizzleLoteRecoveryStore', () => {
         }
       });
     }
+    await handle.db.execute(sql`alter table documents enable trigger documents_resent_seq`);
   }
 
   const approval = (cdc: string) => ({
@@ -923,9 +927,9 @@ describe('DrizzleLoteRecoveryStore', () => {
       expect(warnings).toEqual([]);
     });
 
-    it('stamps the resend after the lote it leaves, even when the database clock stepped back', async () => {
-      // Lote and stamp both read the database clock; a backward step (NTP, VM resync) must not
-      // leave the old lote "carrying" the document again, so the stamp is ordered after the lote.
+    it('leaves the old lote behind even when that lote is ahead of the database clock', async () => {
+      // A backward clock step (NTP, VM resync) must not leave the old lote "carrying" the document
+      // again: ownership follows the lote sequence.
       const ahead = new Date(Date.now() + 3_600_000);
       await handle.db.execute(sql`alter table lotes disable trigger user`);
       try {
@@ -938,11 +942,6 @@ describe('DrizzleLoteRecoveryStore', () => {
         { resolutions: [], unresolved: [absent(CDC_B)] },
         guard,
       );
-      // Compared in SQL: the stamp is one microsecond past the lote, below a JS Date's resolution.
-      const ordered = (await handle.db.execute(
-        sql`select d.resent_at > l.created_at as after from documents d, lotes l where d.cdc = ${CDC_B} and l.id = ${loteId}`,
-      )) as { rows: Array<{ after: boolean }> };
-      expect(ordered.rows).toEqual([{ after: true }]);
       // The outcome that matters: the document left the old lote (it no longer decides for it), is
       // queued for the pre-send check and was not sent again.
       const stillOwned = await withTenantTransaction(handle.db, tenantId, (tx) =>
@@ -953,6 +952,39 @@ describe('DrizzleLoteRecoveryStore', () => {
       );
       expect(stillOwned).toEqual([]);
       expect(await readDoc(CDC_B)).toMatchObject({ status: 'queued', transmissionHold: null });
+    });
+
+    it('lets a lote created after the resend own the document even when the database clock stepped back', async () => {
+      // Residual skew case: the new lote's created_at lands before the resend stamp. Ordering and
+      // ownership must follow the lote sequence, never the clock.
+      await storeFor(tenantId).record(
+        loteId,
+        { resolutions: [], unresolved: [absent(CDC_B)] },
+        guard,
+      );
+      const doc = await readDoc(CDC_B);
+      const [newer] = await handle.db
+        .insert(lotes)
+        .values({
+          tenantId,
+          environment: 'test',
+          documentType: 1,
+          status: 'recovery',
+          createdAt: new Date('2000-01-01T00:00:00Z'),
+        })
+        .returning();
+      await handle.db
+        .insert(loteDocuments)
+        .values({ tenantId, loteId: newer.id, documentId: doc.id });
+      const owned = (id: string) =>
+        withTenantTransaction(handle.db, tenantId, (tx) =>
+          tx
+            .select({ cdc: documents.cdc })
+            .from(documents)
+            .where(and(eq(documents.cdc, CDC_B), recoverableInLote(id))),
+        );
+      expect(await owned(newer.id)).toEqual([{ cdc: CDC_B }]);
+      expect(await owned(loteId)).toEqual([]);
     });
 
     it('keeps the pre-send check 10 minutes after the recovery query (the 10 min minimum between queries)', async () => {

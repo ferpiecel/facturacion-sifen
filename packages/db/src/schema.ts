@@ -984,6 +984,13 @@ export const documents = pgTable(
      */
     resentAt: timestamp('resent_at', { withTimezone: true }),
     /**
+     * Ownership watermark of the resend: the highest `lotes.seq` of the lotes that carried the
+     * document when the recovery queued it again. A lote with `seq` at or below it has left the
+     * document behind; only a later lote carries it. Set by trigger together with `resent_at`,
+     * immutable afterwards. Ordering never reads the clock (ADR-0007/0008, hardening E6).
+     */
+    resentAfterSeq: bigint('resent_after_seq', { mode: 'number' }),
+    /**
      * When SIFEN approved the document (HU-E8-02): the 48 h / 168 h cancellation windows count from it
      * (MT v150 11.6.1, 4009 and 4010). Write-once, only on an approved document, stamped by trigger 0056 when
      * the status becomes approved. NULL on rows approved before the column existed (refreshed lazily).
@@ -1173,6 +1180,11 @@ export const lotes = pgTable(
       .notNull()
       .references(() => tenants.id),
     environment: tenantEnvironment('environment').notNull(),
+    /**
+     * Monotonic creation order (identity sequence, never reused, backfilled by `created_at`). Ordering
+     * and ownership between lotes use it, not `created_at`: the database clock may step back.
+     */
+    seq: bigint('seq', { mode: 'number' }).notNull().generatedAlwaysAsIdentity(),
     /** `iTiDE`: a lote carries a single document type. */
     documentType: smallint('document_type').notNull(),
     status: varchar('status', { length: 16 }).notNull().default('pending'),
@@ -1202,6 +1214,7 @@ export const lotes = pgTable(
   },
   (table) => [
     unique('lotes_tenant_id_key').on(table.tenantId, table.id),
+    unique('lotes_seq_key').on(table.seq),
     check('lotes_document_type_range', sql`${table.documentType} BETWEEN 1 AND 8`),
     check(
       'lotes_status_valid',

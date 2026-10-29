@@ -8,7 +8,6 @@ import {
   IssuerNotConfiguredError,
 } from '../../application/accept-invoice.js';
 import {
-  CorrectionRequiresReissueError,
   CorrectionTypeChangedError,
   DocumentNotCorrectableError,
   DocumentNotFoundError,
@@ -73,12 +72,6 @@ export function toHttpException(error: unknown): HttpException | null {
   if (error instanceof CorrectionTypeChangedError) {
     return problem(HttpStatus.UNPROCESSABLE_ENTITY, error.message, {
       code: 'correction_type_changed',
-    });
-  }
-  if (error instanceof CorrectionRequiresReissueError) {
-    return problem(HttpStatus.UNPROCESSABLE_ENTITY, error.message, {
-      code: 'correction_requires_reissue',
-      reasons: error.reasons,
     });
   }
   if (isUniqueViolation(error)) {

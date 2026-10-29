@@ -30,8 +30,16 @@ describe('POST /v1/documents/{id}/correct (e2e)', () => {
 
   let sequence = 0;
   const auth = (key: string) => ({ authorization: `Bearer ${key}` });
-  const create = async (key: string, status = 'rejected') =>
-    acceptInvoiceWithStatus(handle.db, tenantIds.get(key) ?? '', `c-${String(++sequence)}`, status);
+  /** Issued now: the fixture's default issue date is long past the 72 h window. */
+  const create = (key: string, status = 'rejected') =>
+    acceptInvoiceWithStatus(
+      handle.db,
+      tenantIds.get(key) ?? '',
+      `c-${String(++sequence)}`,
+      status,
+      FE_BODY,
+      new Date(),
+    );
   const correct = (id: string, key: string, body: unknown, idempotencyKey?: string) =>
     app.inject({
       method: 'POST',
@@ -105,7 +113,7 @@ describe('POST /v1/documents/{id}/correct (e2e)', () => {
     );
   });
 
-  it('answers 422 when the correction changes the document number', async () => {
+  it('answers 422 when a correction that needs a new number targets an unconfigured point', async () => {
     const { documentId } = await create(writer);
     const moved = { ...fixed, expeditionPoint: '003' };
     expect((await correct(documentId, writer, moved, 'fix-1')).statusCode).toBe(422);

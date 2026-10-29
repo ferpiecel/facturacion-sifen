@@ -12,6 +12,7 @@ export {
   authEvents,
   authThrottle,
   DOCUMENT_STATUSES,
+  documentCorrectionClaims,
   documentCorrections,
   documents,
   fiscalTaxpayerType,

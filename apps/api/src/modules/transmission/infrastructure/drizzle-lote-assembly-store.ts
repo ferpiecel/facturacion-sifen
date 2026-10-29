@@ -25,11 +25,11 @@ const READY_STATUSES = ['signed', 'queued'];
 export const IN_PROCESS_LOTE_STATUSES = ['pending', 'sending', 'sent', 'unknown', 'recovery'];
 
 /**
- * A lote in process only carries a document that was not queued again after the lote existed: the
- * recovery's resend (`resent_at`) leaves the older lote behind (it may stay `recovery` for its other
+ * A lote in process only carries a document that was not queued again after the lote existed (by sequence, never by clock): the
+ * recovery's resend (`resent_after_seq`, the lote sequence at that moment) leaves the older lotes behind (it may stay `recovery` for its other
  * documents) and only a newer lote carries the document from then on.
  */
-export const stillCarries = sql`NOT (${documents.resentAt} IS NOT NULL AND ${documents.resentAt} > ${lotes.createdAt})`;
+export const stillCarries = sql`NOT (${documents.resentAfterSeq} IS NOT NULL AND ${documents.resentAfterSeq} >= ${lotes.seq})`;
 
 /** `LoteAssemblyStore` over `documents`, `lotes` and `lote_documents`, run as app_user inside the tenant's transaction. */
 export function createDrizzleLoteAssemblyStore({

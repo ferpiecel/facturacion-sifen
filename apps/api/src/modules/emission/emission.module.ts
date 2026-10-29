@@ -5,6 +5,9 @@ import { DATABASE } from '../database/database.module.js';
 import { createAcceptCreditNote, createAcceptDebitNote } from './application/accept-credit-note.js';
 import { createAcceptInvoice } from './application/accept-invoice.js';
 import { createAcceptRemission, createAcceptSelfInvoice } from './application/accept-standalone.js';
+import { createCorrectDocument } from './application/correct-document.js';
+import { createVoidNumbers } from '../issuer-events/application/void-numbers.js';
+import { createDrizzleVoidingUnitOfWork } from '../issuer-events/infrastructure/drizzle-voiding-unit-of-work.js';
 import { createGetDocument } from './application/get-document.js';
 import { createGetKude } from './application/get-kude.js';
 import { createWaitForDocument } from './application/wait-for-document.js';
@@ -15,11 +18,13 @@ import {
   ACCEPT_INVOICE,
   ACCEPT_REMISSION,
   ACCEPT_SELF_INVOICE,
+  CORRECT_DOCUMENT,
   GET_DOCUMENT,
   GET_KUDE,
   WAIT_FOR_DOCUMENT,
 } from './emission.tokens.js';
 import { createDrizzleAcceptanceUnitOfWork } from './infrastructure/drizzle-acceptance-unit-of-work.js';
+import { createDrizzleCorrectionUnitOfWork } from './infrastructure/drizzle-correction-unit-of-work.js';
 import { createDrizzleDocumentReader } from './infrastructure/drizzle-document-reader.js';
 import { createDrizzleSyncFlagReader } from './infrastructure/drizzle-sync-flag-reader.js';
 import { parseSyncWaitTimeoutMs } from './sync-wait-config.js';
@@ -30,6 +35,14 @@ import { DocumentsController } from './infrastructure/http/documents.controller.
 /** `CERTIFICATE_EMISSION_BLOCK_DAYS` (HU-E3-03); an invalid value stops the API at startup. */
 function certificateBlockDays(): number {
   return parseBlockDays(process.env.CERTIFICATE_EMISSION_BLOCK_DAYS);
+}
+
+function acceptanceDeps(db: Database) {
+  return {
+    unitOfWork: createDrizzleAcceptanceUnitOfWork(db),
+    validation: emissionValidationConfig(),
+    certificateBlockDays: certificateBlockDays(),
+  };
 }
 
 /** Acceptance use case of the API, with the validation config shared with the worker. */
@@ -110,6 +123,25 @@ export function acceptInvoiceFor(db: Database) {
           ? createAcceptRemission({
               unitOfWork: createDrizzleAcceptanceUnitOfWork(db),
               validation: emissionValidationConfig(),
+            })
+          : () => Promise.reject(new ServiceUnavailableException()),
+      inject: [DATABASE],
+    },
+    {
+      provide: CORRECT_DOCUMENT,
+      useFactory: (db: Database | null) =>
+        db
+          ? createCorrectDocument({
+              unitOfWork: createDrizzleCorrectionUnitOfWork(db),
+              accept: {
+                FE: acceptInvoiceFor(db),
+                AFE: createAcceptSelfInvoice(acceptanceDeps(db)),
+                NCE: createAcceptCreditNote(acceptanceDeps(db)),
+                NDE: createAcceptDebitNote(acceptanceDeps(db)),
+              },
+              voidNumbers: createVoidNumbers({ unitOfWork: createDrizzleVoidingUnitOfWork(db) }),
+              validation: emissionValidationConfig(),
+              certificateBlockDays: certificateBlockDays(),
             })
           : () => Promise.reject(new ServiceUnavailableException()),
       inject: [DATABASE],

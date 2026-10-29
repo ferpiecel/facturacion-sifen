@@ -15,7 +15,7 @@ Solo ese tenant: el worker pausa sus envíos 30 minutos (configurable por códig
 ## Acciones inmediatas
 
 1. Identificar el tenant del log y confirmar que el bloqueo es real con el tenant o la DNIT: causa típica, RUC suspendido o con obligaciones pendientes. No se resuelve desde la plataforma.
-2. No liberar nada: la pausa expira sola. No hay comando para levantarla antes ni para extenderla: **Brecha**.
+2. Por defecto no hace falta liberar nada: la pausa expira sola. Si la DNIT confirmó que el RUC ya no está bloqueado, el operador puede levantarla antes con `ops ruc:unblock --tenant <id> --actor <nombre> --reason "<motivo>"` (ver `operacion.md`); el siguiente ciclo del worker retoma los envíos. Extender una pausa sigue sin comando: **Brecha**.
 3. Si el RUC sigue bloqueado al terminar la pausa, el siguiente lote se rechaza otra vez y se abre una nueva pausa; los documentos no se pierden ni se retienen por esto (no gastan intentos).
 4. Vigilar los plazos de 72 h de ese tenant con [DE cerca del plazo de 72 h](de-plazo-72h.md): un bloqueo largo los consume.
 5. Si los documentos terminan retenidos por otra causa (`transmission:attempts-exhausted`), corregir y liberar con `document:release-holds` (ver `operacion.md`).

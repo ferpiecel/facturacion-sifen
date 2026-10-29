@@ -1714,11 +1714,19 @@ export const rucBlocks = pgTable(
     blockedUntil: timestamp('blocked_until', { withTimezone: true }).notNull(),
     /** SIFEN's `dMsgRes` for the refused lote, capped; never XML or credentials. */
     reason: text('reason').notNull(),
+    /** Set by the operator CLI (`ruc:unblock`) when it lifts the pause early; the row itself is history. */
+    liftedAt: timestamp('lifted_at', { withTimezone: true }),
+    liftedBy: varchar('lifted_by', { length: 255 }),
+    liftReason: varchar('lift_reason', { length: 500 }),
   },
   (table) => [
     index('ruc_blocks_active_idx').on(table.tenantId, table.environment, table.blockedUntil),
     check('ruc_blocks_window', sql`${table.blockedUntil} > ${table.blockedAt}`),
     check('ruc_blocks_reason_length', sql`char_length(${table.reason}) <= 500`),
+    check(
+      'ruc_blocks_lift_complete',
+      sql`(${table.liftedAt} IS NULL) = (${table.liftedBy} IS NULL) AND (${table.liftedAt} IS NULL) = (${table.liftReason} IS NULL)`,
+    ),
   ],
 );
 

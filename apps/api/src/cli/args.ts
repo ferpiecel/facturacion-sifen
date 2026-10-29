@@ -28,6 +28,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 export class OpsArgError extends Error {}
 
 export type OpsCommand =
+  | { kind: 'ruc:unblock'; tenantId: string; actor: string; reason: string }
   | {
       kind: 'document:deadline';
       tenantId: string | undefined;
@@ -285,6 +286,22 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
           values['after-seq'] === undefined
             ? undefined
             : parseCount(values['after-seq'], 'after-seq'),
+      };
+    }
+    case 'ruc:unblock': {
+      const { values } = parseStrict({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          actor: { type: 'string' },
+          reason: { type: 'string' },
+        },
+      });
+      return {
+        kind: 'ruc:unblock',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        actor: requireOption(values.actor, 'actor'),
+        reason: requireOption(values.reason, 'reason'),
       };
     }
     case 'document:deadline': {

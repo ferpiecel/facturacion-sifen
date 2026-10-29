@@ -93,6 +93,17 @@ describe('publishPlatformGauges', () => {
         blockedUntil: hoursAgo(8),
         reason: 'x',
       },
+      {
+        // Lifted early by an operator: still inside its window, but no longer a pause.
+        tenantId: b.id,
+        environment: 'test',
+        blockedAt: hoursAgo(1),
+        blockedUntil: new Date(NOW.getTime() + 600_000),
+        reason: 'x',
+        liftedAt: NOW,
+        liftedBy: 'op',
+        liftReason: 'resolved',
+      },
     ]);
     const cert = (tenantId: string, days: number, status = 'active') => ({
       tenantId,

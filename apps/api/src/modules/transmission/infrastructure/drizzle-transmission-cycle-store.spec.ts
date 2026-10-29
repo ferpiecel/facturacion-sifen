@@ -404,16 +404,19 @@ describe('DrizzleTransmissionCycleStore', () => {
     // `moved` was queued again (the door: its lote is processed), long before the newer lote that
     // now carries it was created: that newer lote is its own recoverable business.
     await handle.db.execute(sql`alter table documents disable trigger documents_resent_seq`);
-    await handle.db
-      .update(documents)
-      .set({
-        status: 'queued',
-        resentAt: new Date(Date.now() - 3_600_000),
-        resentAfterSeq: 0,
-        transmissionAttempts: 1,
-      })
-      .where(eq(documents.id, moved));
-    await handle.db.execute(sql`alter table documents enable trigger documents_resent_seq`);
+    try {
+      await handle.db
+        .update(documents)
+        .set({
+          status: 'queued',
+          resentAt: new Date(Date.now() - 3_600_000),
+          resentAfterSeq: 0,
+          transmissionAttempts: 1,
+        })
+        .where(eq(documents.id, moved));
+    } finally {
+      await handle.db.execute(sql`alter table documents enable trigger documents_resent_seq`);
+    }
     await handle.db.update(documents).set({ status: 'submitted' }).where(eq(documents.id, moved));
     const newer = await addLote(tenantId, 'sent', [moved], at(40));
     expect(newer).not.toBe(lotMoved);

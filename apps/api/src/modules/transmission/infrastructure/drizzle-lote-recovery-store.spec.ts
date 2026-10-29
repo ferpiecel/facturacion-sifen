@@ -156,24 +156,27 @@ describe('DrizzleLoteRecoveryStore', () => {
         r.resentAt === null,
     );
     await handle.db.execute(sql`alter table documents disable trigger documents_resent_seq`);
-    for (const row of waiting.filter((r) => cdc === undefined || r.cdc === cdc)) {
-      await withTenantTransaction(handle.db, tenantId, async (tx) => {
-        await tx
-          .update(documents)
-          .set({
-            status: 'queued',
-            resentAt: new Date('2026-01-01T00:00:00Z'),
-            // Left behind only the lotes before this one: the watermark trigger would pick this lote.
-            resentAfterSeq: 0,
-            transmissionAttempts: row.transmissionAttempts + 1,
-          })
-          .where(eq(documents.id, row.id));
-        if (row.status === 'submitted') {
-          await tx.update(documents).set({ status: 'submitted' }).where(eq(documents.id, row.id));
-        }
-      });
+    try {
+      for (const row of waiting.filter((r) => cdc === undefined || r.cdc === cdc)) {
+        await withTenantTransaction(handle.db, tenantId, async (tx) => {
+          await tx
+            .update(documents)
+            .set({
+              status: 'queued',
+              resentAt: new Date('2026-01-01T00:00:00Z'),
+              // Left behind only the lotes before this one: the watermark trigger would pick this lote.
+              resentAfterSeq: 0,
+              transmissionAttempts: row.transmissionAttempts + 1,
+            })
+            .where(eq(documents.id, row.id));
+          if (row.status === 'submitted') {
+            await tx.update(documents).set({ status: 'submitted' }).where(eq(documents.id, row.id));
+          }
+        });
+      }
+    } finally {
+      await handle.db.execute(sql`alter table documents enable trigger documents_resent_seq`);
     }
-    await handle.db.execute(sql`alter table documents enable trigger documents_resent_seq`);
   }
 
   const approval = (cdc: string) => ({

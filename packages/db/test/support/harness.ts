@@ -80,7 +80,7 @@ async function createPgliteFromTemplate(): Promise<DatabaseHandle> {
   };
 }
 
-async function createPostgresTestDatabase(): Promise<DatabaseHandle> {
+export async function createPostgresTestDatabase(): Promise<DatabaseHandle> {
   const baseUrl = process.env.DB_TEST_POSTGRES_URL;
   if (!baseUrl) {
     throw new Error(

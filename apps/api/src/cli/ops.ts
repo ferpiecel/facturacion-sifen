@@ -455,7 +455,7 @@ export async function runCli(io: CliIo): Promise<number> {
   try {
     const url = getOpsDatabaseUrl(io.env);
     const parsed = parseOpsArgs(await resolveStdinSecrets(io.argv, io.readStdin));
-    // The expiry window defaults to the earliest alert threshold the worker uses (CERTIFICATE_ALERT_DAYS).
+    // The expiry window defaults to the largest alert threshold the worker uses (CERTIFICATE_ALERT_DAYS).
     const command: OpsCommand =
       parsed.kind === 'certificate:expiring' && parsed.days === undefined
         ? { ...parsed, days: Math.max(...parseAlertDays(io.env.CERTIFICATE_ALERT_DAYS)) }

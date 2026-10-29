@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, isNull, lte, notInArray, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, isNull, lte, ne, notInArray, or, sql } from 'drizzle-orm';
 import {
   documents,
   nextDocumentNumber,
@@ -158,7 +158,7 @@ function createUnit(tx: TenantTx, tenantId: string): AcceptanceUnit {
         receiverRuc: nominated?.kind === 'taxpayer' ? nominated.ruc : row.receiverRuc,
       };
     },
-    async sumCreditNotes(cdc, environment) {
+    async sumCreditNotes(cdc, environment, excludeCdc) {
       const row = await tx
         .select({ total: sql<string | null>`sum(${documents.totalAmount})` })
         .from(documents)
@@ -169,6 +169,7 @@ function createUnit(tx: TenantTx, tenantId: string): AcceptanceUnit {
             eq(documents.associatedCdc, cdc),
             eq(documents.documentType, 5),
             notInArray(documents.status, ['cancelled', 'number_voided']),
+            excludeCdc === undefined ? undefined : ne(documents.cdc, excludeCdc),
           ),
         )
         .then(first);

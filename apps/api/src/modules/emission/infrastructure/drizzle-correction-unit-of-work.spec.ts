@@ -170,7 +170,7 @@ describe('CorrectDocument with the Drizzle unit of work', () => {
     expect(await handle.db.select().from(documentCorrections)).toHaveLength(0);
   });
 
-  it('claims the document for a reissue and releases the claim when the replacement is refused', async () => {
+  it('claims the document for a reissue and keeps the claim when the replacement is refused', async () => {
     const later = () => new Date('2026-03-20T12:00:00Z');
     const base = input('fix-bad');
     const invalid = {
@@ -178,9 +178,10 @@ describe('CorrectDocument with the Drizzle unit of work', () => {
       correction: { ...base.correction, draft: { ...base.correction.draft, items: [] } },
     };
     await expect(correct(later)(invalid as CorrectDocumentInput)).rejects.toBeInstanceOf(Error);
-    expect(await handle.db.select().from(documentCorrectionClaims)).toHaveLength(0);
-    await expect(correct(later)(input('fix-late'))).resolves.toMatchObject({});
-    // The linked reissue keeps its claim: the document is final.
     expect(await handle.db.select().from(documentCorrectionClaims)).toHaveLength(1);
+    // Another key is refused while the claim is held; it is released by an operator, then a new one proceeds.
+    await expect(correct(later)(input('fix-late'))).rejects.toBeInstanceOf(
+      DocumentNotCorrectableError,
+    );
   });
 });

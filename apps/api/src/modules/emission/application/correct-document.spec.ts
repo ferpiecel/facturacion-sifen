@@ -401,11 +401,35 @@ describe('correctDocument', () => {
         await expect(correct(reissueOf)).rejects.toBeInstanceOf(IdempotencyKeyReusedError);
       });
 
-      it('releases the claim when the replacement is refused before it is issued', async () => {
+      it('keeps the claim when the replacement is refused before it is issued', async () => {
         const { correct, releaseClaim, acceptFe } = setup();
         acceptFe.mockRejectedValueOnce(new InvoiceValidationError([]));
         await expect(correct(reissueOf)).rejects.toBeInstanceOf(InvoiceValidationError);
-        expect(releaseClaim).toHaveBeenCalledOnce();
+        expect(releaseClaim).not.toHaveBeenCalled();
+      });
+
+      it('links the replacement a resumed retry finds when it is refused, without releasing the claim', async () => {
+        const claim = {
+          idempotencyKey: 'key-b',
+          requestHash: requestHash({ documentId: 'doc-1', payload: moved.payload }),
+        };
+        const { correct, releaseClaim, recordReissue, acceptFe } = setup({
+          claim,
+          replacementIssued: true,
+        });
+        acceptFe.mockRejectedValueOnce(new InvoiceValidationError([]));
+        await expect(correct(reissueOf)).resolves.toEqual(NEW_DOC);
+        expect(releaseClaim).not.toHaveBeenCalled();
+        expect(recordReissue).toHaveBeenCalledOnce();
+      });
+
+      it('completes a retry with the same key once validation passes after a refusal', async () => {
+        const { correct, releaseClaim, recordReissue, acceptFe } = setup();
+        acceptFe.mockRejectedValueOnce(new InvoiceValidationError([]));
+        await expect(correct(reissueOf)).rejects.toBeInstanceOf(InvoiceValidationError);
+        await expect(correct(reissueOf)).resolves.toEqual(NEW_DOC);
+        expect(releaseClaim).not.toHaveBeenCalled();
+        expect(recordReissue).toHaveBeenCalledOnce();
       });
 
       it('links the replacement an earlier attempt issued instead of releasing the claim when a retry is refused', async () => {
@@ -428,6 +452,12 @@ describe('correctDocument', () => {
         acceptFe.mockRejectedValueOnce(new InvoiceValidationError([]));
         await expect(correct(reissueOf)).rejects.toBeInstanceOf(InvoiceValidationError);
         expect(releaseClaim).not.toHaveBeenCalled();
+      });
+
+      it('tells a new key to retry with the key that holds the claim', () => {
+        expect(new DocumentNotCorrectableError('correction_in_progress').message).toContain(
+          'same Idempotency-Key',
+        );
       });
 
       it('keeps the claim when the acceptance fails in an unknown way', async () => {

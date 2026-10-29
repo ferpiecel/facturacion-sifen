@@ -51,7 +51,11 @@ export class DocumentNotFoundError extends Error {
 /** Only a `rejected` document is corrected (ADR-0021 D5). */
 export class DocumentNotCorrectableError extends Error {
   constructor(readonly status: string) {
-    super(`Only a rejected document can be corrected; this one is ${status}`);
+    super(
+      status === 'correction_in_progress'
+        ? 'Another correction of this document is in flight or was refused: retry it with the same Idempotency-Key and body, or ask support to release it'
+        : `Only a rejected document can be corrected; this one is ${status}`,
+    );
     this.name = 'DocumentNotCorrectableError';
   }
 }
@@ -177,7 +181,7 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
       planCorrection(unit, input, hash, at),
     );
     if (plan.kind === 'done') return plan.result;
-    return reissue(input, hash, plan.document, plan.replacement, plan.resumed);
+    return reissue(input, hash, plan.document, plan.replacement);
   }
 
   /** Phase 1, one transaction: replay, validate and either rewrite the row or decide to reissue. */
@@ -195,7 +199,7 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
       }
       const document = await unit.lockDocument(stored.documentId);
       if (!document) throw new DocumentNotFoundError();
-      return { kind: 'reissue', document, replacement: stored.replacement, resumed: true };
+      return { kind: 'reissue', document, replacement: stored.replacement };
     };
     const early = await replay(await unit.findCorrectionByKey(input.idempotencyKey));
     if (early) return early;
@@ -222,7 +226,7 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
           requestHash: hash,
         });
       }
-      return { kind: 'reissue', document, replacement: null, resumed: claim !== null };
+      return { kind: 'reissue', document, replacement: null };
     };
 
     const impact = classifyCorrection(document, {
@@ -287,10 +291,9 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
     hash: string,
     document: CorrectableDocument,
     stored: AcceptedInvoice | null,
-    resumed: boolean,
   ): Promise<CorrectionResult> {
     const derived = requestHash({ reissueOf: document.id });
-    const replacement = stored ?? (await issueAndLink(input, hash, document, derived, resumed));
+    const replacement = stored ?? (await issueAndLink(input, hash, document, derived));
     try {
       await deps.voidNumbers({
         tenantId: input.tenantId,
@@ -320,28 +323,21 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
     hash: string,
     document: CorrectableDocument,
     derived: string,
-    resumed: boolean,
   ): Promise<AcceptedInvoice> {
     const replacementKey = `${derived}:reissue`;
     let replacement: AcceptedInvoice;
     try {
       replacement = await acceptReplacement(input, replacementKey);
     } catch (error) {
-      // Refused before anything was issued: release the claim so the document can be corrected again. Any other
-      // failure may have issued the replacement, so the claim stays and a retry with the same key resumes it.
+      // The claim is never released on a refusal: another attempt with the same derived key may be committing the
+      // replacement, which this call cannot see. A retry with the same key resumes it; a stuck claim is released
+      // with `ops correction:release-claim` (ADR-0021, adenda).
       if (!isRefusedBeforeIssuing(error)) throw error;
-      // Only the call that took the claim may release it. A resumed call may be refused (time-dependent validation)
-      // while the attempt that holds the claim is committing the replacement, which this call cannot see: releasing
-      // then would let a rewrite take the document before that attempt links. The claim stays; a stuck one is
-      // released with `ops correction:release-claim` (ADR-0021, adenda).
-      if (resumed) throw error;
       // A retry can be refused (the validation runs before the key's replay) although an earlier attempt already
-      // issued the replacement: releasing the claim then would let a rewrite leave two live documents, so link it.
+      // issued the replacement: link it, so a rewrite cannot leave two live documents.
       const issued = await deps.unitOfWork.run(input.tenantId, async (unit) => {
         await unit.lockDocument(document.id);
-        const existing = await unit.findByIdempotencyKey(replacementKey);
-        if (!existing) await unit.releaseClaim(document.id);
-        return existing;
+        return unit.findByIdempotencyKey(replacementKey);
       });
       if (!issued) throw error;
       replacement = { documentId: issued.documentId, cdc: issued.cdc };
@@ -416,9 +412,4 @@ function isRefusedBeforeIssuing(error: unknown): boolean {
 
 type Plan =
   | { kind: 'done'; result: CorrectionResult }
-  | {
-      kind: 'reissue';
-      document: CorrectableDocument;
-      replacement: AcceptedInvoice | null;
-      resumed: boolean;
-    };
+  | { kind: 'reissue'; document: CorrectableDocument; replacement: AcceptedInvoice | null };

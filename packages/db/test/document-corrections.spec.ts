@@ -213,13 +213,13 @@ describe('document corrections', () => {
   });
 });
 
-/** Applies the manual rollback of 0065 statement by statement (the driver runs one statement per call). */
-describe('0065 rollback', () => {
+/** Applies the manual rollback of 0069 statement by statement (the driver runs one statement per call). */
+describe('0069 rollback', () => {
   it('leaves documents writable once the guard of 0034 is back', async () => {
     const handle = await createTestDatabase();
     try {
       const file = fileURLToPath(
-        new URL('../migrations/rollback/0065_documents_corrections.down.sql', import.meta.url),
+        new URL('../migrations/rollback/0069_documents_corrections.down.sql', import.meta.url),
       );
       const text = readFileSync(file, 'utf8');
       const end = text.indexOf('\n$$;') + '\n$$;'.length;

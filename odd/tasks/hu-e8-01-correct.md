@@ -2,7 +2,7 @@
 
 - Feature: `hu-e8-01-correct` · Story: HU-E8-01 (RF-07, MT 6.5) · Parent plan: `odd/tasks/e8-issuer-events.md` (T8, D9)
 - Branch chain: `feat/hu-e8-01-correct` (A) -> B -> C, worktree `/home/fer/github_proyects/facturacion-sifen-worktrees/e8-01`
-- TDD: strict, runner Vitest (source: `openspec/config.yaml`). Migration: only `0065`.
+- TDD: strict, runner Vitest (source: `openspec/config.yaml`). Migration: only `0069`.
 - Route: delegated direct (sifen-writer), one writer thread.
 
 ## Objective

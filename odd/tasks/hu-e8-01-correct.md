@@ -21,7 +21,7 @@ ADR-0021 did not exist when this story started (the plan says "ADR first"). It i
 - Types: FE, AFE, NCE, ND. Changing the document type is refused. Remission notes follow when their routing merges.
 
 ## Tasks
-- [x] A1 ADR-0021, migration 0065, db tests (PR #371; blocker fixed: rollback restores guard of 0034, door requires the history row)
+- [x] A1 ADR-0021, migration 0069, db tests (PR #371; blocker fixed: rollback restores guard of 0034, door requires the history row)
 - [x] B1 classifier `classifyCorrection`, ports, `sumCreditNotes` excludeCdc, db table tests (PR #373, base main, Depende de #371)
 - [x] B2 `createCorrectDocument` use case + spec (PR #374, Depende de #373)
 - [x] B3a Drizzle `createDrizzleCorrectionUnitOfWork` + spec; `documentCorrections` exported from @sifen/db (branch feat/hu-e8-01-correct-endpoint, PR opened as #375 "Depende de #374")
@@ -38,7 +38,14 @@ Webhook events are not re-enqueued on correction (event id per doc+type already 
 All tasks done. If the C1 PR is over 400 lines (about 470 with docs/openapi.json generated, tests included), split docs+openapi into a follow-up. Remaining only: reviews/merge chain #371 -> #373 -> #374 -> #375 -> #377 -> #379 -> C1 PR (rebase onto main after each squash). Not done: a real e2e of a reissue through HTTP (covered by the Drizzle spec with the real void use case).
 
 ## Restack note
-Migration 0065 must be renumbered to 0068 at restack time (merge order: 0063 RUC, 0064 sync, 0065/0066 E9, 0067 E8-05, 0068 E8-01). Chain: #371 -> #373 -> #374 -> #375 -> #377 -> #379 -> #381. All three orchestrator review fixes done (key recheck, updated_at in #379; 72 h window + ADR adenda in #381).
+Migration renumbered 0065 -> 0069 at restack (done) (merge order: 0063 RUC, 0064 sync, 0065/0066 E9, 0067 E8-05, 0069 E8-01). Chain: #371 -> #373 -> #374 -> #375 -> #377 -> #379 -> #381. All three orchestrator review fixes done (key recheck, updated_at in #379; 72 h window + ADR adenda in #381).
 
 ## Review fix: one correction in flight per document (re-review of #381)
-Race: a same-CDC rewrite and a reissue with another establishment could both pass; the loser of `link()` returned 409 but the replacement stayed live. Fix: table `document_correction_claims` (unique per document, migration 0065 edited on #371, renumbered to 0068 at merge, restacked chain). A reissue claims the document under its lock before issuing; the rewrite and other reissues check the claim and answer 409 `correction_in_progress` before issuing; released on pre-issue refusals; resumable with the same key. Tests: A+B interleaving in correct-document.spec.ts, claim lifecycle in the Drizzle spec and db spec. ADR-0021 adenda updated.
+Race: a same-CDC rewrite and a reissue with another establishment could both pass; the loser of `link()` returned 409 but the replacement stayed live. Fix: table `document_correction_claims` (unique per document, migration 0069 edited on #371, renumbered to 0069 at merge, restacked chain). A reissue claims the document under its lock before issuing; the rewrite and other reissues check the claim and answer 409 `correction_in_progress` before issuing; released on pre-issue refusals; resumable with the same key. Tests: A+B interleaving in correct-document.spec.ts, claim lifecycle in the Drizzle spec and db spec. ADR-0021 adenda updated.
+
+## Restack onto main (E9, E8-05 merged) and pre-merge fixes
+- Restacked chain (real order, each on the previous): #371 `feat/hu-e8-01-correct` -> #373 `-correct-same-cdc` -> #374 `-correct-use-case` -> #375 `-correct-endpoint` -> #377 `-correct-http` -> #379 `-correct-fixes` -> #381 `feat/hu-e8-01-reissue`.
+- Migration 0069 (`0069_documents_corrections`, journal idx 65, snapshot regenerated with drizzle-kit from 0068). It rewrites no CHECK list, so nothing of E9/E8-05 is at risk. `documents_guard` copy is based on 0034, still the latest version on main (0056 uses a separate trigger). db coverage test added for the table configs (#371).
+- Main moved remission notes into the request contract: `POST /v1/documents/{id}/correct` now refuses `NRE` with 422 (#377).
+- Fix 1 (#381): a retry whose replacement acceptance is refused by validation looks the derived key up; if the replacement already exists it is linked and the claim is kept (no release), so a later rewrite cannot leave two live documents. Test first in `correct-document.spec.ts`. `accept-invoice.ts` is unchanged: it validates before replaying a key, the caller now copes with that.
+- Fix 2 (#381): `ops correction:release-claim --tenant <id> --document <id> --actor <name>` (needs `--tenant` like the other document commands, RLS-scoped). Refuses a missing claim, another tenant, and an existing replacement; audits `correction.claim_released`. Documented in `docs/operacion.md` and `docs/runbooks/correccion-atascada.md`.

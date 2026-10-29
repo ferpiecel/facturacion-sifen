@@ -177,7 +177,7 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
       planCorrection(unit, input, hash, at),
     );
     if (plan.kind === 'done') return plan.result;
-    return reissue(input, hash, plan.document, plan.replacement);
+    return reissue(input, hash, plan.document, plan.replacement, plan.resumed);
   }
 
   /** Phase 1, one transaction: replay, validate and either rewrite the row or decide to reissue. */
@@ -195,7 +195,7 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
       }
       const document = await unit.lockDocument(stored.documentId);
       if (!document) throw new DocumentNotFoundError();
-      return { kind: 'reissue', document, replacement: stored.replacement };
+      return { kind: 'reissue', document, replacement: stored.replacement, resumed: true };
     };
     const early = await replay(await unit.findCorrectionByKey(input.idempotencyKey));
     if (early) return early;
@@ -222,7 +222,7 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
           requestHash: hash,
         });
       }
-      return { kind: 'reissue', document, replacement: null };
+      return { kind: 'reissue', document, replacement: null, resumed: claim !== null };
     };
 
     const impact = classifyCorrection(document, {
@@ -287,9 +287,10 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
     hash: string,
     document: CorrectableDocument,
     stored: AcceptedInvoice | null,
+    resumed: boolean,
   ): Promise<CorrectionResult> {
     const derived = requestHash({ reissueOf: document.id });
-    const replacement = stored ?? (await issueAndLink(input, hash, document, derived));
+    const replacement = stored ?? (await issueAndLink(input, hash, document, derived, resumed));
     try {
       await deps.voidNumbers({
         tenantId: input.tenantId,
@@ -319,6 +320,7 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
     hash: string,
     document: CorrectableDocument,
     derived: string,
+    resumed: boolean,
   ): Promise<AcceptedInvoice> {
     const replacementKey = `${derived}:reissue`;
     let replacement: AcceptedInvoice;
@@ -328,6 +330,11 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
       // Refused before anything was issued: release the claim so the document can be corrected again. Any other
       // failure may have issued the replacement, so the claim stays and a retry with the same key resumes it.
       if (!isRefusedBeforeIssuing(error)) throw error;
+      // Only the call that took the claim may release it. A resumed call may be refused (time-dependent validation)
+      // while the attempt that holds the claim is committing the replacement, which this call cannot see: releasing
+      // then would let a rewrite take the document before that attempt links. The claim stays; a stuck one is
+      // released with `ops correction:release-claim` (ADR-0021, adenda).
+      if (resumed) throw error;
       // A retry can be refused (the validation runs before the key's replay) although an earlier attempt already
       // issued the replacement: releasing the claim then would let a rewrite leave two live documents, so link it.
       const issued = await deps.unitOfWork.run(input.tenantId, async (unit) => {
@@ -409,4 +416,9 @@ function isRefusedBeforeIssuing(error: unknown): boolean {
 
 type Plan =
   | { kind: 'done'; result: CorrectionResult }
-  | { kind: 'reissue'; document: CorrectableDocument; replacement: AcceptedInvoice | null };
+  | {
+      kind: 'reissue';
+      document: CorrectableDocument;
+      replacement: AcceptedInvoice | null;
+      resumed: boolean;
+    };

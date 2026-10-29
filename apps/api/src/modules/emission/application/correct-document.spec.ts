@@ -418,6 +418,18 @@ describe('correctDocument', () => {
         expect(recordReissue).toHaveBeenCalledOnce();
       });
 
+      it('never releases a claim it resumed when its retry is refused, a concurrent retry may still link', async () => {
+        const claim = {
+          idempotencyKey: 'key-b',
+          requestHash: requestHash({ documentId: 'doc-1', payload: moved.payload }),
+        };
+        const { correct, releaseClaim, acceptFe } = setup({ claim });
+        // The first attempt is mid-commit on the replacement, so the retry finds no replacement yet.
+        acceptFe.mockRejectedValueOnce(new InvoiceValidationError([]));
+        await expect(correct(reissueOf)).rejects.toBeInstanceOf(InvoiceValidationError);
+        expect(releaseClaim).not.toHaveBeenCalled();
+      });
+
       it('keeps the claim when the acceptance fails in an unknown way', async () => {
         const { correct, releaseClaim, acceptFe } = setup();
         acceptFe.mockRejectedValueOnce(new Error('connection reset'));

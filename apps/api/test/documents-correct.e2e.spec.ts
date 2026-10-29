@@ -113,6 +113,39 @@ describe('POST /v1/documents/{id}/correct (e2e)', () => {
     );
   });
 
+  it('answers 422 for a remission note, which is not correctable', async () => {
+    const { documentId } = await create(writer);
+    const place = { department: 1, district: 1, city: 1, cityCode: 1, address: 'Ruta 1' };
+    const remission = {
+      type: 'NRE',
+      establishment: '001',
+      expeditionPoint: '001',
+      motive: 1,
+      responsible: 1,
+      km: 120,
+      receiver: { ruc: '80000002-1', name: 'Receptor Prueba SA', ...place },
+      transport: {
+        type: 1,
+        modality: 1,
+        freightResponsible: 1,
+        startDate: '2026-10-01',
+        endDate: '2026-10-02',
+        departure: place,
+        delivery: place,
+        vehicle: { type: 'Camion', brand: 'Volvo', idType: 1, idNumber: 'ABC12345' },
+        carrier: {
+          contributor: true,
+          name: 'Transportes SA',
+          ruc: '80000003-0',
+          address: 'Ruta 2 km 10',
+          driver: { name: 'Pedro Gomez', idNumber: '1234567', address: 'Calle 9' },
+        },
+      },
+      items: [{ code: 'A-1', description: 'Maíz', unitCode: 77, quantity: 3 }],
+    };
+    expect((await correct(documentId, writer, remission, 'fix-nre')).statusCode).toBe(422);
+  });
+
   it('answers 422 when a correction that needs a new number targets an unconfigured point', async () => {
     const { documentId } = await create(writer);
     const moved = { ...fixed, expeditionPoint: '003' };

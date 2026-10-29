@@ -158,6 +158,15 @@ export class DocumentsController {
     if (!UUID.test(id)) throw new BadRequestException('id must be a UUID');
     const parsed = parseDocumentRequest(body);
     if (!parsed.ok) throw validationProblem(parsed.errors);
+    if (parsed.type === 'NRE') {
+      throw validationProblem([
+        {
+          field: 'type',
+          rule: 'schema',
+          message: 'A remission note cannot be corrected through this endpoint',
+        },
+      ]);
+    }
     try {
       const { value } = parsed;
       const accepted = await this.correctDocument({

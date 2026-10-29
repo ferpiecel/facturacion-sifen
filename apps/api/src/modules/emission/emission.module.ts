@@ -5,7 +5,6 @@ import { DATABASE } from '../database/database.module.js';
 import { createAcceptCreditNote, createAcceptDebitNote } from './application/accept-credit-note.js';
 import { createAcceptInvoice } from './application/accept-invoice.js';
 import { createAcceptRemission, createAcceptSelfInvoice } from './application/accept-standalone.js';
-import { createAcceptSelfInvoice } from './application/accept-standalone.js';
 import { createCorrectDocument } from './application/correct-document.js';
 import { createGetDocument } from './application/get-document.js';
 import { createGetKude } from './application/get-kude.js';

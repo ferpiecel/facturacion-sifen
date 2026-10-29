@@ -3,7 +3,7 @@
 ## Síntomas y detección
 
 - `POST /v1/documents/{id}/correct` responde `409 correction_in_progress` mucho después de la primera corrección y el integrador no la va a reintentar (cambió de clave, abandonó el documento o la clave se perdió).
-- Una reemisión rechazada por una causa externa o dependiente del tiempo (certificado vencido o por vencer, punto sin configurar) conserva el reclamo; un cuerpo inválido no lo toma (422 sin reclamo): no se libera sola. Se corrige la causa y se reintenta con la **misma** `Idempotency-Key` y cuerpo, o se libera con `release-claim`.
+- Una reemisión rechazada por una causa externa o dependiente del tiempo (certificado vencido o por vencer, punto sin configurar) conserva el reclamo, igual que cualquier rechazo de una NCE/NDE (la suma 2417 y las reglas `associated-*` dependen de otros documentos) y cualquier error desconocido; solo un cuerpo FE/AFE inválido libera el reclamo, y uno inválido antes de tomarlo no lo toma (422 sin reclamo). Se corrige la causa y se reintenta con la **misma** `Idempotency-Key` y cuerpo, o se libera con `release-claim`.
 - El documento sigue `rejected` y tiene una fila en `document_correction_claims` (el reclamo que toma una reemisión antes de emitir el reemplazo, ADR-0021).
 
 ## Impacto

@@ -110,6 +110,9 @@ function setup(
       return NEW_DOC;
     },
   );
+  const acceptNce = vi.fn<
+    (input: { idempotencyKey: string; excludeCdc?: string }) => Promise<typeof NEW_DOC>
+  >(() => Promise.resolve(NEW_DOC));
   const voidNumbers = vi.fn(() =>
     options.voidError
       ? Promise.reject(options.voidError)
@@ -171,7 +174,7 @@ function setup(
         return result;
       },
     },
-    accept: { FE: acceptFe, AFE: vi.fn(), NCE: vi.fn(), NDE: vi.fn() },
+    accept: { FE: acceptFe, AFE: vi.fn(), NCE: acceptNce, NDE: vi.fn() },
     voidNumbers,
     now: () => new Date('2026-03-06T15:00:00Z'),
   });
@@ -182,6 +185,7 @@ function setup(
     sumCreditNotes,
     recordReissue,
     acceptFe,
+    acceptNce,
     voidNumbers,
     claimDocument,
     releaseClaim,
@@ -479,6 +483,49 @@ describe('correctDocument', () => {
         await expect(correct(reissueOf)).resolves.toEqual(NEW_DOC);
         expect(releaseClaim).not.toHaveBeenCalled();
         expect(recordReissue).toHaveBeenCalledOnce();
+      });
+
+      describe('credit notes: a refusal after the claim is never known-pure', () => {
+        const note = { ...REJECTED, documentType: 5, associatedCdc: FE_CDC };
+        const nceDraft = {
+          associatedCdc: FE_CDC,
+          reasonCode: 2,
+          items: [{ quantity: 1, unitPrice: 1_000_000, vatRate: 10 as const }],
+          roundingPyg: 0,
+        };
+        const nceMoved = {
+          ...moved,
+          idempotencyKey: 'key-n',
+          correction: { type: 'NCE' as const, draft: nceDraft },
+        };
+
+        it('reissues a full-amount note leaving the rejected one out of the 2417 sum', async () => {
+          const { correct, acceptNce } = setup({ document: note });
+          await expect(correct(nceMoved)).resolves.toEqual(NEW_DOC);
+          expect(acceptNce).toHaveBeenCalledWith(expect.objectContaining({ excludeCdc: CDC }));
+        });
+
+        it('keeps the claim when the replacement is refused with 2417', async () => {
+          const { correct, releaseClaim, acceptNce } = setup({ document: note });
+          acceptNce.mockRejectedValueOnce(
+            new InvoiceValidationError([
+              { field: 'items', rule: 'credit-total', sifenCode: '2417', message: 'over' },
+            ]),
+          );
+          await expect(correct(nceMoved)).rejects.toBeInstanceOf(InvoiceValidationError);
+          expect(releaseClaim).not.toHaveBeenCalled();
+        });
+
+        it('keeps the claim when the replacement is refused for an associated-invoice rule', async () => {
+          const { correct, releaseClaim, acceptNce } = setup({ document: note });
+          acceptNce.mockRejectedValueOnce(
+            new InvoiceValidationError([
+              { field: 'associatedCdc', rule: 'associated-not-found', message: 'missing' },
+            ]),
+          );
+          await expect(correct(nceMoved)).rejects.toBeInstanceOf(InvoiceValidationError);
+          expect(releaseClaim).not.toHaveBeenCalled();
+        });
       });
 
       it('tells a new key to retry with the key that holds the claim', () => {

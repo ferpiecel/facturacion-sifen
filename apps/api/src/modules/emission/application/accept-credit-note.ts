@@ -36,6 +36,8 @@ export interface AcceptCreditNoteInput {
   /** The request body as received. */
   payload: unknown;
   idempotencyKey: string;
+  /** A rejected note being reissued: its CDC is left out of the 2417 sum (ADR-0021 D5). */
+  excludeCdc?: string;
 }
 
 export interface AcceptCreditNoteDependencies {
@@ -102,7 +104,7 @@ export function createAcceptCreditNote(deps: AcceptCreditNoteDependencies) {
       // Only credit notes count against the FE total (2417); a debit adds to it.
       const creditedAmount =
         invoice && kind === 'credit'
-          ? await unit.sumCreditNotes(associatedCdc, issuer.environment)
+          ? await unit.sumCreditNotes(associatedCdc, issuer.environment, input.excludeCdc)
           : '0';
       const validate = kind === 'credit' ? validateCreditNoteDraft : validateDebitNoteDraft;
       const errors = validate(

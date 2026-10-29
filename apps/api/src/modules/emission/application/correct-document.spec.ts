@@ -78,6 +78,8 @@ function setup(
     claim?: { idempotencyKey: string; requestHash: string } | null;
     /** The replacement is not issued until this resolves (a slow acceptance). */
     acceptGate?: Promise<void>;
+    /** A document already holds the replacement's derived key (issued by an earlier attempt, not linked yet). */
+    replacementIssued?: boolean;
   } = {},
   certificateNotAfter?: Date,
 ) {
@@ -147,6 +149,10 @@ function setup(
         receiverRuc: '80069563-1',
       }),
     sumCreditNotes,
+    findByIdempotencyKey: () =>
+      Promise.resolve(
+        options.replacementIssued ? { ...NEW_DOC, requestHash: 'h'.repeat(64) } : null,
+      ),
     rewriteDocument,
     recordAudit,
     findReissue: () => Promise.resolve(linked ?? options.reissued ?? null),
@@ -400,6 +406,16 @@ describe('correctDocument', () => {
         acceptFe.mockRejectedValueOnce(new InvoiceValidationError([]));
         await expect(correct(reissueOf)).rejects.toBeInstanceOf(InvoiceValidationError);
         expect(releaseClaim).toHaveBeenCalledOnce();
+      });
+
+      it('links the replacement an earlier attempt issued instead of releasing the claim when a retry is refused', async () => {
+        const { correct, releaseClaim, recordReissue, acceptFe } = setup({
+          replacementIssued: true,
+        });
+        acceptFe.mockRejectedValueOnce(new InvoiceValidationError([]));
+        await expect(correct(reissueOf)).resolves.toEqual(NEW_DOC);
+        expect(releaseClaim).not.toHaveBeenCalled();
+        expect(recordReissue).toHaveBeenCalledOnce();
       });
 
       it('keeps the claim when the acceptance fails in an unknown way', async () => {

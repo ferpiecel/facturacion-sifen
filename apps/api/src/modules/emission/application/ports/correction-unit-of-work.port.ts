@@ -57,7 +57,11 @@ export interface CorrectionReissue {
 /** Operations that must share one tenant transaction (ADR-0021). */
 export interface CorrectionUnit extends Pick<
   AcceptanceUnit,
-  'resolveIssuer' | 'findAssociatedInvoice' | 'sumCreditNotes' | 'recordAudit'
+  | 'resolveIssuer'
+  | 'findAssociatedInvoice'
+  | 'sumCreditNotes'
+  | 'recordAudit'
+  | 'findByIdempotencyKey'
 > {
   /** The correction an earlier request with this key made, or null. */
   findCorrectionByKey(key: string): Promise<StoredCorrection | null>;

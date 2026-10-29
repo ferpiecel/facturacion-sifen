@@ -320,19 +320,24 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
     document: CorrectableDocument,
     derived: string,
   ): Promise<AcceptedInvoice> {
+    const replacementKey = `${derived}:reissue`;
     let replacement: AcceptedInvoice;
     try {
-      replacement = await acceptReplacement(input, `${derived}:reissue`);
+      replacement = await acceptReplacement(input, replacementKey);
     } catch (error) {
       // Refused before anything was issued: release the claim so the document can be corrected again. Any other
       // failure may have issued the replacement, so the claim stays and a retry with the same key resumes it.
-      if (isRefusedBeforeIssuing(error)) {
-        await deps.unitOfWork.run(input.tenantId, async (unit) => {
-          await unit.lockDocument(document.id);
-          await unit.releaseClaim(document.id);
-        });
-      }
-      throw error;
+      if (!isRefusedBeforeIssuing(error)) throw error;
+      // A retry can be refused (the validation runs before the key's replay) although an earlier attempt already
+      // issued the replacement: releasing the claim then would let a rewrite leave two live documents, so link it.
+      const issued = await deps.unitOfWork.run(input.tenantId, async (unit) => {
+        await unit.lockDocument(document.id);
+        const existing = await unit.findByIdempotencyKey(replacementKey);
+        if (!existing) await unit.releaseClaim(document.id);
+        return existing;
+      });
+      if (!issued) throw error;
+      replacement = { documentId: issued.documentId, cdc: issued.cdc };
     }
     const link = () =>
       deps.unitOfWork.run(input.tenantId, async (unit) => {

@@ -12,11 +12,11 @@ near the 72 h deadline, certificates about to expire. Cross-tenant reads go thro
 
 ## Tasks
 
-- [ ] T1 `audit:list` (tenant, action, date range, paged by seq) and `audit:verify` (PR 1)
-- [ ] T2 `document:deadline` (tenant or all tenants, hours remaining) (PR 2)
-- [ ] T3 `certificate:expiring` (days default from `CERTIFICATE_ALERT_DAYS`) (PR 2)
+- [x] T1 `audit:list` (tenant, action, date range, paged by seq) and `audit:verify` (PR 1, #397, 969ab989)
+- [x] T2 `document:deadline` (tenant or all tenants, hours remaining) (PR 2)
+- [ ] T3 `certificate:expiring` (days default from `CERTIFICATE_ALERT_DAYS`) (PR 3)
 - [ ] T4 `ruc:unblock`: needs migration (ruc_blocks has no UPDATE grant): `lifted_at`/`lifted_by` columns,
-      guard + gauge ignore lifted blocks, audited (PR 3)
+      guard + gauge ignore lifted blocks, audited (PR 4)
 - [ ] T5 Docs: `docs/operacion.md` and runbooks (`ruc-bloqueado`, `de-plazo-72h`, `certificado-vencido`) with each PR
 
 ## Decisions

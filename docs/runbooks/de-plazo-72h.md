@@ -17,7 +17,7 @@ Pasadas las 72 h el DE se aprueba con observación por extemporáneo (ADR-0008);
    - Documento retenido (`WARN ... held`; `transmission_hold`): corregir la causa (`establishment:contact`, `csc:add`, `certificate:add`, ver [certificado](certificado-vencido.md)) y liberar con `document:release-hold` o `document:release-holds`. Un retenido por 5 rechazos 0301 (`transmission:attempts-exhausted`) se libera igual tras corregir la causa; la liberación reinicia el contador.
    - `failures>0`: el log nombra el error; si es repetible, corregir antes de reintentar.
 2. Si la causa es un documento irrecuperable (p. ej. innominado no B2C), inutilizar su numeración y reemitir (ver `operacion.md`).
-3. No hay comando para listar los documentos próximos al plazo ni para forzar su transmisión: **Brecha**. Hoy: los webhooks recibidos, o SQL de solo lectura sobre `documents` por `signed_at`.
+3. Listá los documentos próximos al plazo con `ops document:deadline [--tenant <id>] [--within-hours 24]` (sin `--tenant` recorre todos los tenants; ver `operacion.md`). No hay comando para forzar su transmisión: **Brecha**; el ciclo del worker los envía en cuanto la causa de la demora se corrige.
 4. Informar al tenant con el `hours_remaining` del webhook.
 
 ## Verificación

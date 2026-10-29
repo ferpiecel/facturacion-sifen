@@ -37,7 +37,7 @@ Solo el tenant afectado. Antes del vencimiento, nada falla. Con el bloqueo de em
 
 - La emisión deja de responder `422 certificate_expiring`.
 - Los documentos liberados pasan de `accepted` a `signed` en el siguiente ciclo, y llegan sus webhooks.
-- Audit log: `certificate.revoked` (el anterior), `document.hold_released` (por liberación) y `certificate.accessed` (cada descifrado). No hay comando para consultarlo (ver README, brecha de audit log).
+- Audit log: `certificate.revoked` (el anterior), `document.hold_released` (por liberación) y `certificate.accessed` (cada descifrado). Se consulta con `ops audit:list --tenant <id> --action certificate.revoked` (ver `operacion.md`).
 
 ## Escalamiento
 
@@ -45,4 +45,4 @@ PSC emisora del certificado: `<contacto-PSC>`. DNIT si SIFEN rechaza la firma de
 
 ## Post-incidente
 
-Revisar por qué el aviso a 60/30/7 días no se atendió (el tenant debe tener un endpoint de webhooks con `certificate.expiring`). El comando `ops` no lista certificados ni vencimientos por tenant: **Brecha**; hoy requiere SQL de solo lectura sobre `tenant_certificates` (`not_after`).
+Revisar por qué el aviso a 60/30/7 días no se atendió (el tenant debe tener un endpoint de webhooks con `certificate.expiring`). Para ver qué certificados vencen: `ops certificate:expiring [--tenant <id>] [--days <n>]` (ver `operacion.md`).

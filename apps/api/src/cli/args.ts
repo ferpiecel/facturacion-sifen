@@ -28,6 +28,23 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 export class OpsArgError extends Error {}
 
 export type OpsCommand =
+  | {
+      kind: 'document:deadline';
+      tenantId: string | undefined;
+      withinHours: number | undefined;
+      limit: number | undefined;
+    }
+  | { kind: 'certificate:expiring'; tenantId: string | undefined; days: number | undefined }
+  | {
+      kind: 'audit:list';
+      tenantId: string;
+      action: string | undefined;
+      from: string | undefined;
+      to: string | undefined;
+      limit: number | undefined;
+      afterSeq: number | undefined;
+    }
+  | { kind: 'audit:verify'; tenantId: string }
   | { kind: 'usage:show'; tenantId: string; period: string | undefined }
   | { kind: 'tenant:sync-transmission'; tenantId: string; enabled: boolean; actor: string }
   | {
@@ -245,6 +262,65 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
   }
 
   switch (subcommand) {
+    case 'audit:list': {
+      const { values } = parseStrict({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          action: { type: 'string' },
+          from: { type: 'string' },
+          to: { type: 'string' },
+          limit: { type: 'string' },
+          'after-seq': { type: 'string' },
+        },
+      });
+      return {
+        kind: 'audit:list',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        action: values.action,
+        from: values.from,
+        to: values.to,
+        limit: values.limit === undefined ? undefined : parseCount(values.limit, 'limit'),
+        afterSeq:
+          values['after-seq'] === undefined
+            ? undefined
+            : parseCount(values['after-seq'], 'after-seq'),
+      };
+    }
+    case 'document:deadline': {
+      const { values } = parseStrict({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          'within-hours': { type: 'string' },
+          limit: { type: 'string' },
+        },
+      });
+      return {
+        kind: 'document:deadline',
+        tenantId: values.tenant,
+        withinHours:
+          values['within-hours'] === undefined
+            ? undefined
+            : parseCount(values['within-hours'], 'within-hours'),
+        limit: values.limit === undefined ? undefined : parseCount(values.limit, 'limit'),
+      };
+    }
+    case 'certificate:expiring': {
+      const { values } = parseStrict({
+        args: rest,
+        options: { tenant: { type: 'string' }, days: { type: 'string' } },
+      });
+      return {
+        kind: 'certificate:expiring',
+        tenantId: values.tenant,
+        days: values.days === undefined ? undefined : parseCount(values.days, 'days'),
+      };
+    }
+    case 'audit:verify': {
+      const { values } = parseStrict({ args: rest, options: { tenant: { type: 'string' } } });
+      return { kind: 'audit:verify', tenantId: requireOption(values.tenant, 'tenant') };
+    }
     case 'tenant:sync-transmission': {
       const { values } = parseStrict({
         args: rest,

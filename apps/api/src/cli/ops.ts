@@ -5,8 +5,15 @@ import { CscVault } from '../modules/custody/infrastructure/csc-vault.js';
 import { MAX_PKCS12_BYTES } from '../modules/certificates/infrastructure/pkcs12-inspector.js';
 import { CertificateVault } from '../modules/certificates/infrastructure/certificate-vault.js';
 import { loadTrustedRoots } from '../modules/certificates/infrastructure/trusted-roots.js';
+import { listExpiringCertificates } from './certificate-expiring.js';
+import { DEFAULT_WITHIN_HOURS, listNearDeadline } from './deadline-commands.js';
+import { listAudit, verifyAudit } from './audit-commands.js';
 import { BoundedReadError, readBoundedFile } from './bounded-file.js';
 import { getOpsDatabaseUrl, OpsArgError, parseOpsArgs, type OpsCommand } from './args.js';
+import {
+  DEFAULT_ALERT_DAYS,
+  parseAlertDays,
+} from '../modules/certificates/domain/certificate-expiry.js';
 import { emissionValidationConfig } from '../modules/emission/emission-validation-config.js';
 import {
   addEstablishment,
@@ -100,6 +107,48 @@ export async function runOpsCommand(
   certificates?: CertificateDeps,
 ): Promise<string> {
   switch (command.kind) {
+    case 'audit:list': {
+      const page = await listAudit(db, command);
+      if (page.entries.length === 0) return 'no audit entries';
+      const lines = page.entries.map(
+        (e) =>
+          `${String(e.seq)} ${e.id} ${e.occurredAt.toISOString()} ${e.actorType}:${e.actorId} ${e.action} ${e.entityType}:${e.entityId}`,
+      );
+      return [
+        ...lines,
+        ...(page.nextAfterSeq === null ? [] : [`next: --after-seq ${String(page.nextAfterSeq)}`]),
+      ].join('\n');
+    }
+    case 'document:deadline': {
+      const now = new Date();
+      const rows = await listNearDeadline(db, command, now);
+      if (rows.length === 0) {
+        return `no documents within ${String(command.withinHours ?? DEFAULT_WITHIN_HOURS)} hours of the 72 h deadline`;
+      }
+      return rows
+        .map(
+          (r) =>
+            `${r.tenantId} ${r.id} ${r.cdc} ${r.status} signed ${r.signedAt.toISOString()} deadline ${r.deadline.toISOString()} ${String(r.hoursRemaining)}h`,
+        )
+        .join('\n');
+    }
+    case 'certificate:expiring': {
+      const days = command.days ?? Math.max(...DEFAULT_ALERT_DAYS);
+      const rows = await listExpiringCertificates(db, { ...command, days }, new Date());
+      if (rows.length === 0) return `no active certificates expire within ${String(days)} days`;
+      return rows
+        .map(
+          (r) =>
+            `${r.tenantId} ${r.environment} ${r.id} ${r.fingerprint} expires ${r.notAfter.toISOString()} (${String(r.daysRemaining)} days)`,
+        )
+        .join('\n');
+    }
+    case 'audit:verify': {
+      const result = await verifyAudit(db, command);
+      return result.ok
+        ? `audit chain intact: ${String(result.rows)} rows (head seq ${String(result.headSeq)})`
+        : `audit chain BROKEN at seq ${String(result.brokenAt.seq)} (${result.brokenAt.reason}, entry ${result.brokenAt.id})`;
+    }
     case 'tenant:sync-transmission': {
       const result = await setSyncTransmission(db, {
         tenantId: command.tenantId,
@@ -405,7 +454,12 @@ export interface CliIo {
 export async function runCli(io: CliIo): Promise<number> {
   try {
     const url = getOpsDatabaseUrl(io.env);
-    const command = parseOpsArgs(await resolveStdinSecrets(io.argv, io.readStdin));
+    const parsed = parseOpsArgs(await resolveStdinSecrets(io.argv, io.readStdin));
+    // The expiry window defaults to the largest alert threshold the worker uses (CERTIFICATE_ALERT_DAYS).
+    const command: OpsCommand =
+      parsed.kind === 'certificate:expiring' && parsed.days === undefined
+        ? { ...parsed, days: Math.max(...parseAlertDays(io.env.CERTIFICATE_ALERT_DAYS)) }
+        : parsed;
     const vault = command.kind === 'csc:add' ? createCscVault(io.env) : undefined;
     const certificates =
       command.kind === 'certificate:add'

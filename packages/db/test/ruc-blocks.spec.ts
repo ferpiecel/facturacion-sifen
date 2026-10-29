@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { DatabaseHandle } from '../src/client.js';
 import { rucBlocks, tenants } from '../src/schema.js';
 import { withTenantTransaction } from '../src/tenant-transaction.js';
@@ -100,5 +100,51 @@ describe('ruc_blocks', () => {
         ),
       ),
     ).toMatch(/ruc_blocks_reason_length/);
+  });
+
+  describe('lifting a pause is write-once', () => {
+    async function asAdmin(db: DatabaseHandle['db'], statement: ReturnType<typeof sql>) {
+      return db.transaction(async (tx) => {
+        await tx.execute(sql`SET LOCAL ROLE platform_admin`);
+        await tx.execute(statement);
+      });
+    }
+
+    async function seedLifted() {
+      const { db, a } = await seed();
+      await withTenantTransaction(db, a, (tx) => tx.insert(rucBlocks).values(block(a)));
+      await asAdmin(
+        db,
+        sql`update ruc_blocks set lifted_at = now(), lifted_by = 'ops', lift_reason = 'RUC cleared'`,
+      );
+      return db;
+    }
+
+    it('lets platform_admin lift an active pause once', async () => {
+      const db = await seedLifted();
+      const rows = await db.select().from(rucBlocks);
+      expect(rows[0]?.liftedBy).toBe('ops');
+    });
+
+    it.each([
+      [
+        'nulling the lift out',
+        sql`update ruc_blocks set lifted_at = null, lifted_by = null, lift_reason = null`,
+      ],
+      ['rewriting who lifted it', sql`update ruc_blocks set lifted_by = 'someone else'`],
+      ['rewriting the reason', sql`update ruc_blocks set lift_reason = 'forged'`],
+      ['moving the lift time', sql`update ruc_blocks set lifted_at = now() + interval '1 day'`],
+    ])('refuses %s once lifted', async (_name, statement) => {
+      const db = await seedLifted();
+      expect(await causeOf(asAdmin(db, statement))).toMatch(/ruc_blocks_lift_write_once/);
+    });
+
+    it('refuses setting the lift columns partially', async () => {
+      const { db, a } = await seed();
+      await withTenantTransaction(db, a, (tx) => tx.insert(rucBlocks).values(block(a)));
+      expect(await causeOf(asAdmin(db, sql`update ruc_blocks set lifted_by = 'ops'`))).toMatch(
+        /ruc_blocks_lift_write_once|ruc_blocks_lift_complete/,
+      );
+    });
   });
 });

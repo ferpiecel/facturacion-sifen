@@ -1,6 +1,6 @@
 {
-  "id": "ff1ff2d6-664f-4e96-89e1-28dae1c33b72",
-  "prevId": "eaa32942-14e2-437c-9289-d363028eaad9",
+  "id": "6b83a8ed-1cb5-4948-b5e4-7806e49a1e88",
+  "prevId": "db6ec753-1565-44de-9bcf-66bb5ab8195a",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -962,6 +962,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "resent_after_seq": {
+          "name": "resent_after_seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
         "approved_at": {
           "name": "approved_at",
           "type": "timestamp with time zone",
@@ -1881,6 +1887,23 @@
           "primaryKey": false,
           "notNull": true
         },
+        "seq": {
+          "name": "seq",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "lotes_seq_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
         "document_type": {
           "name": "document_type",
           "type": "smallint",
@@ -1987,6 +2010,13 @@
           "columns": [
             "tenant_id",
             "id"
+          ]
+        },
+        "lotes_seq_key": {
+          "name": "lotes_seq_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "seq"
           ]
         }
       },

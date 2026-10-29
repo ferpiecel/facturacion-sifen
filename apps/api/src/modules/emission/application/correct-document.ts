@@ -220,6 +220,22 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
     if (claim && claim.requestHash !== hash) throw new IdempotencyKeyReusedError();
     const reissuePlan = async (): Promise<Plan> => {
       if (!claim) {
+        // Refusals that depend only on the request are raised before the claim, so a body error holds nothing.
+        const issuer = await unit.resolveIssuer({
+          establishmentCode: input.establishmentCode,
+          expeditionPointCode: input.expeditionPointCode,
+          issueDate: paraguayDate(at),
+        });
+        if (!issuer) throw new IssuerNotConfiguredError();
+        assertCertificateUsable(issuer, at, deps.certificateBlockDays);
+        const { errors } = await validateCorrection(
+          unit,
+          input,
+          document.cdc,
+          issuer.environment,
+          deps.validation ?? {},
+        );
+        if (errors.length > 0) throw new InvoiceValidationError(errors);
         await unit.claimDocument({
           document,
           idempotencyKey: input.idempotencyKey,
@@ -329,15 +345,20 @@ export function createCorrectDocument(deps: CorrectDocumentDependencies) {
     try {
       replacement = await acceptReplacement(input, replacementKey);
     } catch (error) {
-      // The claim is never released on a refusal: another attempt with the same derived key may be committing the
-      // replacement, which this call cannot see. A retry with the same key resumes it; a stuck claim is released
-      // with `ops correction:release-claim` (ADR-0021, adenda).
       if (!isRefusedBeforeIssuing(error)) throw error;
+      // Refusals split by cause. External or time-dependent ones (certificate, issuer point) never release the claim:
+      // another attempt with the same derived key may be committing the replacement, which this call cannot see. A
+      // refused body depends only on the request, so the same key (same hash) fails the same way everywhere: the
+      // claim is released when no replacement exists. A retry with the same key resumes a held claim; a stuck one is
+      // released with `ops correction:release-claim` (ADR-0021, adenda).
+      const deterministic = error instanceof InvoiceValidationError;
       // A retry can be refused (the validation runs before the key's replay) although an earlier attempt already
       // issued the replacement: link it, so a rewrite cannot leave two live documents.
       const issued = await deps.unitOfWork.run(input.tenantId, async (unit) => {
         await unit.lockDocument(document.id);
-        return unit.findByIdempotencyKey(replacementKey);
+        const existing = await unit.findByIdempotencyKey(replacementKey);
+        if (!existing && deterministic) await unit.releaseClaim(document.id);
+        return existing;
       });
       if (!issued) throw error;
       replacement = { documentId: issued.documentId, cdc: issued.cdc };

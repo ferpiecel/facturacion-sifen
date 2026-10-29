@@ -401,10 +401,10 @@ describe('correctDocument', () => {
         await expect(correct(reissueOf)).rejects.toBeInstanceOf(IdempotencyKeyReusedError);
       });
 
-      it('keeps the claim when the replacement is refused before it is issued', async () => {
+      it('keeps the claim when an external check refuses the replacement before it is issued', async () => {
         const { correct, releaseClaim, acceptFe } = setup();
-        acceptFe.mockRejectedValueOnce(new InvoiceValidationError([]));
-        await expect(correct(reissueOf)).rejects.toBeInstanceOf(InvoiceValidationError);
+        acceptFe.mockRejectedValueOnce(new CertificateExpiringError(new Date()));
+        await expect(correct(reissueOf)).rejects.toBeInstanceOf(CertificateExpiringError);
         expect(releaseClaim).not.toHaveBeenCalled();
       });
 
@@ -417,7 +417,7 @@ describe('correctDocument', () => {
           claim,
           replacementIssued: true,
         });
-        acceptFe.mockRejectedValueOnce(new InvoiceValidationError([]));
+        acceptFe.mockRejectedValueOnce(new CertificateExpiringError(new Date()));
         await expect(correct(reissueOf)).resolves.toEqual(NEW_DOC);
         expect(releaseClaim).not.toHaveBeenCalled();
         expect(recordReissue).toHaveBeenCalledOnce();
@@ -425,8 +425,8 @@ describe('correctDocument', () => {
 
       it('completes a retry with the same key once validation passes after a refusal', async () => {
         const { correct, releaseClaim, recordReissue, acceptFe } = setup();
-        acceptFe.mockRejectedValueOnce(new InvoiceValidationError([]));
-        await expect(correct(reissueOf)).rejects.toBeInstanceOf(InvoiceValidationError);
+        acceptFe.mockRejectedValueOnce(new CertificateExpiringError(new Date()));
+        await expect(correct(reissueOf)).rejects.toBeInstanceOf(CertificateExpiringError);
         await expect(correct(reissueOf)).resolves.toEqual(NEW_DOC);
         expect(releaseClaim).not.toHaveBeenCalled();
         expect(recordReissue).toHaveBeenCalledOnce();
@@ -436,7 +436,7 @@ describe('correctDocument', () => {
         const { correct, releaseClaim, recordReissue, acceptFe } = setup({
           replacementIssued: true,
         });
-        acceptFe.mockRejectedValueOnce(new InvoiceValidationError([]));
+        acceptFe.mockRejectedValueOnce(new CertificateExpiringError(new Date()));
         await expect(correct(reissueOf)).resolves.toEqual(NEW_DOC);
         expect(releaseClaim).not.toHaveBeenCalled();
         expect(recordReissue).toHaveBeenCalledOnce();
@@ -449,9 +449,36 @@ describe('correctDocument', () => {
         };
         const { correct, releaseClaim, acceptFe } = setup({ claim });
         // The first attempt is mid-commit on the replacement, so the retry finds no replacement yet.
+        acceptFe.mockRejectedValueOnce(new CertificateExpiringError(new Date()));
+        await expect(correct(reissueOf)).rejects.toBeInstanceOf(CertificateExpiringError);
+        expect(releaseClaim).not.toHaveBeenCalled();
+      });
+
+      it('takes no claim for a body the validation refuses, so a new key with the fixed body goes through', async () => {
+        const { correct, claimDocument, acceptFe } = setup();
+        const draft = { ...DRAFT, items: [] };
+        const bad = { ...reissueOf, correction: { type: 'FE' as const, draft, receiverRuc: null } };
+        await expect(correct(bad)).rejects.toBeInstanceOf(InvoiceValidationError);
+        expect(claimDocument).not.toHaveBeenCalled();
+        expect(acceptFe).not.toHaveBeenCalled();
+        await expect(correct({ ...reissueOf, idempotencyKey: 'key-c' })).resolves.toEqual(NEW_DOC);
+      });
+
+      it('releases the claim when the acceptance refuses the body and no replacement exists', async () => {
+        const { correct, releaseClaim, acceptFe } = setup();
         acceptFe.mockRejectedValueOnce(new InvoiceValidationError([]));
         await expect(correct(reissueOf)).rejects.toBeInstanceOf(InvoiceValidationError);
+        expect(releaseClaim).toHaveBeenCalledOnce();
+      });
+
+      it('links an existing replacement instead of releasing when the body is refused', async () => {
+        const { correct, releaseClaim, recordReissue, acceptFe } = setup({
+          replacementIssued: true,
+        });
+        acceptFe.mockRejectedValueOnce(new InvoiceValidationError([]));
+        await expect(correct(reissueOf)).resolves.toEqual(NEW_DOC);
         expect(releaseClaim).not.toHaveBeenCalled();
+        expect(recordReissue).toHaveBeenCalledOnce();
       });
 
       it('tells a new key to retry with the key that holds the claim', () => {

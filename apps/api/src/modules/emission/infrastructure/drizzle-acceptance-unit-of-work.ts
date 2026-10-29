@@ -25,13 +25,19 @@ import { nominatedFacts } from '../domain/nominated-receiver.js';
 import { approvedNomination } from './approved-nomination.js';
 import { parseCreateDocument, toInvoiceDraft } from './http/create-document.request.js';
 
-const IDEMPOTENCY_CONSTRAINT = 'documents_tenant_idempotency_key_key';
+const IDEMPOTENCY_CONSTRAINTS = [
+  'documents_tenant_idempotency_key_key',
+  'document_corrections_tenant_idempotency_key_key',
+];
 
 /** Whether `error` (or its cause chain) is the unique violation of the idempotency key. */
-function isIdempotencyCollision(error: unknown): boolean {
+export function isIdempotencyCollision(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;
   const { constraint, cause } = error as { constraint?: unknown; cause?: unknown };
-  return constraint === IDEMPOTENCY_CONSTRAINT || isIdempotencyCollision(cause);
+  return (
+    (typeof constraint === 'string' && IDEMPOTENCY_CONSTRAINTS.includes(constraint)) ||
+    isIdempotencyCollision(cause)
+  );
 }
 
 /** First row of a result, typed as possibly missing. */
@@ -39,7 +45,7 @@ function first<T>(rows: T[]): T | undefined {
   return rows.at(0);
 }
 
-function createUnit(tx: TenantTx, tenantId: string): AcceptanceUnit {
+export function createAcceptanceUnit(tx: TenantTx, tenantId: string): AcceptanceUnit {
   return {
     async findByIdempotencyKey(key) {
       const row = await tx
@@ -208,6 +214,6 @@ function createUnit(tx: TenantTx, tenantId: string): AcceptanceUnit {
 export function createDrizzleAcceptanceUnitOfWork(db: Database): AcceptanceUnitOfWork {
   return {
     run: (tenantId, work) =>
-      withTenantTransaction(db, tenantId, (tx) => work(createUnit(tx, tenantId))),
+      withTenantTransaction(db, tenantId, (tx) => work(createAcceptanceUnit(tx, tenantId))),
   };
 }

@@ -1,4 +1,4 @@
-import { and, count, eq, gt, inArray, isNotNull, min } from 'drizzle-orm';
+import { and, count, eq, gt, inArray, isNotNull, isNull, min } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import { documents, rucBlocks, tenantCertificates, tenants, type Database } from '@sifen/db';
 import type { Telemetry } from '../modules/telemetry/application/ports/telemetry.port.js';
@@ -48,7 +48,7 @@ async function readAggregates(db: Database, at: Date) {
         tenants,
         and(eq(tenants.id, rucBlocks.tenantId), eq(tenants.environment, rucBlocks.environment)),
       )
-      .where(gt(rucBlocks.blockedUntil, at));
+      .where(and(gt(rucBlocks.blockedUntil, at), isNull(rucBlocks.liftedAt)));
     const [expiryRow] = await tx
       .select({ notAfter: min(tenantCertificates.notAfter) })
       .from(tenantCertificates)

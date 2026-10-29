@@ -275,7 +275,14 @@ export function createDrizzleTransmissionCycleStore({
             tenants,
             and(eq(tenants.id, rucBlocks.tenantId), eq(tenants.environment, rucBlocks.environment)),
           )
-          .where(and(eq(rucBlocks.tenantId, tenantId), gt(rucBlocks.blockedUntil, at))),
+          .where(
+            and(
+              eq(rucBlocks.tenantId, tenantId),
+              gt(rucBlocks.blockedUntil, at),
+              // A pause an operator lifted (`ruc:unblock`) no longer holds the sends.
+              isNull(rucBlocks.liftedAt),
+            ),
+          ),
       );
       return rows.at(0)?.until ?? null;
     },

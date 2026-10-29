@@ -7,6 +7,7 @@ import { CertificateVault } from '../modules/certificates/infrastructure/certifi
 import { loadTrustedRoots } from '../modules/certificates/infrastructure/trusted-roots.js';
 import { listExpiringCertificates } from './certificate-expiring.js';
 import { DEFAULT_WITHIN_HOURS, listNearDeadline } from './deadline-commands.js';
+import { unblockRuc } from './ruc-unblock.js';
 import { listAudit, verifyAudit } from './audit-commands.js';
 import { BoundedReadError, readBoundedFile } from './bounded-file.js';
 import { getOpsDatabaseUrl, OpsArgError, parseOpsArgs, type OpsCommand } from './args.js';
@@ -118,6 +119,10 @@ export async function runOpsCommand(
         ...lines,
         ...(page.nextAfterSeq === null ? [] : [`next: --after-seq ${String(page.nextAfterSeq)}`]),
       ].join('\n');
+    }
+    case 'ruc:unblock': {
+      const result = await unblockRuc(db, command, new Date());
+      return `RUC pause lifted for tenant ${result.tenantId}: ${String(result.lifted)} block(s)`;
     }
     case 'document:deadline': {
       const now = new Date();

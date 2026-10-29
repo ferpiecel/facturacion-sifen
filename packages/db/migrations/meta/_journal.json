@@ -470,6 +470,13 @@
       "when": 1793279457821,
       "tag": "0070_lote_seq",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1793282147527,
+      "tag": "0071_ruc_blocks_lift",
+      "breakpoints": true
     }
   ]
 }

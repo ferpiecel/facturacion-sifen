@@ -450,6 +450,22 @@ describe('DrizzleTransmissionCycleStore', () => {
       expect(await store().rucBlockedUntil(at(30))).toEqual(at(55));
     });
 
+    it('ignores a pause an operator lifted, and keeps the others', async () => {
+      await handle.db.insert(rucBlocks).values({
+        tenantId,
+        environment: 'test',
+        blockedAt: at(0),
+        blockedUntil: at(90),
+        reason: 'RUC bloqueado',
+        liftedAt: at(10),
+        liftedBy: 'op',
+        liftReason: 'resolved with DNIT',
+      });
+      expect(await store().rucBlockedUntil(at(30))).toBeNull();
+      await block(tenantId, at(55));
+      expect(await store().rucBlockedUntil(at(30))).toEqual(at(55));
+    });
+
     it('ignores other tenants and other environments', async () => {
       await block(otherTenantId, at(90));
       await block(tenantId, at(90), 'production');

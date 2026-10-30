@@ -70,6 +70,14 @@ export async function listExpiringCertificates(
     }));
   };
   return params.tenantId === undefined
-    ? await asPlatformAdmin(db, read)
+    ? await asPlatformAdmin(
+        db,
+        {
+          purpose: 'certificate:expiring',
+          scope: ['tenant_certificates', 'tenants'],
+          rowCount: (rows) => rows.length,
+        },
+        read,
+      )
     : await withTenantTransaction(db, params.tenantId, read);
 }

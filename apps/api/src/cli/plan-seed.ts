@@ -58,7 +58,9 @@ const SEED_PLANS: SeedPlan[] = [
  * valid from today. Re-running it (or running it after `plan:price-set`) changes nothing.
  */
 export function seedPlans(db: Database, now: Date): Promise<{ seeded: string[] }> {
-  return asPlatformAdmin(db, (tx) => seedPlansIn(tx, now));
+  return asPlatformAdmin(db, { purpose: 'plan:seed', scope: ['plans', 'plan_prices'] }, (tx) =>
+    seedPlansIn(tx, now),
+  );
 }
 
 async function seedPlansIn(tx: Database, now: Date): Promise<{ seeded: string[] }> {

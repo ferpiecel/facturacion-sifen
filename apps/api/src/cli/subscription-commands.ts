@@ -65,67 +65,71 @@ export async function assignSubscription(
 ): Promise<AssignedSubscription> {
   const startsOn = params.startsOn ?? billingDate(now);
   parseDate(startsOn, 'starts-on');
-  return await asPlatformAdmin(db, async (tx) => {
-    await bindTenant(tx, params.tenantId);
-    const plan = (await tx.select().from(plans).where(eq(plans.code, params.planCode))).at(0);
-    if (!plan) throw new Error(`plan not found: ${params.planCode}`);
-    if (!plan.active) throw new Error(`plan is not active: ${params.planCode}`);
-    const price = (
-      await tx
-        .select()
-        .from(planPrices)
-        .where(
-          and(
-            eq(planPrices.planId, plan.id),
-            lte(planPrices.validFrom, startsOn),
-            or(isNull(planPrices.validTo), gte(planPrices.validTo, startsOn)),
-          ),
-        )
-    ).at(0);
-    if (!price) throw new Error(`plan ${plan.code} has no price in force on ${startsOn}`);
-    const live = (
-      await tx
-        .select({ id: subscriptions.id })
-        .from(subscriptions)
-        .where(
-          and(eq(subscriptions.tenantId, params.tenantId), ne(subscriptions.status, 'cancelled')),
-        )
-    ).at(0);
-    if (live) throw new Error(`tenant already has a live subscription: ${live.id}`);
-    const [row] = await tx
-      .insert(subscriptions)
-      .values({
-        tenantId: params.tenantId,
-        planId: plan.id,
-        monthlyPrice: price.monthlyPrice,
-        overagePrice: price.overagePrice,
-        documentQuota: price.includedDocuments,
-        startsAt: dayStart(startsOn),
-        nextBillingAt: dayStart(addMonth(startsOn)),
-      })
-      .returning({ id: subscriptions.id });
-    await recordAudit(tx, {
-      actor: OPERATOR,
-      action: 'subscription.assigned',
-      entity: { type: 'subscription', id: row.id },
-      before: null,
-      after: {
-        plan: plan.code,
+  return await asPlatformAdmin(
+    db,
+    { purpose: 'subscription:assign', scope: ['plans', 'plan_prices', 'subscriptions'] },
+    async (tx) => {
+      await bindTenant(tx, params.tenantId);
+      const plan = (await tx.select().from(plans).where(eq(plans.code, params.planCode))).at(0);
+      if (!plan) throw new Error(`plan not found: ${params.planCode}`);
+      if (!plan.active) throw new Error(`plan is not active: ${params.planCode}`);
+      const price = (
+        await tx
+          .select()
+          .from(planPrices)
+          .where(
+            and(
+              eq(planPrices.planId, plan.id),
+              lte(planPrices.validFrom, startsOn),
+              or(isNull(planPrices.validTo), gte(planPrices.validTo, startsOn)),
+            ),
+          )
+      ).at(0);
+      if (!price) throw new Error(`plan ${plan.code} has no price in force on ${startsOn}`);
+      const live = (
+        await tx
+          .select({ id: subscriptions.id })
+          .from(subscriptions)
+          .where(
+            and(eq(subscriptions.tenantId, params.tenantId), ne(subscriptions.status, 'cancelled')),
+          )
+      ).at(0);
+      if (live) throw new Error(`tenant already has a live subscription: ${live.id}`);
+      const [row] = await tx
+        .insert(subscriptions)
+        .values({
+          tenantId: params.tenantId,
+          planId: plan.id,
+          monthlyPrice: price.monthlyPrice,
+          overagePrice: price.overagePrice,
+          documentQuota: price.includedDocuments,
+          startsAt: dayStart(startsOn),
+          nextBillingAt: dayStart(addMonth(startsOn)),
+        })
+        .returning({ id: subscriptions.id });
+      await recordAudit(tx, {
+        actor: OPERATOR,
+        action: 'subscription.assigned',
+        entity: { type: 'subscription', id: row.id },
+        before: null,
+        after: {
+          plan: plan.code,
+          startsOn,
+          monthlyPrice: price.monthlyPrice,
+          overagePrice: price.overagePrice,
+          documentQuota: price.includedDocuments,
+        },
+      });
+      return {
+        id: row.id,
+        planCode: plan.code,
         startsOn,
         monthlyPrice: price.monthlyPrice,
         overagePrice: price.overagePrice,
         documentQuota: price.includedDocuments,
-      },
-    });
-    return {
-      id: row.id,
-      planCode: plan.code,
-      startsOn,
-      monthlyPrice: price.monthlyPrice,
-      overagePrice: price.overagePrice,
-      documentQuota: price.includedDocuments,
-    };
-  });
+      };
+    },
+  );
 }
 
 export interface RecordPaymentParams {
@@ -151,35 +155,39 @@ export async function recordPayment(
     throw new Error('amount must be a whole number greater than zero');
   }
   if (params.paidOn !== undefined) parseDate(params.paidOn, 'paid-on');
-  return await asPlatformAdmin(db, async (tx) => {
-    await bindTenant(tx, params.tenantId);
-    const subscription = (
-      await tx
-        .select({ id: subscriptions.id })
-        .from(subscriptions)
-        .where(
-          and(eq(subscriptions.tenantId, params.tenantId), ne(subscriptions.status, 'cancelled')),
-        )
-        .orderBy(desc(subscriptions.startsAt))
-    ).at(0);
-    if (!subscription) throw new Error(`tenant has no live subscription: ${params.tenantId}`);
-    const [row] = await tx
-      .insert(payments)
-      .values({
-        tenantId: params.tenantId,
-        subscriptionId: subscription.id,
-        amount: params.amount,
-        reference: params.reference ?? null,
-        paidAt: params.paidOn ? dayStart(params.paidOn) : now,
-      })
-      .returning({ id: payments.id });
-    await recordAudit(tx, {
-      actor: OPERATOR,
-      action: 'payment.recorded',
-      entity: { type: 'payment', id: row.id },
-      before: null,
-      after: { subscriptionId: subscription.id, amount: params.amount },
-    });
-    return { id: row.id, subscriptionId: subscription.id, amount: params.amount };
-  });
+  return await asPlatformAdmin(
+    db,
+    { purpose: 'payment:record', scope: ['subscriptions', 'payments'] },
+    async (tx) => {
+      await bindTenant(tx, params.tenantId);
+      const subscription = (
+        await tx
+          .select({ id: subscriptions.id })
+          .from(subscriptions)
+          .where(
+            and(eq(subscriptions.tenantId, params.tenantId), ne(subscriptions.status, 'cancelled')),
+          )
+          .orderBy(desc(subscriptions.startsAt))
+      ).at(0);
+      if (!subscription) throw new Error(`tenant has no live subscription: ${params.tenantId}`);
+      const [row] = await tx
+        .insert(payments)
+        .values({
+          tenantId: params.tenantId,
+          subscriptionId: subscription.id,
+          amount: params.amount,
+          reference: params.reference ?? null,
+          paidAt: params.paidOn ? dayStart(params.paidOn) : now,
+        })
+        .returning({ id: payments.id });
+      await recordAudit(tx, {
+        actor: OPERATOR,
+        action: 'payment.recorded',
+        entity: { type: 'payment', id: row.id },
+        before: null,
+        after: { subscriptionId: subscription.id, amount: params.amount },
+      });
+      return { id: row.id, subscriptionId: subscription.id, amount: params.amount };
+    },
+  );
 }

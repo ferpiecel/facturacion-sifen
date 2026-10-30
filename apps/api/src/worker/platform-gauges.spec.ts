@@ -3,13 +3,25 @@ import {
   rucBlocks,
   tenantCertificates,
   tenants,
+  type Database,
   type DatabaseHandle,
 } from '@sifen/db';
+import { sql } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seedDocuments } from '../../test/support/document-seed.js';
 import type { Telemetry } from '../modules/telemetry/application/ports/telemetry.port.js';
 import { NOOP_TELEMETRY } from '../modules/telemetry/infrastructure/noop-telemetry.js';
 import { publishPlatformGauges } from './platform-gauges.js';
+
+async function auditTrail(db: Database) {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL ROLE platform_admin`);
+    const result = (await tx.execute(
+      sql`select actor, purpose from platform_audit_log order by seq`,
+    )) as { rows: { actor: string; purpose: string }[] };
+    return result.rows;
+  });
+}
 
 const NOW = new Date('2026-10-27T12:00:00.000Z');
 const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000);
@@ -161,6 +173,15 @@ describe('publishPlatformGauges', () => {
       'de_pending_transmission{"bucket":"24-48h"}=0',
       'de_pending_transmission{"bucket":"48-72h"}=1',
       'de_pending_transmission{"bucket":">72h"}=0',
+    ]);
+  });
+
+  it('audits its platform_admin read as a system job, once per throttle window', async () => {
+    await publishPlatformGauges({ db: handle.db, telemetry, now: () => NOW });
+    await publishPlatformGauges({ db: handle.db, telemetry, now: () => NOW });
+
+    expect(await auditTrail(handle.db)).toEqual([
+      { actor: 'system:worker', purpose: 'worker:platform-gauges' },
     ]);
   });
 });

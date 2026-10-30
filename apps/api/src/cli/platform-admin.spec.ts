@@ -20,7 +20,9 @@ describe('asPlatformAdmin', () => {
         .rows[0].role;
     const before = await roleOf(handle.db);
 
-    const inside = await asPlatformAdmin(handle.db, (tx) => roleOf(tx));
+    const inside = await asPlatformAdmin(handle.db, { purpose: 'test', scope: ['none'] }, (tx) =>
+      roleOf(tx),
+    );
 
     expect(inside).toBe('platform_admin');
     expect(await roleOf(handle.db)).toBe(before);

@@ -29,7 +29,12 @@ the worker's tenant directory and platform gauges) leave no audit entry. `audit_
 
 ## Tasks
 
-- [x] T1 Migration + schema + `withPlatformAdminTransaction` + db tests + ADR (PR 1)
-- [ ] T2 Callers: CLI (`asPlatformAdmin`, 7 sites), worker tenant directory, platform gauges, docs (PR 2)
+- [x] T1 Migration + schema + `withPlatformAdminTransaction` + db tests + ADR (PR 1, commits d716ebff rebased as the first #404 commit, 11d52e4a ADR notes)
+- [x] T2 Callers: CLI (`asPlatformAdmin`, 7 sites), worker tenant directory, platform gauges, docs (PR 2)
+- [x] T3 `ruc:unblock` (added by #401) moved from a raw `SET LOCAL ROLE platform_admin` to `asPlatformAdmin`; test in `apps/api/src/cli/platform-audit.spec.ts` (RED on the pre-conversion code: no audit row; GREEN after)
 
 ## Evidence
+
+- `pnpm --filter @sifen/db exec vitest run test/platform-audit.spec.ts`: 9 pass.
+- `pnpm --filter @sifen/api exec vitest run src/cli src/worker/platform-gauges.spec.ts src/worker/drizzle-tenant-directory.spec.ts`: 286 pass (before T3 test).
+- `drizzle-kit generate` on the #404 branch: "No schema changes, nothing to migrate", so `meta/0072_snapshot.json` matches the schema (journal idx 68 after 0071).

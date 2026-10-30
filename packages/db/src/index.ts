@@ -9,6 +9,7 @@ export {
   apiKeys,
   auditActorType,
   auditLog,
+  platformAuditLog,
   authEvents,
   authThrottle,
   DOCUMENT_STATUSES,
@@ -78,4 +79,8 @@ export {
   type VerifyAuditChainOptions,
 } from './audit-chain.js';
 export * from './series.js';
+export {
+  withPlatformAdminTransaction,
+  type PlatformAdminContext,
+} from './platform-admin-transaction.js';
 export * from './request-id.js';

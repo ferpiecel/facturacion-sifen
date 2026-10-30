@@ -24,3 +24,4 @@
 | [0020](0020-eventos-del-emisor-almacenamiento-y-lotes.md) | Eventos del emisor, almacenamiento y envío en lotes | Aceptado |
 | [0021](0021-correccion-de-un-de-rechazado.md) | Corrección y reenvío de un DE rechazado | Aceptado |
 | [0022](0022-gateway-soap-por-tenant.md) | Gateway SOAP por tenant con el certificado del tenant | Aceptado |
+| [0023](0023-auditoria-de-platform-admin.md) | Auditoría de cada uso de `platform_admin` | Aceptado |

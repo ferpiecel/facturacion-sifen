@@ -31,3 +31,15 @@ El umbral y la tolerancia son configurables y viven en un solo lugar. El QR y el
 - **Llamar al LLM siempre, sin QR ni capa de texto:** más costo, más datos enviados y menos certeza sobre el CDC.
 - **Montos como `number` en la salida del LLM:** pierde precisión (ADR-0018).
 - **Fijar ya la biblioteca de PDF o QR:** sin medir licencia, tamaño y Node 22 el riesgo es alto; decide el spike.
+
+## Adenda: spike R3.2 (parser de XML SIFEN)
+
+Decisión: `libxml2-wasm` 0.7.2 (licencia MIT, 1,3 MB instalado, ya fijado en `packages/sifen-xsd`), declarado como dependencia exacta de `apps/api` y usado solo en `modules/reception/infrastructure/adapters/libxml2-sifen-xml-parser.adapter.ts`. No se agrega ninguna versión nueva al repositorio.
+
+- **Por qué:** ya está en el lockfile y en producción para la validación XSD (sin superficie de dependencias nueva), maneja espacios de nombres con XPath y expone `XML_PARSE_NO_XXE` y `XML_PARSE_NONET`. Candidato descartado: `fast-xml-parser` (MIT, JS puro): agrega una dependencia, devuelve objetos sin tipos de nodo y su procesamiento de entidades es una opción más que hay que acordarse de limitar. Un parser SAX/streaming no aporta nada a documentos de 4 a 12 KB con tope de 2 MiB.
+- **XXE y billion laughs:** el adaptador rechaza por completo cualquier `<!DOCTYPE`, `<!ENTITY`, `<!ELEMENT`, `<!ATTLIST` o `<!NOTATION` escaneando los bytes antes de parsear (los documentos SIFEN nunca llevan DTD), rechaza UTF-16/32 y EBCDIC porque no se pueden escanear, y como defensa en profundidad parsea con `NO_XXE | NONET`. Los mensajes de error no incluyen contenido del documento.
+- **Tope de tamaño:** `maxBytes` configurable en el constructor, por defecto 2 MiB, verificado antes de decodificar.
+- **Tipos soportados:** solo `iTiDE` 1 (factura electrónica), el único con fixtures reales y el único que A mapea. Los demás códigos lanzan `UnsupportedDocumentTypeError`; ampliar el conjunto exige fixtures reales.
+- **Formas:** `rDE` con o sin espacio de nombres y envuelto en otro elemento; la búsqueda usa `local-name()`.
+- **Medido:** los 5 XML dorados (4 a 8 KB) se parsean en milisegundos dentro de la suite (21 pruebas en unos 40 ms en total). No se hizo un benchmark formal; no se afirma más.
+- **Riesgo conocido:** `xmlRegisterInputProvider` de libxml2-wasm es global al proceso (lo registra `@sifen/sifen-xsd`); el parser no resuelve recursos externos, así que no depende de él.

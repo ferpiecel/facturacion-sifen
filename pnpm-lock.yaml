@@ -242,6 +242,9 @@ importers:
       ioredis:
         specifier: 6.0.0
         version: 6.0.0(supports-color@7.2.0)
+      libxml2-wasm:
+        specifier: 0.7.2
+        version: 0.7.2
       markdown-it:
         specifier: 14.1.0
         version: 14.1.0

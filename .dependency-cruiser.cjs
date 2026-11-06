@@ -5,6 +5,10 @@
 const FW =
   '(^|node_modules/)((@nestjs|@fastify)/|(fastify|drizzle-orm|bullmq|ioredis|pg|reflect-metadata)(/|$))';
 
+// Third-party SDKs and PDF/QR/image/wasm libraries (excludes libxml2-wasm, used by packages/sifen-xsd).
+const SDK_LIBS =
+  '(^|node_modules/)((@aws-sdk|@smithy)/|(@anthropic-ai/sdk|pdfjs-dist|jsqr|zxing-wasm|sharp|pngjs|jpeg-js|mupdf)(/|$))';
+
 module.exports = {
   options: {
     tsPreCompilationDeps: true,
@@ -46,6 +50,14 @@ module.exports = {
         'only packages/sifen-tips may import the facturacionelectronicapy-* (TIPS) libraries (ADR-0015)',
       from: { pathNot: '(^|/)packages/sifen-tips/' },
       to: { path: '(^|node_modules/)facturacionelectronicapy-' },
+    },
+    {
+      name: 'sdk-libs-confined-to-infrastructure',
+      severity: 'error',
+      comment:
+        'AWS/Anthropic SDKs and PDF/QR/image libraries may only be imported from modules/*/infrastructure/ (ADR-0020, ADR-0021)',
+      from: { pathNot: '(^|/)modules/[^/]+/infrastructure/' },
+      to: { path: SDK_LIBS },
     },
   ],
 };

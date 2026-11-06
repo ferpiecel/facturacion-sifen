@@ -9,6 +9,7 @@ import { PartnersModule } from './modules/partners/partners.module.js';
 import { PortalDocumentsModule } from './modules/portal-documents/portal-documents.module.js';
 import { IdentityModule } from './modules/identity/identity.module.js';
 import { PortalAuthModule } from './modules/identity/portal-auth.module.js';
+import { ReceptionModule } from './modules/reception/reception.module.js';
 import { WebhooksModule } from './modules/webhooks/webhooks.module.js';
 
 @Module({
@@ -24,6 +25,7 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module.js';
     ApiDocsModule,
     EmissionModule,
     WebhooksModule,
+    ReceptionModule,
   ],
 })
 export class AppModule {}

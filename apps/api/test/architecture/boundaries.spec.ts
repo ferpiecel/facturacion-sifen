@@ -74,4 +74,20 @@ describe('architecture boundaries (dependency-cruiser rules on fixtures)', () =>
     expect(module).toBeDefined();
     expect(module?.dependencies.every((dependency) => dependency.valid)).toBe(true);
   });
+
+  it('flags a domain file importing an SDK library', async () => {
+    const result = await cruiseFixtures();
+
+    expect(violatedRuleNames(result, 'modules/sample/domain/sdk-import.ts')).toContain(
+      'sdk-libs-confined-to-infrastructure',
+    );
+  });
+
+  it('does not flag infrastructure importing an SDK library', async () => {
+    const result = await cruiseFixtures();
+
+    expect(
+      violatedRuleNames(result, 'modules/sample/infrastructure/sdk-import-allowed.ts'),
+    ).not.toContain('sdk-libs-confined-to-infrastructure');
+  });
 });

@@ -1138,6 +1138,42 @@ export const loteDocuments = pgTable(
 );
 
 /**
+ * Metadata of an uploaded file received by the reception module (XML, PDF, photo). The bytes
+ * live in object storage under `storage_key`, never in the database. One row per distinct
+ * content per tenant (`UNIQUE(tenant_id, sha256)` is the upload dedupe); `(tenant_id, id)` is
+ * unique so later tables reference it with a composite tenant foreign key.
+ */
+export const receivedArtifacts = pgTable(
+  'received_artifacts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    /** Object key, globally unique: `<source>/<tenant_id>/<sha256|cdc>.<ext>`. */
+    storageKey: text('storage_key').notNull().unique('received_artifacts_storage_key_key'),
+    contentType: varchar('content_type', { length: 255 }),
+    /** Lowercase hex SHA-256 of the stored bytes. */
+    sha256: char('sha256', { length: 64 }).notNull(),
+    sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
+    originalName: text('original_name'),
+    pageCount: integer('page_count'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('received_artifacts_tenant_id_key').on(table.tenantId, table.id),
+    unique('received_artifacts_tenant_sha256_key').on(table.tenantId, table.sha256),
+    check('received_artifacts_sha256_hex', sql`${table.sha256} ~ '^[0-9a-f]{64}$'`),
+    check('received_artifacts_size_nonneg', sql`${table.sizeBytes} >= 0`),
+    check(
+      'received_artifacts_page_count_positive',
+      sql`${table.pageCount} IS NULL OR ${table.pageCount} > 0`,
+    ),
+  ],
+);
+
+/**
  * Every table that carries a `tenant_id` column and MUST be covered by
  * `FORCE ROW LEVEL SECURITY` plus a tenant-isolation policy. The
  * `rls-coverage.spec.ts` drift check discovers these tables from the
@@ -1149,6 +1185,7 @@ export const TENANT_TABLES = [
   'documents',
   'lote_documents',
   'lotes',
+  'received_artifacts',
   'tenant_document_sequences',
   'tenant_establishments',
   'tenant_expedition_points',

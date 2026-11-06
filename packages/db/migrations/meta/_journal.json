@@ -323,6 +323,20 @@
       "when": 1791460000000,
       "tag": "0045_mfa_enrolment",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1793978791211,
+      "tag": "0046_received_artifacts",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1793978792211,
+      "tag": "0047_received_artifacts_rls",
+      "breakpoints": true
     }
   ]
 }

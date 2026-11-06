@@ -24,3 +24,4 @@
 | [0020](0020-almacenamiento-de-objetos-seaweedfs-storage-provider.md) | Almacenamiento de objetos con SeaweedFS detrás del puerto `StorageProvider` | Propuesto |
 | [0021](0021-pipeline-de-extraccion-confianza-y-auto-confirmacion.md) | Pipeline de extracción, confianza por campo y política de auto-confirmación | Propuesto |
 | [0022](0022-consulta-a-ekuatia-por-cdc-con-recaptcha.md) | Consulta a eKuatia por CDC con reCAPTCHA v2 (2Captcha): integración de riesgo | Propuesto |
+| [0023](0023-eventos-de-webhook-de-recepcion-y-scopes.md) | Eventos de webhook de recepción y scopes `reception:*` | Propuesto |

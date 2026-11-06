@@ -3,7 +3,7 @@ import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../src/app.module.js';
-import { HEALTH_CHECK_PORT } from '../src/modules/health/health.tokens.js';
+import { HEALTH_CHECK_PORT, STORAGE_READINESS_PORT } from '../src/modules/health/health.tokens.js';
 
 describe('GET /health (e2e)', () => {
   let app: NestFastifyApplication;
@@ -26,8 +26,31 @@ describe('GET /health (e2e)', () => {
 
     expect(response.statusCode).toBe(200);
 
-    const body = JSON.parse(response.payload) as { status: string };
+    const body = JSON.parse(response.payload) as { status: string; storage: string };
     expect(body.status).toBe('up');
+    expect(body.storage).toBe('skipped');
+  });
+
+  it('returns 503 reporting storage down when storage is unreachable', async () => {
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(STORAGE_READINESS_PORT)
+      .useValue({ check: () => Promise.resolve('down') })
+      .compile();
+    const downApp = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
+    await downApp.init();
+    await downApp.getHttpAdapter().getInstance().ready();
+
+    try {
+      const response = await downApp.getHttpAdapter().getInstance().inject({
+        method: 'GET',
+        url: '/health',
+      });
+
+      expect(response.statusCode).toBe(503);
+      expect((JSON.parse(response.payload) as { storage: string }).storage).toBe('down');
+    } finally {
+      await downApp.close();
+    }
   });
 
   it('returns 503 with a down status when the health check fails', async () => {

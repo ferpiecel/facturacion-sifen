@@ -1174,6 +1174,163 @@ export const receivedArtifacts = pgTable(
 );
 
 /**
+ * A document issued by a third party in favor of a tenant (a purchase), received through the
+ * reception module from a SIFEN XML, an eKuatia CDC lookup, or a PDF/photo read by vision.
+ * Own aggregate: never mixed with `documents` (emitted). Every business field is nullable
+ * because extraction can be partial; the domain decides when a document may be confirmed.
+ * `(tenant_id, id)` is unique so items and confidences reference it with a composite tenant
+ * foreign key. `received_documents_guard` freezes the identity columns after insert.
+ */
+export const receivedDocuments = pgTable(
+  'received_documents',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    source: varchar('source', { length: 16 }).notNull(),
+    status: varchar('status', { length: 32 }).notNull().default('received'),
+    /** Optimistic lock; incremented on every correction or reprocess, never decreases. */
+    version: integer('version').notNull().default(1),
+    /** Index-friendly mirror of `status = 'needs_review'` (parity CHECK). */
+    needsReview: boolean('needs_review').notNull().default(false),
+    /** Reason codes (never free text); non-empty only while in review. */
+    needsReviewReasons: text('needs_review_reasons').array().notNull().default([]),
+    /** False when the receiver RUC is not the tenant's own: stored, but webhook-silent. */
+    isOwnReceiver: boolean('is_own_receiver').notNull().default(true),
+    /** iTiDE code, like `documents.document_type`. */
+    documentType: smallint('document_type'),
+    cdc: char('cdc', { length: 44 }),
+    timbrado: varchar('timbrado', { length: 8 }),
+    establishmentCode: varchar('establishment_code', { length: 3 }),
+    expeditionPointCode: varchar('expedition_point_code', { length: 3 }),
+    documentNumber: varchar('document_number', { length: 7 }),
+    series: varchar('series', { length: 2 }),
+    issuerRucBase: varchar('issuer_ruc_base', { length: 8 }),
+    issuerRucDv: smallint('issuer_ruc_dv'),
+    issuerLegalName: text('issuer_legal_name'),
+    issuerTradeName: text('issuer_trade_name'),
+    issuerAddress: text('issuer_address'),
+    issuerEconomicActivity: text('issuer_economic_activity'),
+    receiverRucBase: varchar('receiver_ruc_base', { length: 8 }),
+    receiverRucDv: smallint('receiver_ruc_dv'),
+    receiverLegalName: text('receiver_legal_name'),
+    receiverType: smallint('receiver_type'),
+    issuedAt: timestamp('issued_at', { withTimezone: true }),
+    dueOn: date('due_on', { mode: 'string' }),
+    paidOn: date('paid_on', { mode: 'string' }),
+    paymentCondition: varchar('payment_condition', { length: 8 }),
+    creditTermDays: integer('credit_term_days'),
+    paymentMethod: text('payment_method'),
+    currency: char('currency', { length: 3 }).notNull().default('PYG'),
+    exchangeRate: numeric('exchange_rate', { precision: 23, scale: 8 }),
+    totalExempt: numeric('total_exempt', { precision: 23, scale: 8 }),
+    totalZeroRated: numeric('total_zero_rated', { precision: 23, scale: 8 }),
+    taxable5: numeric('taxable_5', { precision: 23, scale: 8 }),
+    taxable10: numeric('taxable_10', { precision: 23, scale: 8 }),
+    vat5: numeric('vat_5', { precision: 23, scale: 8 }),
+    vat10: numeric('vat_10', { precision: 23, scale: 8 }),
+    totalVat: numeric('total_vat', { precision: 23, scale: 8 }),
+    totalDiscount: numeric('total_discount', { precision: 23, scale: 8 }),
+    totalAmount: numeric('total_amount', { precision: 23, scale: 8 }),
+    totalPyg: numeric('total_pyg', { precision: 23, scale: 8 }),
+    sifenStatus: varchar('sifen_status', { length: 16 }).notNull().default('unknown'),
+    sifenAuthorizedAt: timestamp('sifen_authorized_at', { withTimezone: true }),
+    sifenProtocolNumber: varchar('sifen_protocol_number', { length: 64 }),
+    confidenceOverall: numeric('confidence_overall', { precision: 4, scale: 3 }),
+    artifactId: uuid('artifact_id'),
+    /** Raw parsed rDE or raw model output; never logged. */
+    rawData: jsonb('raw_data'),
+    idempotencyKey: varchar('idempotency_key', { length: 255 }),
+    requestHash: char('request_hash', { length: 64 }),
+    extractionAttempts: integer('extraction_attempts').notNull().default(0),
+    /** A plain machine code, never free text. */
+    extractionErrorCode: varchar('extraction_error_code', { length: 64 }),
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+    /** Portal user id or API key id that confirmed the document. */
+    confirmedBy: text('confirmed_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('received_documents_tenant_id_key').on(table.tenantId, table.id),
+    unique('received_documents_tenant_idempotency_key_key').on(
+      table.tenantId,
+      table.idempotencyKey,
+    ),
+    foreignKey({
+      name: 'received_documents_artifact_fk',
+      columns: [table.tenantId, table.artifactId],
+      foreignColumns: [receivedArtifacts.tenantId, receivedArtifacts.id],
+    }),
+    uniqueIndex('received_documents_tenant_cdc_idx')
+      .on(table.tenantId, table.cdc)
+      .where(sql`${table.cdc} IS NOT NULL`),
+    uniqueIndex('received_documents_tenant_number_idx')
+      .on(table.tenantId, table.issuerRucBase, table.timbrado, table.documentNumber)
+      .where(
+        sql`${table.issuerRucBase} IS NOT NULL AND ${table.timbrado} IS NOT NULL AND ${table.documentNumber} IS NOT NULL`,
+      ),
+    index('received_documents_tenant_updated_idx').on(
+      table.tenantId,
+      sql`${table.updatedAt} DESC`,
+      sql`${table.id} DESC`,
+    ),
+    index('received_documents_tenant_status_idx').on(table.tenantId, table.status),
+    check(
+      'received_documents_source_valid',
+      sql`${table.source} IN ('sifen_xml', 'ekuatia_cdc', 'pdf', 'photo')`,
+    ),
+    check(
+      'received_documents_status_valid',
+      sql`${table.status} IN ('received', 'extracting', 'extracted', 'needs_review', 'extraction_failed', 'confirmed')`,
+    ),
+    check('received_documents_version_positive', sql`${table.version} >= 1`),
+    check(
+      'received_documents_needs_review_parity',
+      sql`${table.needsReview} = (${table.status} = 'needs_review')`,
+    ),
+    check(
+      'received_documents_reasons_only_in_review',
+      sql`${table.needsReview} OR cardinality(${table.needsReviewReasons}) = 0`,
+    ),
+    check(
+      'received_documents_document_type_valid',
+      sql`${table.documentType} IS NULL OR ${table.documentType} IN (1, 4, 5, 6, 7)`,
+    ),
+    check('received_documents_cdc_format', sql`${table.cdc} ~ '^[0-9]{44}$'`),
+    check(
+      'received_documents_payment_condition_valid',
+      sql`${table.paymentCondition} IS NULL OR ${table.paymentCondition} IN ('cash', 'credit')`,
+    ),
+    check(
+      'received_documents_sifen_status_valid',
+      sql`${table.sifenStatus} IN ('unknown', 'approved', 'rejected', 'cancelled', 'voided', 'na')`,
+    ),
+    check(
+      'received_documents_confidence_range',
+      sql`${table.confidenceOverall} IS NULL OR (${table.confidenceOverall} >= 0 AND ${table.confidenceOverall} <= 1)`,
+    ),
+    check(
+      'received_documents_error_code_format',
+      sql`${table.extractionErrorCode} ~ '^[a-z0-9_.-]{1,64}$'`,
+    ),
+    check(
+      'received_documents_idempotency_pair',
+      sql`(${table.idempotencyKey} IS NULL) = (${table.requestHash} IS NULL)`,
+    ),
+    check(
+      'received_documents_idempotency_key_format',
+      sql`${table.idempotencyKey} ~ '^[!-~]{1,255}$'`,
+    ),
+    check(
+      'received_documents_idempotency_hash_format',
+      sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+  ],
+);
+
+/**
  * Every table that carries a `tenant_id` column and MUST be covered by
  * `FORCE ROW LEVEL SECURITY` plus a tenant-isolation policy. The
  * `rls-coverage.spec.ts` drift check discovers these tables from the
@@ -1186,6 +1343,7 @@ export const TENANT_TABLES = [
   'lote_documents',
   'lotes',
   'received_artifacts',
+  'received_documents',
   'tenant_document_sequences',
   'tenant_establishments',
   'tenant_expedition_points',

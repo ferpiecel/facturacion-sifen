@@ -22,3 +22,4 @@
 | [0018](0018-precision-decimal-en-montos-y-cantidades.md) | Precisión decimal exacta en montos y cantidades | Aceptado |
 | [0019](0019-contexto-acotado-reception-documentos-recibidos.md) | Contexto acotado `reception`: documentos recibidos como agregado propio | Propuesto |
 | [0020](0020-almacenamiento-de-objetos-seaweedfs-storage-provider.md) | Almacenamiento de objetos con SeaweedFS detrás del puerto `StorageProvider` | Propuesto |
+| [0021](0021-pipeline-de-extraccion-confianza-y-auto-confirmacion.md) | Pipeline de extracción, confianza por campo y política de auto-confirmación | Propuesto |

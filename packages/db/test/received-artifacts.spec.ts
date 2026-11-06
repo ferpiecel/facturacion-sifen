@@ -194,6 +194,8 @@ describe('received_artifacts', () => {
     const { db } = await seed();
     // received_documents (0048/0049) references this table, so it is rolled back first.
     for (const file of [
+      '0051_received_document_items_and_confidences_rls.down.sql',
+      '0050_received_document_items_and_confidences.down.sql',
       '0049_received_documents_rls.down.sql',
       '0048_received_documents.down.sql',
       '0047_received_artifacts_rls.down.sql',

@@ -1331,6 +1331,99 @@ export const receivedDocuments = pgTable(
 );
 
 /**
+ * A line of a received document. `quantity` is numeric(18,8): up to 10 integer digits and 8
+ * decimals (ADR-0018); money is numeric(23,8). The composite foreign key keeps an item in the
+ * same tenant as its document. Items are inserted and updated, never deleted by the runtime
+ * role, so a correction rewrites positions in place.
+ */
+export const receivedDocumentItems = pgTable(
+  'received_document_items',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    receivedDocumentId: uuid('received_document_id').notNull(),
+    /** 1-based line order inside the document. */
+    position: integer('position').notNull(),
+    description: text('description'),
+    productCode: text('product_code'),
+    quantity: numeric('quantity', { precision: 18, scale: 8 }),
+    unitOfMeasure: text('unit_of_measure'),
+    unitPrice: numeric('unit_price', { precision: 23, scale: 8 }),
+    discount: numeric('discount', { precision: 23, scale: 8 }),
+    subtotal: numeric('subtotal', { precision: 23, scale: 8 }),
+    vatRate: smallint('vat_rate'),
+    taxableBase: numeric('taxable_base', { precision: 23, scale: 8 }),
+    vatAmount: numeric('vat_amount', { precision: 23, scale: 8 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'received_document_items_document_fk',
+      columns: [table.tenantId, table.receivedDocumentId],
+      foreignColumns: [receivedDocuments.tenantId, receivedDocuments.id],
+    }),
+    unique('received_document_items_document_position_key').on(
+      table.receivedDocumentId,
+      table.position,
+    ),
+    check('received_document_items_position_positive', sql`${table.position} >= 1`),
+    check(
+      'received_document_items_vat_rate_valid',
+      sql`${table.vatRate} IS NULL OR ${table.vatRate} IN (0, 5, 10)`,
+    ),
+  ],
+);
+
+/**
+ * Per-field extraction confidence of a received document, for the 8 curated fields, with the
+ * audit of a human or ERP correction (`corrected_by` and `corrected_at` are set together).
+ */
+export const receivedDocumentFieldConfidences = pgTable(
+  'received_document_field_confidences',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    receivedDocumentId: uuid('received_document_id').notNull(),
+    fieldName: varchar('field_name', { length: 32 }).notNull(),
+    confidence: numeric('confidence', { precision: 4, scale: 3 }).notNull(),
+    extractedValue: text('extracted_value'),
+    correctedValue: text('corrected_value'),
+    correctedBy: text('corrected_by'),
+    correctedAt: timestamp('corrected_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'received_document_field_confidences_document_fk',
+      columns: [table.tenantId, table.receivedDocumentId],
+      foreignColumns: [receivedDocuments.tenantId, receivedDocuments.id],
+    }),
+    unique('received_document_field_confidences_document_field_key').on(
+      table.receivedDocumentId,
+      table.fieldName,
+    ),
+    check(
+      'received_document_field_confidences_field_name_valid',
+      sql`${table.fieldName} IN ('issuer_ruc', 'issuer_legal_name', 'issued_on', 'document_number', 'receiver_ruc', 'payment_condition', 'totals', 'items')`,
+    ),
+    check(
+      'received_document_field_confidences_confidence_range',
+      sql`${table.confidence} >= 0 AND ${table.confidence} <= 1`,
+    ),
+    check(
+      'received_document_field_confidences_correction_pair',
+      sql`(${table.correctedBy} IS NULL) = (${table.correctedAt} IS NULL)`,
+    ),
+  ],
+);
+
+/**
  * Every table that carries a `tenant_id` column and MUST be covered by
  * `FORCE ROW LEVEL SECURITY` plus a tenant-isolation policy. The
  * `rls-coverage.spec.ts` drift check discovers these tables from the
@@ -1343,6 +1436,8 @@ export const TENANT_TABLES = [
   'lote_documents',
   'lotes',
   'received_artifacts',
+  'received_document_field_confidences',
+  'received_document_items',
   'received_documents',
   'tenant_document_sequences',
   'tenant_establishments',

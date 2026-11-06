@@ -363,7 +363,10 @@ describe('received_documents', () => {
 
   it('rolls back cleanly: RLS first (0049), then the table (0048)', async () => {
     const { db } = await seed();
+    // The items and confidences tables (0050/0051) reference this one, so they go first.
     for (const file of [
+      '0051_received_document_items_and_confidences_rls.down.sql',
+      '0050_received_document_items_and_confidences.down.sql',
       '0049_received_documents_rls.down.sql',
       '0048_received_documents.down.sql',
     ]) {

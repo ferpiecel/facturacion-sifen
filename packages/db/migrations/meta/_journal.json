@@ -351,6 +351,20 @@
       "when": 1793979031293,
       "tag": "0049_received_documents_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1793980108216,
+      "tag": "0050_received_document_items_and_confidences",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1793980109216,
+      "tag": "0051_received_document_items_and_confidences_rls",
+      "breakpoints": true
     }
   ]
 }

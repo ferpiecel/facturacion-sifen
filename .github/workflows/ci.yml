@@ -141,3 +141,71 @@ jobs:
       - run: pnpm turbo run build --filter=@sifen/api^...
 
       - run: pnpm --filter @sifen/api exec vitest run src/worker --reporter=verbose
+
+  storage-seaweedfs:
+    name: storage-seaweedfs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Real SeaweedFS (same pinned image as docker-compose.yml) for the S3 adapter and presigned URL
+    # specs that skip themselves without STORAGE_ENDPOINT_URL. Dev credentials are non-secret.
+    env:
+      STORAGE_ENDPOINT_URL: http://127.0.0.1:9000
+      STORAGE_BUCKET: sifen-reception-dev
+      STORAGE_REGION: us-east-1
+      STORAGE_ADMIN_ACCESS_KEY: dev-admin-access-key
+      STORAGE_ADMIN_SECRET_KEY: dev-admin-secret-key-change-me
+      STORAGE_ACCESS_KEY_ID: dev-app-access-key
+      STORAGE_SECRET_ACCESS_KEY: dev-app-secret-key-change-me
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Start SeaweedFS
+        run: |
+          set -eu
+          sed -e "s|\${STORAGE_ADMIN_ACCESS_KEY}|$STORAGE_ADMIN_ACCESS_KEY|g" \
+              -e "s|\${STORAGE_ADMIN_SECRET_KEY}|$STORAGE_ADMIN_SECRET_KEY|g" \
+              -e "s|\${STORAGE_APP_ACCESS_KEY}|$STORAGE_ACCESS_KEY_ID|g" \
+              -e "s|\${STORAGE_APP_SECRET_KEY}|$STORAGE_SECRET_ACCESS_KEY|g" \
+              docker/seaweedfs/s3.json.template > "$RUNNER_TEMP/s3.json"
+          docker run -d --name seaweedfs -p 127.0.0.1:9000:9000 \
+            -v "$RUNNER_TEMP/s3.json:/etc/seaweedfs/s3.json:ro" \
+            chrislusf/seaweedfs:4.48 \
+            server -dir=/data -ip=0.0.0.0 -s3 -s3.port=9000 \
+            -s3.config=/etc/seaweedfs/s3.json -s3.externalUrl="$STORAGE_ENDPOINT_URL"
+
+      - name: Wait for the S3 port
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -s -o /dev/null http://127.0.0.1:9000/; then exit 0; fi
+            sleep 2
+          done
+          docker logs seaweedfs || true
+          echo "SeaweedFS S3 port did not become ready in time" >&2
+          exit 1
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      - run: node scripts/storage-create-bucket.mjs
+
+      # The corepack bundled with Node 22 cannot shim pnpm 12's native binary; 0.36+ can.
+      - run: npm install --global corepack@0.36.0 && corepack enable
+
+      - id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+        env:
+          COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+
+      - uses: actions/cache@v6
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-store-${{ runner.os }}-
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm turbo run build --filter=@sifen/api^...
+
+      - run: pnpm --filter @sifen/api exec vitest run test/storage.seaweedfs.integration.spec.ts --reporter=verbose

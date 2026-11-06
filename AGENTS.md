@@ -103,7 +103,8 @@ Invariantes. Si un cambio no puede respetarlas, se frena y se consulta.
 - Gate de cobertura: 85 % en líneas, ramas, funciones y sentencias, por paquete (`thresholds` en cada `vitest.config.ts`; entrada `coverage` de la matriz de `quality-gates`).
 - `packages/db`: PGlite por defecto; el job `db-postgres` corre la misma suite en un testcontainer `postgres:16` con `DB_TEST_DRIVER=postgres` (`pnpm --filter @sifen/db test:postgres`). Lo que depende de roles reales solo se prueba ahí.
 - Pruebas del worker con Redis real: `REDIS_URL=... pnpm --filter @sifen/api exec vitest run src/worker`; sin `REDIS_URL` se omiten y las corre el job `worker-redis`.
-- El CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) corre el job `quality-gates` (matriz: `format:check`, `lint`, `typecheck`, `depcruise`, `test`, `build`, `verify-vendor`, `coverage`) y los jobs `db-postgres` y `worker-redis`.
+- Almacenamiento con SeaweedFS real: `docker compose up -d --wait seaweedfs seaweedfs-init` y `STORAGE_ENDPOINT_URL=http://127.0.0.1:9000 STORAGE_BUCKET=sifen-reception-dev STORAGE_ACCESS_KEY_ID=dev-app-access-key STORAGE_SECRET_ACCESS_KEY=dev-app-secret-key-change-me pnpm --filter @sifen/api exec vitest run test/storage.seaweedfs.integration.spec.ts`; sin `STORAGE_ENDPOINT_URL` se omite y la corre el job `storage-seaweedfs`.
+- El CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) corre el job `quality-gates` (matriz: `format:check`, `lint`, `typecheck`, `depcruise`, `test`, `build`, `verify-vendor`, `coverage`) y los jobs `db-postgres`, `worker-redis` y `storage-seaweedfs`.
 - El test que compara `docs/api/openapi.json` con el código falla si el spec cambia sin regenerarse (`pnpm --filter @sifen/api openapi`).
 
 ## Flujo de trabajo
@@ -130,7 +131,7 @@ pnpm --filter @sifen/db test:postgres
 pnpm --filter @sifen/api coverage
 ```
 
-`pnpm verify` corre los gates del CI sin Docker (`db-postgres` y `worker-redis` siguen solo en CI) y imprime una línea de resumen. El hook `.githooks/pre-push` lo ejecuta antes de cada push (se activa con `pnpm install`); se omite con `git push --no-verify`. Los agentes corren `pnpm verify` antes de pushear y leen solo su resumen, no `.verify.log` completo. Detalle y puesta en marcha: [`docs/desarrollo.md`](docs/desarrollo.md#verificación-local).
+`pnpm verify` corre los gates del CI sin Docker (`db-postgres`, `worker-redis` y `storage-seaweedfs` siguen solo en CI) y imprime una línea de resumen. El hook `.githooks/pre-push` lo ejecuta antes de cada push (se activa con `pnpm install`); se omite con `git push --no-verify`. Los agentes corren `pnpm verify` antes de pushear y leen solo su resumen, no `.verify.log` completo. Detalle y puesta en marcha: [`docs/desarrollo.md`](docs/desarrollo.md#verificación-local).
 
 ## Dónde encontrar
 

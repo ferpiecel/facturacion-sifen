@@ -20,3 +20,5 @@
 | [0016](0016-tenant-transaction-runner-sin-plugin-cls.md) | `TenantTransactionRunner` singleton en vez del plugin transaccional de nestjs-cls | Aceptado |
 | [0017](0017-direccion-del-receptor-y-catalogo-geografico.md) | Dirección del receptor y propiedad del catálogo geográfico | Aceptado |
 | [0018](0018-precision-decimal-en-montos-y-cantidades.md) | Precisión decimal exacta en montos y cantidades | Aceptado |
+| [0019](0019-contexto-acotado-reception-documentos-recibidos.md) | Contexto acotado `reception`: documentos recibidos como agregado propio | Propuesto |
+| [0020](0020-almacenamiento-de-objetos-seaweedfs-storage-provider.md) | Almacenamiento de objetos con SeaweedFS detrás del puerto `StorageProvider` | Propuesto |

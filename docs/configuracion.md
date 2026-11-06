@@ -40,6 +40,8 @@ Todas tienen un valor por defecto, así que el entorno local funciona sin un arc
 
 `STORAGE_ENDPOINT_URL`, `STORAGE_BUCKET`, `STORAGE_ACCESS_KEY_ID` y `STORAGE_SECRET_ACCESS_KEY` van juntas. Con `NODE_ENV` exactamente `development` o `test`, sin ninguna de ellas el almacenamiento queda deshabilitado (sin error); con solo algunas, la validación **falla** (se conecta al arranque junto con el módulo de recepción). Con cualquier otro valor de `NODE_ENV` (o sin valor) las cuatro son obligatorias, el endpoint debe ser `https` y las credenciales no pueden ser valores de ejemplo, de lo contrario la validación **falla** (se conecta al arranque junto con el módulo de recepción).
 
+Para desarrollo local, `docker compose up -d` provee SeaweedFS con credenciales de ejemplo (ver [`desarrollo.md`](desarrollo.md#almacenamiento-local-seaweedfs)); esas credenciales nunca se usan fuera de `development` y `test`.
+
 ## IP del cliente y proxies de confianza
 
 La IP que usa el límite de intentos de login es `request.ip` de Fastify, normalizada por `normalizeClientIp` (`apps/api/src/modules/identity/infrastructure/http/client-ip.ts`): IPv4 tal cual, IPv6 colapsada a su /64.

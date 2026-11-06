@@ -30,6 +30,62 @@ services:
       timeout: 5s
       retries: 10
 
+  # Object storage for the reception module (ADR-0020). Image tag is pinned
+  # (verified 4.48: flags -s3, -s3.port, -s3.config, -s3.externalUrl). Anonymous
+  # access is disabled because identities are loaded from the rendered
+  # s3.json. The dev credentials below are NON-secret defaults for local use only.
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.48
+    restart: unless-stopped
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        set -eu
+        sed -e "s|\$${STORAGE_ADMIN_ACCESS_KEY}|$$STORAGE_ADMIN_ACCESS_KEY|g" \
+            -e "s|\$${STORAGE_ADMIN_SECRET_KEY}|$$STORAGE_ADMIN_SECRET_KEY|g" \
+            -e "s|\$${STORAGE_APP_ACCESS_KEY}|$$STORAGE_APP_ACCESS_KEY|g" \
+            -e "s|\$${STORAGE_APP_SECRET_KEY}|$$STORAGE_APP_SECRET_KEY|g" \
+            /templates/s3.json.template > /tmp/s3.json
+        exec weed server -dir=/data -ip=0.0.0.0 -s3 -s3.port=9000 \
+          -s3.config=/tmp/s3.json -s3.externalUrl="$$STORAGE_PUBLIC_ENDPOINT_URL"
+    environment:
+      STORAGE_ADMIN_ACCESS_KEY: ${STORAGE_ADMIN_ACCESS_KEY:-dev-admin-access-key}
+      STORAGE_ADMIN_SECRET_KEY: ${STORAGE_ADMIN_SECRET_KEY:-dev-admin-secret-key-change-me}
+      STORAGE_APP_ACCESS_KEY: ${STORAGE_APP_ACCESS_KEY:-dev-app-access-key}
+      STORAGE_APP_SECRET_KEY: ${STORAGE_APP_SECRET_KEY:-dev-app-secret-key-change-me}
+      STORAGE_PUBLIC_ENDPOINT_URL: ${STORAGE_PUBLIC_ENDPOINT_URL:-http://127.0.0.1:${STORAGE_PORT:-9000}}
+    ports:
+      - '127.0.0.1:${STORAGE_PORT:-9000}:9000'
+    volumes:
+      - seaweedfsdata:/data
+      - ./docker/seaweedfs/s3.json.template:/templates/s3.json.template:ro
+    healthcheck:
+      # Any HTTP answer (403 without credentials) proves the S3 listener is up.
+      test: ['CMD', 'curl', '-s', '-o', '/dev/null', 'http://127.0.0.1:9000/']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # One-shot: creates the bucket with a signed request, then exits.
+  seaweedfs-init:
+    image: chrislusf/seaweedfs:4.48
+    restart: 'no'
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        set -eu
+        curl -sS -f -X PUT --user "$$STORAGE_ADMIN_ACCESS_KEY:$$STORAGE_ADMIN_SECRET_KEY" \
+          --aws-sigv4 "aws:amz:$$STORAGE_REGION:s3" "http://seaweedfs:9000/$$STORAGE_BUCKET"
+    environment:
+      STORAGE_ADMIN_ACCESS_KEY: ${STORAGE_ADMIN_ACCESS_KEY:-dev-admin-access-key}
+      STORAGE_ADMIN_SECRET_KEY: ${STORAGE_ADMIN_SECRET_KEY:-dev-admin-secret-key-change-me}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-sifen-reception-dev}
+      STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+
 volumes:
   pgdata:
   redisdata:
+  seaweedfsdata:

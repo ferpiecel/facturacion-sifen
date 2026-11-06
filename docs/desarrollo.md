@@ -22,6 +22,14 @@ pnpm --filter @sifen/api start:dev   # API en http://localhost:3000; NODE_ENV=de
 
 Así la API arranca sin base de datos: `/health` responde 200 y las rutas protegidas responden `503`. Para usarlas, aplicá las migraciones y arrancá la API con `DATABASE_URL`. Las migraciones corren con el rol dueño (`sifen`) y crean el rol `app_login` sin contraseña, que se define aparte.
 
+## Almacenamiento local (SeaweedFS)
+
+`docker compose up -d` también levanta `seaweedfs` (API S3 en `127.0.0.1:9000`, imagen con etiqueta fija 4.48, acceso anónimo deshabilitado) y `seaweedfs-init`, que crea el bucket `sifen-reception-dev`. Las identidades se generan al arrancar desde `docker/seaweedfs/s3.json.template`.
+
+Las credenciales (`dev-admin-*` y `dev-app-*`) y el bucket vienen de valores por defecto del compose y se pueden sobrescribir con variables `STORAGE_*` en el entorno o en un `.env` local. **Son solo de desarrollo y nunca se usan en producción**: el validador de configuración rechaza valores de ejemplo fuera de `development` y `test`. Para apuntar la API al almacenamiento local: `STORAGE_ENDPOINT_URL=http://127.0.0.1:9000`, `STORAGE_BUCKET=sifen-reception-dev` y `STORAGE_ACCESS_KEY_ID`/`STORAGE_SECRET_ACCESS_KEY` con las credenciales `dev-app-*`.
+
+Verificación rápida: `node scripts/storage-smoke.mjs` comprueba que un PUT anónimo se rechaza y que uno firmado (SigV4) funciona.
+
 ## Base de datos y migraciones
 
 Los comandos siguientes aplican las migraciones y fijan la contraseña de `app_login` (solo desarrollo local):

@@ -1,7 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { HEALTH_CHECK_PORT, STORAGE_READINESS_PORT } from '../src/modules/health/health.tokens.js';
 
@@ -51,6 +51,61 @@ describe('GET /health (e2e)', () => {
     } finally {
       await downApp.close();
     }
+  });
+
+  async function healthIn(
+    env: Record<string, string>,
+  ): Promise<{ statusCode: number; storage: string }> {
+    for (const [name, value] of Object.entries(env)) vi.stubEnv(name, value);
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const envApp = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());
+    await envApp.init();
+    await envApp.getHttpAdapter().getInstance().ready();
+    try {
+      const response = await envApp.getHttpAdapter().getInstance().inject({
+        method: 'GET',
+        url: '/health',
+      });
+      return {
+        statusCode: response.statusCode,
+        storage: (JSON.parse(response.payload) as { storage: string }).storage,
+      };
+    } finally {
+      await envApp.close();
+      vi.unstubAllEnvs();
+    }
+  }
+
+  const productionEnv = {
+    NODE_ENV: 'production',
+    SIFEN_ENVIRONMENT: 'test',
+    KMS_LOCAL_MASTER_KEY: Buffer.alloc(32, 1).toString('base64'),
+    AUTH_SUBJECT_PEPPER: 'p'.repeat(48),
+    PORTAL_ORIGIN: 'https://app.example.com',
+  };
+
+  const noStorage = {
+    STORAGE_ENDPOINT_URL: '',
+    STORAGE_BUCKET: '',
+    STORAGE_ACCESS_KEY_ID: '',
+    STORAGE_SECRET_ACCESS_KEY: '',
+    STORAGE_REGION: '',
+  };
+
+  it('returns 200 with storage skipped in production when no STORAGE_* is set', async () => {
+    const result = await healthIn({ ...noStorage, ...productionEnv });
+
+    expect(result).toEqual({ statusCode: 200, storage: 'skipped' });
+  });
+
+  it('returns 503 with storage down in production when STORAGE_* is partial', async () => {
+    const result = await healthIn({
+      ...noStorage,
+      ...productionEnv,
+      STORAGE_BUCKET: 'sifen-artifacts',
+    });
+
+    expect(result).toEqual({ statusCode: 503, storage: 'down' });
   });
 
   it('returns 503 with a down status when the health check fails', async () => {

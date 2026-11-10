@@ -57,6 +57,17 @@ function assertEndpoint(endpoint: string, production: boolean): void {
   }
 }
 
+const ALL_STORAGE_VARIABLES = [...REQUIRED.map(([name]) => name), 'STORAGE_REGION'] as const;
+
+/**
+ * True when no storage variable is set at all (unset or blank), i.e. storage is not in use.
+ * Independent of NODE_ENV: callers that must not fail for deployments without storage use it
+ * before `loadStorageConfig`.
+ */
+export function isStorageUnconfigured(env: Readonly<Record<string, string | undefined>>): boolean {
+  return ALL_STORAGE_VARIABLES.every((name) => read(env, name) === undefined);
+}
+
 /**
  * Parses the storage environment variables, failing fast on unsafe configuration.
  *

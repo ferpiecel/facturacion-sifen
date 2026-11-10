@@ -6,7 +6,10 @@ import { ProcessHealthCheckAdapter } from './infrastructure/adapters/process-hea
 import { StorageReadinessAdapter } from './infrastructure/adapters/storage-readiness.adapter.js';
 import { HealthController } from './infrastructure/controllers/health.controller.js';
 import { createS3StorageProvider } from '../reception/infrastructure/adapters/s3-storage-provider.adapter.js';
-import { loadStorageConfig } from '../reception/infrastructure/storage-config.js';
+import {
+  isStorageUnconfigured,
+  loadStorageConfig,
+} from '../reception/infrastructure/storage-config.js';
 import { HEALTH_CHECK_PORT, STORAGE_READINESS_PORT } from './health.tokens.js';
 
 @Module({
@@ -17,6 +20,8 @@ import { HEALTH_CHECK_PORT, STORAGE_READINESS_PORT } from './health.tokens.js';
       // Wiring only: the real S3 provider is built solely when storage is configured.
       provide: STORAGE_READINESS_PORT,
       useFactory: (): StorageReadinessPort => {
+        // Storage not in use at all (emission-only deployments): never affects readiness.
+        if (isStorageUnconfigured(process.env)) return new StorageReadinessAdapter(null);
         try {
           const storage = loadStorageConfig(process.env, process.env.NODE_ENV);
           return new StorageReadinessAdapter(

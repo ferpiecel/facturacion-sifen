@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadStorageConfig } from './storage-config.js';
+import { isStorageUnconfigured, loadStorageConfig } from './storage-config.js';
 
 const full = {
   STORAGE_ENDPOINT_URL: 'https://s3.example.com',
@@ -124,4 +124,32 @@ describe('loadStorageConfig', () => {
       );
     });
   });
+});
+
+describe('isStorageUnconfigured', () => {
+  it('is true when no storage variable is set', () => {
+    expect(isStorageUnconfigured({})).toBe(true);
+  });
+
+  it('is true when every storage variable is blank', () => {
+    expect(
+      isStorageUnconfigured({
+        STORAGE_ENDPOINT_URL: '',
+        STORAGE_BUCKET: '  ',
+        STORAGE_ACCESS_KEY_ID: undefined,
+        STORAGE_SECRET_ACCESS_KEY: '\t',
+        STORAGE_REGION: ' ',
+      }),
+    ).toBe(true);
+  });
+
+  it('ignores unrelated variables', () => {
+    expect(isStorageUnconfigured({ NODE_ENV: 'production', OTHER: 'x' })).toBe(true);
+  });
+
+  for (const name of [...Object.keys(full), 'STORAGE_REGION']) {
+    it(`is false when only ${name} is set`, () => {
+      expect(isStorageUnconfigured({ [name]: 'value' })).toBe(false);
+    });
+  }
 });

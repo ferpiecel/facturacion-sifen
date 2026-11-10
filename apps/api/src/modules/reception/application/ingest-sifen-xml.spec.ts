@@ -122,6 +122,7 @@ class Harness {
       return Promise.resolve({ created: true, document: input.document });
     },
     load: () => Promise.reject(new Error('unused')),
+    saveCorrection: () => Promise.reject(new Error('unused')),
     findByCdc: (_tenantId, cdc) => {
       this.log.push('findByCdc');
       return Promise.resolve(this.documents.get(cdc) ?? null);

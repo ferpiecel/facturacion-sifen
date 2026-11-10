@@ -1,5 +1,9 @@
 import type { ReceptionEventType } from './reception-events.js';
-import { assertTransition, type ReceivedDocumentStatus } from './received-document-status.js';
+import {
+  InvalidStatusTransitionError,
+  assertTransition,
+  type ReceivedDocumentStatus,
+} from './received-document-status.js';
 import { isReceivedDocumentSource, type ReceivedDocumentSource } from './source.js';
 
 /** Minimal immutable state needed by the status machine; persistence fields live elsewhere. */
@@ -130,6 +134,28 @@ export function transitionReceivedDocument(
     confirmedAt: to === 'confirmed' ? (edit ? document.confirmedAt : options.at) : null,
   });
   return { document: next, event: document.isOwnReceiver ? eventFor(document.status, to) : null };
+}
+
+/**
+ * A correction that does not confirm: only a `needs_review` document accepts it. The version
+ * moves by one (the optimistic lock must see every caller-driven change) and the reasons are
+ * replaced by the ones that still hold after the correction.
+ *
+ * @throws InvalidStatusTransitionError for any other status.
+ * @throws InvalidReceivedDocumentError when no reason is given.
+ */
+export function recordReceivedDocumentCorrection(
+  document: ReceivedDocument,
+  reasons: readonly string[],
+): ReceivedDocument {
+  if (document.status !== 'needs_review') {
+    throw new InvalidStatusTransitionError(document.status, 'needs_review');
+  }
+  return rehydrateReceivedDocument({
+    ...document,
+    version: document.version + 1,
+    needsReviewReasons: [...reasons],
+  });
 }
 
 function bumpsVersion(from: ReceivedDocumentStatus, to: ReceivedDocumentStatus): boolean {

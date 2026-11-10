@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import {
   receivedArtifacts,
   receivedDocumentFieldConfidences,
@@ -8,11 +8,13 @@ import {
   type Database,
   type TenantTx,
 } from '@sifen/db';
+import { recordAudit } from '../../../audit/infrastructure/record-audit.js';
 import type { ReceivedDocumentDetail } from '../../application/ports/received-document-query.port.js';
 import {
   ReceivedDocumentNotFoundError,
   VersionConflictError,
   type ArtifactMatch,
+  type CorrectionWrite,
   type CreateReceivedDocumentResult,
   type FieldConfidence,
   type NewReceivedArtifact,
@@ -79,6 +81,8 @@ const HEADER_KEYS = [
   'rawData',
   'extractionErrorCode',
   'confirmedBy',
+  'correctedAt',
+  'correctedBy',
 ] as const satisfies readonly (keyof ReceivedDocumentHeader & keyof DocumentRow)[];
 
 /** Only the known header columns that were actually supplied; stray properties never reach SQL. */
@@ -153,11 +157,12 @@ export async function readDocumentDetail(
       .where(and(eq(receivedDocuments.tenantId, tenantId), eq(receivedDocuments.id, id)))
   ).at(0);
   if (row === undefined) return null;
-  const items = await tx
+  const itemRows = await tx
     .select()
     .from(receivedDocumentItems)
     .where(eq(receivedDocumentItems.receivedDocumentId, id))
     .orderBy(asc(receivedDocumentItems.position));
+  const items = itemRows.filter((item) => item.removedAt === null);
   const confidences = await tx
     .select()
     .from(receivedDocumentFieldConfidences)
@@ -177,11 +182,103 @@ export async function readDocumentDetail(
     document: toDocument(row),
     header: toHeader(row),
     items: items.map(toItem),
+    removedPositions: itemRows
+      .filter((item) => item.removedAt !== null)
+      .map((item) => item.position),
     confidences: confidences.map(toConfidence),
     artifact: artifact ? toArtifact(artifact) : null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+/**
+ * Writes the aggregate columns (and header columns) only if the stored version is still
+ * `expectedVersion`; tells a stale version apart from a document that is not visible.
+ */
+async function writeState(
+  tx: TenantTx,
+  tenantId: string,
+  document: ReceivedDocument,
+  expectedVersion: number,
+  header: ReceivedDocumentHeaderInput | undefined,
+): Promise<void> {
+  const byId = and(eq(receivedDocuments.tenantId, tenantId), eq(receivedDocuments.id, document.id));
+  const updated = await tx
+    .update(receivedDocuments)
+    .set({
+      ...pickHeader(header),
+      status: document.status,
+      version: document.version,
+      needsReview: document.needsReview,
+      needsReviewReasons: [...document.needsReviewReasons],
+      confidenceOverall: document.confidenceOverall,
+      extractionAttempts: document.extractionAttempts,
+      confirmedAt: document.confirmedAt,
+      updatedAt: new Date(),
+    })
+    .where(and(byId, eq(receivedDocuments.version, expectedVersion)))
+    .returning({ id: receivedDocuments.id });
+  if (updated.length > 0) return;
+  const exists = await tx
+    .select({ version: receivedDocuments.version })
+    .from(receivedDocuments)
+    .where(byId);
+  if (exists.length === 0) throw new ReceivedDocumentNotFoundError(document.id);
+  throw new VersionConflictError(document.id, expectedVersion, exists[0].version);
+}
+
+/** Upserts active items by position and soft-removes the rest; a removed row is never touched. */
+async function writeItems(
+  tx: TenantTx,
+  tenantId: string,
+  documentId: string,
+  write: CorrectionWrite,
+): Promise<void> {
+  for (const { position, ...fields } of write.items.upserts) {
+    await tx
+      .insert(receivedDocumentItems)
+      .values({ ...fields, position, tenantId, receivedDocumentId: documentId })
+      .onConflictDoUpdate({
+        target: [receivedDocumentItems.receivedDocumentId, receivedDocumentItems.position],
+        set: { ...fields, updatedAt: write.at },
+      });
+  }
+  if (write.items.removedPositions.length === 0) return;
+  await tx
+    .update(receivedDocumentItems)
+    .set({ removedAt: write.at, removedBy: write.actorId, updatedAt: write.at })
+    .where(
+      and(
+        eq(receivedDocumentItems.receivedDocumentId, documentId),
+        inArray(receivedDocumentItems.position, [...write.items.removedPositions]),
+        isNull(receivedDocumentItems.removedAt),
+      ),
+    );
+}
+
+/** Stamps the correction on existing confidence rows; a field without a row is skipped. */
+async function writeConfidences(
+  tx: TenantTx,
+  documentId: string,
+  write: CorrectionWrite,
+): Promise<void> {
+  for (const correction of write.confidences) {
+    await tx
+      .update(receivedDocumentFieldConfidences)
+      .set({
+        correctedValue: correction.correctedValue,
+        correctedBy: write.actorId,
+        correctedAt: write.at,
+        updatedAt: write.at,
+      })
+      .where(
+        and(
+          eq(receivedDocumentFieldConfidences.receivedDocumentId, documentId),
+          eq(receivedDocumentFieldConfidences.fieldName, correction.fieldName),
+        ),
+      );
+  }
 }
 
 /** Thrown inside the transaction to roll it back when a concurrent insert won the unique index. */
@@ -194,9 +291,6 @@ class LostInsertRace extends Error {}
 export function createDrizzleReceivedDocumentRepository(db: Database): ReceivedDocumentRepository {
   const inTenant = <T>(tenantId: string, fn: (tx: TenantTx) => Promise<T>) =>
     withTenantTransaction(db, tenantId, fn);
-
-  const documentById = (tenantId: string, id: string) =>
-    and(eq(receivedDocuments.tenantId, tenantId), eq(receivedDocuments.id, id));
 
   async function documentByCdc(tx: TenantTx, tenantId: string, cdc: string) {
     const rows = await tx
@@ -345,6 +439,7 @@ export function createDrizzleReceivedDocumentRepository(db: Database): ReceivedD
             document: detail.document,
             header: detail.header,
             items: detail.items,
+            removedPositions: detail.removedPositions,
             confidences: detail.confidences,
             artifact: detail.artifact,
           }
@@ -366,35 +461,24 @@ export function createDrizzleReceivedDocumentRepository(db: Database): ReceivedD
     },
 
     save(tenantId, document, expectedVersion, change) {
+      return inTenant(tenantId, (tx) =>
+        writeState(tx, tenantId, document, expectedVersion, change?.header),
+      );
+    },
+
+    saveCorrection(tenantId, write) {
       return inTenant(tenantId, async (tx) => {
-        const updated = await tx
-          .update(receivedDocuments)
-          .set({
-            ...pickHeader(change?.header),
-            status: document.status,
-            version: document.version,
-            needsReview: document.needsReview,
-            needsReviewReasons: [...document.needsReviewReasons],
-            confidenceOverall: document.confidenceOverall,
-            extractionAttempts: document.extractionAttempts,
-            confirmedAt: document.confirmedAt,
-            updatedAt: new Date(),
-          })
-          .where(
-            and(
-              documentById(tenantId, document.id),
-              eq(receivedDocuments.version, expectedVersion),
-            ),
-          )
-          .returning({ id: receivedDocuments.id });
-        if (updated.length > 0) return;
-        // Nothing was written; tell a stale version apart from a document that is not visible.
-        const exists = await tx
-          .select({ id: receivedDocuments.id })
-          .from(receivedDocuments)
-          .where(documentById(tenantId, document.id));
-        if (exists.length === 0) throw new ReceivedDocumentNotFoundError(document.id);
-        throw new VersionConflictError(document.id, expectedVersion);
+        const { document } = write;
+        await writeState(tx, tenantId, document, write.expectedVersion, write.header);
+        await writeItems(tx, tenantId, document.id, write);
+        await writeConfidences(tx, document.id, write);
+        await recordAudit(tx, {
+          actor: { type: 'api_key', id: write.actorId },
+          action: write.audit.action,
+          entity: { type: 'received_document', id: document.id },
+          before: write.audit.before,
+          after: write.audit.after,
+        });
       });
     },
   };

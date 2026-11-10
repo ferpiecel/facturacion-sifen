@@ -53,6 +53,9 @@ export interface ReceivedDocumentHeader {
   readonly extractionErrorCode: string | null;
   /** Portal user id or API key id that confirmed the document. */
   readonly confirmedBy: string | null;
+  /** When and by whom (API key id or portal user id) the last correction was applied. */
+  readonly correctedAt: Date | null;
+  readonly correctedBy: string | null;
 }
 
 /** Header fields supplied when creating or patching; omitted fields keep their default or value. */
@@ -110,7 +113,10 @@ export interface NewReceivedDocument {
 export interface ReceivedDocumentGraph {
   readonly document: ReceivedDocument;
   readonly header: ReceivedDocumentHeader;
+  /** Active items only, by position; soft-removed items are listed in `removedPositions`. */
   readonly items: readonly ReceivedDocumentItem[];
+  /** Positions of soft-removed items: retained, never reused, never shown. */
+  readonly removedPositions: readonly number[];
   readonly confidences: readonly FieldConfidence[];
   readonly artifact: ReceivedArtifact | null;
 }
@@ -137,6 +143,8 @@ export class VersionConflictError extends Error {
   constructor(
     readonly documentId: string,
     readonly expectedVersion: number,
+    /** The stored version when the conflict was detected, if known. */
+    readonly currentVersion?: number,
   ) {
     super(`received document ${documentId} is no longer at version ${String(expectedVersion)}`);
     this.name = 'VersionConflictError';
@@ -149,6 +157,38 @@ export class ReceivedDocumentNotFoundError extends Error {
     super(`received document ${documentId} not found`);
     this.name = 'ReceivedDocumentNotFoundError';
   }
+}
+
+/** Items to write in a correction: full resulting rows by position, plus soft removals. */
+export interface ItemCorrectionWrite {
+  /** Updates an active item at the position, or inserts a new one. */
+  readonly upserts: readonly ReceivedDocumentItem[];
+  readonly removedPositions: readonly number[];
+}
+
+/** The correction of one field confidence (the row must already exist; otherwise it is skipped). */
+export interface ConfidenceCorrectionWrite {
+  readonly fieldName: string;
+  readonly correctedValue: string | null;
+}
+
+/** Everything one PATCH writes; all or nothing, in one tenant transaction. */
+export interface CorrectionWrite {
+  readonly document: ReceivedDocument;
+  readonly expectedVersion: number;
+  /** Changed header columns, plus `confirmedBy` / `correctedBy` / `correctedAt` when they apply. */
+  readonly header?: ReceivedDocumentHeaderInput;
+  readonly items: ItemCorrectionWrite;
+  readonly confidences: readonly ConfidenceCorrectionWrite[];
+  /** Actor stamped on removed items and corrected confidences. */
+  readonly actorId: string;
+  readonly at: Date;
+  /** One audit-chain entry, appended in the same transaction. */
+  readonly audit: {
+    readonly action: string;
+    readonly before: unknown;
+    readonly after: unknown;
+  };
 }
 
 /** Every method runs in its own tenant transaction; `tenantId` always comes first. */
@@ -179,4 +219,13 @@ export interface ReceivedDocumentRepository {
     expectedVersion: number,
     change?: StateChange,
   ): Promise<void>;
+
+  /**
+   * Applies a correction atomically: state columns and header (version-checked), items, field
+   * confidences and the audit entry commit together or not at all.
+   *
+   * @throws VersionConflictError when the stored version is not `expectedVersion`.
+   * @throws ReceivedDocumentNotFoundError when the document does not exist for the tenant.
+   */
+  saveCorrection(tenantId: string, write: CorrectionWrite): Promise<void>;
 }

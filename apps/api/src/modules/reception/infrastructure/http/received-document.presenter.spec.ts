@@ -18,6 +18,7 @@ describe('presentReceivedDocumentDetail', () => {
     }),
     header: header(overrides),
     items: [],
+    removedPositions: [],
     confidences: [],
     artifact: null,
     createdAt: new Date('2026-03-10T12:00:00Z'),

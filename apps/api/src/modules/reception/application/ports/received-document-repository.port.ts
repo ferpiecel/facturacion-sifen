@@ -1,4 +1,5 @@
 import type { ReceivedDocument } from '../../domain/received-document.js';
+import type { ReceptionActor, ReceptionEventType } from '../../domain/reception-events.js';
 
 /**
  * Business fields of a received document. Every field is nullable because extraction can be
@@ -101,6 +102,18 @@ export interface ReceivedArtifact extends NewReceivedArtifact {
   readonly id: string;
 }
 
+/**
+ * Webhook events to enqueue (outbox) in the SAME transaction as the write, so the change and its
+ * deliveries commit or roll back together (ADR-0023). The adapter enqueues nothing for a document
+ * that is not addressed to the tenant and dedupes by (document, type, version).
+ */
+export interface ReceptionEventRequest {
+  readonly types: readonly ReceptionEventType[];
+  /** Who made the change; carried by `reception.document.updated`. */
+  readonly actor?: ReceptionActor;
+  readonly at: Date;
+}
+
 export interface NewReceivedDocument {
   /** Aggregate built by `createReceivedDocument`; its id and tenant must match the call. */
   readonly document: ReceivedDocument;
@@ -108,6 +121,8 @@ export interface NewReceivedDocument {
   readonly items?: readonly ReceivedDocumentItem[];
   readonly confidences?: readonly FieldConfidence[];
   readonly artifact?: NewReceivedArtifact;
+  /** Enqueued with the insert; skipped when the document turns out to be a duplicate. */
+  readonly events?: ReceptionEventRequest;
 }
 
 export interface ReceivedDocumentGraph {
@@ -136,6 +151,8 @@ export interface ArtifactMatch {
 /** Non-aggregate columns that change together with a state transition. */
 export interface StateChange {
   readonly header?: ReceivedDocumentHeaderInput;
+  /** Enqueued with the state write; nothing is enqueued when the version check fails. */
+  readonly events?: ReceptionEventRequest;
 }
 
 /** The stored version differs from the one the caller read; nothing was written. */
@@ -183,6 +200,8 @@ export interface CorrectionWrite {
   /** Actor stamped on removed items and corrected confidences. */
   readonly actorId: string;
   readonly at: Date;
+  /** Enqueued with the correction, in the same transaction. */
+  readonly events?: ReceptionEventRequest;
   /** One audit-chain entry, appended in the same transaction. */
   readonly audit: {
     readonly action: string;

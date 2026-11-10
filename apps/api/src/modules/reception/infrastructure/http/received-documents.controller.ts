@@ -151,8 +151,7 @@ export class ReceivedDocumentsController {
       xml: upload.bytes,
       originalName: upload.originalName,
     });
-    // Seam (R4.5): `result.events` must be enqueued as webhook outbox rows here, in the same
-    // transaction as the document, once the reception event emitter exists. Nothing is enqueued yet.
+    // Reception events were enqueued by the repository, in the document's own transaction (R4.5).
     const { document } = result;
     if (document.status === 'extraction_failed') {
       throw receptionProblem(
@@ -221,8 +220,7 @@ export class ReceivedDocumentsController {
         id: documentId,
         actorId: this.cls.get(API_KEY_ID_CLS_KEY),
       });
-      // Seam (R4.5): `result.events` must be enqueued as webhook outbox rows in the same
-      // transaction as the correction once the reception event emitter exists. Nothing yet.
+      // The `updated` / `confirmed` event was enqueued in the correction's transaction (R4.5).
       if (result.replayed) reply.header('idempotent-replayed', 'true');
       const detail = await this.require(this.getDocument)(tenantId, documentId);
       if (detail === null) throw notFound();

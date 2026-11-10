@@ -356,6 +356,12 @@ describe('correctReceivedDocument', () => {
     const result = await run({ header: { issuerTradeName: 'ACME SRL' } });
     expect(result.document).toMatchObject({ status: 'confirmed', version: 3, confirmedAt: AT });
     expect(result.events).toEqual(['reception.document.updated']);
+    // The event travels with the write, so the repository enqueues it in the same transaction.
+    expect(repository.writes[0].events).toEqual({
+      types: ['reception.document.updated'],
+      actor: { kind: 'api_key', id: 'key-1' },
+      at: AT,
+    });
     const header = repository.writes[0].header;
     expect(header).toMatchObject({ issuerTradeName: 'ACME SRL', correctedBy: 'key-1' });
     expect(header).not.toHaveProperty('confirmedBy');

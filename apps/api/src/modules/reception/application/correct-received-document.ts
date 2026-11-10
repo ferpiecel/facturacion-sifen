@@ -94,7 +94,7 @@ export interface CorrectReceivedDocumentResult {
   readonly document: ReceivedDocument;
   /** True when the request had already been applied: nothing was written. */
   readonly replayed: boolean;
-  /** Events the caller must enqueue (R4.5); empty for no-ops, replays and silent documents. */
+  /** Events enqueued in the correction's transaction (R4.5); empty for no-ops, replays and silent documents. */
   readonly events: readonly ReceptionEventType[];
 }
 
@@ -481,6 +481,9 @@ export function createCorrectReceivedDocument(deps: CorrectReceivedDocumentDeps)
       confidences: confidenceCorrections(merged, changes, items),
       actorId,
       at,
+      ...(event === null
+        ? {}
+        : { events: { types: [event], actor: { kind: 'api_key' as const, id: actorId }, at } }),
       audit: {
         action: confirmedNow ? 'received_document.confirmed' : 'received_document.corrected',
         before: {

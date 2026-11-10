@@ -259,6 +259,7 @@ describe('IngestSifenXml', () => {
       confirmedAt: AT,
     });
     expect(result.events).toEqual(['reception.document.confirmed']);
+    expect(h.first.events).toEqual({ types: ['reception.document.confirmed'], at: AT });
   });
 
   it('ends needs_review with the validation reason codes when validation fails', async () => {

@@ -45,7 +45,10 @@ export interface IngestSifenXmlResult {
   /** False when the upload (same bytes) or the CDC was already ingested; nothing was written. */
   readonly created: boolean;
   readonly document: ReceivedDocument;
-  /** Events the caller must enqueue; always empty for deduped and receiver-mismatch documents. */
+  /**
+   * Events enqueued in the same transaction as the document (R4.5); empty for deduped and
+   * receiver-mismatch documents. Informational for the caller: it has nothing left to enqueue.
+   */
   readonly events: readonly ReceptionEventType[];
 }
 
@@ -137,6 +140,7 @@ export class IngestSifenXml {
       items: parsed.items.map(toItem),
       confidences: CONFIDENCE_FIELDS.map(toConfidence),
       artifact,
+      ...(final.event === null ? {} : { events: { types: [final.event], at } }),
     });
     if (!result.created) return { created: false, document: result.document, events: [] };
     return {
@@ -169,6 +173,7 @@ export class IngestSifenXml {
       document: failed.document,
       header: { extractionErrorCode: code },
       artifact,
+      ...(failed.event === null ? {} : { events: { types: [failed.event], at } }),
     });
     if (!result.created) return { created: false, document: result.document, events: [] };
     return {

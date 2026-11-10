@@ -8,6 +8,7 @@ import {
   type Database,
   type TenantTx,
 } from '@sifen/db';
+import { enqueueReceptionEvents } from '../enqueue-reception-events.js';
 import { recordAudit } from '../../../audit/infrastructure/record-audit.js';
 import type { ReceivedDocumentDetail } from '../../application/ports/received-document-query.port.js';
 import {
@@ -25,6 +26,7 @@ import {
   type ReceivedDocumentHeaderInput,
   type ReceivedDocumentItem,
   type ReceivedDocumentRepository,
+  type ReceptionEventRequest,
 } from '../../application/ports/received-document-repository.port.js';
 import {
   rehydrateReceivedDocument,
@@ -350,6 +352,16 @@ export function createDrizzleReceivedDocumentRepository(db: Database): ReceivedD
     return null;
   }
 
+  async function enqueueRequested(
+    tx: TenantTx,
+    tenantId: string,
+    document: ReceivedDocument,
+    events: ReceptionEventRequest | undefined,
+  ): Promise<void> {
+    if (events === undefined) return;
+    await enqueueReceptionEvents(tx, { tenantId, document, ...events });
+  }
+
   async function insertGraph(
     tx: TenantTx,
     tenantId: string,
@@ -411,6 +423,7 @@ export function createDrizzleReceivedDocumentRepository(db: Database): ReceivedD
           input.confidences.map((c) => ({ ...c, tenantId, receivedDocumentId: document.id })),
         );
     }
+    await enqueueRequested(tx, tenantId, document, input.events);
     return { created: true, document };
   }
 
@@ -461,9 +474,10 @@ export function createDrizzleReceivedDocumentRepository(db: Database): ReceivedD
     },
 
     save(tenantId, document, expectedVersion, change) {
-      return inTenant(tenantId, (tx) =>
-        writeState(tx, tenantId, document, expectedVersion, change?.header),
-      );
+      return inTenant(tenantId, async (tx) => {
+        await writeState(tx, tenantId, document, expectedVersion, change?.header);
+        await enqueueRequested(tx, tenantId, document, change?.events);
+      });
     },
 
     saveCorrection(tenantId, write) {
@@ -479,6 +493,7 @@ export function createDrizzleReceivedDocumentRepository(db: Database): ReceivedD
           before: write.audit.before,
           after: write.audit.after,
         });
+        await enqueueRequested(tx, tenantId, document, write.events);
       });
     },
   };

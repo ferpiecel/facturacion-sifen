@@ -52,6 +52,7 @@ function integratorRoutes(): Route[] {
             typeof handler === 'function' && Reflect.hasMetadata(METHOD_METADATA, handler),
         )
         .filter((handler) => !Reflect.getMetadata(IS_PUBLIC_KEY, handler))
+        .filter((handler) => !Reflect.getMetadata(EXCLUDED_FROM_OPENAPI_KEY, handler))
         .map((handler) => {
           const sub = String(Reflect.getMetadata(PATH_METADATA, handler));
           const path = `/${[base, sub === '/' ? '' : sub].filter(Boolean).join('/')}`.replace(

@@ -146,6 +146,72 @@ export function buildOpenApiDocument() {
           },
         },
       },
+      '/v1/received-documents': {
+        post: {
+          operationId: 'uploadReceivedDocument',
+          tags: ['Reception'],
+          summary: 'Upload a received SIFEN XML',
+          description:
+            'Stores the XML and extracts it; the processing contract is asynchronous (202), although a SIFEN XML is read before the answer. ' +
+            'The status in the body is `confirmed` when the document passes validation and is addressed to the tenant, `needs_review` otherwise. ' +
+            'Send the XML as a raw `application/xml` or `text/xml` body, as a `multipart/form-data` upload with one `file` part, or as JSON `{ "xml": "<...>" }` (JSON is limited to 1 MiB). ' +
+            'Content is recognized by its first bytes, not by the declared type. ' +
+            'The same bytes, or the same CDC, uploaded again answer 200 with the existing document. ' +
+            'PDF, photo and CDC-only requests answer 422 `unsupported_source` for now. ' +
+            'The maximum upload size is `RECEPTION_MAX_UPLOAD_BYTES` (default 2 MiB). ' +
+            'Errors carry a stable `code`.',
+          ...secured(['reception:write']),
+          requestBody: {
+            required: true,
+            content: {
+              'application/xml': { schema: { type: 'string' } },
+              'text/xml': { schema: { type: 'string' } },
+              'multipart/form-data': {
+                schema: {
+                  type: 'object',
+                  required: ['file'],
+                  properties: { file: { type: 'string', format: 'binary' } },
+                },
+              },
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['xml'],
+                  properties: { xml: { type: 'string' } },
+                },
+              },
+            },
+          },
+          responses: {
+            '200': {
+              ...json('Already received; the existing document', ref('ReceivedDocumentAck')),
+              headers: { Location: { schema: { type: 'string' } } },
+            },
+            '202': {
+              ...json('Accepted', ref('ReceivedDocumentAck')),
+              headers: { Location: { schema: { type: 'string' } } },
+            },
+            '401': UNAUTHORIZED,
+            '403': FORBIDDEN,
+            '413': problem(
+              'The upload exceeds the maximum size (`payload_too_large`)',
+              'ReceptionProblem',
+            ),
+            '415': problem(
+              'The bytes do not look like XML (`unsupported_media_type`)',
+              'ReceptionProblem',
+            ),
+            '422': problem(
+              '`unsupported_source` (PDF, photo, CDC only), `extraction_failed` (stored but unreadable; carries `document_id`), `empty_upload` or `invalid_request`',
+              'ReceptionProblem',
+            ),
+            '503': problem(
+              'Document storage is not available (`storage_unavailable`)',
+              'ReceptionProblem',
+            ),
+          },
+        },
+      },
       '/v1/webhooks/endpoints': {
         post: {
           operationId: 'createWebhookEndpoint',
@@ -267,7 +333,7 @@ export function buildOpenApiDocument() {
           type: 'http',
           scheme: 'bearer',
           description:
-            'API key. Each route needs the scope named in `x-required-scopes` (`documents:read`, `documents:write`, `webhooks:read`, `webhooks:write`).',
+            'API key. Each route needs the scope named in `x-required-scopes` (`documents:read`, `documents:write`, `webhooks:read`, `webhooks:write`, `reception:write`).',
         },
       },
       schemas: {
@@ -275,6 +341,46 @@ export function buildOpenApiDocument() {
           type: 'object',
           required: ['statusCode', 'message'],
           properties: { statusCode: { type: 'integer' }, message: { type: 'string' } },
+        },
+        ReceptionProblem: {
+          type: 'object',
+          required: ['statusCode', 'code', 'message'],
+          properties: {
+            statusCode: { type: 'integer' },
+            code: {
+              type: 'string',
+              enum: [
+                'payload_too_large',
+                'unsupported_media_type',
+                'unsupported_source',
+                'extraction_failed',
+                'empty_upload',
+                'invalid_request',
+                'storage_unavailable',
+              ],
+            },
+            message: { type: 'string' },
+            document_id: {
+              type: 'string',
+              format: 'uuid',
+              description: 'Only with `extraction_failed`',
+            },
+          },
+        },
+        ReceivedDocumentAck: {
+          type: 'object',
+          required: ['id', 'status', 'version', 'source'],
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+            status: {
+              type: 'string',
+              description:
+                'Current status; a re-upload returns whatever status the document has reached',
+              examples: ['needs_review'],
+            },
+            version: { type: 'integer', minimum: 1 },
+            source: { type: 'string', enum: ['sifen_xml'] },
+          },
         },
         ValidationProblem: {
           type: 'object',

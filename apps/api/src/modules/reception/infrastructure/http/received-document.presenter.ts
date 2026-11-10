@@ -5,8 +5,8 @@ import type {
 } from '../../application/ports/received-document-query.port.js';
 
 /**
- * The only place where the wire names of the received-document read model live. PROVISIONAL:
- * R4.4 (PATCH) may refine them, and the OpenAPI schemas mirror this file.
+ * The only place where the wire names of the received-document read model live. The names are
+ * final since R4.4 (PATCH takes the same nested shape) and the OpenAPI schemas mirror this file.
  *
  * Money and quantities are decimal strings with trailing zeros trimmed ('10.50000000' -> '10.5').
  * Storage keys, buckets, endpoints and the raw parsed payload are never exposed.
@@ -151,6 +151,8 @@ export function presentReceivedDocumentDetail(detail: ReceivedDocumentDetail) {
     })),
     confirmed_at: iso(document.confirmedAt),
     confirmed_by: header.confirmedBy,
+    corrected_at: iso(header.correctedAt),
+    corrected_by: header.correctedBy,
     artifact: artifact && {
       id: artifact.id,
       content_type: artifact.contentType,

@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Inject,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -13,11 +14,25 @@ import {
   StreamableFile,
 } from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
+import {
+  API_KEY_ID_CLS_KEY,
+  type IdentityClsStore,
+} from '../../../identity/infrastructure/identity-cls-store.js';
 import { RequireScopes } from '../../../identity/infrastructure/decorators/require-scopes.decorator.js';
 import {
   TENANT_ID_CLS_KEY,
   type TenancyClsStore,
 } from '../../../tenancy/infrastructure/tenancy-cls-store.js';
+import {
+  InvalidCorrectionError,
+  InvalidReceivedDocumentStateError,
+  ValidationFailedError,
+  type createCorrectReceivedDocument,
+} from '../../application/correct-received-document.js';
+import {
+  ReceivedDocumentNotFoundError,
+  VersionConflictError,
+} from '../../application/ports/received-document-repository.port.js';
 import type { createGetArtifact, createGetArtifactUrl } from '../../application/get-artifact.js';
 import type { createGetReceivedDocument } from '../../application/get-received-document.js';
 import type { IngestSifenXml } from '../../application/ingest-sifen-xml.js';
@@ -27,6 +42,7 @@ import {
 } from '../../application/list-received-documents.js';
 import type { ReceivedDocument } from '../../domain/received-document.js';
 import {
+  CORRECT_RECEIVED_DOCUMENT,
   GET_RECEIVED_DOCUMENT,
   GET_RECEPTION_ARTIFACT,
   GET_RECEPTION_ARTIFACT_URL,
@@ -34,6 +50,7 @@ import {
   LIST_RECEIVED_DOCUMENTS,
   RECEPTION_UPLOAD_CONFIG,
 } from '../../reception.tokens.js';
+import { parseCorrectionRequest } from './correct-received-document.request.js';
 import {
   presentReceivedDocumentDetail,
   presentReceivedDocumentPage,
@@ -86,7 +103,9 @@ export class ReceivedDocumentsController {
     private readonly getArtifact: ReturnType<typeof createGetArtifact> | null,
     @Inject(GET_RECEPTION_ARTIFACT_URL)
     private readonly getArtifactUrl: ReturnType<typeof createGetArtifactUrl> | null,
-    private readonly cls: ClsService<TenancyClsStore>,
+    @Inject(CORRECT_RECEIVED_DOCUMENT)
+    private readonly correctDocument: ReturnType<typeof createCorrectReceivedDocument> | null,
+    private readonly cls: ClsService<TenancyClsStore & IdentityClsStore>,
   ) {}
 
   /**
@@ -166,6 +185,51 @@ export class ReceivedDocumentsController {
     const detail = await this.require(this.getDocument)(this.tenantId(), parseId(id));
     if (detail === null) throw notFound();
     return presentReceivedDocumentDetail(detail);
+  }
+
+  /**
+   * Corrects header fields and items and optionally confirms, in one call. The body carries the
+   * `version` the caller read (optimistic lock; there is no `If-Match`). 200 with the detail
+   * shape; a replay of an already applied request is a 200 too (`Idempotent-Replayed: true`).
+   * Errors: 400 `invalid_request`, 404 `not_found`, 409 `version_conflict` (with
+   * `current_version`) or `invalid_state`, 422 `validation_failed` (with `reasons`; nothing is
+   * written) or `invalid_correction`.
+   */
+  @Patch(':id')
+  @RequireScopes('reception:write')
+  async correct(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Res({ passthrough: true }) reply: HttpReply,
+  ) {
+    const correct = this.require(this.correctDocument);
+    const documentId = parseId(id);
+    const parsed = parseCorrectionRequest(body);
+    if (!parsed.ok) {
+      throw receptionProblem(
+        HttpStatus.BAD_REQUEST,
+        'invalid_request',
+        'The request body is not valid',
+        { issues: parsed.issues },
+      );
+    }
+    const tenantId = this.tenantId();
+    try {
+      const result = await correct({
+        ...parsed.value,
+        tenantId,
+        id: documentId,
+        actorId: this.cls.get(API_KEY_ID_CLS_KEY),
+      });
+      // Seam (R4.5): `result.events` must be enqueued as webhook outbox rows in the same
+      // transaction as the correction once the reception event emitter exists. Nothing yet.
+      if (result.replayed) reply.header('idempotent-replayed', 'true');
+      const detail = await this.require(this.getDocument)(tenantId, documentId);
+      if (detail === null) throw notFound();
+      return presentReceivedDocumentDetail(detail);
+    } catch (error) {
+      throw asCorrectionProblem(error);
+    }
   }
 
   /** The stored bytes, as uploaded. */
@@ -274,6 +338,38 @@ function parseId(raw: string): string {
 
 function asBadRequest(error: unknown): unknown {
   return error instanceof InvalidReceivedDocumentQueryError ? invalidRequest(error.message) : error;
+}
+
+function asCorrectionProblem(error: unknown): unknown {
+  if (error instanceof ReceivedDocumentNotFoundError) return notFound();
+  if (error instanceof VersionConflictError) {
+    return receptionProblem(
+      HttpStatus.CONFLICT,
+      'version_conflict',
+      'The document changed since the version you read',
+      { current_version: error.currentVersion ?? null },
+    );
+  }
+  if (error instanceof InvalidReceivedDocumentStateError) {
+    return receptionProblem(
+      HttpStatus.CONFLICT,
+      'invalid_state',
+      'The document cannot be corrected in its current status',
+      { status: error.status },
+    );
+  }
+  if (error instanceof ValidationFailedError) {
+    return receptionProblem(
+      HttpStatus.UNPROCESSABLE_ENTITY,
+      'validation_failed',
+      'The corrected document does not pass validation; nothing was saved',
+      { reasons: error.reasons },
+    );
+  }
+  if (error instanceof InvalidCorrectionError) {
+    return receptionProblem(HttpStatus.UNPROCESSABLE_ENTITY, 'invalid_correction', error.message);
+  }
+  return error;
 }
 
 /** ASCII-only, quote-free file name for `Content-Disposition`; never the storage key. */

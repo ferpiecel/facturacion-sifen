@@ -698,7 +698,7 @@
           "Reception"
         ],
         "summary": "Get a received document with its items and per-field confidences",
-        "description": "Everything an ERP needs to render its own review: extracted fields, items, per-field confidences, `needs_review_reasons` and the artifact link. Field names are provisional until the correction endpoint (PATCH) ships. Money is a decimal string.",
+        "description": "Everything an ERP needs to render its own review: extracted fields, items, per-field confidences, `needs_review_reasons` and the artifact link. Money is a decimal string. Soft-removed items are not listed. `version` is what `PATCH` expects.",
         "security": [
           {
             "apiKey": []
@@ -762,6 +762,116 @@
           },
           "404": {
             "description": "Not found, also for another tenant`s document (`not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "correctReceivedDocument",
+        "tags": [
+          "Reception"
+        ],
+        "summary": "Correct a received document and, optionally, confirm it, in one call",
+        "description": "Allowed in `needs_review` and `confirmed` only. Send the `version` you read (optimistic lock, no `If-Match`); a stale one answers 409 `version_conflict` with `current_version`. Absent fields keep their value, `null` clears a nullable one. Items are addressed by `position` (yours to choose, never reused): an existing position is modified, a new one is added, `remove: true` soft-removes it (the row is retained, reads skip it). With `confirm: true`, or when the document is already `confirmed`, the result is revalidated: a failure answers 422 `validation_failed` with `reasons` and NOTHING is saved (not even the corrections). Without `confirm`, a `needs_review` document stays in `needs_review`, its `version` increases and `needs_review_reasons` are refreshed (`awaiting_confirmation` when the data is valid but unconfirmed). Repeating a request that was already applied (same actor, previous `version`) answers 200 with `Idempotent-Replayed: true` and writes nothing. The response is the same shape as `GET`.",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-required-scopes": [
+          "reception:write"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Received document id (UUID)",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectReceivedDocumentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The document after the correction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceivedDocumentDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed body or id (`invalid_request`, with `issues`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, also for another tenant`s document (`not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`version_conflict` (with `current_version`) or `invalid_state` (with `status`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed` (with `reasons`) or `invalid_correction`",
             "content": {
               "application/json": {
                 "schema": {
@@ -1476,11 +1586,48 @@
               "invalid_request",
               "storage_unavailable",
               "service_unavailable",
-              "not_found"
+              "not_found",
+              "version_conflict",
+              "invalid_state",
+              "validation_failed",
+              "invalid_correction"
             ]
           },
           "message": {
             "type": "string"
+          },
+          "current_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Only with `version_conflict`"
+          },
+          "status": {
+            "type": "string",
+            "description": "Only with `invalid_state`"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Only with `validation_failed`: stable reason codes"
+          },
+          "issues": {
+            "type": "array",
+            "description": "Only with `invalid_request` on PATCH: paths and messages, no values",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "document_id": {
             "type": "string",
@@ -1693,7 +1840,7 @@
           "items",
           "field_confidences"
         ],
-        "description": "Provisional field names. Money and quantities are decimal strings; confidences are decimal strings in [0, 1].",
+        "description": "Money and quantities are decimal strings; confidences are decimal strings in [0, 1]. `PATCH` accepts the same nested names.",
         "properties": {
           "id": {
             "type": "string",
@@ -2216,6 +2363,20 @@
               "null"
             ]
           },
+          "corrected_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "corrected_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "API key id of the last correction"
+          },
           "artifact": {
             "type": [
               "object",
@@ -2321,6 +2482,557 @@
             }
           }
         }
+      },
+      "CorrectReceivedDocumentRequest": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "confirm": {
+            "type": "boolean"
+          },
+          "document_type": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timbrado": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "series": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "establishment_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expedition_point_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "document_sequence": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "issued_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
+            "type": "string"
+          },
+          "exchange_rate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "issuer": {
+            "type": "object",
+            "properties": {
+              "ruc": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "legal_name": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "trade_name": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "address": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "economic_activity": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "receiver": {
+            "type": "object",
+            "properties": {
+              "ruc": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "legal_name": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "payment": {
+            "type": "object",
+            "properties": {
+              "condition": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "cash",
+                      "credit"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "credit_term_days": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "method": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "due_on": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "paid_on": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "totals": {
+            "type": "object",
+            "properties": {
+              "exempt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "zero_rated": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "taxable_5": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "taxable_10": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "vat_5": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "vat_10": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "total_vat": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "discount": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "total_amount": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "total_pyg": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "items": {
+            "maxItems": 999,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "position": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 999999
+                },
+                "remove": {
+                  "type": "boolean"
+                },
+                "description": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "product_code": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "quantity": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "unit_of_measure": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "unit_price": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "discount": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "subtotal": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "vat_rate": {
+                  "anyOf": [
+                    {
+                      "anyOf": [
+                        {
+                          "type": "number",
+                          "const": 0
+                        },
+                        {
+                          "type": "number",
+                          "const": 5
+                        },
+                        {
+                          "type": "number",
+                          "const": 10
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "taxable_base": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "vat_amount": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "position"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "additionalProperties": false
       },
       "CreateDocumentRequest": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",

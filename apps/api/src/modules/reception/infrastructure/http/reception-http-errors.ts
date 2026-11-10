@@ -10,7 +10,11 @@ export type ReceptionUploadErrorCode =
   | 'invalid_request'
   | 'storage_unavailable'
   | 'service_unavailable'
-  | 'not_found';
+  | 'not_found'
+  | 'version_conflict'
+  | 'invalid_state'
+  | 'validation_failed'
+  | 'invalid_correction';
 
 /** The API's `{ statusCode, message }` envelope plus a stable `code` (and optional extras). */
 export function receptionProblem(

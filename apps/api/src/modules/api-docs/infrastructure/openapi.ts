@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { DOCUMENT_STATUSES } from '@sifen/db';
 import { RECEIVED_DOCUMENT_STATUSES } from '../../reception/domain/received-document-status.js';
 import { RECEIVED_DOCUMENT_SOURCES } from '../../reception/domain/source.js';
+import { correctReceivedDocumentRequestSchema } from '../../reception/infrastructure/http/correct-received-document.request.js';
 import { createDocumentSchema } from '../../emission/infrastructure/http/create-document.request.js';
 import { WEBHOOK_EVENT_TYPES } from '../../webhooks/domain/webhook-event.js';
 
@@ -277,7 +278,7 @@ export function buildOpenApiDocument() {
           summary: 'Get a received document with its items and per-field confidences',
           description:
             'Everything an ERP needs to render its own review: extracted fields, items, per-field confidences, `needs_review_reasons` and the artifact link. ' +
-            'Field names are provisional until the correction endpoint (PATCH) ships. Money is a decimal string.',
+            'Money is a decimal string. Soft-removed items are not listed. `version` is what `PATCH` expects.',
           ...secured(['reception:read']),
           parameters: [idParam('Received document')],
           responses: {
@@ -287,6 +288,45 @@ export function buildOpenApiDocument() {
             '403': FORBIDDEN,
             '404': problem(
               'Not found, also for another tenant`s document (`not_found`)',
+              'ReceptionProblem',
+            ),
+          },
+        },
+        patch: {
+          operationId: 'correctReceivedDocument',
+          tags: ['Reception'],
+          summary: 'Correct a received document and, optionally, confirm it, in one call',
+          description:
+            'Allowed in `needs_review` and `confirmed` only. Send the `version` you read (optimistic lock, no `If-Match`); a stale one answers 409 `version_conflict` with `current_version`. ' +
+            'Absent fields keep their value, `null` clears a nullable one. Items are addressed by `position` (yours to choose, never reused): an existing position is modified, a new one is added, `remove: true` soft-removes it (the row is retained, reads skip it). ' +
+            'With `confirm: true`, or when the document is already `confirmed`, the result is revalidated: a failure answers 422 `validation_failed` with `reasons` and NOTHING is saved (not even the corrections). ' +
+            'Without `confirm`, a `needs_review` document stays in `needs_review`, its `version` increases and `needs_review_reasons` are refreshed (`awaiting_confirmation` when the data is valid but unconfirmed). ' +
+            'Repeating a request that was already applied (same actor, previous `version`) answers 200 with `Idempotent-Replayed: true` and writes nothing. ' +
+            'The response is the same shape as `GET`.',
+          ...secured(['reception:write']),
+          parameters: [idParam('Received document')],
+          requestBody: {
+            required: true,
+            content: { 'application/json': { schema: ref('CorrectReceivedDocumentRequest') } },
+          },
+          responses: {
+            '200': json('The document after the correction', ref('ReceivedDocumentDetail')),
+            '400': problem(
+              'Malformed body or id (`invalid_request`, with `issues`)',
+              'ReceptionProblem',
+            ),
+            '401': UNAUTHORIZED,
+            '403': FORBIDDEN,
+            '404': problem(
+              'Not found, also for another tenant`s document (`not_found`)',
+              'ReceptionProblem',
+            ),
+            '409': problem(
+              '`version_conflict` (with `current_version`) or `invalid_state` (with `status`)',
+              'ReceptionProblem',
+            ),
+            '422': problem(
+              '`validation_failed` (with `reasons`) or `invalid_correction`',
               'ReceptionProblem',
             ),
           },
@@ -490,9 +530,31 @@ export function buildOpenApiDocument() {
                 'storage_unavailable',
                 'service_unavailable',
                 'not_found',
+                'version_conflict',
+                'invalid_state',
+                'validation_failed',
+                'invalid_correction',
               ],
             },
             message: { type: 'string' },
+            current_version: {
+              type: ['integer', 'null'],
+              description: 'Only with `version_conflict`',
+            },
+            status: { type: 'string', description: 'Only with `invalid_state`' },
+            reasons: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Only with `validation_failed`: stable reason codes',
+            },
+            issues: {
+              type: 'array',
+              description: 'Only with `invalid_request` on PATCH: paths and messages, no values',
+              items: {
+                type: 'object',
+                properties: { path: { type: 'string' }, message: { type: 'string' } },
+              },
+            },
             document_id: {
               type: 'string',
               format: 'uuid',
@@ -558,7 +620,7 @@ export function buildOpenApiDocument() {
           type: 'object',
           required: ['id', 'status', 'source', 'version', 'items', 'field_confidences'],
           description:
-            'Provisional field names. Money and quantities are decimal strings; confidences are decimal strings in [0, 1].',
+            'Money and quantities are decimal strings; confidences are decimal strings in [0, 1]. `PATCH` accepts the same nested names.',
           properties: {
             id: { type: 'string', format: 'uuid' },
             status: { type: 'string', enum: RECEIVED_DOCUMENT_STATUSES },
@@ -677,6 +739,11 @@ export function buildOpenApiDocument() {
             },
             confirmed_at: nullableDateTime,
             confirmed_by: { type: ['string', 'null'] },
+            corrected_at: nullableDateTime,
+            corrected_by: {
+              type: ['string', 'null'],
+              description: 'API key id of the last correction',
+            },
             artifact: {
               type: ['object', 'null'],
               properties: {
@@ -722,6 +789,10 @@ export function buildOpenApiDocument() {
             },
           },
         },
+        CorrectReceivedDocumentRequest: z.toJSONSchema(correctReceivedDocumentRequestSchema, {
+          io: 'input',
+          unrepresentable: 'any',
+        }),
         CreateDocumentRequest: z.toJSONSchema(createDocumentSchema, {
           io: 'input',
           unrepresentable: 'any',

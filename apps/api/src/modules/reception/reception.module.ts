@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Module } from '@nestjs/common';
 import type { Database } from '@sifen/db';
 import { DATABASE } from '../database/database.module.js';
+import { createCorrectReceivedDocument } from './application/correct-received-document.js';
 import { createGetArtifact, createGetArtifactUrl } from './application/get-artifact.js';
 import { createGetReceivedDocument } from './application/get-received-document.js';
 import { IngestSifenXml } from './application/ingest-sifen-xml.js';
@@ -19,6 +20,7 @@ import {
 } from './infrastructure/http/reception-upload-config.js';
 import { loadStorageConfig } from './infrastructure/storage-config.js';
 import {
+  CORRECT_RECEIVED_DOCUMENT,
   GET_RECEIVED_DOCUMENT,
   GET_RECEPTION_ARTIFACT,
   GET_RECEPTION_ARTIFACT_URL,
@@ -64,6 +66,17 @@ import {
             })
           : null,
       inject: [DATABASE, RECEPTION_STORAGE, RECEPTION_UPLOAD_CONFIG],
+    },
+    {
+      provide: CORRECT_RECEIVED_DOCUMENT,
+      useFactory: (db: Database | null) =>
+        db
+          ? createCorrectReceivedDocument({
+              repository: createDrizzleReceivedDocumentRepository(db),
+              now: () => new Date(),
+            })
+          : null,
+      inject: [DATABASE],
     },
     {
       provide: LIST_RECEIVED_DOCUMENTS,

@@ -45,4 +45,10 @@ describe('presentReceivedDocumentDetail', () => {
     expect(out.issuer.ruc).toBeNull();
     expect(out.document_number).toBeNull();
   });
+
+  it('exposes who corrected the document and when', () => {
+    const at = new Date('2026-11-10T12:00:00Z');
+    const out = presentReceivedDocumentDetail(base({ correctedBy: 'key-1', correctedAt: at }));
+    expect(out).toMatchObject({ corrected_by: 'key-1', corrected_at: at.toISOString() });
+  });
 });

@@ -3,7 +3,8 @@
  * submitted, approved, rejected, cancelled and the notification pair; plan v1.1 §19 adds
  * `approved_with_observations` (renaming v1.0's `approved_with_warnings`), `number_voided` and
  * `transmission_deadline_warning` rather than replacing the list. `lote.*` and `event.*` of
- * v1.0 are not document lifecycle events and are out of this story.
+ * v1.0 are not document lifecycle events and are out of this story. ADR-0023 appends the four
+ * `reception.document.*` events of received documents.
  */
 export const WEBHOOK_EVENT_TYPES = [
   'document.created',
@@ -17,6 +18,10 @@ export const WEBHOOK_EVENT_TYPES = [
   'document.transmission_deadline_warning',
   'document.notification.delivered',
   'document.notification.failed',
+  'reception.document.confirmed',
+  'reception.document.needs_review',
+  'reception.document.extraction_failed',
+  'reception.document.updated',
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];

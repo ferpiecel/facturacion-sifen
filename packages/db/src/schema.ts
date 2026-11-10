@@ -728,6 +728,10 @@ export const WEBHOOK_EVENT_TYPES = [
   'document.transmission_deadline_warning',
   'document.notification.delivered',
   'document.notification.failed',
+  'reception.document.confirmed',
+  'reception.document.needs_review',
+  'reception.document.extraction_failed',
+  'reception.document.updated',
 ] as const;
 
 /**

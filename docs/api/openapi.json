@@ -3351,7 +3351,11 @@
                 "document.number_voided",
                 "document.transmission_deadline_warning",
                 "document.notification.delivered",
-                "document.notification.failed"
+                "document.notification.failed",
+                "reception.document.confirmed",
+                "reception.document.needs_review",
+                "reception.document.extraction_failed",
+                "reception.document.updated"
               ]
             }
           }
@@ -3379,7 +3383,11 @@
                 "document.number_voided",
                 "document.transmission_deadline_warning",
                 "document.notification.delivered",
-                "document.notification.failed"
+                "document.notification.failed",
+                "reception.document.confirmed",
+                "reception.document.needs_review",
+                "reception.document.extraction_failed",
+                "reception.document.updated"
               ]
             }
           },

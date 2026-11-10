@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { AppModule } from '../../../app.module.js';
 import { IS_PUBLIC_KEY } from '../../identity/infrastructure/decorators/public.decorator.js';
 import { REQUIRED_SCOPES_KEY } from '../../identity/infrastructure/decorators/require-scopes.decorator.js';
+import { EXCLUDED_FROM_OPENAPI_KEY } from './exclude-from-openapi.decorator.js';
 import { buildOpenApiDocument } from './openapi.js';
 
 type Ctor = new (...args: never[]) => unknown;
@@ -39,6 +40,7 @@ interface Route {
 function integratorRoutes(): Route[] {
   return controllers(AppModule as Ctor)
     .filter((controller) => !Reflect.getMetadata(IS_PUBLIC_KEY, controller))
+    .filter((controller) => !Reflect.getMetadata(EXCLUDED_FROM_OPENAPI_KEY, controller))
     .flatMap((controller) => {
       const base = String(Reflect.getMetadata(PATH_METADATA, controller));
       return Object.getOwnPropertyNames(controller.prototype)

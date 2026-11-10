@@ -1249,6 +1249,10 @@ export const receivedDocuments = pgTable(
     confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
     /** Portal user id or API key id that confirmed the document. */
     confirmedBy: text('confirmed_by'),
+    /** Last correction through the API (set together with `corrected_by`); history is in audit_log. */
+    correctedAt: timestamp('corrected_at', { withTimezone: true }),
+    /** API key id or portal user id of the last correction. */
+    correctedBy: text('corrected_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1316,6 +1320,10 @@ export const receivedDocuments = pgTable(
       sql`${table.extractionErrorCode} ~ '^[a-z0-9_.-]{1,64}$'`,
     ),
     check(
+      'received_documents_correction_pair',
+      sql`(${table.correctedAt} IS NULL) = (${table.correctedBy} IS NULL)`,
+    ),
+    check(
       'received_documents_idempotency_pair',
       sql`(${table.idempotencyKey} IS NULL) = (${table.requestHash} IS NULL)`,
     ),
@@ -1334,7 +1342,8 @@ export const receivedDocuments = pgTable(
  * A line of a received document. `quantity` is numeric(18,8): up to 10 integer digits and 8
  * decimals (ADR-0018); money is numeric(23,8). The composite foreign key keeps an item in the
  * same tenant as its document. Items are inserted and updated, never deleted by the runtime
- * role, so a correction rewrites positions in place.
+ * role: a correction edits a line in place or soft-removes it (`removed_at`), and positions are
+ * never reused.
  */
 export const receivedDocumentItems = pgTable(
   'received_document_items',
@@ -1356,6 +1365,9 @@ export const receivedDocumentItems = pgTable(
     vatRate: smallint('vat_rate'),
     taxableBase: numeric('taxable_base', { precision: 23, scale: 8 }),
     vatAmount: numeric('vat_amount', { precision: 23, scale: 8 }),
+    /** Soft removal (a correction dropped the line): the row is retained, reads skip it. */
+    removedAt: timestamp('removed_at', { withTimezone: true }),
+    removedBy: text('removed_by'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -1370,6 +1382,10 @@ export const receivedDocumentItems = pgTable(
       table.position,
     ),
     check('received_document_items_position_positive', sql`${table.position} >= 1`),
+    check(
+      'received_document_items_removal_pair',
+      sql`(${table.removedAt} IS NULL) = (${table.removedBy} IS NULL)`,
+    ),
     check(
       'received_document_items_vat_rate_valid',
       sql`${table.vatRate} IS NULL OR ${table.vatRate} IN (0, 5, 10)`,

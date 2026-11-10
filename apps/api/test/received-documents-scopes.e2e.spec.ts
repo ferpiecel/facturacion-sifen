@@ -66,9 +66,9 @@ describe('/v1/received-documents scopes (e2e)', () => {
     const read = await call('GET', await keyWith(['reception:read']));
     const write = await call('POST', await keyWith(['reception:write']));
 
-    // GET is still the R4.3 placeholder; POST is real (an empty upload is refused, not 401/403/501).
-    expect(read.statusCode).toBe(501);
-    expect(read.json<{ message: string }>().message).toBe('not_implemented');
+    // GET lists (R4.3); POST is real (an empty upload is refused, not 401/403/501).
+    expect(read.statusCode).toBe(200);
+    expect(read.json()).toEqual({ items: [], next_cursor: null });
     expect([401, 403, 501]).not.toContain(write.statusCode);
   });
 });

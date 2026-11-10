@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { DOCUMENT_STATUSES } from '@sifen/db';
+import { RECEIVED_DOCUMENT_STATUSES } from '../../reception/domain/received-document-status.js';
+import { RECEIVED_DOCUMENT_SOURCES } from '../../reception/domain/source.js';
 import { createDocumentSchema } from '../../emission/infrastructure/http/create-document.request.js';
 import { WEBHOOK_EVENT_TYPES } from '../../webhooks/domain/webhook-event.js';
 
@@ -41,6 +43,7 @@ const secured = (scopes: string[]) => ({
 
 const dateTime = { type: 'string', format: 'date-time' };
 const nullableDateTime = { type: ['string', 'null'], format: 'date-time' };
+const decimalString = { type: ['string', 'null'], examples: ['10000.5'] };
 
 export function buildOpenApiDocument() {
   return {
@@ -211,6 +214,134 @@ export function buildOpenApiDocument() {
             ),
           },
         },
+        get: {
+          operationId: 'listReceivedDocuments',
+          tags: ['Reception'],
+          summary: 'List received documents, newest first, cursor paginated',
+          description:
+            'Ordered by creation time, newest first. Pass the `next_cursor` of a page as `cursor` to get the next one; it is null on the last page. ' +
+            '`issued_from` and `issued_to` are inclusive calendar days; `updated_since` is an inclusive ISO 8601 timestamp for incremental sync.',
+          ...secured(['reception:read']),
+          parameters: [
+            {
+              name: 'limit',
+              in: 'query',
+              schema: { type: 'integer', minimum: 1, maximum: 200, default: 50 },
+            },
+            {
+              name: 'cursor',
+              in: 'query',
+              description: 'The `next_cursor` of the previous page',
+              schema: { type: 'string' },
+            },
+            {
+              name: 'status',
+              in: 'query',
+              schema: { type: 'string', enum: RECEIVED_DOCUMENT_STATUSES },
+            },
+            {
+              name: 'source',
+              in: 'query',
+              schema: { type: 'string', enum: RECEIVED_DOCUMENT_SOURCES },
+            },
+            {
+              name: 'issuer_ruc',
+              in: 'query',
+              description:
+                'Issuer RUC, with or without the check digit (`80000001` or `80000001-8`)',
+              schema: { type: 'string', pattern: '^[0-9]{5,8}(-[0-9])?$' },
+            },
+            { name: 'issued_from', in: 'query', schema: { type: 'string', format: 'date' } },
+            { name: 'issued_to', in: 'query', schema: { type: 'string', format: 'date' } },
+            { name: 'is_own_receiver', in: 'query', schema: { type: 'boolean' } },
+            {
+              name: 'cdc_prefix',
+              in: 'query',
+              description: 'Leading digits of the CDC',
+              schema: { type: 'string', pattern: '^[0-9]{1,44}$' },
+            },
+            { name: 'updated_since', in: 'query', schema: { type: 'string', format: 'date-time' } },
+          ],
+          responses: {
+            '200': json('A page of received documents', ref('ReceivedDocumentPage')),
+            '400': problem('A parameter is malformed (`invalid_request`)', 'ReceptionProblem'),
+            '401': UNAUTHORIZED,
+            '403': FORBIDDEN,
+          },
+        },
+      },
+      '/v1/received-documents/{id}': {
+        get: {
+          operationId: 'getReceivedDocument',
+          tags: ['Reception'],
+          summary: 'Get a received document with its items and per-field confidences',
+          description:
+            'Everything an ERP needs to render its own review: extracted fields, items, per-field confidences, `needs_review_reasons` and the artifact link. ' +
+            'Field names are provisional until the correction endpoint (PATCH) ships. Money is a decimal string.',
+          ...secured(['reception:read']),
+          parameters: [idParam('Received document')],
+          responses: {
+            '200': json('The document', ref('ReceivedDocumentDetail')),
+            '400': problem('id is not a UUID (`invalid_request`)', 'ReceptionProblem'),
+            '401': UNAUTHORIZED,
+            '403': FORBIDDEN,
+            '404': problem(
+              'Not found, also for another tenant`s document (`not_found`)',
+              'ReceptionProblem',
+            ),
+          },
+        },
+      },
+      '/v1/received-documents/{id}/artifact': {
+        get: {
+          operationId: 'downloadReceivedArtifact',
+          tags: ['Reception'],
+          summary: 'Download the stored upload, byte for byte',
+          description:
+            'Served with the content type recorded at upload and `Content-Disposition: inline`.',
+          ...secured(['reception:read']),
+          parameters: [idParam('Received document')],
+          responses: {
+            '200': {
+              description: 'The stored bytes',
+              content: { '*/*': { schema: { type: 'string', format: 'binary' } } },
+            },
+            '400': problem('id is not a UUID (`invalid_request`)', 'ReceptionProblem'),
+            '401': UNAUTHORIZED,
+            '403': FORBIDDEN,
+            '404': problem(
+              'No such document, or it has no stored artifact (`not_found`)',
+              'ReceptionProblem',
+            ),
+            '503': problem(
+              'Document storage is not available (`storage_unavailable`)',
+              'ReceptionProblem',
+            ),
+          },
+        },
+      },
+      '/v1/received-documents/{id}/artifact-url': {
+        get: {
+          operationId: 'getReceivedArtifactUrl',
+          tags: ['Reception'],
+          summary: 'A time-limited direct download URL for the stored upload',
+          ...secured(['reception:read']),
+          parameters: [idParam('Received document')],
+          responses: {
+            '200': json('The URL', ref('ReceivedArtifactUrl')),
+            '400': problem('id is not a UUID (`invalid_request`)', 'ReceptionProblem'),
+            '401': UNAUTHORIZED,
+            '403': FORBIDDEN,
+            '404': problem(
+              'No such document, or it has no stored artifact (`not_found`)',
+              'ReceptionProblem',
+            ),
+            '503': problem(
+              'Document storage is not available (`storage_unavailable`)',
+              'ReceptionProblem',
+            ),
+          },
+        },
       },
       '/v1/webhooks/endpoints': {
         post: {
@@ -333,7 +464,7 @@ export function buildOpenApiDocument() {
           type: 'http',
           scheme: 'bearer',
           description:
-            'API key. Each route needs the scope named in `x-required-scopes` (`documents:read`, `documents:write`, `webhooks:read`, `webhooks:write`, `reception:write`).',
+            'API key. Each route needs the scope named in `x-required-scopes` (`documents:read`, `documents:write`, `webhooks:read`, `webhooks:write`, `reception:read`, `reception:write`).',
         },
       },
       schemas: {
@@ -357,6 +488,8 @@ export function buildOpenApiDocument() {
                 'empty_upload',
                 'invalid_request',
                 'storage_unavailable',
+                'service_unavailable',
+                'not_found',
               ],
             },
             message: { type: 'string' },
@@ -381,6 +514,193 @@ export function buildOpenApiDocument() {
             version: { type: 'integer', minimum: 1 },
             source: { type: 'string', enum: ['sifen_xml'] },
           },
+        },
+        ReceivedDocumentSummary: {
+          type: 'object',
+          required: ['id', 'status', 'source', 'version', 'created_at', 'updated_at'],
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+            status: { type: 'string', enum: RECEIVED_DOCUMENT_STATUSES },
+            source: { type: 'string', enum: RECEIVED_DOCUMENT_SOURCES },
+            version: { type: 'integer', minimum: 1 },
+            needs_review: { type: 'boolean' },
+            is_own_receiver: {
+              type: 'boolean',
+              description: 'False when the receiver RUC is not the tenant`s own',
+            },
+            document_type: { type: ['integer', 'null'] },
+            cdc: { type: ['string', 'null'] },
+            issuer: {
+              type: 'object',
+              properties: { ruc: { type: ['string', 'null'] }, name: { type: ['string', 'null'] } },
+            },
+            document_number: { type: ['string', 'null'], examples: ['001-001-0000123'] },
+            issued_on: { type: ['string', 'null'], format: 'date' },
+            currency: { type: 'string' },
+            total_amount: decimalString,
+            total_vat: decimalString,
+            confidence_overall: decimalString,
+            confirmed_at: nullableDateTime,
+            has_artifact: { type: 'boolean' },
+            created_at: dateTime,
+            updated_at: dateTime,
+          },
+        },
+        ReceivedDocumentPage: {
+          type: 'object',
+          required: ['items', 'next_cursor'],
+          properties: {
+            items: { type: 'array', items: ref('ReceivedDocumentSummary') },
+            next_cursor: { type: ['string', 'null'] },
+          },
+        },
+        ReceivedDocumentDetail: {
+          type: 'object',
+          required: ['id', 'status', 'source', 'version', 'items', 'field_confidences'],
+          description:
+            'Provisional field names. Money and quantities are decimal strings; confidences are decimal strings in [0, 1].',
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+            status: { type: 'string', enum: RECEIVED_DOCUMENT_STATUSES },
+            source: { type: 'string', enum: RECEIVED_DOCUMENT_SOURCES },
+            version: { type: 'integer', minimum: 1 },
+            needs_review: { type: 'boolean' },
+            needs_review_reasons: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Machine reason codes; empty unless `needs_review`',
+            },
+            is_own_receiver: { type: 'boolean' },
+            extraction_error_code: { type: ['string', 'null'] },
+            extraction_attempts: { type: 'integer' },
+            confidence_overall: decimalString,
+            document_type: { type: ['integer', 'null'] },
+            cdc: { type: ['string', 'null'] },
+            timbrado: { type: ['string', 'null'] },
+            series: { type: ['string', 'null'] },
+            establishment_code: { type: ['string', 'null'] },
+            expedition_point_code: { type: ['string', 'null'] },
+            document_sequence: { type: ['string', 'null'] },
+            document_number: { type: ['string', 'null'] },
+            issued_on: { type: ['string', 'null'], format: 'date' },
+            currency: { type: 'string' },
+            exchange_rate: decimalString,
+            issuer: {
+              type: 'object',
+              properties: {
+                ruc: { type: ['string', 'null'] },
+                ruc_base: { type: ['string', 'null'] },
+                ruc_dv: { type: ['integer', 'null'] },
+                legal_name: { type: ['string', 'null'] },
+                trade_name: { type: ['string', 'null'] },
+                address: { type: ['string', 'null'] },
+                economic_activity: { type: ['string', 'null'] },
+              },
+            },
+            receiver: {
+              type: 'object',
+              properties: {
+                ruc: { type: ['string', 'null'] },
+                ruc_base: { type: ['string', 'null'] },
+                ruc_dv: { type: ['integer', 'null'] },
+                legal_name: { type: ['string', 'null'] },
+                type: { type: ['integer', 'null'] },
+              },
+            },
+            payment: {
+              type: 'object',
+              properties: {
+                condition: { type: ['string', 'null'], enum: ['cash', 'credit', null] },
+                credit_term_days: { type: ['integer', 'null'] },
+                method: { type: ['string', 'null'] },
+                due_on: { type: ['string', 'null'], format: 'date' },
+                paid_on: { type: ['string', 'null'], format: 'date' },
+              },
+            },
+            totals: {
+              type: 'object',
+              properties: {
+                exempt: decimalString,
+                zero_rated: decimalString,
+                taxable_5: decimalString,
+                taxable_10: decimalString,
+                vat_5: decimalString,
+                vat_10: decimalString,
+                total_vat: decimalString,
+                discount: decimalString,
+                total_amount: decimalString,
+                total_pyg: decimalString,
+              },
+            },
+            sifen: {
+              type: 'object',
+              properties: {
+                status: { type: 'string' },
+                authorized_at: nullableDateTime,
+                protocol_number: { type: ['string', 'null'] },
+              },
+            },
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['position'],
+                properties: {
+                  position: { type: 'integer', minimum: 1 },
+                  description: { type: ['string', 'null'] },
+                  product_code: { type: ['string', 'null'] },
+                  quantity: decimalString,
+                  unit_of_measure: { type: ['string', 'null'] },
+                  unit_price: decimalString,
+                  discount: decimalString,
+                  subtotal: decimalString,
+                  vat_rate: { type: ['integer', 'null'], enum: [0, 5, 10, null] },
+                  taxable_base: decimalString,
+                  vat_amount: decimalString,
+                },
+              },
+            },
+            field_confidences: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['field', 'confidence'],
+                properties: {
+                  field: { type: 'string' },
+                  confidence: { type: 'string' },
+                  extracted_value: { type: ['string', 'null'] },
+                  corrected_value: { type: ['string', 'null'] },
+                  corrected_by: { type: ['string', 'null'] },
+                  corrected_at: nullableDateTime,
+                },
+              },
+            },
+            confirmed_at: nullableDateTime,
+            confirmed_by: { type: ['string', 'null'] },
+            artifact: {
+              type: ['object', 'null'],
+              properties: {
+                id: { type: 'string', format: 'uuid' },
+                content_type: { type: ['string', 'null'] },
+                size_bytes: { type: 'integer' },
+                sha256: { type: 'string' },
+                original_name: { type: ['string', 'null'] },
+                page_count: { type: ['integer', 'null'] },
+              },
+            },
+            artifact_url: {
+              type: ['string', 'null'],
+              description:
+                'Path of `GET /v1/received-documents/{id}/artifact` (needs the API key); null without artifact',
+            },
+            created_at: dateTime,
+            updated_at: dateTime,
+          },
+        },
+        ReceivedArtifactUrl: {
+          type: 'object',
+          required: ['url', 'expires_in_seconds'],
+          properties: { url: { type: 'string' }, expires_in_seconds: { type: 'integer' } },
         },
         ValidationProblem: {
           type: 'object',

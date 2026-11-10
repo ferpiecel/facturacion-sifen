@@ -1,6 +1,6 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
 
-/** Stable machine codes of `POST /v1/received-documents` errors (body `code`). */
+/** Stable machine codes of `/v1/received-documents` errors (body `code`). */
 export type ReceptionUploadErrorCode =
   | 'payload_too_large'
   | 'unsupported_media_type'
@@ -8,7 +8,9 @@ export type ReceptionUploadErrorCode =
   | 'extraction_failed'
   | 'empty_upload'
   | 'invalid_request'
-  | 'storage_unavailable';
+  | 'storage_unavailable'
+  | 'service_unavailable'
+  | 'not_found';
 
 /** The API's `{ statusCode, message }` envelope plus a stable `code` (and optional extras). */
 export function receptionProblem(

@@ -8,6 +8,7 @@ import {
   type Database,
   type TenantTx,
 } from '@sifen/db';
+import type { ReceivedDocumentDetail } from '../../application/ports/received-document-query.port.js';
 import {
   ReceivedDocumentNotFoundError,
   VersionConflictError,
@@ -91,7 +92,7 @@ const toHeader = (row: DocumentRow): ReceivedDocumentHeader =>
     HEADER_KEYS.map((key) => [key, row[key]]),
   ) as unknown as ReceivedDocumentHeader;
 
-const toDocument = (row: DocumentRow): ReceivedDocument =>
+export const toDocument = (row: Omit<DocumentRow, 'rawData'>): ReceivedDocument =>
   rehydrateReceivedDocument({
     id: row.id,
     tenantId: row.tenantId,
@@ -138,6 +139,50 @@ const toArtifact = (row: ArtifactRow): ReceivedArtifact => ({
   originalName: row.originalName,
   pageCount: row.pageCount,
 });
+
+/** One document with its items, confidences and artifact, read inside the caller's transaction. */
+export async function readDocumentDetail(
+  tx: TenantTx,
+  tenantId: string,
+  id: string,
+): Promise<ReceivedDocumentDetail | null> {
+  const row = (
+    await tx
+      .select()
+      .from(receivedDocuments)
+      .where(and(eq(receivedDocuments.tenantId, tenantId), eq(receivedDocuments.id, id)))
+  ).at(0);
+  if (row === undefined) return null;
+  const items = await tx
+    .select()
+    .from(receivedDocumentItems)
+    .where(eq(receivedDocumentItems.receivedDocumentId, id))
+    .orderBy(asc(receivedDocumentItems.position));
+  const confidences = await tx
+    .select()
+    .from(receivedDocumentFieldConfidences)
+    .where(eq(receivedDocumentFieldConfidences.receivedDocumentId, id))
+    .orderBy(asc(receivedDocumentFieldConfidences.fieldName));
+  const artifact = row.artifactId
+    ? (
+        await tx
+          .select()
+          .from(receivedArtifacts)
+          .where(
+            and(eq(receivedArtifacts.tenantId, tenantId), eq(receivedArtifacts.id, row.artifactId)),
+          )
+      ).at(0)
+    : undefined;
+  return {
+    document: toDocument(row),
+    header: toHeader(row),
+    items: items.map(toItem),
+    confidences: confidences.map(toConfidence),
+    artifact: artifact ? toArtifact(artifact) : null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
 
 /** Thrown inside the transaction to roll it back when a concurrent insert won the unique index. */
 class LostInsertRace extends Error {}
@@ -293,43 +338,17 @@ export function createDrizzleReceivedDocumentRepository(db: Database): ReceivedD
       return { created: false, document: toDocument(winner) };
     },
 
-    load(tenantId, id): Promise<ReceivedDocumentGraph | null> {
-      return inTenant(tenantId, async (tx) => {
-        const row = (
-          await tx.select().from(receivedDocuments).where(documentById(tenantId, id))
-        ).at(0);
-        if (row === undefined) return null;
-        const items = await tx
-          .select()
-          .from(receivedDocumentItems)
-          .where(eq(receivedDocumentItems.receivedDocumentId, id))
-          .orderBy(asc(receivedDocumentItems.position));
-        const confidences = await tx
-          .select()
-          .from(receivedDocumentFieldConfidences)
-          .where(eq(receivedDocumentFieldConfidences.receivedDocumentId, id))
-          .orderBy(asc(receivedDocumentFieldConfidences.fieldName));
-        const artifact = row.artifactId
-          ? (
-              await tx
-                .select()
-                .from(receivedArtifacts)
-                .where(
-                  and(
-                    eq(receivedArtifacts.tenantId, tenantId),
-                    eq(receivedArtifacts.id, row.artifactId),
-                  ),
-                )
-            ).at(0)
-          : undefined;
-        return {
-          document: toDocument(row),
-          header: toHeader(row),
-          items: items.map(toItem),
-          confidences: confidences.map(toConfidence),
-          artifact: artifact ? toArtifact(artifact) : null,
-        };
-      });
+    async load(tenantId, id): Promise<ReceivedDocumentGraph | null> {
+      const detail = await inTenant(tenantId, (tx) => readDocumentDetail(tx, tenantId, id));
+      return detail
+        ? {
+            document: detail.document,
+            header: detail.header,
+            items: detail.items,
+            confidences: detail.confidences,
+            artifact: detail.artifact,
+          }
+        : null;
     },
 
     async findByCdc(tenantId, cdc) {

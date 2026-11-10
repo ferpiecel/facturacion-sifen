@@ -1,6 +1,6 @@
 # Webhooks firmados (HU-E11-01)
 
-Referencia para integradores. Decisión: [ADR-0011](../adr/0011-api-asincrona-202-webhooks-idempotencia.md).
+Referencia para integradores. Decisión: [ADR-0011](../adr/0011-api-asincrona-202-webhooks-idempotencia.md). Flujo completo de documentos recibidos: [`recepcion.md`](recepcion.md).
 
 ## Entrega
 

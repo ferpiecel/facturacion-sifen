@@ -157,7 +157,8 @@ export function buildOpenApiDocument() {
           summary: 'Upload a received SIFEN XML',
           description:
             'Stores the XML and extracts it; the processing contract is asynchronous (202), although a SIFEN XML is read before the answer. ' +
-            'The status in the body is `confirmed` when the document passes validation and is addressed to the tenant, `needs_review` otherwise. ' +
+            'The status in the body is `confirmed` when the document passes validation, `needs_review` otherwise. A document whose receiver is not the tenant (`is_own_receiver` false) is stored the same way but never produces webhook events. ' +
+            'Webhooks `reception.document.needs_review` and `reception.document.confirmed` announce the result (see docs/integracion/recepcion.md). ' +
             'Send the XML as a raw `application/xml` or `text/xml` body, as a `multipart/form-data` upload with one `file` part, or as JSON `{ "xml": "<...>" }` (JSON is limited to 1 MiB). ' +
             'Content is recognized by its first bytes, not by the declared type. ' +
             'The same bytes, or the same CDC, uploaded again answer 200 with the existing document. ' +
@@ -302,7 +303,9 @@ export function buildOpenApiDocument() {
             'With `confirm: true`, or when the document is already `confirmed`, the result is revalidated: a failure answers 422 `validation_failed` with `reasons` and NOTHING is saved (not even the corrections). ' +
             'Without `confirm`, a `needs_review` document stays in `needs_review`, its `version` increases and `needs_review_reasons` are refreshed (`awaiting_confirmation` when the data is valid but unconfirmed). ' +
             'Repeating a request that was already applied (same actor, previous `version`) answers 200 with `Idempotent-Replayed: true` and writes nothing. ' +
-            'The response is the same shape as `GET`.',
+            'The response is the same shape as `GET`. ' +
+            'Webhook echo contract: editing a `confirmed` document emits `reception.document.updated` with `data.actor` (`{ type: "api_key", id }`), `data.version` and `data.status`, also to the endpoints of the caller. ' +
+            'To ignore its own echo an ERP discards the event when `data.actor.type` is `api_key`, `data.actor.id` is the id of its API key and `data.version` equals the `version` returned by this operation; see docs/integracion/webhooks.md.',
           ...secured(['reception:write']),
           parameters: [idParam('Received document')],
           requestBody: {

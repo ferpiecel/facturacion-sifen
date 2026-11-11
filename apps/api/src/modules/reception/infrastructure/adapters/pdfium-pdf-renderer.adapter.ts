@@ -24,6 +24,8 @@ export interface PdfiumPdfRendererOptions {
   readonly maxPixelDimension?: number;
   /** Total PNG bytes allowed for one `rasterize` call. */
   readonly maxOutputBytes?: number;
+  /** Creates the PDFium instance (the wasm module); injectable so tests can observe its lifecycle. */
+  readonly initializeLibrary?: () => Promise<PDFiumLibrary>;
 }
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -78,11 +80,13 @@ export class PdfiumPdfRenderer implements PdfRenderer {
   private readonly maxInputBytes: number;
   private readonly maxPixelDimension: number;
   private readonly maxOutputBytes: number;
+  private readonly initializeLibrary: () => Promise<PDFiumLibrary>;
 
   constructor(options: PdfiumPdfRendererOptions) {
     this.maxInputBytes = options.maxInputBytes;
     this.maxPixelDimension = options.maxPixelDimension ?? DEFAULT_PDF_MAX_PIXEL_DIMENSION;
     this.maxOutputBytes = options.maxOutputBytes ?? DEFAULT_PDF_MAX_OUTPUT_BYTES;
+    this.initializeLibrary = options.initializeLibrary ?? (() => PDFiumLibrary.init());
   }
 
   async countPages(pdf: Uint8Array): Promise<number> {
@@ -169,11 +173,22 @@ export class PdfiumPdfRenderer implements PdfRenderer {
   }
 
   private async open(pdf: Uint8Array): Promise<PDFiumDocument> {
+    const library = await this.ensureLibrary();
     try {
-      this.library ??= PDFiumLibrary.init();
-      return await (await this.library).loadDocument(pdf);
+      return await library.loadDocument(pdf);
     } catch {
-      this.library = null; // a failed init must not poison later calls
+      // An unreadable document (corrupt, encrypted) says nothing about the library: keep it.
+      throw new CorruptPdfError();
+    }
+  }
+
+  private async ensureLibrary(): Promise<PDFiumLibrary> {
+    const pending = (this.library ??= this.initializeLibrary());
+    try {
+      return await pending;
+    } catch {
+      // Only a failed init is cleared (there is no instance to destroy), so the next call retries.
+      if (this.library === pending) this.library = null;
       throw new CorruptPdfError();
     }
   }

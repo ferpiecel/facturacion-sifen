@@ -365,13 +365,25 @@ describe('createAnthropicExtractionLlm', () => {
   });
 
   it('never falls back when the fallback is explicitly disabled', async () => {
-    const { client, create } = fakeClient(okMessage());
-    create.mockRejectedValueOnce(new Error('boom'));
+    // 529 is fallback-eligible, so only the explicit opt-out can explain the single call.
+    const { client, create } = fakeClient(new HttpError(529), okMessage());
     const llm = createAnthropicExtractionLlm(
       { ...base, apiKey: 'sk-test', fallbackModel: null },
       { clientFactory: () => client },
     );
-    await expect(llm.extract(request)).rejects.toBeDefined();
+    await expect(llm.extract(request)).rejects.toBeInstanceOf(ExtractionLlmProviderError);
     expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to the configured model after the same eligible error', async () => {
+    const { client, create } = fakeClient(new HttpError(529), okMessage());
+    const llm = createAnthropicExtractionLlm(
+      { ...base, apiKey: 'sk-test' },
+      { clientFactory: () => client },
+    );
+    const response = await llm.extract(request);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(firstCall(create, 1).model).toBe('fallback-model');
+    expect(response.modelId).toBe('fallback-model');
   });
 });

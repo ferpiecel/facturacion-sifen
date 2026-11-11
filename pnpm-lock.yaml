@@ -275,6 +275,12 @@ importers:
       ioredis:
         specifier: 6.0.0
         version: 6.0.0(supports-color@7.2.0)
+      jpeg-js:
+        specifier: 0.4.4
+        version: 0.4.4
+      jsqr:
+        specifier: 1.4.0
+        version: 1.4.0
       libxml2-wasm:
         specifier: 0.7.2
         version: 0.7.2
@@ -293,6 +299,9 @@ importers:
       pdfkit:
         specifier: 0.20.2
         version: 0.20.2
+      pngjs:
+        specifier: 5.0.0
+        version: 5.0.0
       qrcode:
         specifier: 1.5.4
         version: 1.5.4
@@ -333,6 +342,9 @@ importers:
       '@types/pdfkit':
         specifier: 0.17.6
         version: 0.17.6
+      '@types/pngjs':
+        specifier: 6.0.5
+        version: 6.0.5
       '@types/qrcode':
         specifier: 1.5.6
         version: 1.5.6
@@ -345,9 +357,6 @@ importers:
       fast-check:
         specifier: 4.10.2
         version: 4.10.2
-      jsqr:
-        specifier: 1.4.0
-        version: 1.4.0
       pdfjs-dist:
         specifier: 6.3.289
         version: 6.3.289
@@ -2500,6 +2509,9 @@ packages:
   '@types/pg@8.23.1':
     resolution: {integrity: sha512-fKVHpikPdg4GKks3JuLEhvwSyvwzF23hnabPy6DD8ljVbC7+6J5dQzdv4arV6jqq57djnMgs1HKBxX4P8aBI3A==}
 
+  '@types/pngjs@6.0.5':
+    resolution: {integrity: sha512-0k5eKfrA83JOZPppLtS2C7OUtyNAl2wKNxfyYl9Q5g9lPkgBl/9hNyAu6HuEH2J4XmIv2znEpkDd0SaZVxW6iQ==}
+
   '@types/qrcode@1.5.6':
     resolution: {integrity: sha512-te7NQcV2BOvdj2b1hCAHzAoMNuj65kNBMz0KBaxM6c3VGBOhU0dURQKOtH8CFNI/dsKkwlv32p26qYQTWoB5bw==}
 
@@ -3575,6 +3587,9 @@ packages:
   jiti@2.7.0:
     resolution: {integrity: sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==}
     hasBin: true
+
+  jpeg-js@0.4.4:
+    resolution: {integrity: sha512-WZzeDOEtTOBK4Mdsar0IqEU5sMr3vSV2RqkAIzUEV2BHnUfKGyswWFPFwK5EeDo93K3FohSHbLAjj0s1Wzd+dg==}
 
   js-tokens@10.0.0:
     resolution: {integrity: sha512-lM/UBzQmfJRo9ABXbPWemivdCW8V2G8FHaHdypQaIy523snUjog0W71ayWXTjiR+ixeMyVHN2XcpnTd/liPg/Q==}
@@ -6505,6 +6520,10 @@ snapshots:
       pg-protocol: 1.16.0
       pg-types: 2.2.0
 
+  '@types/pngjs@6.0.5':
+    dependencies:
+      '@types/node': 22.20.4
+
   '@types/qrcode@1.5.6':
     dependencies:
       '@types/node': 22.20.4
@@ -7614,6 +7633,8 @@ snapshots:
       '@pkgjs/parseargs': 0.11.0
 
   jiti@2.7.0: {}
+
+  jpeg-js@0.4.4: {}
 
   js-tokens@10.0.0: {}
 

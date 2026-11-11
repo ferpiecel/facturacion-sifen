@@ -14,6 +14,37 @@ export interface ClosableReceptionJobQueue extends ReceptionJobQueue {
   close(): Promise<void>;
 }
 
+const ERROR_LOG_INTERVAL_MS = 60_000;
+
+/**
+ * ioredis emits `error` on every failed reconnect, which would flood the log during an outage.
+ * Logs the first error, then at most one line per interval with how many were dropped. The error
+ * class only: messages hold hosts and credentials.
+ */
+export function createThrottledErrorLog(
+  write: (line: string) => void,
+  intervalMs: number,
+  now: () => number,
+): (error: unknown) => void {
+  let lastLoggedAt: number | undefined;
+  let suppressed = 0;
+  return (error) => {
+    const at = now();
+    if (lastLoggedAt !== undefined && at - lastLoggedAt < intervalMs) {
+      suppressed += 1;
+      return;
+    }
+    const name = error instanceof Error ? error.name : 'unknown';
+    write(
+      `reception queue connection error: ${name}${
+        suppressed === 0 ? '' : ` (${String(suppressed)} more suppressed)`
+      }`,
+    );
+    lastLoggedAt = at;
+    suppressed = 0;
+  };
+}
+
 /** Without Redis there is no extraction queue: PDF and photo uploads answer 503, XML keeps working. */
 const unavailable: ClosableReceptionJobQueue = {
   enqueueExtraction: () => Promise.reject(new ReceptionQueueUnavailableError('not_configured')),
@@ -39,11 +70,16 @@ export function createReceptionJobQueue(
     if (opened) return opened;
     const connection = new Redis(url, { maxRetriesPerRequest: 1, enableOfflineQueue: false });
     // Without a listener ioredis would crash the process on a connection error; log the class only.
-    connection.on('error', (error: unknown) => {
-      console.error(
-        `reception queue connection error: ${error instanceof Error ? error.name : 'unknown'}`,
-      );
-    });
+    connection.on(
+      'error',
+      createThrottledErrorLog(
+        (line) => {
+          console.error(line);
+        },
+        ERROR_LOG_INTERVAL_MS,
+        Date.now,
+      ),
+    );
     const queue = new Queue(RECEPTION_EXTRACTION_QUEUE, { connection });
     queue.on('error', () => undefined);
     opened = { connection, queue, adapter: new BullmqReceptionJobQueue({ queue }) };

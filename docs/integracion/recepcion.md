@@ -86,7 +86,7 @@ El archivo se guarda, se registra el documento en `received` y se encola su extr
 
 - `confirmed`: la confianza global supera el umbral configurado, el emisor está completo y las validaciones pasan.
 - `needs_review`: algo requiere revisión. Además de los motivos de validación de siempre, hay dos propios de esta fuente: `low_confidence` (la confianza global no alcanza el umbral) e `items_without_subtotals` (hay ítems pero ninguno trae subtotal, así que la suma no se puede verificar).
-- `extraction_failed`: no se pudo extraer. `extraction_error_code` lo explica: `corrupt_pdf`, `empty_pdf`, `too_many_pages`, `llm_disabled` (la extracción no está habilitada en el servicio), `llm_refusal`, `llm_invalid_output`, `llm_provider_error`, `llm_rate_limited`, `duplicate_document` (el CDC extraído ya pertenece a otro documento), `artifact_missing`, `internal_error`. Los fallos transitorios (proveedor, límite de tasa, error interno) se reintentan hasta 3 veces con espera creciente; el evento `extraction_failed` se envía solo cuando el fallo es definitivo.
+- `extraction_failed`: no se pudo extraer. `extraction_error_code` lo explica: `corrupt_pdf`, `empty_pdf`, `too_many_pages`, `llm_disabled` (la extracción no está habilitada en el servicio), `llm_refusal`, `llm_invalid_output`, `llm_provider_error`, `llm_rate_limited`, `duplicate_document` (el CDC extraído ya pertenece a otro documento), `artifact_missing`, `internal_error`. Los fallos transitorios (proveedor, límite de tasa, error interno) se reintentan con espera creciente hasta 3 intentos en total (la primera ejecución más 2 reintentos); el evento `extraction_failed` se envía solo cuando el fallo es definitivo.
 
 Para saber cuándo terminó, escuche los webhooks `reception.document.confirmed`, `reception.document.needs_review` y `reception.document.extraction_failed`, o consulte el documento con `GET` hasta que su estado deje de ser `received` o `extracting`.
 
@@ -319,7 +319,7 @@ Todos los errores usan `{ "statusCode", "code", "message" }` más campos extra s
 | `409` | `invalid_state` | `PATCH` sobre un documento que no está en `needs_review` ni `confirmed`. Trae `status` | No reintentar igual |
 | `413` | `payload_too_large` | El archivo supera `RECEPTION_MAX_UPLOAD_BYTES` | Enviar un archivo menor |
 | `415` | `unsupported_media_type` | Los bytes no son XML de SIFEN, PDF, PNG ni JPEG | Enviar un archivo soportado |
-| `422` | `unsupported_source` | Solo CDC (`{ "cdc": ... }`) o una imagen que no es PNG ni JPEG: aún no se procesan | Enviar el archivo |
+| `422` | `unsupported_source` | Solo CDC (`{ "cdc": ... }`): aún no se procesa. Cualquier otro contenido que no sea XML de SIFEN, PDF, PNG ni JPEG responde `415` | Enviar el archivo |
 | `422` | `empty_upload` | Archivo vacío | Enviar el archivo |
 | `422` | `invalid_request` | Falta la parte `file` en `multipart`, o el JSON no trae un `xml` de tipo cadena | Corregir la petición |
 | `422` | `extraction_failed` | El XML no se pudo leer como documento SIFEN soportado. Trae `document_id` (el archivo queda guardado) | Revisar el archivo; no hay reproceso por API todavía |

@@ -76,4 +76,36 @@ describe('BullmqReceptionJobQueue', () => {
       }),
     ).rejects.toBeInstanceOf(ReceptionQueueUnavailableError);
   });
+
+  it('answers unavailable on a slow Redis but the job may still be enqueued (pinned)', async () => {
+    const landed: string[] = [];
+    const add = vi.fn(
+      (_name: string, _data: unknown, opts: { jobId: string }) =>
+        new Promise((resolve) =>
+          setTimeout(() => {
+            landed.push(opts.jobId);
+            resolve({});
+          }, 60),
+        ),
+    );
+    const adapter = new BullmqReceptionJobQueue({ queue: { add }, timeoutMs: 20 });
+    const job = { tenantId: TENANT, documentId: DOC };
+
+    await expect(adapter.enqueueExtraction(job)).rejects.toBeInstanceOf(
+      ReceptionQueueUnavailableError,
+    );
+    expect(landed).toEqual([]);
+    await vi.waitFor(() => {
+      expect(landed).toEqual([`reception-extraction:${DOC}:1`]);
+    });
+
+    // The caller saw 503 and re-uploads: the retry carries the same job id, so BullMQ ignores it.
+    await expect(adapter.enqueueExtraction(job)).rejects.toBeInstanceOf(
+      ReceptionQueueUnavailableError,
+    );
+    expect(add.mock.calls.map((call) => call[2].jobId)).toEqual([
+      `reception-extraction:${DOC}:1`,
+      `reception-extraction:${DOC}:1`,
+    ]);
+  });
 });

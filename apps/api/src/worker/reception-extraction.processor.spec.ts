@@ -15,9 +15,17 @@ const DOC = '22222222-2222-4222-8222-222222222222';
 
 const document = { id: DOC } as never;
 
-const job = (over: { attemptsMade?: number; attempts?: number; tenantId?: string } = {}) => ({
+const job = (
+  over: {
+    attemptsMade?: number;
+    attempts?: number;
+    stalledCounter?: number;
+    tenantId?: string;
+  } = {},
+) => ({
   data: { tenantId: over.tenantId ?? TENANT, documentId: DOC },
   attemptsMade: over.attemptsMade ?? 0,
+  stalledCounter: over.stalledCounter ?? 0,
   opts: { attempts: over.attempts ?? 3 },
 });
 
@@ -25,9 +33,15 @@ function setup(result: ExtractReceivedDocumentResult | Error) {
   const execute = vi.fn<
     (input: ExtractReceivedDocumentInput) => Promise<ExtractReceivedDocumentResult>
   >(() => (result instanceof Error ? Promise.reject(result) : Promise.resolve(result)));
+  const failUnexpected = vi.fn<(input: { tenantId: string; documentId: string }) => Promise<void>>(
+    () => Promise.resolve(),
+  );
   const logger = { info: vi.fn(), warn: vi.fn() };
-  const process = createReceptionExtractionProcessor({ extract: { execute }, logger });
-  return { execute, logger, process };
+  const process = createReceptionExtractionProcessor({
+    extract: { execute, failUnexpected },
+    logger,
+  });
+  return { execute, failUnexpected, logger, process };
 }
 
 const failed = (retryable: boolean, retryAfterSeconds: number | null = null) =>
@@ -87,9 +101,36 @@ describe('reception extraction processor', () => {
     expect((error as Error).message).toBe('llm_provider_error');
   });
 
-  it('lets an unexpected error propagate so the job is retried', async () => {
-    const { process } = setup(new Error('boom'));
-    await expect(process(job())).rejects.toThrow('boom');
+  it('counts a stalled rerun as a later attempt so the use case resumes it', async () => {
+    const { execute, process } = setup({ kind: 'skipped', reason: 'already_processed' });
+    await process(job({ attemptsMade: 0, stalledCounter: 1, attempts: 3 }));
+    // attempt > 1 resumes an `extracting` document; finality still reads real attempts only.
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({ attempt: 2, finalAttempt: false }),
+    );
+    await process(job({ attemptsMade: 2, stalledCounter: 1, attempts: 3 }));
+    expect(execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({ attempt: 4, finalAttempt: true }),
+    );
+  });
+
+  it('lets an unexpected error propagate on a non-final attempt without failing the document', async () => {
+    const { process, failUnexpected } = setup(new Error('boom'));
+    await expect(process(job({ attemptsMade: 0 }))).rejects.toThrow('boom');
+    expect(failUnexpected).not.toHaveBeenCalled();
+  });
+
+  it('fails the document when an unexpected error hits the final attempt, then rethrows', async () => {
+    const { process, failUnexpected } = setup(new Error('boom'));
+    await expect(process(job({ attemptsMade: 2 }))).rejects.toThrow('boom');
+    expect(failUnexpected).toHaveBeenCalledWith({ tenantId: TENANT, documentId: DOC });
+  });
+
+  it('still rethrows the original error when marking the document failed also fails', async () => {
+    const { process, failUnexpected, logger } = setup(new Error('boom'));
+    failUnexpected.mockRejectedValueOnce(new Error('db down'));
+    await expect(process(job({ attemptsMade: 2 }))).rejects.toThrow('boom');
+    expect(logger.warn).toHaveBeenCalled();
   });
 
   it('logs ids, codes and counts only', async () => {

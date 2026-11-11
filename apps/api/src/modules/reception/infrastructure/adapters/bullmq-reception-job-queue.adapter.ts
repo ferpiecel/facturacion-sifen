@@ -27,7 +27,10 @@ interface JobOptions {
   readonly removeOnFail: number;
 }
 
-/** Attempts per job (first run plus retries); the processor reads `attemptsMade` against this. */
+/**
+ * Attempts per job in total (the first run plus two retries). BullMQ stores it in the job options
+ * and the processor reads it back as `job.opts.attempts`, so the producer owns the number.
+ */
 export const RECEPTION_EXTRACTION_ATTEMPTS = 3;
 const BACKOFF_DELAY_MS = 30_000;
 /** Kept for an hour so a duplicate enqueue right after completion is still a no-op. */
@@ -47,6 +50,11 @@ export interface BullmqReceptionJobQueueOptions {
  * `ReceptionJobQueue` over BullMQ. The job id (`reception-extraction:<document>:<attempt>`) makes
  * `add` idempotent: BullMQ ignores an id that already exists. Any failure to reach Redis becomes
  * `ReceptionQueueUnavailableError` carrying the error class only (messages hold hosts and URLs).
+ *
+ * The timeout races `queue.add` but does not cancel it: a slow-but-alive Redis can answer 503 while
+ * the job still lands. That is harmless by design: the document stays `received`, the worker
+ * extracts it, and the re-upload the 503 invites carries the same job id (so BullMQ ignores it) or
+ * finds the document already processed (`duplicate`, no second LLM call).
  */
 export class BullmqReceptionJobQueue implements ReceptionJobQueue {
   private readonly queue: ReceptionExtractionQueue;

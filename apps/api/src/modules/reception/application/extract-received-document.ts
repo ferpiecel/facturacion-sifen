@@ -210,6 +210,31 @@ export class ExtractReceivedDocument {
     }
   }
 
+  /**
+   * Last resort for the FINAL attempt of a job that threw an unexpected error (an infrastructure
+   * failure while loading, claiming or persisting): moves a document left in `received` or
+   * `extracting` to `extraction_failed` with the stable code `internal_error` and the failure event,
+   * so it is never stuck. Stores no error text. Anything already processed (or unknown) is left alone.
+   * It may itself fail (the database that broke the run may still be down); the caller handles that.
+   */
+  async failUnexpected(input: { readonly tenantId: string; readonly documentId: string }) {
+    const { tenantId, documentId } = input;
+    const graph = await this.deps.repository.load(tenantId, documentId);
+    if (graph === null) return;
+    const { document } = graph;
+    if (document.status !== 'received' && document.status !== 'extracting') return;
+    const extracting =
+      document.status === 'extracting'
+        ? document
+        : transitionReceivedDocument(document, 'extracting', { at: this.deps.now() }).document;
+    await this.persistFailure(
+      tenantId,
+      extracting,
+      { code: 'internal_error', retryable: false, retryAfterSeconds: null },
+      { tenantId, documentId, finalAttempt: true },
+    );
+  }
+
   private async claim(
     tenantId: string,
     document: ReceivedDocument,

@@ -610,3 +610,39 @@ describe('ExtractReceivedDocument: guards', () => {
     expect(failed(await h.run('bare'))).toMatchObject({ code: 'artifact_missing' });
   });
 });
+
+describe('ExtractReceivedDocument.failUnexpected (final attempt crashed)', () => {
+  it('moves a document stuck in extracting to extraction_failed with a stable code and the event', async () => {
+    const h = new Harness();
+    await h.seed();
+    const doc = h.doc();
+    await h.repository.save(TENANT, { ...doc, status: 'extracting', extractionAttempts: 1 }, 1);
+
+    await h.useCase.failUnexpected({ tenantId: TENANT, documentId: 'doc-1' });
+
+    expect(h.doc().status).toBe('extraction_failed');
+    expect((await h.repository.load(TENANT, 'doc-1'))?.header.extractionErrorCode).toBe(
+      'internal_error',
+    );
+    expect(h.events).toEqual(['reception.document.extraction_failed']);
+  });
+
+  it('claims and fails a document still in received (the error came before the claim)', async () => {
+    const h = new Harness();
+    await h.seed();
+    await h.useCase.failUnexpected({ tenantId: TENANT, documentId: 'doc-1' });
+    expect(h.doc().status).toBe('extraction_failed');
+    expect(h.events).toEqual(['reception.document.extraction_failed']);
+  });
+
+  it('leaves an already processed, failed or unknown document alone', async () => {
+    const h = new Harness();
+    await h.seed();
+    extracted(await h.run());
+    const before = h.events.length;
+    await h.useCase.failUnexpected({ tenantId: TENANT, documentId: 'doc-1' });
+    await h.useCase.failUnexpected({ tenantId: TENANT, documentId: 'missing' });
+    expect(h.doc().status).toBe('confirmed');
+    expect(h.events).toHaveLength(before);
+  });
+});

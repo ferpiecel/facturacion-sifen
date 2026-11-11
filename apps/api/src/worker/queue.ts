@@ -302,8 +302,35 @@ export function createDocumentEmailWorker({
   return worker;
 }
 
+/**
+ * A stalled job (worker died or lost its lock) is requeued up to this many times; the next stall
+ * fails the BullMQ job with "stalled more than allowable limit" and nothing runs the use case, so
+ * the document stays `extracting` until a reprocess (R5.8). BullMQ's default is 1; 2 tolerates one
+ * deploy restart plus one crash. A stalled requeue does not consume an attempt of the job: the
+ * processor adds `stalledCounter` to the attempt it hands the use case.
+ */
+export const RECEPTION_EXTRACTION_MAX_STALLED_COUNT = 2;
+const MIN_LOCK_DURATION_MS = 300_000;
+
+/**
+ * The lock is renewed while the processor runs, but PDFium and jsqr block the event loop, so it
+ * must outlast the slowest run: the primary and the fallback model each get `llmTimeoutMs`
+ * (BullMQ's 30 s default would flag healthy long calls as stalled and double the LLM spend).
+ */
+export function receptionExtractionWorkerSettings(llmTimeoutMs: number): {
+  readonly lockDuration: number;
+  readonly maxStalledCount: number;
+} {
+  return {
+    lockDuration: Math.max(MIN_LOCK_DURATION_MS, 2 * llmTimeoutMs + 60_000),
+    maxStalledCount: RECEPTION_EXTRACTION_MAX_STALLED_COUNT,
+  };
+}
+
 export interface ReceptionExtractionWorkerOptions {
   readonly connection: Redis;
+  /** Per-call timeout of the LLM; sizes the job lock. */
+  readonly llmTimeoutMs: number;
   /** Low on purpose: PDFium and jsqr run on the event loop of the worker process. */
   readonly concurrency: number;
   readonly process: (job: ReceptionExtractionJob) => Promise<unknown>;
@@ -314,6 +341,7 @@ export interface ReceptionExtractionWorkerOptions {
 /** The ReceptionExtractionWorker (R5.6): one job per uploaded PDF or photo, retried by BullMQ. */
 export function createReceptionExtractionWorker({
   connection,
+  llmTimeoutMs,
   concurrency,
   process,
   prefix,
@@ -322,7 +350,12 @@ export function createReceptionExtractionWorker({
   const worker = new Worker<ReceptionExtractionJobData>(
     RECEPTION_EXTRACTION_QUEUE,
     (job) => process(job),
-    { connection, concurrency, ...(prefix === undefined ? {} : { prefix }) },
+    {
+      connection,
+      concurrency,
+      ...receptionExtractionWorkerSettings(llmTimeoutMs),
+      ...(prefix === undefined ? {} : { prefix }),
+    },
   );
   if (logger) logQueueErrors(worker, 'reception extraction worker', logger);
   return worker;

@@ -54,7 +54,7 @@ export const extractionOutputSchema = z.strictObject({
   items: z.array(itemSchema),
   fieldConfidences: fieldConfidencesSchema,
   overallConfidence: confidence,
-  notes: z.string().optional(),
+  notes: z.string().nullable(),
 });
 
 /** JSON Schema of {@link extractionOutputSchema}, for providers with structured outputs. */
@@ -81,30 +81,98 @@ export type LlmExtractionOutcome =
 
 const FENCE = /```(?:json)?\s*([\s\S]*?)```/i;
 
-function tryParseObject(candidate: string): Record<string, unknown> | null {
+type JsonProbe =
+  | { readonly kind: 'object'; readonly value: Record<string, unknown> }
+  | { readonly kind: 'other' }
+  | { readonly kind: 'invalid' };
+
+function probe(candidate: string): JsonProbe {
   try {
     const value: unknown = JSON.parse(candidate);
     return typeof value === 'object' && value !== null && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : null;
+      ? { kind: 'object', value: value as Record<string, unknown> }
+      : { kind: 'other' };
   } catch {
-    return null;
+    return { kind: 'invalid' };
   }
 }
 
-/** Plain JSON, then a fenced block, then the outermost braces (leading or trailing prose). */
+/** End index (inclusive) of the balanced `{...}` starting at `start`, honoring JSON strings. */
+function balancedEnd(text: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < text.length; i += 1) {
+    const ch = text[i];
+    if (inString) {
+      if (ch === '\\') i += 1;
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') inString = true;
+    else if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/** Last non-whitespace character before `index`, or '' at the start. */
+function previousSignificant(text: string, index: number): string {
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const ch = text[i] ?? '';
+    if (ch.trim() !== '') return ch;
+  }
+  return '';
+}
+
+/**
+ * Scans the text for the first balanced `{...}` that parses as an object. A candidate directly
+ * after `[` is an element of an array, not the answer, and is skipped.
+ */
+function scanForObject(text: string): Record<string, unknown> | null {
+  let from = text.indexOf('{');
+  while (from >= 0) {
+    const end = balancedEnd(text, from);
+    if (end > from) {
+      if (previousSignificant(text, from) !== '[') {
+        const found = probe(text.slice(from, end + 1));
+        if (found.kind === 'object') return found.value;
+      }
+      // Never descend into a rejected candidate: its nested objects are not the answer.
+      from = text.indexOf('{', end + 1);
+    } else {
+      from = text.indexOf('{', from + 1);
+    }
+  }
+  return null;
+}
+
+/**
+ * Plain JSON, then a fenced block, then the first balanced object in surrounding prose. Valid JSON
+ * that is not an object (for example an array wrapping the answer) is never unwrapped.
+ */
 function extractJsonObject(text: string): Record<string, unknown> | null {
   const trimmed = text.trim();
-  const direct = tryParseObject(trimmed);
-  if (direct !== null) return direct;
+  const direct = probe(trimmed);
+  if (direct.kind === 'object') return direct.value;
+  if (direct.kind === 'other') return null;
   const fenced = FENCE.exec(trimmed)?.[1];
   if (fenced !== undefined) {
-    const fromFence = tryParseObject(fenced.trim());
-    if (fromFence !== null) return fromFence;
+    const fromFence = probe(fenced.trim());
+    if (fromFence.kind === 'object') return fromFence.value;
+    if (fromFence.kind === 'other') return null;
   }
-  const start = trimmed.indexOf('{');
-  const end = trimmed.lastIndexOf('}');
-  return start >= 0 && end > start ? tryParseObject(trimmed.slice(start, end + 1)) : null;
+  return scanForObject(trimmed);
+}
+
+/** Domain messages read `<path> must be <expectation>`; anything else is not trusted to be value-free. */
+const DOMAIN_MESSAGE = /^([A-Za-z0-9_.[\]]+) must be [A-Za-z0-9_ ,'.]+$/;
+
+function valueFreeDomainMessage(message: string): string {
+  const path = DOMAIN_MESSAGE.exec(message)?.[1];
+  return path === undefined
+    ? 'extracted values failed domain validation'
+    : `${path}: failed domain validation`;
 }
 
 const fail = (code: LlmExtractionErrorCode, message: string): LlmExtractionOutcome => ({
@@ -121,8 +189,9 @@ export function parseLlmExtractionOutput(text: string): LlmExtractionOutcome {
   if (json === null) return fail('not_json', 'model output is not a JSON object');
   const parsed = extractionOutputSchema.safeParse(json);
   if (!parsed.success) {
+    // Paths and zod issue codes only: raw zod messages can echo model-supplied keys or values.
     const issues = parsed.error.issues
-      .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+      .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.code}`)
       .join('; ');
     return fail('schema_violation', issues);
   }
@@ -131,7 +200,7 @@ export function parseLlmExtractionOutput(text: string): LlmExtractionOutcome {
     return { ok: true, value: { result: parseExtractionResult(data), notes: notes ?? '' } };
   } catch (error) {
     if (error instanceof InvalidExtractionResultError) {
-      return fail('schema_violation', error.message);
+      return fail('schema_violation', valueFreeDomainMessage(error.message));
     }
     throw error;
   }

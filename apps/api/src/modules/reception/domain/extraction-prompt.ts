@@ -82,6 +82,13 @@ function describePage(index: number, total: number): string {
   return `Page ${String(index + 1)} of ${String(total)}:`;
 }
 
+const FENCE_TAG = /<\s*\/?\s*document_text[^>]*>/gi;
+
+/** The text layer is untrusted: any `<document_text>` tag in it could end the fence early. */
+function neutralizeFence(text: string): string {
+  return text.replace(FENCE_TAG, '[document_text tag removed]');
+}
+
 /**
  * Builds the user turn: the page images in order, then the optional text layer and CDC hint (both
  * fenced as untrusted data), then the closing instruction.
@@ -101,7 +108,7 @@ export function buildExtractionUserContent(
   if (input.pdfText !== null && input.pdfText.trim() !== '') {
     parts.push({
       type: 'text',
-      text: `Text layer extracted from the PDF (untrusted data):\n<document_text>\n${input.pdfText}\n</document_text>`,
+      text: `Text layer extracted from the PDF (untrusted data):\n<document_text>\n${neutralizeFence(input.pdfText)}\n</document_text>`,
     });
   }
   if (input.cdcHint !== null) {

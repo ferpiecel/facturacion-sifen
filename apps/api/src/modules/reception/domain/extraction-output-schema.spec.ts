@@ -82,9 +82,45 @@ describe('parseLlmExtractionOutput', () => {
     expect(ok(text).result.issuerLegalName).toBe('Almacen Don Jose');
   });
 
-  it('defaults missing notes to an empty string', () => {
+  it('maps null notes to an empty string', () => {
+    expect(ok(json({ notes: null })).notes).toBe('');
+  });
+
+  it('rejects missing notes: every key is required, as the prompt says', () => {
     const rest = Object.fromEntries(Object.entries(valid()).filter(([key]) => key !== 'notes'));
-    expect(ok(JSON.stringify(rest)).notes).toBe('');
+    const error = failure(JSON.stringify(rest));
+    expect(error.code).toBe('schema_violation');
+    expect(error.message).toContain('notes');
+  });
+
+  it('does not accept a JSON array wrapping the object', () => {
+    expect(failure(`[${json()}]`).code).toBe('not_json');
+    expect(failure('```json\n[' + json() + ']\n```').code).toBe('not_json');
+    expect(failure(`Result: [${json()}]`).code).toBe('not_json');
+  });
+
+  it('finds the JSON object after prose that contains a brace', () => {
+    const text = `I read the {total} carefully.\n${json()}\nDone {ok}.`;
+    expect(ok(text).result.issuerRuc).toBe('80000000-3');
+  });
+
+  it('is not confused by braces inside JSON strings', () => {
+    const text = `Here:\n${json({ issuerLegalName: 'Foo } {Bar' })}`;
+    expect(ok(text).result.issuerLegalName).toBe('Foo } {Bar');
+  });
+
+  it('keeps messages free of model-supplied values and key names', () => {
+    const bad = { ...(valid().totals as object), vat10: 'abc' };
+    const decimal = failure(json({ totals: bad }));
+    expect(decimal.message).not.toContain('abc');
+    expect(decimal.message).toContain('totals.vat10');
+    const unknown = failure(json({ secretKey123: 'x' }));
+    expect(unknown.code).toBe('schema_violation');
+    expect(unknown.message).not.toContain('secretKey123');
+    const nested = failure(json({ fieldConfidences: { ...confidences, secretKey123: 0.5 } }));
+    expect(nested.message).not.toContain('secretKey123');
+    const wrongType = failure(json({ issuerRuc: 'TOPSECRET', paymentCondition: 'TOPSECRET' }));
+    expect(wrongType.message).not.toContain('TOPSECRET');
   });
 
   it('rejects text that is not JSON', () => {
@@ -156,7 +192,11 @@ describe('EXTRACTION_OUTPUT_JSON_SCHEMA', () => {
       properties?: Record<string, unknown>;
     };
     expect(schema.additionalProperties).toBe(false);
+    expect([...(schema.required ?? [])].sort()).toEqual(
+      Object.keys(schema.properties ?? {}).sort(),
+    );
     expect(schema.required).toEqual(expect.arrayContaining(['issuerRuc', 'totals', 'items']));
+    expect(schema.required).toContain('notes');
     expect(Object.keys(schema.properties ?? {})).toContain('fieldConfidences');
   });
 });

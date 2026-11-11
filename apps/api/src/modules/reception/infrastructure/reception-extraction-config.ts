@@ -9,6 +9,8 @@ export interface ReceptionExtractionConfig {
   readonly timeoutMs: number;
   /** The single read of the auto-confirm threshold; feeds `ConfidencePolicy.create` (ADR-0026). */
   readonly autoConfirmThreshold: number;
+  /** Jobs the worker runs at once; PDFium and jsqr are CPU-bound and single-threaded. */
+  readonly concurrency: number;
 }
 
 /** Documented defaults (ADR-0026, decision Q2); overridable through the environment. */
@@ -16,6 +18,8 @@ export const DEFAULT_EXTRACTION_MODEL = 'claude-sonnet-5';
 export const DEFAULT_EXTRACTION_FALLBACK_MODEL = 'claude-haiku-4-5';
 export const DEFAULT_AUTO_CONFIRM_THRESHOLD = 0.85;
 export const DEFAULT_EXTRACTION_TIMEOUT_MS = 120_000;
+export const DEFAULT_EXTRACTION_CONCURRENCY = 2;
+const MAX_CONCURRENCY = 8;
 const MIN_TIMEOUT_MS = 1_000;
 const MAX_TIMEOUT_MS = 600_000;
 
@@ -55,6 +59,18 @@ function readTimeoutMs(env: Env): number {
   return parsed;
 }
 
+function readConcurrency(env: Env): number {
+  const value = read(env, 'RECEPTION_EXTRACTION_CONCURRENCY');
+  if (value === undefined) return DEFAULT_EXTRACTION_CONCURRENCY;
+  const parsed = /^\d+$/.test(value) ? Number(value) : Number.NaN;
+  if (!(parsed >= 1 && parsed <= MAX_CONCURRENCY)) {
+    throw new Error(
+      `RECEPTION_EXTRACTION_CONCURRENCY must be an integer between 1 and ${String(MAX_CONCURRENCY)}.`,
+    );
+  }
+  return parsed;
+}
+
 function readThreshold(env: Env): number {
   const value = read(env, 'RECEPTION_AUTO_CONFIRM_THRESHOLD');
   if (value === undefined) return DEFAULT_AUTO_CONFIRM_THRESHOLD;
@@ -75,5 +91,6 @@ export function loadReceptionExtractionConfig(env: Env): ReceptionExtractionConf
     fallbackModel: readFallbackModel(env),
     timeoutMs: readTimeoutMs(env),
     autoConfirmThreshold: readThreshold(env),
+    concurrency: readConcurrency(env),
   };
 }

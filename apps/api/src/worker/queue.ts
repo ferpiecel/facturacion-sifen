@@ -11,6 +11,11 @@ import {
   type DocumentEmailJobData,
 } from './document-email.processor.js';
 import {
+  RECEPTION_EXTRACTION_QUEUE,
+  type ReceptionExtractionJob,
+  type ReceptionExtractionJobData,
+} from './reception-extraction.processor.js';
+import {
   WEBHOOK_DELIVERY_QUEUE,
   webhookDeliveryJob,
   type WebhookDeliveryJobData,
@@ -294,5 +299,31 @@ export function createDocumentEmailWorker({
     { connection, concurrency, ...(prefix === undefined ? {} : { prefix }) },
   );
   if (logger) logQueueErrors(worker, 'document email worker', logger);
+  return worker;
+}
+
+export interface ReceptionExtractionWorkerOptions {
+  readonly connection: Redis;
+  /** Low on purpose: PDFium and jsqr run on the event loop of the worker process. */
+  readonly concurrency: number;
+  readonly process: (job: ReceptionExtractionJob) => Promise<unknown>;
+  readonly prefix?: string;
+  readonly logger?: QueueLogger;
+}
+
+/** The ReceptionExtractionWorker (R5.6): one job per uploaded PDF or photo, retried by BullMQ. */
+export function createReceptionExtractionWorker({
+  connection,
+  concurrency,
+  process,
+  prefix,
+  logger,
+}: ReceptionExtractionWorkerOptions): Worker<ReceptionExtractionJobData> {
+  const worker = new Worker<ReceptionExtractionJobData>(
+    RECEPTION_EXTRACTION_QUEUE,
+    (job) => process(job),
+    { connection, concurrency, ...(prefix === undefined ? {} : { prefix }) },
+  );
+  if (logger) logQueueErrors(worker, 'reception extraction worker', logger);
   return worker;
 }

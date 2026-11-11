@@ -13,6 +13,7 @@ import { PortalDocumentsModule } from './modules/portal-documents/portal-documen
 import { IdentityModule } from './modules/identity/identity.module.js';
 import { PortalAuthModule } from './modules/identity/portal-auth.module.js';
 import { TelemetryModule } from './modules/telemetry/telemetry.module.js';
+import { ReceptionModule } from './modules/reception/reception.module.js';
 import { WebhooksModule } from './modules/webhooks/webhooks.module.js';
 
 @Module({
@@ -32,6 +33,7 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module.js';
     WebhooksModule,
     GeoModule,
     RucModule,
+    ReceptionModule,
   ],
 })
 export class AppModule {}

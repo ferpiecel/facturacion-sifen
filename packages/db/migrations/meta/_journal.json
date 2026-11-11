@@ -484,6 +484,76 @@
       "when": 1793314415318,
       "tag": "0072_platform_audit_log",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1793978791211,
+      "tag": "0073_received_artifacts",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "7",
+      "when": 1793978792211,
+      "tag": "0074_received_artifacts_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1793979030293,
+      "tag": "0075_received_documents",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1793979031293,
+      "tag": "0076_received_documents_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1793980108216,
+      "tag": "0077_received_document_items_and_confidences",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1793980109216,
+      "tag": "0078_received_document_items_and_confidences_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1793980110216,
+      "tag": "0079_received_document_children_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1794341621005,
+      "tag": "0080_received_document_corrections",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1794341622005,
+      "tag": "0081_received_document_items_removal_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1794343146364,
+      "tag": "0082_reception_webhook_events",
+      "breakpoints": true
     }
   ]
 }

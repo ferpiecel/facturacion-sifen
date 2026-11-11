@@ -22,6 +22,14 @@ pnpm --filter @sifen/api start:dev   # API en http://localhost:3000; NODE_ENV=de
 
 Así la API arranca sin base de datos: `/health` responde 200 y las rutas protegidas responden `503`. Para usarlas, aplicá las migraciones y arrancá la API con `DATABASE_URL`. Las migraciones corren con el rol dueño (`sifen`) y crean el rol `app_login` sin contraseña, que se define aparte.
 
+## Almacenamiento local (SeaweedFS)
+
+`docker compose up -d` también levanta `seaweedfs` (API S3 en `127.0.0.1:9000`, imagen con etiqueta fija 4.48, acceso anónimo deshabilitado) y `seaweedfs-init`, que crea el bucket `sifen-reception-dev`. Las identidades se generan al arrancar desde `docker/seaweedfs/s3.json.template`.
+
+Las credenciales (`dev-admin-*` y `dev-app-*`) y el bucket vienen de valores por defecto del compose y se pueden sobrescribir con variables `STORAGE_*` en el entorno o en un `.env` local. **Son solo de desarrollo y nunca se usan en producción**: el validador de configuración rechaza valores de ejemplo fuera de `development` y `test`. Para apuntar la API al almacenamiento local: `STORAGE_ENDPOINT_URL=http://127.0.0.1:9000`, `STORAGE_BUCKET=sifen-reception-dev` y `STORAGE_ACCESS_KEY_ID`/`STORAGE_SECRET_ACCESS_KEY` con las credenciales `dev-app-*`.
+
+Verificación rápida: `node scripts/storage-smoke.mjs` comprueba que un PUT anónimo se rechaza y que uno firmado (SigV4) funciona.
+
 ## Base de datos y migraciones
 
 Los comandos siguientes aplican las migraciones y fijan la contraseña de `app_login` (solo desarrollo local):
@@ -41,7 +49,7 @@ Para crear partners, tenants y API keys, ver [Operación](operacion.md).
 
 ## Verificación local
 
-`pnpm verify` corre los quality-gates del CI (format, lint, typecheck, depcruise, test, build, verify-vendor, coverage) solo sobre los paquetes afectados respecto de `origin/main`. Imprime una línea (`verify OK ...`) o `verify FAIL <tarea>` con las líneas que fallan; el log completo queda en `.verify.log`. `pnpm install` activa el hook `.githooks/pre-push` (script `prepare`), que lo ejecuta antes de cada push; para saltearlo en una emergencia: `git push --no-verify`. Los jobs con Docker (`db-postgres`, `worker-redis`) siguen solo en CI. Los tests de los scripts de verificación se corren con `pnpm test:scripts`.
+`pnpm verify` corre los quality-gates del CI (format, lint, typecheck, depcruise, test, build, verify-vendor, coverage) solo sobre los paquetes afectados respecto de `origin/main`. Imprime una línea (`verify OK ...`) o `verify FAIL <tarea>` con las líneas que fallan; el log completo queda en `.verify.log`. `pnpm install` activa el hook `.githooks/pre-push` (script `prepare`), que lo ejecuta antes de cada push; para saltearlo en una emergencia: `git push --no-verify`. Los jobs con Docker (`db-postgres`, `worker-redis`, `storage-seaweedfs`) siguen solo en CI. Para correr la prueba de integración de almacenamiento en local: `docker compose up -d --wait seaweedfs seaweedfs-init` y luego `STORAGE_ENDPOINT_URL=http://127.0.0.1:9000 STORAGE_BUCKET=sifen-reception-dev STORAGE_ACCESS_KEY_ID=dev-app-access-key STORAGE_SECRET_ACCESS_KEY=dev-app-secret-key-change-me pnpm --filter @sifen/api exec vitest run test/storage.seaweedfs.integration.spec.ts` (credenciales de desarrollo no secretas). Los tests de los scripts de verificación se corren con `pnpm test:scripts`.
 
 ## Portal web
 

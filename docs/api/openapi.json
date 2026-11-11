@@ -1453,6 +1453,693 @@
         }
       }
     },
+    "/v1/received-documents": {
+      "post": {
+        "operationId": "uploadReceivedDocument",
+        "tags": [
+          "Reception"
+        ],
+        "summary": "Upload a received SIFEN XML",
+        "description": "Stores the XML and extracts it; the processing contract is asynchronous (202), although a SIFEN XML is read before the answer. The status in the body is `confirmed` when the document passes validation, `needs_review` otherwise. A document whose receiver is not the tenant (`is_own_receiver` false) is stored the same way but never produces webhook events. Webhooks `reception.document.needs_review` and `reception.document.confirmed` announce the result (see docs/integracion/recepcion.md). Send the XML as a raw `application/xml` or `text/xml` body, as a `multipart/form-data` upload with one `file` part, or as JSON `{ \"xml\": \"<...>\" }` (JSON is limited to 1 MiB). Content is recognized by its first bytes, not by the declared type. The same bytes, or the same CDC, uploaded again answer 200 with the existing document. PDF, photo and CDC-only requests answer 422 `unsupported_source` for now. The maximum upload size is `RECEPTION_MAX_UPLOAD_BYTES` (default 2 MiB). Errors carry a stable `code`.",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-required-scopes": [
+          "reception:write"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/xml": {
+              "schema": {
+                "type": "string"
+              }
+            },
+            "text/xml": {
+              "schema": {
+                "type": "string"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              }
+            },
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "xml"
+                ],
+                "properties": {
+                  "xml": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Already received; the existing document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceivedDocumentAck"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceivedDocumentAck"
+                }
+              }
+            },
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The upload exceeds the maximum size (`payload_too_large`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The bytes do not look like XML (`unsupported_media_type`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`unsupported_source` (PDF, photo, CDC only), `extraction_failed` (stored but unreadable; carries `document_id`), `empty_upload` or `invalid_request`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Document storage is not available (`storage_unavailable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listReceivedDocuments",
+        "tags": [
+          "Reception"
+        ],
+        "summary": "List received documents, newest first, cursor paginated",
+        "description": "Ordered by creation time, newest first. Pass the `next_cursor` of a page as `cursor` to get the next one; it is null on the last page. `issued_from` and `issued_to` are inclusive calendar days; `updated_since` is an inclusive ISO 8601 timestamp for incremental sync.",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-required-scopes": [
+          "reception:read"
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The `next_cursor` of the previous page",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "received",
+                "extracting",
+                "extracted",
+                "needs_review",
+                "extraction_failed",
+                "confirmed"
+              ]
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "sifen_xml",
+                "ekuatia_cdc",
+                "pdf",
+                "photo"
+              ]
+            }
+          },
+          {
+            "name": "issuer_ruc",
+            "in": "query",
+            "description": "Issuer RUC, with or without the check digit (`80000001` or `80000001-8`)",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{5,8}(-[0-9])?$"
+            }
+          },
+          {
+            "name": "issued_from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "issued_to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "is_own_receiver",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cdc_prefix",
+            "in": "query",
+            "description": "Leading digits of the CDC",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]{1,44}$"
+            }
+          },
+          {
+            "name": "updated_since",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of received documents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceivedDocumentPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "A parameter is malformed (`invalid_request`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/received-documents/{id}": {
+      "get": {
+        "operationId": "getReceivedDocument",
+        "tags": [
+          "Reception"
+        ],
+        "summary": "Get a received document with its items and per-field confidences",
+        "description": "Everything an ERP needs to render its own review: extracted fields, items, per-field confidences, `needs_review_reasons` and the artifact link. Money is a decimal string. Soft-removed items are not listed. `version` is what `PATCH` expects.",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-required-scopes": [
+          "reception:read"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Received document id (UUID)",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceivedDocumentDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "id is not a UUID (`invalid_request`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, also for another tenant`s document (`not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "correctReceivedDocument",
+        "tags": [
+          "Reception"
+        ],
+        "summary": "Correct a received document and, optionally, confirm it, in one call",
+        "description": "Allowed in `needs_review` and `confirmed` only. Send the `version` you read (optimistic lock, no `If-Match`); a stale one answers 409 `version_conflict` with `current_version`. Absent fields keep their value, `null` clears a nullable one. Items are addressed by `position` (yours to choose, never reused): an existing position is modified, a new one is added, `remove: true` soft-removes it (the row is retained, reads skip it). With `confirm: true`, or when the document is already `confirmed`, the result is revalidated: a failure answers 422 `validation_failed` with `reasons` and NOTHING is saved (not even the corrections). Without `confirm`, a `needs_review` document stays in `needs_review`, its `version` increases and `needs_review_reasons` are refreshed (`awaiting_confirmation` when the data is valid but unconfirmed). Repeating a request that was already applied (same actor, previous `version`) answers 200 with `Idempotent-Replayed: true` and writes nothing. The response is the same shape as `GET`. Webhook echo contract: editing a `confirmed` document emits `reception.document.updated` with `data.actor` (`{ type: \"api_key\", id }`), `data.version` and `data.status`, also to the endpoints of the caller. To ignore its own echo an ERP discards the event when `data.actor.type` is `api_key`, `data.actor.id` is the id of its API key and `data.version` equals the `version` returned by this operation; see docs/integracion/webhooks.md.",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-required-scopes": [
+          "reception:write"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Received document id (UUID)",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectReceivedDocumentRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The document after the correction",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceivedDocumentDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed body or id (`invalid_request`, with `issues`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found, also for another tenant`s document (`not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`version_conflict` (with `current_version`) or `invalid_state` (with `status`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`validation_failed` (with `reasons`) or `invalid_correction`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/received-documents/{id}/artifact": {
+      "get": {
+        "operationId": "downloadReceivedArtifact",
+        "tags": [
+          "Reception"
+        ],
+        "summary": "Download the stored upload, byte for byte",
+        "description": "Served with the content type recorded at upload and `Content-Disposition: inline`.",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-required-scopes": [
+          "reception:read"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Received document id (UUID)",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The stored bytes",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "id is not a UUID (`invalid_request`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such document, or it has no stored artifact (`not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Document storage is not available (`storage_unavailable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/received-documents/{id}/artifact-url": {
+      "get": {
+        "operationId": "getReceivedArtifactUrl",
+        "tags": [
+          "Reception"
+        ],
+        "summary": "A time-limited direct download URL for the stored upload",
+        "security": [
+          {
+            "apiKey": []
+          }
+        ],
+        "x-required-scopes": [
+          "reception:read"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Received document id (UUID)",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceivedArtifactUrl"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "id is not a UUID (`invalid_request`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed or revoked API key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The API key lacks the required scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such document, or it has no stored artifact (`not_found`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Document storage is not available (`storage_unavailable`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/webhooks/endpoints": {
       "post": {
         "operationId": "createWebhookEndpoint",
@@ -1931,7 +2618,7 @@
       "apiKey": {
         "type": "http",
         "scheme": "bearer",
-        "description": "API key. Each route needs the scope named in `x-required-scopes` (`documents:read`, `documents:write`, `webhooks:read`, `webhooks:write`); the `/v1/geo` routes need only a valid key."
+        "description": "API key. Each route needs the scope named in `x-required-scopes` (`documents:read`, `documents:write`, `webhooks:read`, `webhooks:write`, `reception:read`, `reception:write`); the `/v1/geo` routes need only a valid key."
       }
     },
     "schemas": {
@@ -1947,6 +2634,887 @@
           },
           "message": {
             "type": "string"
+          }
+        }
+      },
+      "ReceptionProblem": {
+        "type": "object",
+        "required": [
+          "statusCode",
+          "code",
+          "message"
+        ],
+        "properties": {
+          "statusCode": {
+            "type": "integer"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "payload_too_large",
+              "unsupported_media_type",
+              "unsupported_source",
+              "extraction_failed",
+              "empty_upload",
+              "invalid_request",
+              "storage_unavailable",
+              "service_unavailable",
+              "not_found",
+              "version_conflict",
+              "invalid_state",
+              "validation_failed",
+              "invalid_correction"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "current_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Only with `version_conflict`"
+          },
+          "status": {
+            "type": "string",
+            "description": "Only with `invalid_state`"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Only with `validation_failed`: stable reason codes"
+          },
+          "issues": {
+            "type": "array",
+            "description": "Only with `invalid_request` on PATCH: paths and messages, no values",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "document_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Only with `extraction_failed`"
+          }
+        }
+      },
+      "ReceivedDocumentAck": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "version",
+          "source"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "description": "Current status; a re-upload returns whatever status the document has reached",
+            "examples": [
+              "needs_review"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "sifen_xml"
+            ]
+          }
+        }
+      },
+      "ReceivedDocumentSummary": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "source",
+          "version",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "received",
+              "extracting",
+              "extracted",
+              "needs_review",
+              "extraction_failed",
+              "confirmed"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "sifen_xml",
+              "ekuatia_cdc",
+              "pdf",
+              "photo"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "needs_review": {
+            "type": "boolean"
+          },
+          "is_own_receiver": {
+            "type": "boolean",
+            "description": "False when the receiver RUC is not the tenant`s own"
+          },
+          "document_type": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cdc": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "issuer": {
+            "type": "object",
+            "properties": {
+              "ruc": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "document_number": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "001-001-0000123"
+            ]
+          },
+          "issued_on": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "total_amount": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "10000.5"
+            ]
+          },
+          "total_vat": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "10000.5"
+            ]
+          },
+          "confidence_overall": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "10000.5"
+            ]
+          },
+          "confirmed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "has_artifact": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ReceivedDocumentPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReceivedDocumentSummary"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ReceivedDocumentDetail": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "source",
+          "version",
+          "items",
+          "field_confidences"
+        ],
+        "description": "Money and quantities are decimal strings; confidences are decimal strings in [0, 1]. `PATCH` accepts the same nested names.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "received",
+              "extracting",
+              "extracted",
+              "needs_review",
+              "extraction_failed",
+              "confirmed"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "sifen_xml",
+              "ekuatia_cdc",
+              "pdf",
+              "photo"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "needs_review": {
+            "type": "boolean"
+          },
+          "needs_review_reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Machine reason codes; empty unless `needs_review`"
+          },
+          "is_own_receiver": {
+            "type": "boolean"
+          },
+          "extraction_error_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "extraction_attempts": {
+            "type": "integer"
+          },
+          "confidence_overall": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "10000.5"
+            ]
+          },
+          "document_type": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cdc": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timbrado": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "series": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "establishment_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "expedition_point_code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "document_sequence": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "document_number": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "issued_on": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "exchange_rate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "examples": [
+              "10000.5"
+            ]
+          },
+          "issuer": {
+            "type": "object",
+            "properties": {
+              "ruc": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ruc_base": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ruc_dv": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "legal_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "trade_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "address": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "economic_activity": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "receiver": {
+            "type": "object",
+            "properties": {
+              "ruc": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ruc_base": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "ruc_dv": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "legal_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "type": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            }
+          },
+          "payment": {
+            "type": "object",
+            "properties": {
+              "condition": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "cash",
+                  "credit",
+                  null
+                ]
+              },
+              "credit_term_days": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "method": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "due_on": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date"
+              },
+              "paid_on": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date"
+              }
+            }
+          },
+          "totals": {
+            "type": "object",
+            "properties": {
+              "exempt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "10000.5"
+                ]
+              },
+              "zero_rated": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "10000.5"
+                ]
+              },
+              "taxable_5": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "10000.5"
+                ]
+              },
+              "taxable_10": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "10000.5"
+                ]
+              },
+              "vat_5": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "10000.5"
+                ]
+              },
+              "vat_10": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "10000.5"
+                ]
+              },
+              "total_vat": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "10000.5"
+                ]
+              },
+              "discount": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "10000.5"
+                ]
+              },
+              "total_amount": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "10000.5"
+                ]
+              },
+              "total_pyg": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "10000.5"
+                ]
+              }
+            }
+          },
+          "sifen": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string"
+              },
+              "authorized_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "protocol_number": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "position"
+              ],
+              "properties": {
+                "position": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "description": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "product_code": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "quantity": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "examples": [
+                    "10000.5"
+                  ]
+                },
+                "unit_of_measure": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "unit_price": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "examples": [
+                    "10000.5"
+                  ]
+                },
+                "discount": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "examples": [
+                    "10000.5"
+                  ]
+                },
+                "subtotal": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "examples": [
+                    "10000.5"
+                  ]
+                },
+                "vat_rate": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "enum": [
+                    0,
+                    5,
+                    10,
+                    null
+                  ]
+                },
+                "taxable_base": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "examples": [
+                    "10000.5"
+                  ]
+                },
+                "vat_amount": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "examples": [
+                    "10000.5"
+                  ]
+                }
+              }
+            }
+          },
+          "field_confidences": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "field",
+                "confidence"
+              ],
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "confidence": {
+                  "type": "string"
+                },
+                "extracted_value": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "corrected_value": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "corrected_by": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "corrected_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                }
+              }
+            }
+          },
+          "confirmed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "confirmed_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "corrected_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "corrected_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "API key id of the last correction"
+          },
+          "artifact": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "content_type": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "size_bytes": {
+                "type": "integer"
+              },
+              "sha256": {
+                "type": "string"
+              },
+              "original_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "page_count": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            }
+          },
+          "artifact_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Path of `GET /v1/received-documents/{id}/artifact` (needs the API key); null without artifact"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ReceivedArtifactUrl": {
+        "type": "object",
+        "required": [
+          "url",
+          "expires_in_seconds"
+        ],
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "expires_in_seconds": {
+            "type": "integer"
           }
         }
       },
@@ -1987,6 +3555,557 @@
             }
           }
         }
+      },
+      "CorrectReceivedDocumentRequest": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "confirm": {
+            "type": "boolean"
+          },
+          "document_type": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timbrado": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "series": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "establishment_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expedition_point_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "document_sequence": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "issued_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
+            "type": "string"
+          },
+          "exchange_rate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "issuer": {
+            "type": "object",
+            "properties": {
+              "ruc": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "legal_name": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "trade_name": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "address": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "economic_activity": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "receiver": {
+            "type": "object",
+            "properties": {
+              "ruc": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "legal_name": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "payment": {
+            "type": "object",
+            "properties": {
+              "condition": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "cash",
+                      "credit"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "credit_term_days": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "method": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "due_on": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "paid_on": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "totals": {
+            "type": "object",
+            "properties": {
+              "exempt": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "zero_rated": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "taxable_5": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "taxable_10": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "vat_5": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "vat_10": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "total_vat": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "discount": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "total_amount": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "total_pyg": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "items": {
+            "maxItems": 999,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "position": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 999999
+                },
+                "remove": {
+                  "type": "boolean"
+                },
+                "description": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "product_code": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "quantity": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "unit_of_measure": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 500
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "unit_price": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "discount": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "subtotal": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "vat_rate": {
+                  "anyOf": [
+                    {
+                      "anyOf": [
+                        {
+                          "type": "number",
+                          "const": 0
+                        },
+                        {
+                          "type": "number",
+                          "const": 5
+                        },
+                        {
+                          "type": "number",
+                          "const": 10
+                        }
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "taxable_base": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "vat_amount": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^-?\\d{1,15}(?:\\.\\d{1,8})?$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "position"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "additionalProperties": false
       },
       "CreateDocumentRequest": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -3390,7 +5509,11 @@
                 "document.transmission_deadline_warning",
                 "document.notification.delivered",
                 "document.notification.failed",
-                "certificate.expiring"
+                "certificate.expiring",
+                "reception.document.confirmed",
+                "reception.document.needs_review",
+                "reception.document.extraction_failed",
+                "reception.document.updated"
               ]
             }
           }
@@ -3420,7 +5543,11 @@
                 "document.transmission_deadline_warning",
                 "document.notification.delivered",
                 "document.notification.failed",
-                "certificate.expiring"
+                "certificate.expiring",
+                "reception.document.confirmed",
+                "reception.document.needs_review",
+                "reception.document.extraction_failed",
+                "reception.document.updated"
               ]
             }
           },

@@ -104,7 +104,8 @@ Invariantes. Si un cambio no puede respetarlas, se frena y se consulta.
 - `packages/db`: PGlite por defecto; el job `db-postgres` corre la misma suite en un testcontainer `postgres:16` con `DB_TEST_DRIVER=postgres` (`pnpm --filter @sifen/db test:postgres`). Lo que depende de roles reales solo se prueba ahí.
 - `apps/api`: las pruebas `*.pg.spec.ts` (carreras con dos conexiones reales, p. ej. NCE concurrentes sobre una FE) arrancan su propio `postgres:16` y se omiten sin `DB_TEST_DRIVER=postgres`; `pnpm --filter @sifen/api test:postgres` (Docker) y el job `db-postgres` las corren.
 - Pruebas del worker con Redis real: `REDIS_URL=... pnpm --filter @sifen/api exec vitest run src/worker`; sin `REDIS_URL` se omiten y las corre el job `worker-redis`.
-- El CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) corre el job `quality-gates` (matriz: `format:check`, `lint`, `typecheck`, `depcruise`, `test`, `build`, `verify-vendor`, `coverage`) y los jobs `db-postgres` y `worker-redis`.
+- Almacenamiento con SeaweedFS real: `docker compose up -d --wait seaweedfs seaweedfs-init` y `STORAGE_ENDPOINT_URL=http://127.0.0.1:9000 STORAGE_BUCKET=sifen-reception-dev STORAGE_ACCESS_KEY_ID=dev-app-access-key STORAGE_SECRET_ACCESS_KEY=dev-app-secret-key-change-me pnpm --filter @sifen/api exec vitest run test/storage.seaweedfs.integration.spec.ts`; sin `STORAGE_ENDPOINT_URL` se omite y la corre el job `storage-seaweedfs`.
+- El CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) corre el job `quality-gates` (matriz: `format:check`, `lint`, `typecheck`, `depcruise`, `test`, `build`, `verify-vendor`, `coverage`) y los jobs `db-postgres`, `worker-redis` y `storage-seaweedfs`.
 - El test que compara `docs/api/openapi.json` con el código falla si el spec cambia sin regenerarse (`pnpm --filter @sifen/api openapi`).
 
 ## Flujo de trabajo
@@ -131,7 +132,7 @@ pnpm --filter @sifen/db test:postgres
 pnpm --filter @sifen/api coverage
 ```
 
-`pnpm verify` corre los gates del CI sin Docker (`db-postgres` y `worker-redis` siguen solo en CI) y imprime una línea de resumen. El hook `.githooks/pre-push` lo ejecuta antes de cada push (se activa con `pnpm install`); se omite con `git push --no-verify`. Los agentes corren `pnpm verify` antes de pushear y leen solo su resumen, no `.verify.log` completo. Detalle y puesta en marcha: [`docs/desarrollo.md`](docs/desarrollo.md#verificación-local).
+`pnpm verify` corre los gates del CI sin Docker (`db-postgres`, `worker-redis` y `storage-seaweedfs` siguen solo en CI) y imprime una línea de resumen. El hook `.githooks/pre-push` lo ejecuta antes de cada push (se activa con `pnpm install`); se omite con `git push --no-verify`. Los agentes corren `pnpm verify` antes de pushear y leen solo su resumen, no `.verify.log` completo. Detalle y puesta en marcha: [`docs/desarrollo.md`](docs/desarrollo.md#verificación-local).
 
 ## Dónde encontrar
 
@@ -142,7 +143,7 @@ pnpm --filter @sifen/api coverage
 | Historias del MVP | [`docs/backlog/mvp.md`](docs/backlog/mvp.md) |
 | Decisiones de arquitectura | [`docs/adr/`](docs/adr/README.md) |
 | Diseño técnico | [`docs/plan/plan-desarrollo-v1.1.md`](docs/plan/plan-desarrollo-v1.1.md) |
-| API de integradores | `/docs` con la API en marcha; spec en [`docs/api/openapi.json`](docs/api/openapi.json); emisión en [`docs/integracion/emision.md`](docs/integracion/emision.md); webhooks en [`docs/integracion/webhooks.md`](docs/integracion/webhooks.md) |
+| API de integradores | `/docs` con la API en marcha; spec en [`docs/api/openapi.json`](docs/api/openapi.json); emisión en [`docs/integracion/emision.md`](docs/integracion/emision.md); recepción en [`docs/integracion/recepcion.md`](docs/integracion/recepcion.md); webhooks en [`docs/integracion/webhooks.md`](docs/integracion/webhooks.md) |
 | Normativa DNIT | [`docs/referencia/`](docs/referencia/README.md) |
 | Variables de entorno | [`docs/configuracion.md`](docs/configuracion.md) |
 | Operación y CLI | [`docs/operacion.md`](docs/operacion.md) |

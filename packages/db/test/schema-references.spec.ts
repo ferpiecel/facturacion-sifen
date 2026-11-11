@@ -7,6 +7,10 @@ import {
   loteDocuments,
   lotes,
   partners,
+  receivedArtifacts,
+  receivedDocumentFieldConfidences,
+  receivedDocumentItems,
+  receivedDocuments,
   tenantEstablishments,
   tenantExpeditionPoints,
   tenantMemberships,
@@ -111,5 +115,33 @@ describe('schema foreign key targets', () => {
         .foreignKeys.map((fk) => getTableName(fk.reference().foreignTable))
         .sort(),
     ).toEqual(['documents', 'lotes', 'tenants']);
+  });
+
+  it('received_artifacts.tenant_id references tenants', () => {
+    expectForeignKeyTargets(receivedArtifacts, ['tenants']);
+  });
+
+  it('received_documents references tenants and received_artifacts', () => {
+    expect(
+      getTableConfig(receivedDocuments)
+        .foreignKeys.map((fk) => getTableName(fk.reference().foreignTable))
+        .sort(),
+    ).toEqual(['received_artifacts', 'tenants']);
+  });
+
+  it('received_document_items references tenants and received_documents', () => {
+    expect(
+      getTableConfig(receivedDocumentItems)
+        .foreignKeys.map((fk) => getTableName(fk.reference().foreignTable))
+        .sort(),
+    ).toEqual(['received_documents', 'tenants']);
+  });
+
+  it('received_document_field_confidences references tenants and received_documents', () => {
+    expect(
+      getTableConfig(receivedDocumentFieldConfidences)
+        .foreignKeys.map((fk) => getTableName(fk.reference().foreignTable))
+        .sort(),
+    ).toEqual(['received_documents', 'tenants']);
   });
 });

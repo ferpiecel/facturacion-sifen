@@ -1,0 +1,16 @@
+{
+  "ekuatia/README.md": "0104ec2ba1ef350f0e3c00e95c615ee404edb841a56b6d33e414e6a0348ff6a3",
+  "ekuatia/v2026-Q3/_consulta_page/consulta_page.html": "2e01605e68d200b6fe26b8d0882f5694b36895589f4aa294a23e34c302143bd7",
+  "ekuatia/v2026-Q3/servicio_digital/documento.xml": "98eb21a0fbb59cd38ea2d3dd13282e5925d32fb1245bd452208f1df704433a9b",
+  "ekuatia/v2026-Q3/servicio_digital/meta.json": "2579f2914b76842278e8e4008a372e20068f3f89ed43cc773ae3860325036ee0",
+  "ekuatia/v2026-Q3/servicio_digital/requests.json": "1829ad6428f058ca95a0091ce3a7c3efe13791fca44dd89810032aa940b59bc0",
+  "ekuatia/v2026-Q3/success/documento.xml": "5a3e4df7edfcf40e16c43b7f101ff37fc17d63e9c06e5dec06eae61783ebb133",
+  "ekuatia/v2026-Q3/success/meta.json": "c19bae5a190fd00961456599edb4e95ab9e171a91068884199ba709d4d4dae00",
+  "ekuatia/v2026-Q3/success/requests.json": "25589c60cf808bffbffd3b0b5fb3f4ee17630ce49806cf16f8d5bf947dd53524",
+  "ekuatia/v2026-Q3/success_pago_credito/documento.xml": "20346a723e3589c1e12e49fb333587f69d6be35b83b0dc5531c1287beb7c101c",
+  "ekuatia/v2026-Q3/success_pago_credito/meta.json": "631cb4e3729789c4fe453569b66246d7f21737d4dc07a1e4e9c484971f19a6ea",
+  "ekuatia/v2026-Q3/success_pago_credito/requests.json": "3e3afec48390c983ec324a4b2fd4ddf8983c5ead8a709f1356abea3196db4b1f",
+  "sifen/README.md": "6360f88dc3f08582aa415113703cd927fdf25534738da122cdbc3f14e6d78602",
+  "sifen/factura_contado/documento.xml": "5a3e4df7edfcf40e16c43b7f101ff37fc17d63e9c06e5dec06eae61783ebb133",
+  "sifen/factura_servicio_digital/documento.xml": "98eb21a0fbb59cd38ea2d3dd13282e5925d32fb1245bd452208f1df704433a9b"
+}

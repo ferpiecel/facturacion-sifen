@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { computeRucCheckDigit } from '../../fiscal-config/domain/ruc.js';
+import { ConfidencePolicy } from '../domain/confidence-policy.js';
 import { rehydrateReceivedDocument, type ReceivedDocument } from '../domain/received-document.js';
 import {
   InvalidCorrectionError,
@@ -104,9 +105,9 @@ function document(
   });
 }
 
-const confidence = (fieldName: string) => ({
+const confidence = (fieldName: string, value = '1.0') => ({
   fieldName,
-  confidence: '1.0',
+  confidence: value,
   extractedValue: null,
   correctedValue: null,
   correctedBy: null,
@@ -149,6 +150,17 @@ class FakeRepository implements ReceivedDocumentRepository {
       header: { ...current.header, ...write.header },
       items: [...items, ...write.items.upserts].sort((a, b) => a.position - b.position),
       removedPositions: [...current.removedPositions, ...write.items.removedPositions],
+      confidences: current.confidences.map((row) => {
+        const correction = write.confidences.find((c) => c.fieldName === row.fieldName);
+        return correction === undefined
+          ? row
+          : {
+              ...row,
+              correctedValue: correction.correctedValue,
+              correctedBy: write.actorId,
+              correctedAt: write.at,
+            };
+      }),
     };
     return Promise.resolve();
   }
@@ -169,11 +181,15 @@ function setup(
     header: HEADER,
     items: [line(1, '110000.00000000')],
     removedPositions: [],
-    confidences: ['issuer_ruc', 'totals', 'items'].map(confidence),
+    confidences: ['issuer_ruc', 'totals', 'items'].map((field) => confidence(field)),
     artifact: null,
     ...extra,
   });
-  const correct = createCorrectReceivedDocument({ repository, now: () => AT });
+  const correct = createCorrectReceivedDocument({
+    repository,
+    policy: ConfidencePolicy.create(0.85),
+    now: () => AT,
+  });
   const run = (input: Partial<CorrectReceivedDocumentInput> = {}) =>
     correct({
       tenantId: TENANT,
@@ -450,5 +466,150 @@ describe('correctReceivedDocument', () => {
     expect(audit.before).toMatchObject({ version: 2, status: 'needs_review' });
     expect(audit.before).toMatchObject({ header: { issuerLegalName: 'ACME' } });
     expect(audit.after).toMatchObject({ version: 3, header: { issuerLegalName: 'ACME SA' } });
+  });
+});
+
+/** Spec: reception R5.7. Field-level corrections of documents that came from extraction. */
+describe('correctReceivedDocument: extracted documents', () => {
+  const VALID = { ...HEADER, totalAmount: '110000.00000000' };
+
+  /** A photo whose issuer name was read with low confidence; everything else validates. */
+  function vision(
+    over: Partial<ReceivedDocumentGraph> = {},
+    reasons: string[] = ['low_confidence'],
+  ) {
+    return setup(
+      'needs_review',
+      {
+        header: VALID,
+        confidences: [
+          confidence('issuer_ruc', '0.950'),
+          confidence('issuer_legal_name', '0.600'),
+          confidence('totals', '0.700'),
+          confidence('items', '0.900'),
+        ],
+        ...over,
+      },
+      { source: 'photo', needsReviewReasons: reasons, confidenceOverall: '0.700' },
+    );
+  }
+
+  it('stores a corrected low-confidence field with who and when', async () => {
+    const { repository, run } = vision();
+    await run({ header: { issuerLegalName: 'ACME SA' } });
+    const row = repository.graph?.confidences.find((c) => c.fieldName === 'issuer_legal_name');
+    expect(row).toMatchObject({
+      correctedValue: 'ACME SA',
+      correctedBy: 'key-1',
+      correctedAt: AT,
+    });
+  });
+
+  it('keeps low_confidence while a tracked low-confidence field is still uncorrected', async () => {
+    const { run } = vision();
+    // totals (0.700) and issuer_legal_name (0.600) are below 0.85: correcting one is not enough.
+    const result = await run({ header: { issuerLegalName: 'ACME SA' } });
+    expect(result.document.needsReviewReasons).toEqual(['low_confidence']);
+  });
+
+  it('clears low_confidence once every tracked low-confidence field was corrected or reviewed', async () => {
+    const { run } = vision();
+    const first = await run({ header: { issuerLegalName: 'ACME SA' } });
+    const second = await run({
+      expectedVersion: first.document.version,
+      reviewedFields: ['totals'],
+    });
+    expect(second.document.needsReviewReasons).not.toContain('low_confidence');
+  });
+
+  it('turns a fully corrected, valid document into awaiting_confirmation', async () => {
+    const { run } = vision();
+    const result = await run({
+      header: { issuerLegalName: 'ACME SA' },
+      reviewedFields: ['totals'],
+    });
+    expect(result.document.needsReviewReasons).toEqual(['awaiting_confirmation']);
+  });
+
+  it('records a reviewed field as verified without changing the document data', async () => {
+    const { repository, run } = vision();
+    const result = await run({ reviewedFields: ['totals'] });
+    expect(result.document.version).toBe(3);
+    expect(repository.writes[0].confidences).toEqual([
+      { fieldName: 'totals', correctedValue: expect.any(String) as string },
+    ]);
+    expect(repository.writes[0].header).toMatchObject({ correctedBy: 'key-1' });
+  });
+
+  it('treats an already reviewed field as a no-op and as a replay at the old version', async () => {
+    const { repository, run } = vision();
+    await run({ reviewedFields: ['totals'] });
+    await expect(run({ reviewedFields: ['totals'] })).resolves.toMatchObject({ replayed: true });
+    await expect(run({ expectedVersion: 3, reviewedFields: ['totals'] })).resolves.toMatchObject({
+      replayed: false,
+    });
+    expect(repository.writes).toHaveLength(1);
+  });
+
+  it('rejects a reviewed field outside the 8 curated ones and writes nothing', async () => {
+    const { repository, run } = vision();
+    const failure = await run({ reviewedFields: ['issuer_trade_name'] }).catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(InvalidCorrectionError);
+    expect(repository.writes).toHaveLength(0);
+  });
+
+  it('skips a reviewed field that has no confidence row instead of inventing one', async () => {
+    const { repository, run } = vision({ confidences: [confidence('totals', '0.700')] });
+    await run({ reviewedFields: ['issuer_ruc'] });
+    expect(repository.writes).toHaveLength(0);
+  });
+
+  it('keeps low_confidence when no tracked field is below the threshold (only a confirm clears it)', async () => {
+    const { run } = vision({
+      confidences: ['issuer_ruc', 'totals'].map((field) => confidence(field, '0.950')),
+    });
+    const result = await run({ header: { issuerLegalName: 'ACME SA' } });
+    expect(result.document.needsReviewReasons).toEqual(['low_confidence']);
+  });
+
+  it('confirms explicitly despite low_confidence once validations pass', async () => {
+    const { run } = vision();
+    const result = await run({ confirm: true });
+    expect(result.document.status).toBe('confirmed');
+  });
+
+  it('still blocks the confirm while validations fail, saving nothing', async () => {
+    const { repository, run } = vision({ header: HEADER });
+    const failure = await run({ confirm: true, reviewedFields: ['totals'] }).catch(
+      (e: unknown) => e,
+    );
+    expect(failure).toBeInstanceOf(ValidationFailedError);
+    expect(repository.writes).toHaveLength(0);
+  });
+
+  it('keeps items_without_subtotals until an item gets a subtotal', async () => {
+    const noSubtotal: ReceivedDocumentItem = { ...line(1, '1'), subtotal: null };
+    const { run } = vision({ items: [noSubtotal] }, ['items_without_subtotals']);
+    const same = await run({ header: { issuerTradeName: 'ACME' } });
+    expect(same.document.needsReviewReasons).toEqual(['items_without_subtotals']);
+    const fixed = await run({
+      expectedVersion: same.document.version,
+      items: [{ position: 1, subtotal: '110000' }],
+    });
+    expect(fixed.document.needsReviewReasons).not.toContain('items_without_subtotals');
+  });
+
+  it('edits a confirmed extracted document atomically and emits updated', async () => {
+    const confirmed = setup(
+      'confirmed',
+      { header: VALID, confidences: [confidence('issuer_legal_name', '0.600')] },
+      { source: 'photo', confidenceOverall: '0.900' },
+    );
+    const result = await confirmed.run({ header: { issuerLegalName: 'ACME SA' } });
+    expect(result.events).toEqual(['reception.document.updated']);
+    await expect(
+      confirmed.run({ expectedVersion: 3, header: { totalAmount: '5' } }),
+    ).rejects.toBeInstanceOf(ValidationFailedError);
+    expect(confirmed.repository.writes).toHaveLength(1);
   });
 });

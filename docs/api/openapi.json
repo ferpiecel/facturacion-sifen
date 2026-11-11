@@ -3589,6 +3589,15 @@
           "confirm": {
             "type": "boolean"
           },
+          "reviewed_fields": {
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            }
+          },
           "document_type": {
             "anyOf": [
               {

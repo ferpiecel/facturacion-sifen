@@ -193,6 +193,7 @@ El cuerpo tiene la misma forma anidada que `GET`, de modo que se puede devolver 
 |---|---|
 | `version` | **Obligatorio.** Entero: la `version` que usted leyó (bloqueo optimista; no hay `If-Match`) |
 | `confirm` | Opcional. `true` confirma el documento |
+| `reviewed_fields` | Opcional. Hasta 8 nombres de los campos con confianza (`issuer_ruc`, `issuer_legal_name`, `issued_on`, `document_number`, `receiver_ruc`, `payment_condition`, `totals`, `items`) que usted verificó contra el original y deja tal como se extrajeron. Otro nombre responde `422 invalid_correction`. Ver [correcciones por campo](#correcciones-por-campo-y-confianza-baja) |
 | `document_type`, `timbrado`, `series`, `establishment_code`, `expedition_point_code`, `document_sequence`, `issued_on` (`YYYY-MM-DD`), `currency`, `exchange_rate` | Opcionales |
 | `issuer` | `ruc`, `legal_name`, `trade_name`, `address`, `economic_activity` |
 | `receiver` | `ruc`, `legal_name`, `type` |
@@ -219,6 +220,18 @@ Un ítem eliminado queda congelado: no se puede modificar ni volver a agregar co
 Con `confirm: true`, o cuando el documento ya está `confirmed`, el resultado se **revalida**. Si falla, la petición completa se rechaza con `422 validation_failed` y la lista `reasons`, y **no se guarda nada**, ni siquiera las correcciones. Corrija todo y reintente.
 
 Sin `confirm`, un documento en `needs_review` sigue en `needs_review`, su `version` aumenta y `needs_review_reasons` se recalcula (`awaiting_confirmation` si los datos ya son válidos).
+
+### Correcciones por campo y confianza baja
+
+Los documentos de PDF y foto guardan una confianza por cada uno de los 8 campos curados (`field_confidences[]`). Cada vez que un `PATCH` cambia un campo, su fila registra `corrected_value`, `corrected_by` (la API key) y `corrected_at`, en la misma transacción que los datos. Los campos que no son de los 8 (por ejemplo `issuer.trade_name`) se corrigen pero no tienen fila de confianza. Con `reviewed_fields` se registra lo mismo para un campo que usted comprobó y no cambia; `corrected_value` guarda entonces el valor que se verificó (`totals` guarda todos los montos; `items`, las posiciones activas). Un campo ya corregido o revisado no se registra de nuevo, y uno sin fila de confianza se ignora.
+
+Qué ocurre con los motivos que solo existen en la extracción cuando el `PATCH` **no** confirma:
+
+- `low_confidence` se mantiene mientras quede algún campo con confianza menor que el umbral (`RECEPTION_AUTO_CONFIRM_THRESHOLD`) sin corregir ni revisar. Se retira cuando todos los campos bajo el umbral tienen `corrected_at`. Si ningún campo individual está bajo el umbral (la confianza baja es solo la global), no hay nada que corregir y solo `confirm: true` lo retira.
+- `items_without_subtotals` se retira en cuanto un ítem activo trae `subtotal` (o ya no quedan ítems).
+- Los motivos de validación se recalculan siempre con los datos corregidos.
+
+`confirm: true` ignora `low_confidence` e `items_without_subtotals`: quien confirma asume la revisión, siempre que las validaciones pasen (si fallan, `422 validation_failed` y no se guarda nada).
 
 ### Versión e idempotencia
 
@@ -324,7 +337,7 @@ Todos los errores usan `{ "statusCode", "code", "message" }` más campos extra s
 | `422` | `invalid_request` | Falta la parte `file` en `multipart`, o el JSON no trae un `xml` de tipo cadena | Corregir la petición |
 | `422` | `extraction_failed` | El XML no se pudo leer como documento SIFEN soportado. Trae `document_id` (el archivo queda guardado) | Revisar el archivo; no hay reproceso por API todavía |
 | `422` | `validation_failed` | `PATCH` revalidado falló. Trae `reasons`; no se guardó nada | Corregir los motivos |
-| `422` | `invalid_correction` | `position` desconocida, o editar o re-agregar un ítem eliminado | Corregir los ítems |
+| `422` | `invalid_correction` | `position` desconocida, editar o re-agregar un ítem eliminado, o un nombre de `reviewed_fields` que no es uno de los 8 campos | Corregir la petición |
 | `503` | `storage_unavailable` | El almacenamiento de objetos no está configurado o no responde | Avisar al operador |
 | `503` | `queue_unavailable` | PDF o foto: la cola de extracción no está disponible. Trae `document_id`; el archivo quedó guardado | Reintentar la misma subida más tarde |
 | `503` | `service_unavailable` | La recepción no está disponible (sin base de datos) | Reintentar; avisar al operador |

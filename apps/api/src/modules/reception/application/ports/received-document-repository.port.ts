@@ -134,6 +134,8 @@ export interface ReceivedDocumentGraph {
   readonly removedPositions: readonly number[];
   readonly confidences: readonly FieldConfidence[];
   readonly artifact: ReceivedArtifact | null;
+  /** Last write of the document row; reprocess uses it to tell a stalled `extracting` job apart. */
+  readonly updatedAt: Date;
 }
 
 /** `created: false` means a document with the same CDC, number or artifact already existed. */
@@ -225,6 +227,16 @@ export interface ExtractionWrite {
   readonly events?: ReceptionEventRequest;
 }
 
+/** One audit-chain entry about a received document, appended in its own tenant transaction. */
+export interface ReceivedDocumentAuditEntry {
+  readonly documentId: string;
+  /** API key id (or portal user id) that made the request. */
+  readonly actorId: string;
+  readonly action: string;
+  readonly before: unknown;
+  readonly after: unknown;
+}
+
 /** Every method runs in its own tenant transaction; `tenantId` always comes first. */
 export interface ReceivedDocumentRepository {
   /**
@@ -271,4 +283,12 @@ export interface ReceivedDocumentRepository {
    * @throws ReceivedDocumentNotFoundError when the document does not exist for the tenant.
    */
   saveCorrection(tenantId: string, write: CorrectionWrite): Promise<void>;
+
+  /**
+   * Appends one audit entry for a request that changed no row of the document by itself (a
+   * reprocess that only queues a job).
+   *
+   * @throws ReceivedDocumentNotFoundError when the document does not exist for the tenant.
+   */
+  appendAudit(tenantId: string, entry: ReceivedDocumentAuditEntry): Promise<void>;
 }

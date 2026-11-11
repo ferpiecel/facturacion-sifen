@@ -54,8 +54,8 @@ export interface IngestSifenXmlResult {
 
 const CONTENT_TYPE = 'application/xml';
 /** Every field comes straight from the XML, not from a model, so it is fully trusted. */
-const FULL_CONFIDENCE = '1.0';
-const CONFIDENCE_FIELDS = [
+export const FULL_CONFIDENCE = '1.0';
+export const CONFIDENCE_FIELDS = [
   'issuer_ruc',
   'issuer_legal_name',
   'issued_on',
@@ -96,7 +96,7 @@ export class IngestSifenXml {
     try {
       parsed = parser.parse(xml);
     } catch (error) {
-      const code = extractionErrorCode(error);
+      const code = sifenXmlFailureCode(error);
       if (code === null) throw error;
       return this.persistFailure(tenantId, artifact, code);
     }
@@ -136,9 +136,9 @@ export class IngestSifenXml {
 
     const result = await repository.create(tenantId, {
       document: final.document,
-      header: toHeader(parsed),
-      items: parsed.items.map(toItem),
-      confidences: CONFIDENCE_FIELDS.map(toConfidence),
+      header: sifenXmlHeader(parsed),
+      items: parsed.items.map(sifenXmlItem),
+      confidences: CONFIDENCE_FIELDS.map(sifenXmlConfidence),
       artifact,
       ...(final.event === null ? {} : { events: { types: [final.event], at } }),
     });
@@ -185,14 +185,14 @@ export class IngestSifenXml {
 }
 
 /** Plain machine code for a parser failure, or null for an error that is not the input's fault. */
-function extractionErrorCode(error: unknown): string | null {
+export function sifenXmlFailureCode(error: unknown): string | null {
   if (error instanceof MalformedSifenXmlError) return `malformed_xml.${error.code}`;
   if (error instanceof UnsupportedDocumentTypeError) return 'unsupported_document_type';
   if (error instanceof SifenXmlTooLargeError) return 'xml_too_large';
   return null;
 }
 
-function toHeader(parsed: ParsedSifenDocument): ReceivedDocumentHeaderInput {
+export function sifenXmlHeader(parsed: ParsedSifenDocument): ReceivedDocumentHeaderInput {
   const { issuer, receiver, totals } = parsed;
   const vat5 = Decimal.parse(totals.vat5);
   const vat10 = Decimal.parse(totals.vat10);
@@ -227,7 +227,10 @@ function toHeader(parsed: ParsedSifenDocument): ReceivedDocumentHeaderInput {
   };
 }
 
-function toItem(item: ParsedSifenDocument['items'][number], index: number): ReceivedDocumentItem {
+export function sifenXmlItem(
+  item: ParsedSifenDocument['items'][number],
+  index: number,
+): ReceivedDocumentItem {
   return {
     position: index + 1,
     description: item.description,
@@ -243,7 +246,7 @@ function toItem(item: ParsedSifenDocument['items'][number], index: number): Rece
   };
 }
 
-function toConfidence(fieldName: (typeof CONFIDENCE_FIELDS)[number]): FieldConfidence {
+export function sifenXmlConfidence(fieldName: (typeof CONFIDENCE_FIELDS)[number]): FieldConfidence {
   return {
     fieldName,
     confidence: FULL_CONFIDENCE,

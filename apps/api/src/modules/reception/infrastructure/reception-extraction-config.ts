@@ -19,6 +19,14 @@ export const DEFAULT_EXTRACTION_FALLBACK_MODEL = 'claude-haiku-4-5';
 export const DEFAULT_AUTO_CONFIRM_THRESHOLD = 0.85;
 export const DEFAULT_EXTRACTION_TIMEOUT_MS = 120_000;
 export const DEFAULT_EXTRACTION_CONCURRENCY = 2;
+/**
+ * An `extracting` document untouched this long is taken as stalled by reprocess (R5.8). A job can
+ * legitimately run three attempts of two LLM calls plus backoff (roughly 15 minutes at the default
+ * timeout), so the default leaves a wide margin.
+ */
+export const DEFAULT_EXTRACTION_STALE_AFTER_MS = 1_800_000;
+const MIN_STALE_AFTER_MS = 60_000;
+const MAX_STALE_AFTER_MS = 86_400_000;
 const MAX_CONCURRENCY = 8;
 const MIN_TIMEOUT_MS = 1_000;
 const MAX_TIMEOUT_MS = 600_000;
@@ -83,6 +91,19 @@ export function loadAutoConfirmThreshold(env: Env): number {
     throw new Error('RECEPTION_AUTO_CONFIRM_THRESHOLD must be a number between 0 and 1.');
   }
   return Number(value);
+}
+
+/** Read by the API (reprocess), not by the worker; validated on its own like the threshold. */
+export function loadExtractionStaleAfterMs(env: Env): number {
+  const value = read(env, 'RECEPTION_EXTRACTION_STALE_AFTER_MS');
+  if (value === undefined) return DEFAULT_EXTRACTION_STALE_AFTER_MS;
+  const parsed = /^\d+$/.test(value) ? Number(value) : Number.NaN;
+  if (!(parsed >= MIN_STALE_AFTER_MS && parsed <= MAX_STALE_AFTER_MS)) {
+    throw new Error(
+      `RECEPTION_EXTRACTION_STALE_AFTER_MS must be an integer between ${String(MIN_STALE_AFTER_MS)} and ${String(MAX_STALE_AFTER_MS)}.`,
+    );
+  }
+  return parsed;
 }
 
 /**

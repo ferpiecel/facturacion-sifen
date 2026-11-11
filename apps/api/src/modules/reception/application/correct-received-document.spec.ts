@@ -169,6 +169,7 @@ class FakeRepository implements ReceivedDocumentRepository {
   findByCdc = () => Promise.resolve(null);
   findArtifactBySha256 = () => Promise.resolve(null);
   save = () => Promise.reject(new Error('unused'));
+  appendAudit = () => Promise.reject(new Error('unused'));
 }
 
 function setup(
@@ -183,6 +184,7 @@ function setup(
     removedPositions: [],
     confidences: ['issuer_ruc', 'totals', 'items'].map((field) => confidence(field)),
     artifact: null,
+    updatedAt: AT,
     ...extra,
   });
   const correct = createCorrectReceivedDocument({

@@ -1,5 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { createPgliteDatabase, receivedArtifacts, tenants, type DatabaseHandle } from '@sifen/db';
+import {
+  auditLog,
+  createPgliteDatabase,
+  receivedArtifacts,
+  tenants,
+  type DatabaseHandle,
+} from '@sifen/db';
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   ReceivedDocumentNotFoundError,
@@ -376,6 +383,32 @@ describe('DrizzleReceivedDocumentRepository', () => {
       expect(graph?.removedPositions).toEqual([1, 2]);
     });
 
+    it('never reuses a soft-removed position: it numbers the later items past the highest one', async () => {
+      const { extracting, review } = await extractedGraph();
+      const write = {
+        document: review,
+        expectedVersion: extracting.version,
+        header: {},
+        items: [item(1), item(2), item(3)],
+        confidences: [],
+      };
+      await repo().saveExtraction(tenantId, write);
+      await repo().saveExtraction(tenantId, { ...write, items: [item(1)] });
+      // Positions 2 and 3 are frozen by the removal guard (migration 0081): a reprocess that reads
+      // three lines again must not touch them.
+      await repo().saveExtraction(tenantId, {
+        ...write,
+        items: [item(1), item(2, { description: 'B' }), item(3, { description: 'C' })],
+      });
+      const graph = await repo().load(tenantId, extracting.id);
+      expect(graph?.items.map((i) => [i.position, i.description])).toEqual([
+        [1, item(1).description],
+        [4, 'B'],
+        [5, 'C'],
+      ]);
+      expect(graph?.removedPositions).toEqual([2, 3]);
+    });
+
     it('rejects a stale version and reports a missing document', async () => {
       const { extracting, review } = await extractedGraph();
       const base = { document: review, header: {}, items: [], confidences: [] };
@@ -386,6 +419,37 @@ describe('DrizzleReceivedDocumentRepository', () => {
         repo().saveExtraction(otherTenantId, { ...base, expectedVersion: extracting.version }),
       ).rejects.toBeInstanceOf(ReceivedDocumentNotFoundError);
       expect((await repo().load(tenantId, extracting.id))?.document.status).toBe('extracting');
+    });
+  });
+
+  describe('appendAudit', () => {
+    it('appends one audit entry for the document and rejects another tenant', async () => {
+      const { document } = await repo().create(tenantId, fullGraph());
+      await repo().appendAudit(tenantId, {
+        documentId: document.id,
+        actorId: 'key-1',
+        action: 'received_document.reprocess_requested',
+        before: { status: 'received' },
+        after: { queued: true },
+      });
+      const rows = await handle.db
+        .select()
+        .from(auditLog)
+        .where(eq(auditLog.entityId, document.id));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        action: 'received_document.reprocess_requested',
+        entityType: 'received_document',
+      });
+      await expect(
+        repo().appendAudit(otherTenantId, {
+          documentId: document.id,
+          actorId: 'key-1',
+          action: 'x',
+          before: {},
+          after: {},
+        }),
+      ).rejects.toBeInstanceOf(ReceivedDocumentNotFoundError);
     });
   });
 });

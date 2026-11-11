@@ -33,6 +33,12 @@ import {
   ReceivedDocumentNotFoundError,
   VersionConflictError,
 } from '../../application/ports/received-document-repository.port.js';
+import {
+  ArtifactNotAvailableError,
+  ReprocessNotAllowedError,
+  type createReprocessReceivedDocument,
+} from '../../application/reprocess-received-document.js';
+import { ReceptionQueueUnavailableError } from '../../application/ports/reception-job-queue.port.js';
 import type { createGetArtifact, createGetArtifactUrl } from '../../application/get-artifact.js';
 import type { createGetReceivedDocument } from '../../application/get-received-document.js';
 import type { IngestUpload } from '../../application/ingest-upload.js';
@@ -49,6 +55,7 @@ import {
   INGEST_UPLOAD,
   LIST_RECEIVED_DOCUMENTS,
   RECEPTION_UPLOAD_CONFIG,
+  REPROCESS_RECEIVED_DOCUMENT,
 } from '../../reception.tokens.js';
 import { sniffUpload } from '../../domain/upload-sniff.js';
 import { parseCorrectionRequest } from './correct-received-document.request.js';
@@ -105,6 +112,8 @@ export class ReceivedDocumentsController {
     private readonly getArtifactUrl: ReturnType<typeof createGetArtifactUrl> | null,
     @Inject(CORRECT_RECEIVED_DOCUMENT)
     private readonly correctDocument: ReturnType<typeof createCorrectReceivedDocument> | null,
+    @Inject(REPROCESS_RECEIVED_DOCUMENT)
+    private readonly reprocessDocument: ReturnType<typeof createReprocessReceivedDocument> | null,
     private readonly cls: ClsService<TenancyClsStore & IdentityClsStore>,
   ) {}
 
@@ -245,6 +254,38 @@ export class ReceivedDocumentsController {
     }
   }
 
+  /**
+   * Re-runs the extraction on the STORED artifact. PDF and photo: 202 with `Location`, the job is
+   * queued (a second request while one is queued or running is a no-op 202). SIFEN XML that was
+   * unreadable: re-read synchronously, 200 with the new status (422 `extraction_failed` when it is
+   * still unreadable). Errors: 404 `not_found`, 409 `artifact_not_available` or `invalid_state`
+   * (with `status`), 503 `queue_unavailable` or `storage_unavailable`.
+   */
+  @Post(':id/reprocess')
+  @RequireScopes('reception:write')
+  async reprocess(@Param('id') id: string, @Res({ passthrough: true }) reply: HttpReply) {
+    const reprocess = this.requireStorage(this.reprocessDocument);
+    try {
+      const result = await reprocess({
+        tenantId: this.tenantId(),
+        id: parseId(id),
+        actorId: this.cls.get(API_KEY_ID_CLS_KEY),
+      });
+      if (result.kind === 'failed') {
+        throw receptionProblem(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          'extraction_failed',
+          'The XML could not be read as a supported SIFEN document',
+          { document_id: result.document.id },
+        );
+      }
+      const status = result.kind === 'reprocessed' ? HttpStatus.OK : HttpStatus.ACCEPTED;
+      return accepted(reply, status, result.document);
+    } catch (error) {
+      throw asReprocessProblem(error);
+    }
+  }
+
   /** The stored bytes, as uploaded. */
   @Get(':id/artifact')
   @RequireScopes('reception:read')
@@ -381,6 +422,33 @@ function asCorrectionProblem(error: unknown): unknown {
   }
   if (error instanceof InvalidCorrectionError) {
     return receptionProblem(HttpStatus.UNPROCESSABLE_ENTITY, 'invalid_correction', error.message);
+  }
+  return error;
+}
+
+function asReprocessProblem(error: unknown): unknown {
+  if (error instanceof ReceivedDocumentNotFoundError) return notFound();
+  if (error instanceof ArtifactNotAvailableError) {
+    return receptionProblem(
+      HttpStatus.CONFLICT,
+      'artifact_not_available',
+      'The document has no stored artifact to reprocess',
+    );
+  }
+  if (error instanceof ReprocessNotAllowedError) {
+    return receptionProblem(
+      HttpStatus.CONFLICT,
+      'invalid_state',
+      'The document cannot be reprocessed in its current status',
+      { status: error.status },
+    );
+  }
+  if (error instanceof ReceptionQueueUnavailableError) {
+    return receptionProblem(
+      HttpStatus.SERVICE_UNAVAILABLE,
+      'queue_unavailable',
+      'The extraction queue is not available; try again later',
+    );
   }
   return error;
 }

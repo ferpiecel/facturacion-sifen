@@ -747,6 +747,50 @@ export function buildOpenApiDocument() {
           },
         },
       },
+      '/v1/received-documents/{id}/reprocess': {
+        post: {
+          operationId: 'reprocessReceivedDocument',
+          tags: ['Reception'],
+          summary: 'Re-run the extraction on the stored artifact',
+          description:
+            'Works from the stored upload, never from a new one. A PDF or photo in `received` or `extraction_failed` (including `llm_disabled` and `internal_error`) is queued again: 202 with `Location`, and a second request while the job is queued or running is a no-op 202. ' +
+            'An `extracting` document is a no-op 202 while its run is live; one untouched for `RECEPTION_EXTRACTION_STALE_AFTER_MS` (default 30 minutes) is taken as stalled, moved to `extraction_failed` without a webhook and queued again. ' +
+            'The result arrives later (`GET /v1/received-documents/{id}` or webhooks). A SIFEN XML that was unreadable (`extraction_failed`) is re-read synchronously: 200 with the new status, or 422 `extraction_failed` when it is still unreadable. ' +
+            'Documents in `needs_review` or `confirmed` are refused (409 `invalid_state`, with `status`): re-extracting would overwrite the machine output a person may have corrected, and a parsed XML would read the same. ' +
+            'The request body is ignored. Every accepted request that did work appends one audit entry.',
+          ...secured(['reception:write']),
+          parameters: [idParam('Received document')],
+          responses: {
+            '200': {
+              ...json('XML re-read; the document after the reprocess', ref('ReceivedDocumentAck')),
+              headers: { Location: { schema: { type: 'string' } } },
+            },
+            '202': {
+              ...json('Queued (or already running)', ref('ReceivedDocumentAck')),
+              headers: { Location: { schema: { type: 'string' } } },
+            },
+            '400': problem('id is not a UUID (`invalid_request`)', 'ReceptionProblem'),
+            '401': UNAUTHORIZED,
+            '403': FORBIDDEN,
+            '404': problem(
+              'Not found, also for another tenant`s document (`not_found`)',
+              'ReceptionProblem',
+            ),
+            '409': problem(
+              '`artifact_not_available` (no stored artifact or its bytes are gone) or `invalid_state` (with `status`)',
+              'ReceptionProblem',
+            ),
+            '422': problem(
+              '`extraction_failed`: the XML is still unreadable (carries `document_id`)',
+              'ReceptionProblem',
+            ),
+            '503': problem(
+              'Document storage is not available (`storage_unavailable`) or the extraction queue is down (`queue_unavailable`)',
+              'ReceptionProblem',
+            ),
+          },
+        },
+      },
       '/v1/received-documents/{id}/artifact': {
         get: {
           operationId: 'downloadReceivedArtifact',
@@ -948,6 +992,7 @@ export function buildOpenApiDocument() {
                 'not_found',
                 'version_conflict',
                 'invalid_state',
+                'artifact_not_available',
                 'validation_failed',
                 'invalid_correction',
               ],

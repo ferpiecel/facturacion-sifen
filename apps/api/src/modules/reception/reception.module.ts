@@ -3,13 +3,17 @@ import { Inject, Module, type OnApplicationShutdown } from '@nestjs/common';
 import type { Database } from '@sifen/db';
 import { DATABASE } from '../database/database.module.js';
 import { ConfidencePolicy } from './domain/confidence-policy.js';
-import { loadAutoConfirmThreshold } from './infrastructure/reception-extraction-config.js';
+import {
+  loadAutoConfirmThreshold,
+  loadExtractionStaleAfterMs,
+} from './infrastructure/reception-extraction-config.js';
 import { createCorrectReceivedDocument } from './application/correct-received-document.js';
 import { createGetArtifact, createGetArtifactUrl } from './application/get-artifact.js';
 import { createGetReceivedDocument } from './application/get-received-document.js';
 import { IngestSifenXml } from './application/ingest-sifen-xml.js';
 import { IngestUpload } from './application/ingest-upload.js';
 import { createListReceivedDocuments } from './application/list-received-documents.js';
+import { createReprocessReceivedDocument } from './application/reprocess-received-document.js';
 import type { StorageProvider } from './application/ports/storage-provider.port.js';
 import { createDrizzleReceivedDocumentQuery } from './infrastructure/adapters/drizzle-received-document-query.js';
 import { createDrizzleReceivedDocumentRepository } from './infrastructure/adapters/drizzle-received-document-repository.js';
@@ -37,6 +41,7 @@ import {
   RECEPTION_JOB_QUEUE,
   RECEPTION_STORAGE,
   RECEPTION_UPLOAD_CONFIG,
+  REPROCESS_RECEIVED_DOCUMENT,
 } from './reception.tokens.js';
 
 /** Reception bounded context (ADR-0024): intake, extraction and review of received documents. */
@@ -115,6 +120,29 @@ import {
             })
           : null,
       inject: [DATABASE],
+    },
+    {
+      // Re-runs the extraction on the stored artifact (R5.8). Needs storage (to check the bytes),
+      // the queue (PDF and photo) and the parser (XML); a missing queue answers 503 per request.
+      provide: REPROCESS_RECEIVED_DOCUMENT,
+      useFactory: (
+        db: Database | null,
+        storage: StorageProvider | null,
+        queue: ClosableReceptionJobQueue,
+        upload: ReceptionUploadConfig,
+      ) =>
+        db && storage
+          ? createReprocessReceivedDocument({
+              repository: createDrizzleReceivedDocumentRepository(db),
+              storage,
+              parser: new Libxml2SifenXmlParser({ maxBytes: upload.maxBytes }),
+              fiscalIdentity: createDrizzleTenantFiscalIdentity(db),
+              queue,
+              now: () => new Date(),
+              staleExtractingAfterMs: loadExtractionStaleAfterMs(process.env),
+            })
+          : null,
+      inject: [DATABASE, RECEPTION_STORAGE, RECEPTION_JOB_QUEUE, RECEPTION_UPLOAD_CONFIG],
     },
     {
       provide: LIST_RECEIVED_DOCUMENTS,

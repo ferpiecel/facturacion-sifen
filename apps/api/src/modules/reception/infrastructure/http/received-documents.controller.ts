@@ -39,6 +39,7 @@ import {
   type createReprocessReceivedDocument,
 } from '../../application/reprocess-received-document.js';
 import { ReceptionQueueUnavailableError } from '../../application/ports/reception-job-queue.port.js';
+import { StorageUnavailableError } from '../../application/ports/storage-provider.port.js';
 import type { createGetArtifact, createGetArtifactUrl } from '../../application/get-artifact.js';
 import type { createGetReceivedDocument } from '../../application/get-received-document.js';
 import type { IngestUpload } from '../../application/ingest-upload.js';
@@ -259,7 +260,7 @@ export class ReceivedDocumentsController {
    * queued (a second request while one is queued or running is a no-op 202). SIFEN XML that was
    * unreadable: re-read synchronously, 200 with the new status (422 `extraction_failed` when it is
    * still unreadable). Errors: 404 `not_found`, 409 `artifact_not_available` or `invalid_state`
-   * (with `status`), 503 `queue_unavailable` or `storage_unavailable`.
+   * (with `status`), 503 `queue_unavailable` or `storage_unavailable` (any storage failure).
    */
   @Post(':id/reprocess')
   @RequireScopes('reception:write')
@@ -269,7 +270,7 @@ export class ReceivedDocumentsController {
       const result = await reprocess({
         tenantId: this.tenantId(),
         id: parseId(id),
-        actorId: this.cls.get(API_KEY_ID_CLS_KEY),
+        actor: { type: 'api_key', id: this.cls.get(API_KEY_ID_CLS_KEY) },
       });
       if (result.kind === 'failed') {
         throw receptionProblem(
@@ -448,6 +449,13 @@ function asReprocessProblem(error: unknown): unknown {
       HttpStatus.SERVICE_UNAVAILABLE,
       'queue_unavailable',
       'The extraction queue is not available; try again later',
+    );
+  }
+  if (error instanceof StorageUnavailableError) {
+    return receptionProblem(
+      HttpStatus.SERVICE_UNAVAILABLE,
+      'storage_unavailable',
+      'Document storage is not available',
     );
   }
   return error;

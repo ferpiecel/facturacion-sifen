@@ -230,8 +230,8 @@ export interface ExtractionWrite {
 /** One audit-chain entry about a received document, appended in its own tenant transaction. */
 export interface ReceivedDocumentAuditEntry {
   readonly documentId: string;
-  /** API key id (or portal user id) that made the request. */
-  readonly actorId: string;
+  /** Who made the request; the audit chain stores the type and the id. */
+  readonly actor: { readonly type: 'api_key' | 'user'; readonly id: string };
   readonly action: string;
   readonly before: unknown;
   readonly after: unknown;

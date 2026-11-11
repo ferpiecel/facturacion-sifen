@@ -20,9 +20,10 @@ export class ReceptionQueueUnavailableError extends Error {
 export interface ReceptionJobQueue {
   /**
    * Schedules the asynchronous extraction of a stored document. Idempotent per (document, attempt):
-   * a second call while the first job exists is a no-op, never a duplicate job.
+   * a second call while the first job exists is a no-op, never a duplicate job. `enqueued` is false
+   * when that job already existed, so callers can tell a new job from a repeated request.
    *
    * @throws ReceptionQueueUnavailableError when the job could not be enqueued.
    */
-  enqueueExtraction(job: ExtractionJob): Promise<void>;
+  enqueueExtraction(job: ExtractionJob): Promise<{ readonly enqueued: boolean }>;
 }

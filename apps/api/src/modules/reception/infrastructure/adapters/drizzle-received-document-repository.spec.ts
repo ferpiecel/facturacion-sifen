@@ -427,7 +427,7 @@ describe('DrizzleReceivedDocumentRepository', () => {
       const { document } = await repo().create(tenantId, fullGraph());
       await repo().appendAudit(tenantId, {
         documentId: document.id,
-        actorId: 'key-1',
+        actor: { type: 'api_key', id: 'key-1' },
         action: 'received_document.reprocess_requested',
         before: { status: 'received' },
         after: { queued: true },
@@ -440,11 +440,22 @@ describe('DrizzleReceivedDocumentRepository', () => {
       expect(rows[0]).toMatchObject({
         action: 'received_document.reprocess_requested',
         entityType: 'received_document',
+        actorType: 'api_key',
+        actorId: 'key-1',
       });
+      await repo().appendAudit(tenantId, {
+        documentId: document.id,
+        actor: { type: 'user', id: 'user-1' },
+        action: 'received_document.reprocess_requested',
+        before: {},
+        after: {},
+      });
+      const all = await handle.db.select().from(auditLog).where(eq(auditLog.entityId, document.id));
+      expect(all.map((row) => row.actorType).sort()).toEqual(['api_key', 'user']);
       await expect(
         repo().appendAudit(otherTenantId, {
           documentId: document.id,
-          actorId: 'key-1',
+          actor: { type: 'api_key', id: 'key-1' },
           action: 'x',
           before: {},
           after: {},

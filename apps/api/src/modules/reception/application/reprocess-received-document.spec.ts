@@ -17,6 +17,7 @@ import {
   type NewReceivedArtifact,
 } from './ports/received-document-repository.port.js';
 import { ReceptionQueueUnavailableError } from './ports/reception-job-queue.port.js';
+import { StorageUnavailableError } from './ports/storage-provider.port.js';
 import {
   MalformedSifenXmlError,
   type ParsedSifenDocument,
@@ -25,11 +26,13 @@ import {
 import {
   ArtifactNotAvailableError,
   ReprocessNotAllowedError,
+  RETRY_PENDING_WINDOW_MS,
   createReprocessReceivedDocument,
 } from './reprocess-received-document.js';
 
 const TENANT = '11111111-1111-4111-8111-111111111111';
 const ACTOR = 'key-1';
+const API_KEY = { type: 'api_key', id: ACTOR } as const;
 const NOW = new Date('2026-11-11T12:00:00.000Z');
 const STALE_MS = 30 * 60_000;
 const KEY = 'tenants/t/received/pdf/abc.pdf';
@@ -115,6 +118,7 @@ class Harness {
     dv: computeRucCheckDigit(RECEIVER_BASE),
   };
   now = NOW;
+  identityFails: Error | null = null;
 
   readonly parser: SifenXmlParser = { parse: () => this.parse() };
 
@@ -122,7 +126,12 @@ class Harness {
     repository: this.repository,
     storage: this.storage,
     parser: this.parser,
-    fiscalIdentity: { getRucIdentity: () => Promise.resolve(this.identity) },
+    fiscalIdentity: {
+      getRucIdentity: () =>
+        this.identityFails === null
+          ? Promise.resolve(this.identity)
+          : Promise.reject(this.identityFails),
+    },
     queue: this.queue,
     now: () => this.now,
     staleExtractingAfterMs: STALE_MS,
@@ -131,7 +140,7 @@ class Harness {
   async seed(
     status: Status,
     source: ReceivedDocumentSource = 'pdf',
-    options: { artifact?: boolean; bytes?: boolean } = {},
+    options: { artifact?: boolean; bytes?: boolean; errorCode?: string } = {},
   ): Promise<void> {
     const artifact: NewReceivedArtifact = {
       storageKey: source === 'sifen_xml' ? 'tenants/t/received/sifen_xml/abc.xml' : KEY,
@@ -144,6 +153,9 @@ class Harness {
     await this.repository.create(TENANT, {
       document: documentIn(status, source),
       ...(options.artifact === false ? {} : { artifact }),
+      ...(options.errorCode === undefined
+        ? {}
+        : { header: { extractionErrorCode: options.errorCode } }),
     });
     if (options.artifact !== false && options.bytes !== false) {
       this.storage.objects.set(artifact.storageKey, new Uint8Array([1, 2, 3]));
@@ -152,7 +164,7 @@ class Harness {
   }
 
   reprocess() {
-    return this.run({ tenantId: TENANT, id: 'doc-1', actorId: ACTOR });
+    return this.run({ tenantId: TENANT, id: 'doc-1', actor: API_KEY });
   }
 }
 
@@ -162,6 +174,7 @@ describe('reprocessReceivedDocument (vision sources)', () => {
     async (source) => {
       const h = new Harness();
       await h.seed('received', source);
+      h.now = new Date(NOW.getTime() + STALE_MS);
       const result = await h.reprocess();
 
       expect(result).toMatchObject({ kind: 'queued', document: { id: 'doc-1' } });
@@ -171,7 +184,7 @@ describe('reprocessReceivedDocument (vision sources)', () => {
       expect(h.repository.audits).toEqual([
         expect.objectContaining({
           documentId: 'doc-1',
-          actorId: ACTOR,
+          actor: API_KEY,
           action: 'received_document.reprocess_requested',
         }),
       ]);
@@ -238,6 +251,75 @@ describe('reprocessReceivedDocument (vision sources)', () => {
     },
   );
 
+  it('leaves a recent received document alone: its upload job may still be queued', async () => {
+    const h = new Harness();
+    await h.seed('received');
+    h.now = new Date(NOW.getTime() + STALE_MS - 1);
+    const result = await h.reprocess();
+
+    expect(result).toMatchObject({ kind: 'in_progress' });
+    expect(h.queue.jobs).toEqual([]);
+    expect(h.repository.audits).toEqual([]);
+  });
+
+  it.each(['llm_rate_limited', 'llm_provider_error', 'internal_error'])(
+    'leaves a %s failure alone while the queue may still retry it',
+    async (errorCode) => {
+      const h = new Harness();
+      await h.seed('extraction_failed', 'pdf', { errorCode });
+      h.now = new Date(NOW.getTime() + RETRY_PENDING_WINDOW_MS - 1);
+      expect(await h.reprocess()).toMatchObject({ kind: 'in_progress' });
+      expect(h.queue.jobs).toEqual([]);
+
+      h.now = new Date(NOW.getTime() + RETRY_PENDING_WINDOW_MS);
+      expect(await h.reprocess()).toMatchObject({ kind: 'queued' });
+      expect(h.queue.jobs).toHaveLength(1);
+    },
+  );
+
+  it('queues a final failure (no retry is ever coming) right away', async () => {
+    const h = new Harness();
+    await h.seed('extraction_failed', 'pdf', { errorCode: 'llm_disabled' });
+    expect(await h.reprocess()).toMatchObject({ kind: 'queued' });
+  });
+
+  it('audits a double click once: the second request enqueues nothing new', async () => {
+    const h = new Harness();
+    await h.seed('extraction_failed');
+    await h.reprocess();
+    const second = await h.reprocess();
+
+    expect(second.kind).toBe('queued');
+    expect(h.repository.audits).toHaveLength(1);
+  });
+
+  it('audits the document as loaded, not as recovered from a stall', async () => {
+    const h = new Harness();
+    await h.seed('extracting');
+    const loaded = h.repository.document('doc-1');
+    h.now = new Date(NOW.getTime() + STALE_MS);
+    await h.reprocess();
+
+    expect(h.repository.audits[0]).toMatchObject({
+      before: { status: 'extracting', version: loaded.version },
+      after: { status: 'extraction_failed', queued: true },
+    });
+  });
+
+  it('records a portal user as a user in the audit entry', async () => {
+    const h = new Harness();
+    await h.seed('extraction_failed');
+    await h.run({ tenantId: TENANT, id: 'doc-1', actor: { type: 'user', id: 'user-1' } });
+    expect(h.repository.audits[0]?.actor).toEqual({ type: 'user', id: 'user-1' });
+  });
+
+  it('reports a storage provider failure as StorageUnavailableError', async () => {
+    const h = new Harness();
+    await h.seed('extraction_failed');
+    h.storage.exists = () => Promise.reject(new Error('s3 down'));
+    await expect(h.reprocess()).rejects.toBeInstanceOf(StorageUnavailableError);
+  });
+
   it('refuses a document without a stored artifact', async () => {
     const h = new Harness();
     await h.seed('extraction_failed', 'pdf', { artifact: false });
@@ -259,6 +341,7 @@ describe('reprocessReceivedDocument (vision sources)', () => {
   it('propagates a queue outage without auditing', async () => {
     const h = new Harness();
     await h.seed('received');
+    h.now = new Date(NOW.getTime() + STALE_MS);
     h.queue.failWith = new Error('down');
     await expect(h.reprocess()).rejects.toBeInstanceOf(ReceptionQueueUnavailableError);
     expect(h.repository.audits).toEqual([]);
@@ -288,7 +371,7 @@ describe('reprocessReceivedDocument (SIFEN XML)', () => {
     expect(h.repository.rows.get('doc-1')?.items).toHaveLength(1);
     expect(h.repository.events.at(-1)?.request.types).toEqual(['reception.document.confirmed']);
     expect(h.repository.audits).toEqual([
-      expect.objectContaining({ action: 'received_document.reprocessed', actorId: ACTOR }),
+      expect.objectContaining({ action: 'received_document.reprocessed', actor: API_KEY }),
     ]);
   });
 
@@ -341,4 +424,22 @@ describe('reprocessReceivedDocument (SIFEN XML)', () => {
       await expect(h.reprocess()).rejects.toBeInstanceOf(ReprocessNotAllowedError);
     },
   );
+  it.each([
+    ['the identity port', (h: Harness) => (h.identityFails = new Error('db down'))],
+    [
+      'the parser',
+      (h: Harness) =>
+        (h.parse = () => {
+          throw new TypeError('boom');
+        }),
+    ],
+  ])('never leaves the document stuck in extracting when %s throws', async (_name, arm) => {
+    const h = new Harness();
+    await h.seed('extraction_failed', 'sifen_xml');
+    arm(h);
+    await expect(h.reprocess()).rejects.toThrow();
+
+    expect(h.repository.document('doc-1').status).toBe('extraction_failed');
+    expect(h.repository.rows.get('doc-1')?.header.extractionErrorCode).toBe('internal_error');
+  });
 });

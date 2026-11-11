@@ -249,12 +249,12 @@ Qué ocurre con los motivos que solo existen en la extracción cuando el `PATCH`
 
 | Documento | Resultado |
 |---|---|
-| PDF o foto en `received` o `extraction_failed` | `202` con `Location`: el trabajo queda en cola y el resultado llega después (`GET` o webhooks, como en una subida nueva). |
+| PDF o foto en `received` o `extraction_failed` | `202` con `Location`: el trabajo queda en cola y el resultado llega después (`GET` o webhooks, como en una subida nueva). Para no dejar dos trabajos vivos, un `received` de menos de `RECEPTION_EXTRACTION_STALE_AFTER_MS` (su trabajo de subida puede seguir en cola) y un `extraction_failed` con código reintentable (`llm_provider_error`, `llm_rate_limited`, `internal_error`) de menos de 5 minutos (la cola aún puede reintentarlo) responden `202` sin hacer nada; un fallo definitivo (por ejemplo `llm_disabled`) se encola de inmediato. Si el pedido es inmediato tras un `503 queue_unavailable`, vuelva a subir los mismos bytes: eso sí reencola sin esperar. |
 | PDF o foto en `extracting` | `202` sin hacer nada mientras la corrida sigue viva. Si lleva más de `RECEPTION_EXTRACTION_STALE_AFTER_MS` (30 minutos por defecto) sin cambios, se la toma por trabada: pasa a `extraction_failed` sin webhook y se encola de nuevo. |
 | XML de SIFEN en `extraction_failed` | Se vuelve a leer **dentro de la petición**: `200` con el estado nuevo (`confirmed` o `needs_review`), o `422 extraction_failed` si sigue ilegible. |
 | `needs_review` o `confirmed` (cualquier origen) | `409 invalid_state` con `status`. Reextraer sobreescribiría los datos que una persona pudo corregir, y un XML ya leído daría lo mismo. |
 
-Un doble clic es seguro: el segundo pedido mientras el trabajo está en cola responde `202` y no crea otro trabajo. Cada pedido aceptado que hizo trabajo deja una entrada de auditoría (`received_document.reprocess_requested` o `received_document.reprocessed`). La versión del documento sube cuando el worker lo reclama, como en cualquier extracción. Errores: `404 not_found` (también de otro tenant), `409 artifact_not_available` (sin archivo guardado, o el archivo ya no está en el almacenamiento), `503 queue_unavailable` y `503 storage_unavailable`.
+Un doble clic es seguro: el segundo pedido mientras el trabajo está en cola responde `202`, no crea otro trabajo y no agrega otra entrada de auditoría. Cada pedido aceptado que hizo trabajo (un trabajo nuevo, o la relectura del XML) deja una entrada de auditoría (`received_document.reprocess_requested` o `received_document.reprocessed`). La versión del documento sube cuando el worker lo reclama, como en cualquier extracción. Errores: `404 not_found` (también de otro tenant), `409 artifact_not_available` (sin archivo guardado, o el archivo ya no está en el almacenamiento), `503 queue_unavailable` y `503 storage_unavailable` (cualquier falla del almacenamiento).
 
 ## Eventos de webhook
 

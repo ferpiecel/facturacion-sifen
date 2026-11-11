@@ -261,13 +261,14 @@ export class InMemoryReceptionRepository implements ReceivedDocumentRepository {
 export class FakeJobQueue implements ReceptionJobQueue {
   readonly jobs: ExtractionJob[] = [];
   failWith: Error | null = null;
-  enqueueExtraction(job: ExtractionJob): Promise<void> {
+  enqueueExtraction(job: ExtractionJob): Promise<{ readonly enqueued: boolean }> {
     if (this.failWith !== null) {
       return Promise.reject(new ReceptionQueueUnavailableError('redis down'));
     }
-    if (!this.jobs.some((j) => j.documentId === job.documentId && j.attempt === job.attempt)) {
-      this.jobs.push(job); // idempotent per (document, attempt), like the real adapter
-    }
-    return Promise.resolve();
+    const known = this.jobs.some(
+      (j) => j.documentId === job.documentId && j.attempt === job.attempt,
+    );
+    if (!known) this.jobs.push(job); // idempotent per (document, attempt), like the real adapter
+    return Promise.resolve({ enqueued: !known });
   }
 }

@@ -9,6 +9,14 @@ export class StorageObjectNotFoundError extends Error {
   }
 }
 
+/** The storage provider failed for a reason other than a missing key (outage, credentials, timeout). */
+export class StorageUnavailableError extends Error {
+  constructor() {
+    super('document storage is unavailable');
+    this.name = 'StorageUnavailableError';
+  }
+}
+
 export interface StorageUploadOptions {
   readonly contentType?: string;
 }

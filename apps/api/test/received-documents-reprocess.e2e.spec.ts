@@ -206,7 +206,7 @@ describe('POST /v1/received-documents/{id}/reprocess (e2e)', () => {
             (j) => j.documentId === job.documentId && j.attempt === job.attempt,
           );
           if (!known) jobs.push(job);
-          return Promise.resolve();
+          return Promise.resolve({ enqueued: !known });
         },
         close: () => Promise.resolve(),
       })
@@ -301,6 +301,15 @@ describe('POST /v1/received-documents/{id}/reprocess (e2e)', () => {
     expect((await detail(id)).status).toBe('extraction_failed');
     queueDown = false;
     expect((await reprocess(id)).statusCode).toBe(202);
+  });
+
+  it('answers 503 storage_unavailable when the storage provider fails', async () => {
+    const id = await upload();
+    await runWorker('disabled');
+    storage.exists = () => Promise.reject(new Error('s3 down'));
+    const response = await reprocess(id);
+    expect(response.statusCode).toBe(503);
+    expect(response.json<Body>().code).toBe('storage_unavailable');
   });
 
   it('re-reads an unreadable XML synchronously and reports it when it is still unreadable', async () => {

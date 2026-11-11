@@ -9,7 +9,10 @@ import {
 const TENANT = '11111111-1111-4111-8111-111111111111';
 const DOC = '22222222-2222-4222-8222-222222222222';
 
-const fakeQueue = (add = vi.fn().mockResolvedValue({})) => ({ add });
+const fakeQueue = (
+  add = vi.fn().mockResolvedValue({}),
+  getJob = vi.fn().mockResolvedValue(undefined),
+) => ({ add, getJob });
 
 describe('BullmqReceptionJobQueue', () => {
   it('names the queue without a colon (BullMQ rejects it)', () => {
@@ -42,6 +45,16 @@ describe('BullmqReceptionJobQueue', () => {
     expect((queue.add.mock.calls[0] as unknown[])[2]).toMatchObject({
       jobId: `reception-extraction:${DOC}:3`,
     });
+  });
+
+  it('reports whether the job is new: an existing job id is not enqueued again', async () => {
+    const getJob = vi.fn().mockResolvedValueOnce(undefined).mockResolvedValueOnce({ id: 'x' });
+    const adapter = new BullmqReceptionJobQueue({ queue: fakeQueue(undefined, getJob) });
+    const job = { tenantId: TENANT, documentId: DOC, attempt: 2 };
+
+    expect(await adapter.enqueueExtraction(job)).toEqual({ enqueued: true });
+    expect(await adapter.enqueueExtraction(job)).toEqual({ enqueued: false });
+    expect(getJob).toHaveBeenCalledWith(`reception-extraction:${DOC}:2`);
   });
 
   it('retries with exponential backoff and bounds the retained history', async () => {
@@ -88,7 +101,10 @@ describe('BullmqReceptionJobQueue', () => {
           }, 60),
         ),
     );
-    const adapter = new BullmqReceptionJobQueue({ queue: { add }, timeoutMs: 20 });
+    const adapter = new BullmqReceptionJobQueue({
+      queue: { add, getJob: vi.fn().mockResolvedValue(undefined) },
+      timeoutMs: 20,
+    });
     const job = { tenantId: TENANT, documentId: DOC };
 
     await expect(adapter.enqueueExtraction(job)).rejects.toBeInstanceOf(

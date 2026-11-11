@@ -601,7 +601,7 @@ export function createDrizzleReceivedDocumentRepository(db: Database): ReceivedD
           );
         if (rows.length === 0) throw new ReceivedDocumentNotFoundError(entry.documentId);
         await recordAudit(tx, {
-          actor: { type: 'api_key', id: entry.actorId },
+          actor: entry.actor,
           action: entry.action,
           entity: { type: 'received_document', id: entry.documentId },
           before: entry.before,

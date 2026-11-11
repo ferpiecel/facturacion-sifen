@@ -42,7 +42,7 @@ const document = (over: Partial<Parameters<typeof rehydrateReceivedDocument>[0]>
     ...over,
   });
 
-/** Spec: reception R4.5 (ADR-0023). One delivery per matching endpoint, inside the caller's transaction. */
+/** Spec: reception R4.5 (ADR-0028). One delivery per matching endpoint, inside the caller's transaction. */
 describe('enqueueReceptionEvents', () => {
   let handle: DatabaseHandle;
   let tenantId: string;

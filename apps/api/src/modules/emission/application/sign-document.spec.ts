@@ -8,7 +8,7 @@ import { createExpeditionPoint } from '../../fiscal-config/domain/expedition-poi
 import { createFiscalProfile } from '../../fiscal-config/domain/fiscal-profile.js';
 import { parseRuc } from '../../fiscal-config/domain/ruc.js';
 import { createTimbrado } from '../../fiscal-config/domain/timbrado.js';
-import type { InvoiceDraft } from '../domain/invoice-draft.js';
+import type { InvoiceDraft, ValidationConfig } from '../domain/invoice-draft.js';
 import { InvoiceQrError } from './invoice-qr.js';
 import { generateInvoiceXml, type InvoiceXmlContext } from './invoice-xml.js';
 import type {
@@ -132,6 +132,7 @@ function setup(
     certificate?: () => Promise<SigningCertificate>;
     csc?: CscSecret | null;
     qrGenerator?: QrGenerator;
+    validation?: ValidationConfig;
   } = {},
 ) {
   const dev = generateDevCertificate();
@@ -158,6 +159,7 @@ function setup(
     builder,
     signer,
     qr: options.qrGenerator ?? qr,
+    validation: options.validation,
   });
   return { service, store, certificate, csc, calls };
 }
@@ -181,6 +183,23 @@ describe('SignDocument', () => {
     expect(stored.signedXml).not.toContain(CSC);
     expect(stored.signedAt.getTime()).toBe((result as { signedAt: Date }).signedAt.getTime());
     expect(Math.abs(stored.signedAt.getTime() - Date.now())).toBeLessThan(60_000);
+  });
+
+  it('signs a decimal document only with the validation config the API accepted it with', async () => {
+    const decimalDraft: InvoiceDraft = {
+      ...draft,
+      items: [{ quantity: 2.3, unitPrice: 100.5, vatRate: 10 }],
+      roundingPyg: 31.15,
+    };
+    const document = signable({ draft: decimalDraft });
+
+    const allowed = setup({ document, validation: { allowDecimals: true } });
+    await expect(run(allowed.service)).resolves.toMatchObject({ status: 'signed' });
+    expect(validateXml(allowed.store.signed[0].signedXml, 'siRecepDE').valid).toBe(true);
+
+    const refused = setup({ document });
+    await expect(run(refused.service)).rejects.toThrow(/pyg-integer/);
+    expect(refused.store.signed).toHaveLength(0);
   });
 
   it('opens the certificate for the document environment', async () => {

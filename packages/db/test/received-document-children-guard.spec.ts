@@ -161,7 +161,7 @@ describe('received document children write guard', () => {
 
   it('rolls back cleanly: the triggers and function go away and identity edits work again', async () => {
     const { db, docA2, itemId } = await seed();
-    for (const statement of rollbackStatements('0052_received_document_children_guard.down.sql')) {
+    for (const statement of rollbackStatements('0079_received_document_children_guard.down.sql')) {
       await db.execute(sql.raw(statement));
     }
     const left = await queryRows<{ name: string }>(

@@ -15,7 +15,7 @@ The upstream README states these are anonymized captures of the eKuatia consulta
 
 ## Authority
 
-The `ekuatia/v2026-Q3/*/requests.json` files are the only authoritative evidence of the eKuatia HTTP contract available to this project (ADR-0022). Do not infer the contract from anywhere else.
+The `ekuatia/v2026-Q3/*/requests.json` files are the only authoritative evidence of the eKuatia HTTP contract available to this project (ADR-0027). Do not infer the contract from anywhere else.
 
 ## Integrity
 

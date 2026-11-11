@@ -190,16 +190,16 @@ describe('received_artifacts', () => {
     expect(grants).toEqual([]);
   });
 
-  it('rolls back cleanly: RLS first (0047), then the table (0046)', async () => {
+  it('rolls back cleanly: RLS first (0074), then the table (0073)', async () => {
     const { db } = await seed();
-    // received_documents (0048/0049) references this table, so it is rolled back first.
+    // received_documents (0075/0076) references this table, so it is rolled back first.
     for (const file of [
-      '0051_received_document_items_and_confidences_rls.down.sql',
-      '0050_received_document_items_and_confidences.down.sql',
-      '0049_received_documents_rls.down.sql',
-      '0048_received_documents.down.sql',
-      '0047_received_artifacts_rls.down.sql',
-      '0046_received_artifacts.down.sql',
+      '0078_received_document_items_and_confidences_rls.down.sql',
+      '0077_received_document_items_and_confidences.down.sql',
+      '0076_received_documents_rls.down.sql',
+      '0075_received_documents.down.sql',
+      '0074_received_artifacts_rls.down.sql',
+      '0073_received_artifacts.down.sql',
     ]) {
       for (const statement of rollbackStatements(file)) {
         await db.execute(sql.raw(statement));

@@ -40,3 +40,5 @@ Cuando el dataset esté vendorizado se registrará su fuente, fecha y SHA-256 en
 - Consultar la tabla en tiempo de ejecución desde el portal de la DNIT: validación no determinista y dependencia externa en el camino de aceptación.
 - Exigir `documents:read` en los endpoints del catálogo: acopla un dato público a permisos sobre documentos.
 - Dataset en un módulo de `fiscal-config`: sugiere una pertenencia por tenant que no existe.
+
+**Adenda (2026-10-14):** el PO difirió B2G y B2F del MVP. `POST /v1/documents` los rechaza con 422 `operation-type-not-supported` antes de consumir numeración; un receptor entidad pública tampoco se puede facturar (exige B2G). Las reglas de dirección de B2F de este ADR se mantienen en el código, listas para cuando se habilite.

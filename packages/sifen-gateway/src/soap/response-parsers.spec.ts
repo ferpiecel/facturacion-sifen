@@ -3,12 +3,15 @@ import { SifenFaultError, SifenProtocolError } from '../errors.ts';
 import {
   CDC_A,
   DE_XML,
+  EVENTO_CANCELACION_XML,
+  consDEConEventosXml,
   consDEEncontradoXml,
   consDEInexistenteXml,
   consRUCEncontradoXml,
   consRUCInexistenteXml,
   deAutorizadoXml,
   deRechazadoXml,
+  envelope,
   eventosXml,
   CDC_B,
   fault11Xml,
@@ -154,7 +157,36 @@ describe('parseConsultaDE', () => {
       dCodRes: '0422',
       dMsgRes: 'CDC encontrado',
       xmlDE: DE_XML,
+      eventos: [],
     });
+  });
+
+  it('returns the events registered on the DTE, each as its exact source', () => {
+    expect(parseConsultaDE(consDEConEventosXml)).toEqual({
+      dCodRes: '0422',
+      dMsgRes: 'CDC encontrado',
+      xmlDE: DE_XML,
+      eventos: [EVENTO_CANCELACION_XML],
+    });
+  });
+
+  it.each([
+    [
+      'beside rContDe, under xContenDE',
+      (ev: string) =>
+        `<xContenDE><rContDe>${DE_XML}</rContDe><xContEv><rContEv>${ev}</rContEv></xContEv></xContenDE>`,
+    ],
+    [
+      'under the response body',
+      (ev: string) =>
+        `<xContenDE><rContDe>${DE_XML}</rContDe></xContenDE><xContEv><rContEv>${ev}</rContEv></xContEv>`,
+    ],
+  ])('finds the registered events when xContEv sits %s', (_where, content) => {
+    const xml = envelope(
+      `<rResEnviConsDe xmlns="http://ekuatia.set.gov.py/sifen/xsd"><dCodRes>0422</dCodRes><dMsgRes>CDC encontrado</dMsgRes>${content(EVENTO_CANCELACION_XML)}</rResEnviConsDe>`,
+    );
+
+    expect(parseConsultaDE(xml).eventos).toEqual([EVENTO_CANCELACION_XML]);
   });
 
   it('returns no DE when the CDC does not exist', () => {
@@ -162,6 +194,7 @@ describe('parseConsultaDE', () => {
       dCodRes: '0420',
       dMsgRes: 'CDC inexistente',
       xmlDE: null,
+      eventos: [],
     });
   });
 });

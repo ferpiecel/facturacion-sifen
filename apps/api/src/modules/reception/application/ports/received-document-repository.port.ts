@@ -104,7 +104,7 @@ export interface ReceivedArtifact extends NewReceivedArtifact {
 
 /**
  * Webhook events to enqueue (outbox) in the SAME transaction as the write, so the change and its
- * deliveries commit or roll back together (ADR-0023). The adapter enqueues nothing for a document
+ * deliveries commit or roll back together (ADR-0028). The adapter enqueues nothing for a document
  * that is not addressed to the tenant and dedupes by (document, type, version).
  */
 export interface ReceptionEventRequest {

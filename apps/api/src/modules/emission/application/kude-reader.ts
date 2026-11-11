@@ -1,3 +1,4 @@
+import { Decimal } from '../domain/decimal.js';
 import type { KudeInvoice, KudeItem } from '../domain/kude-model.js';
 import { qrBaseUrl } from '../domain/qr.js';
 
@@ -9,6 +10,17 @@ export class KudeSourceError extends Error {
   ) {
     super(`Cannot build the KuDE: ${field} ${reason}`);
     this.name = 'KudeSourceError';
+  }
+}
+
+/** The signed document is of a type that has no KuDE layout yet. */
+export class KudeDocumentTypeUnsupportedError extends KudeSourceError {
+  constructor(readonly documentTypeCode: string) {
+    super(
+      'iTiDE',
+      `unsupported: the KuDE of type ${documentTypeCode} documents does not exist yet`,
+    );
+    this.name = 'KudeDocumentTypeUnsupportedError';
   }
 }
 
@@ -41,16 +53,24 @@ function required(source: string, name: string): string {
   return value;
 }
 
-/** PYG amounts are whole numbers; anything else means the XML is not what we can print. */
+/**
+ * PYG amounts: whole numbers as before, or exact decimals (HU-E5-09). A decimal must survive the
+ * trip through `number` unchanged, otherwise the KuDE would print a different amount.
+ */
 function pyg(source: string, name: string, fallback?: number): number {
   const text = optional(source, name);
   if (text === undefined || text === '') {
     if (fallback === undefined) throw new KudeSourceError(name, 'is missing');
     return fallback;
   }
-  if (!/^-?\d+(\.0+)?$/.test(text))
-    throw new KudeSourceError(name, `is not a PYG integer: ${text}`);
-  return Number(text);
+  if (/^-?\d+(\.0+)?$/.test(text)) return Number(text);
+  if (!/^-?\d+\.\d+$/.test(text)) throw new KudeSourceError(name, `is not a PYG amount: ${text}`);
+  const exact = Decimal.parse(text);
+  const value = Number(text);
+  const roundTrip = Decimal.parse(value);
+  if (!exact.ok || !roundTrip.ok || !exact.value.equals(roundTrip.value))
+    throw new KudeSourceError(name, `cannot be printed exactly: ${text}`);
+  return value;
 }
 
 function section(source: string, name: string): string {
@@ -61,8 +81,9 @@ function section(source: string, name: string): string {
   return match[1];
 }
 
-function readItem(block: string): KudeItem {
-  const rate = pyg(block, 'dTasaIVA');
+/** An AFE item carries no gCamIVA (E730, 1901): its rate is 0. */
+function readItem(block: string, vatOptional: boolean, priced = true): KudeItem {
+  const rate = vatOptional ? pyg(block, 'dTasaIVA', 0) : pyg(block, 'dTasaIVA');
   if (rate !== 0 && rate !== 5 && rate !== 10)
     throw new KudeSourceError('dTasaIVA', `unsupported rate ${String(rate)}`);
   const quantity = Number(required(block, 'dCantProSer'));
@@ -72,25 +93,93 @@ function readItem(block: string): KudeItem {
     description: required(block, 'dDesProSer'),
     unit: optional(block, 'dDesUniMed') ?? '',
     quantity,
-    unitPrice: pyg(block, 'dPUniProSer'),
+    unitPrice: priced ? pyg(block, 'dPUniProSer') : 0,
     discount: pyg(block, 'dDescItem', 0),
     vatRate: rate,
-    total: pyg(block, 'dTotOpeItem'),
+    total: priced ? pyg(block, 'dTotOpeItem') : 0,
+  };
+}
+
+/** H004: the CDC of the associated FE, exactly 44 digits (the KuDE prints its number and groups). */
+function associatedCdc(group: string): string {
+  const cdc = required(group, 'dCdCDERef');
+  if (!/^\d{44}$/.test(cdc)) throw new KudeSourceError('dCdCDERef', 'is not a 44-digit CDC');
+  return cdc;
+}
+
+/** gCamAE (E300) and the constancia of gCamDEAsoc (H014-H017) of an AFE. */
+function readSelfInvoice(xml: string): NonNullable<KudeInvoice['selfInvoice']> {
+  const seller = section(xml, 'gCamAE');
+  const associated = section(xml, 'gCamDEAsoc');
+  return {
+    seller: {
+      name: required(seller, 'dNomVen'),
+      idType: required(seller, 'dDTipIDVen'),
+      idNumber: required(seller, 'dNumIDVen'),
+      address: required(seller, 'dDirVen'),
+    },
+    place: required(seller, 'dDirProv'),
+    certificate: {
+      type: required(associated, 'dDesTipCons'),
+      number: required(associated, 'dNumCons'),
+    },
+  };
+}
+
+const place = (group: string, suffix: 'Sal' | 'Ent'): string =>
+  [
+    required(group, `dDirLoc${suffix}`),
+    optional(group, `dNumCas${suffix}`),
+    optional(group, `dDesCiu${suffix}`),
+  ]
+    .filter(Boolean)
+    .join(', ');
+
+/** gCamNRE (E500s) and gTransp (E900s) of an NRE. */
+function readRemission(xml: string): NonNullable<KudeInvoice['remission']> {
+  const remission = section(xml, 'gCamNRE');
+  const transport = section(xml, 'gTransp');
+  const vehicle = section(transport, 'gVehTras');
+  const carrier = section(transport, 'gCamTrans');
+  return {
+    motive: required(remission, 'dDesMotEmiNR'),
+    responsible: required(remission, 'dDesRespEmiNR'),
+    km: Number(required(remission, 'dKmR')),
+    invoiceDate: optional(remission, 'dFecEm'),
+    startDate: optional(transport, 'dIniTras'),
+    endDate: optional(transport, 'dFinTras'),
+    departure: place(section(transport, 'gCamSal'), 'Sal'),
+    delivery: place(section(transport, 'gCamEnt'), 'Ent'),
+    vehicle: [
+      required(vehicle, 'dTiVehTras'),
+      required(vehicle, 'dMarVeh'),
+      optional(vehicle, 'dNroIDVeh'),
+    ]
+      .filter(Boolean)
+      .join(' '),
+    carrier: required(carrier, 'dNomTrans'),
+    driver: required(carrier, 'dNomChof'),
   };
 }
 
 /**
  * Builds the KuDE model from the signed DE (with `dCarQR`). Nothing is recomputed: the VAT
  * liquidation and totals are the ones the XML carries (MT 13.2: the KuDE shows no data that
- * is not in the signed XML). FE only; `options.stampValidTo` supplies C009, which the DE
+ * is not in the signed XML). FE, AFE, NCE, NDE and NRE; `options.stampValidTo` supplies C009, which the DE
  * v150 XSD does not carry.
  */
 export function readKudeInvoice(xml: string, options: { stampValidTo?: string } = {}): KudeInvoice {
   const cdc = /<DE\b[^>]*\bId="(\d{44})"/.exec(xml)?.[1];
   if (!cdc) throw new KudeSourceError('CDC (DE/@Id)', 'is missing');
   const timbrado = section(xml, 'gTimb');
-  if (required(timbrado, 'iTiDE') !== '1')
-    throw new KudeSourceError('iTiDE', 'unsupported: only the FE KuDE exists');
+  const documentTypeCode = required(timbrado, 'iTiDE');
+  if (!['1', '4', '5', '6', '7'].includes(documentTypeCode)) {
+    throw new KudeDocumentTypeUnsupportedError(documentTypeCode);
+  }
+  const isCreditNote = documentTypeCode === '5' || documentTypeCode === '6'; // an NCE or an NDE: same layout
+  const isSelfInvoice = documentTypeCode === '4';
+  const isRemission = documentTypeCode === '7'; // no condition, prices or totals
+  const noteSlot = documentTypeCode === '6' ? 'debitNote' : 'creditNote';
   const qrUrl = required(section(xml, 'gCamFuFD'), 'dCarQR');
   const environment = qrUrl.startsWith(qrBaseUrl('production'))
     ? 'production'
@@ -102,11 +191,11 @@ export function readKudeInvoice(xml: string, options: { stampValidTo?: string } 
 
   const emitter = section(xml, 'gEmis');
   const receiverBlock = section(xml, 'gDatRec');
-  const totals = section(xml, 'gTotSub');
+  const totals = isRemission ? '' : section(xml, 'gTotSub');
   const general = section(xml, 'gDatGralOpe');
-  const operation = section(general, 'gOpeCom');
-  const condition = section(xml, 'gCamCond');
-  const currency = required(operation, 'cMoneOpe');
+  const operation = isRemission ? '' : section(general, 'gOpeCom'); // an NRE has no gOpeCom
+  const condition = isCreditNote || isRemission ? '' : section(xml, 'gCamCond');
+  const currency = isRemission ? 'PYG' : required(operation, 'cMoneOpe');
   if (currency !== 'PYG') {
     throw new KudeSourceError('cMoneOpe', `is ${currency}: only PYG KuDEs are supported`);
   }
@@ -114,7 +203,7 @@ export function readKudeInvoice(xml: string, options: { stampValidTo?: string } 
     ...xml.matchAll(
       new RegExp(`<${NAME}gCamItem(?:\\s[^>]*)?>([\\s\\S]*?)</${NAME}gCamItem>`, 'g'),
     ),
-  ].map((m) => readItem(m[1]));
+  ].map((m) => readItem(m[1], isSelfInvoice || isRemission, !isRemission));
   if (items.length === 0) throw new KudeSourceError('gCamItem', 'at least one item is required');
 
   const rucRec = optional(receiverBlock, 'dRucRec');
@@ -133,7 +222,7 @@ export function readKudeInvoice(xml: string, options: { stampValidTo?: string } 
           email: optional(receiverBlock, 'dEmailRec'),
         };
 
-  const total = pyg(totals, 'dTotGralOpe');
+  const total = pyg(totals, 'dTotGralOpe', isRemission ? 0 : undefined);
   return {
     environment,
     cdc,
@@ -155,13 +244,23 @@ export function readKudeInvoice(xml: string, options: { stampValidTo?: string } 
     point: required(timbrado, 'dPunExp'),
     documentNumber: required(timbrado, 'dNumDoc'),
     issuedAt: required(general, 'dFeEmiDE'),
-    operationCondition: required(condition, 'dDCondOpe'),
+    operationCondition: isCreditNote || isRemission ? undefined : required(condition, 'dDCondOpe'),
     installments:
       optional(condition, 'dCuotas') === undefined ? undefined : pyg(condition, 'dCuotas'),
     currency,
     exchangeRate: optional(operation, 'dTiCam'),
     receiver,
-    transactionType: required(operation, 'dDesTipTra'),
+    transactionType: isCreditNote || isRemission ? undefined : required(operation, 'dDesTipTra'),
+    ...(isCreditNote
+      ? {
+          [noteSlot]: {
+            reason: required(section(xml, 'gCamNCDE'), 'dDesMotEmi'),
+            associatedCdc: associatedCdc(section(xml, 'gCamDEAsoc')),
+          },
+        }
+      : {}),
+    ...(isSelfInvoice ? { selfInvoice: readSelfInvoice(xml) } : {}),
+    ...(isRemission ? { remission: readRemission(xml) } : {}),
     items,
     totals: {
       subtotalExempt: pyg(totals, 'dSubExe', 0) + pyg(totals, 'dSubExo', 0),

@@ -1,0 +1,1 @@
+ALTER TABLE "tenant_fiscal_profiles" ADD COLUMN "sync_transmission" boolean DEFAULT false NOT NULL;

@@ -28,7 +28,33 @@ describe('loadWorkerConfig', () => {
       lockTtlMs: 300_000,
       certificateCacheTtlMs: 300_000,
       certificateCacheMaxEntries: 64,
+      deadlineWatchIntervalMs: 300_000,
+      certificateAlertDays: [60, 30, 7],
     });
+  });
+
+  /** Spec: HU-E6-07. */
+  it('reads and bounds the deadline watch interval', () => {
+    expect(loadWorkerConfig({ ...base, DEADLINE_WATCH_INTERVAL_MS: '60000' })).toMatchObject({
+      deadlineWatchIntervalMs: 60_000,
+    });
+    for (const value of ['59999', '3600001', 'abc']) {
+      expect(() => loadWorkerConfig({ ...base, DEADLINE_WATCH_INTERVAL_MS: value })).toThrow(
+        new WorkerConfigError('DEADLINE_WATCH_INTERVAL_MS is out of range'),
+      );
+    }
+  });
+
+  /** Spec: HU-E3-03. */
+  it('reads the certificate alert thresholds', () => {
+    expect(loadWorkerConfig({ ...base, CERTIFICATE_ALERT_DAYS: '14, 90' })).toMatchObject({
+      certificateAlertDays: [90, 14],
+    });
+    for (const value of ['abc', '0', '500']) {
+      expect(() => loadWorkerConfig({ ...base, CERTIFICATE_ALERT_DAYS: value })).toThrow(
+        new WorkerConfigError('CERTIFICATE_ALERT_DAYS is out of range'),
+      );
+    }
   });
 
   it('reads and bounds the certificate cache settings (HU-E3-02)', () => {

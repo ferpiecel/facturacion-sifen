@@ -54,7 +54,7 @@ interface EventBody {
   data: Record<string, unknown>;
 }
 
-/** Spec: reception R4.5 (ADR-0023). Reception events reach the webhook outbox and the delivery path. */
+/** Spec: reception R4.5 (ADR-0028). Reception events reach the webhook outbox and the delivery path. */
 describe('reception webhook events (e2e)', () => {
   let handle: DatabaseHandle;
   let app: NestFastifyApplication;

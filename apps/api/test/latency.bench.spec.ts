@@ -50,7 +50,7 @@ const BODY = {
     },
   ],
   roundingPyg: 0,
-  location: { departmentCode: 11 },
+  location: { departmentCode: 1 },
 };
 
 const percentile = (sorted: number[], p: number) =>

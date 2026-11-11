@@ -1,5 +1,6 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { z } from 'zod';
+import type { NominationEventReceiver } from '@sifen/sifen-gateway';
 import {
   documents,
   tenantEstablishments,
@@ -10,14 +11,16 @@ import {
   tenantTimbrados,
   withTenantTransaction,
   type Database,
+  type TenantTx,
 } from '@sifen/db';
 import { createEstablishment } from '../../fiscal-config/domain/establishment.js';
 import { createExpeditionPoint } from '../../fiscal-config/domain/expedition-point.js';
 import { createFiscalProfile } from '../../fiscal-config/domain/fiscal-profile.js';
-import { createRuc } from '../../fiscal-config/domain/ruc.js';
+import { createRuc, formatRuc } from '../../fiscal-config/domain/ruc.js';
 import { createTimbrado } from '../../fiscal-config/domain/timbrado.js';
 import {
   EstablishmentContactMissingError,
+  DocumentTypeNotSignableError,
   SigningDataIncompleteError,
   type NotAcceptedDocument,
   type SignableDocument,
@@ -25,7 +28,21 @@ import {
 } from '../application/ports/signing.port.js';
 import { enqueueDocumentEvents } from '../../webhooks/infrastructure/enqueue-document-events.js';
 import { parseCreateDocument, toInvoiceDraft } from './http/create-document.request.js';
-import type { XmlReceiver } from '../application/invoice-xml.js';
+import {
+  parseCreateCreditNote,
+  parseCreateDebitNote,
+  toCreditNoteDraft,
+} from './http/credit-note.request.js';
+import { parseCreateRemission, toRemissionDraft } from './http/remission.request.js';
+import { parseCreateSelfInvoice, toSelfInvoiceDraft } from './http/self-invoice.request.js';
+import type {
+  InvoiceXmlContext,
+  NominatedXmlReceiver,
+  XmlReceiver,
+} from '../application/invoice-xml.js';
+import { nominatedFacts } from '../domain/nominated-receiver.js';
+import { approvedNomination } from './approved-nomination.js';
+import type { FiscalProfile } from '../../fiscal-config/domain/fiscal-profile.js';
 
 export interface DrizzleSigningStoreOptions {
   readonly db: Database;
@@ -59,7 +76,7 @@ const pathOf = (path: readonly PropertyKey[]): string =>
 
 function readPayload(payload: unknown): {
   draft: ReturnType<typeof toInvoiceDraft>;
-  receiver: XmlReceiver | undefined;
+  receiver: XmlReceiver | NominatedXmlReceiver | undefined;
   items: { code: string; description: string; unitCode: number }[];
 } {
   const base = parseCreateDocument(payload);
@@ -74,7 +91,7 @@ function readPayload(payload: unknown): {
     return { draft: toInvoiceDraft(body), receiver: undefined, ...detail.data };
   }
   const { ruc, name, address, houseNumber, districtCode, districtDescription } = body.receiver;
-  const { cityCode, cityDescription } = body.receiver;
+  const { cityCode, cityDescription, email } = body.receiver;
   const receiver: XmlReceiver = {
     ruc,
     name,
@@ -82,11 +99,175 @@ function readPayload(payload: unknown): {
     ...(houseNumber === undefined ? {} : { houseNumber }),
     ...(districtCode === undefined ? {} : { districtCode, districtDescription }),
     ...(cityCode === undefined ? {} : { cityCode, cityDescription }),
+    ...(email === undefined ? {} : { email }),
   };
   return { draft: toInvoiceDraft(body), receiver, ...detail.data };
 }
 
+type NoteData = { associatedCdc: string; reasonCode: number };
+
+/**
+ * An NCE (HU-E7-01) or NDE (HU-E7-02): its own items, rounding and reason come from its payload;
+ * the receiver, operation and location are the FE's (ADR-0019 D3), read from the FE's stored payload.
+ */
+function readNotePayload(
+  payload: unknown,
+  invoicePayload: unknown,
+  associatedCdc: string,
+  kind: 'credit' | 'debit',
+  nominated: NominationEventReceiver | null,
+): ReturnType<typeof readPayload> & { note: NoteData } {
+  const base = kind === 'credit' ? parseCreateCreditNote(payload) : parseCreateDebitNote(payload);
+  if (!base.ok) throw new SigningDataIncompleteError(base.errors.map((e) => e.field));
+  const detail = xmlDetailSchema.safeParse(payload);
+  if (!detail.success) {
+    throw new SigningDataIncompleteError(detail.error.issues.map((i) => pathOf(i.path)));
+  }
+  const invoice = readPayload(invoicePayload);
+  const credit = toCreditNoteDraft(base.value);
+  // An FE issued to "Sin Nombre" whose nomination SIFEN approved: the note names the nominated receiver.
+  const facts =
+    nominated && invoice.draft.receiver.kind === 'unnamed' ? nominatedFacts(nominated) : null;
+  return {
+    draft: {
+      receiver: facts?.receiver ?? invoice.draft.receiver,
+      operationType: facts?.operationType ?? invoice.draft.operationType,
+      location: facts?.location ?? invoice.draft.location,
+      items: credit.items,
+      roundingPyg: credit.roundingPyg,
+    },
+    receiver: facts && nominated ? { nominated } : invoice.receiver,
+    items: detail.data.items,
+    note: { associatedCdc, reasonCode: credit.reasonCode },
+  };
+}
+
+/**
+ * An AFE (HU-E7-03): the receiver is the issuer (D206 = D101, 1317), B2C and without location, so
+ * the draft is built here and only the seller, the place and the constancia come from the payload.
+ */
+function readSelfInvoicePayload(
+  payload: unknown,
+  issuer: FiscalProfile,
+): ReturnType<typeof readPayload> & { selfInvoice: InvoiceXmlContext['selfInvoice'] } {
+  const base = parseCreateSelfInvoice(payload);
+  if (!base.ok) throw new SigningDataIncompleteError(base.errors.map((e) => e.field));
+  const detail = xmlDetailSchema.safeParse(payload);
+  if (!detail.success) {
+    throw new SigningDataIncompleteError(detail.error.issues.map((i) => pathOf(i.path)));
+  }
+  const { seller, place, certificate, items, roundingPyg } = toSelfInvoiceDraft(base.value);
+  return {
+    draft: {
+      receiver: { kind: 'named', isPublicEntity: false },
+      operationType: 'B2C',
+      location: {},
+      items,
+      roundingPyg,
+    },
+    receiver: { ruc: formatRuc(issuer.ruc), name: issuer.legalName },
+    items: detail.data.items,
+    selfInvoice: { seller, place, certificate },
+  };
+}
+
+/**
+ * An NRE (HU-E7-04): the receiver is the named one of the payload, the draft is B2B with the
+ * receiver address and the items carry no price (quantity only, VAT exempt, as xmlgen needs them).
+ */
+function readRemissionPayload(payload: unknown): ReturnType<typeof readPayload> & {
+  remission: InvoiceXmlContext['remission'];
+} {
+  const base = parseCreateRemission(payload);
+  if (!base.ok) throw new SigningDataIncompleteError(base.errors.map((e) => e.field));
+  const detail = xmlDetailSchema.safeParse(payload);
+  if (!detail.success) {
+    throw new SigningDataIncompleteError(detail.error.issues.map((i) => pathOf(i.path)));
+  }
+  const { motive, responsible, km, invoiceDate, receiver, transport, items } = toRemissionDraft(
+    base.value,
+  );
+  const { ruc, name, address, houseNumber, districtCode, cityCode, departmentCode } = receiver;
+  const { idType, idNumber, countryCode } = receiver;
+  return {
+    draft: {
+      receiver: {
+        kind: 'named',
+        isPublicEntity: false,
+        address: { street: address, houseNumber, districtCode, cityCode },
+      },
+      // D202: xmlgen needs B2C (2) or B2F (4) for a non-taxpayer; B2F is not built yet (MVP), so B2C.
+      operationType: ruc === undefined ? 'B2C' : 'B2B',
+      location: { departmentCode },
+      items: items.map(({ quantity }) => ({ quantity, unitPrice: 0, vatRate: 0 as const })),
+      roundingPyg: 0,
+    },
+    receiver: {
+      ...(ruc === undefined ? {} : { ruc }),
+      ...(ruc === undefined && idType !== undefined && idNumber !== undefined
+        ? { document: { type: idType, number: idNumber, countryCode } }
+        : {}),
+      name,
+      address,
+      houseNumber,
+      districtCode,
+      cityCode,
+    },
+    items: detail.data.items,
+    remission: { motive, responsible, km, invoiceDate, transport },
+  };
+}
+
 const first = <T>(rows: T[]): T | undefined => rows.at(0);
+
+/** The XML data of an FE, or of an NCE or NDE together with the FE row it is associated to. */
+async function readDocument(
+  tx: TenantTx,
+  tenantId: string,
+  document: typeof documents.$inferSelect,
+  issuer: FiscalProfile,
+): Promise<
+  ReturnType<typeof readPayload> & {
+    note?: NoteData;
+    noteKind?: 'credit' | 'debit';
+    selfInvoice?: InvoiceXmlContext['selfInvoice'];
+    remission?: InvoiceXmlContext['remission'];
+  }
+> {
+  if (document.documentType === 1) return readPayload(document.payload);
+  if (document.documentType === 4) return readSelfInvoicePayload(document.payload, issuer);
+  if (document.documentType === 7) return readRemissionPayload(document.payload);
+  // Explicit: a type added later must not fall into the credit note branch.
+  if (document.documentType !== 5 && document.documentType !== 6) {
+    throw new DocumentTypeNotSignableError(document.documentType);
+  }
+  const { associatedCdc } = document;
+  const invoice =
+    associatedCdc === null
+      ? undefined
+      : first(
+          await tx
+            .select({ id: documents.id, payload: documents.payload })
+            .from(documents)
+            .where(
+              and(
+                eq(documents.tenantId, tenantId),
+                eq(documents.environment, document.environment),
+                eq(documents.cdc, associatedCdc),
+                eq(documents.documentType, 1),
+              ),
+            ),
+        );
+  if (associatedCdc === null || invoice === undefined) {
+    throw new SigningDataIncompleteError(['associatedCdc']);
+  }
+  const noteKind = document.documentType === 5 ? 'credit' : 'debit';
+  const nominated = await approvedNomination(tx, tenantId, invoice.id);
+  return {
+    ...readNotePayload(document.payload, invoice.payload, associatedCdc, noteKind, nominated),
+    noteKind,
+  };
+}
 
 /** `SigningStore` over `documents` and the tenant's fiscal configuration, as app_user under RLS. */
 export function createDrizzleSigningStore({
@@ -110,6 +291,10 @@ export function createDrizzleSigningStore({
           // Nothing to sign: do not touch the configuration or parse the payload again.
           if (document.status !== 'accepted') {
             return { documentId: document.id, status: document.status };
+          }
+          // Only an FE (1), an AFE (4), an NCE (5), an NDE (6) and an NRE (7) have an XML builder; any other type is held.
+          if (![1, 4, 5, 6, 7].includes(document.documentType)) {
+            throw new DocumentTypeNotSignableError(document.documentType);
           }
           const tenant = first(
             await tx
@@ -168,7 +353,6 @@ export function createDrizzleSigningStore({
             throw new EstablishmentContactMissingError(establishment.code);
           }
 
-          const { draft, receiver, items } = readPayload(document.payload);
           const issuer = createFiscalProfile({
             ruc: createRuc(profile.rucBase, profile.rucDv),
             legalName: profile.legalName,
@@ -180,6 +364,8 @@ export function createDrizzleSigningStore({
               description: a.description,
             })),
           });
+          const readable = await readDocument(tx, tenantId, document, issuer);
+          const { draft, receiver, items } = readable;
           return {
             documentId: document.id,
             cdc: document.cdc,
@@ -227,6 +413,13 @@ export function createDrizzleSigningStore({
               },
               issuedAt: document.issuedAt,
               ...(receiver === undefined ? {} : { receiver }),
+              ...(readable.selfInvoice === undefined ? {} : { selfInvoice: readable.selfInvoice }),
+              ...(readable.remission === undefined ? {} : { remission: readable.remission }),
+              ...(readable.note === undefined
+                ? {}
+                : readable.noteKind === 'debit'
+                  ? { debitNote: readable.note }
+                  : { creditNote: readable.note }),
               lines: items.map((i) => ({
                 code: i.code,
                 description: i.description,

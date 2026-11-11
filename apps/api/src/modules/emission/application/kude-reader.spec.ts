@@ -1,6 +1,8 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   exemptItem,
+  remissionNote,
+  selfInvoice,
   signedInvoiceWithQr,
   unnamedReceiver,
 } from '../../../../test/support/signed-invoice.js';
@@ -145,18 +147,66 @@ describe('readKudeInvoice', () => {
     expect(() => readKudeInvoice(without(xml, tag))).toThrow(new RegExp(tag));
   });
 
-  it('fails closed on a missing CDC, no items, and non-integer PYG amounts', () => {
+  it('fails closed on a missing CDC, no items, and an amount that is not a number', () => {
     expect(() => readKudeInvoice(xml.replace(/ Id="\d{44}"/, ''))).toThrow(/CDC/);
     expect(() => readKudeInvoice(xml.replace(/<gCamItem>[\s\S]*<\/gCamItem>/, ''))).toThrow(/item/);
     expect(() =>
-      readKudeInvoice(xml.replace('<dSub10>10000</dSub10>', '<dSub10>1.5</dSub10>')),
+      readKudeInvoice(xml.replace('<dSub10>10000</dSub10>', '<dSub10>1,5</dSub10>')),
     ).toThrow(/dSub10/);
   });
 
-  it('rejects documents that are not an FE', () => {
-    expect(() => readKudeInvoice(xml.replace('<iTiDE>1</iTiDE>', '<iTiDE>5</iTiDE>'))).toThrow(
+  it('rejects documents of a type with no layout yet (a retention)', () => {
+    expect(() => readKudeInvoice(xml.replace('<iTiDE>1</iTiDE>', '<iTiDE>8</iTiDE>'))).toThrow(
       /unsupported/,
     );
+  });
+
+  it('reads an AFE: the seller, the place and the constancia, with the issuer as receiver', async () => {
+    const model = readKudeInvoice(await signedInvoiceWithQr(selfInvoice));
+    expect(model).toMatchObject({
+      operationCondition: 'Contado',
+      receiver: {
+        kind: 'named',
+        name: 'DE generado en ambiente de prueba - sin valor comercial ni fiscal',
+      },
+      selfInvoice: {
+        seller: {
+          name: 'Juan Perez',
+          idType: 'Cédula paraguaya',
+          idNumber: '1234567',
+          address: 'Calle 1',
+        },
+        place: 'Calle del Cultivo',
+        certificate: { type: 'Constancia de no ser contribuyente', number: '12345678901' },
+      },
+    });
+    expect(model.creditNote).toBeUndefined();
+    expect(model.debitNote).toBeUndefined();
+    expect(model.totals.totalVat).toBe(0);
+  });
+
+  it('reads an NRE: the motive, the dates, the places, the vehicle and the carrier, with no money', async () => {
+    const model = readKudeInvoice(await signedInvoiceWithQr(remissionNote));
+    expect(model).toMatchObject({
+      receiver: { kind: 'named', name: 'Receptor Prueba SA' },
+      remission: {
+        motive: 'Traslado por ventas',
+        responsible: 'Emisor de la factura',
+        km: 120,
+        invoiceDate: '2026-11-01',
+        startDate: '2026-11-02',
+        endDate: '2026-11-03',
+        vehicle: 'Camion Volvo ABC123',
+        carrier: 'Transportes SA',
+        driver: 'Pedro Gomez',
+      },
+      totals: { totalOperation: 0, totalVat: 0 },
+    });
+    expect(model.remission?.departure).toContain('Calle 1');
+    expect(model.remission?.delivery).toContain('Calle 2');
+    expect(model.operationCondition).toBeUndefined();
+    expect(model.transactionType).toBeUndefined();
+    expect(model.items[0]).toMatchObject({ unitPrice: 0, total: 0 });
   });
 
   it('reads each field only from its own group, ignoring look-alike elements elsewhere', () => {
@@ -188,5 +238,33 @@ describe('readKudeInvoice', () => {
   it('rejects foreign currencies explicitly (PYG-only MVP)', () => {
     const usd = xml.replace('<cMoneOpe>PYG</cMoneOpe>', '<cMoneOpe>USD</cMoneOpe>');
     expect(() => readKudeInvoice(usd)).toThrow(/cMoneOpe.*PYG/);
+  });
+});
+
+describe('readKudeInvoice with decimal amounts (HU-E5-09)', () => {
+  const decimal = (source: string) =>
+    source
+      .replace(/<dPUniProSer>[^<]*</, '<dPUniProSer>4940.2<')
+      .replace(/<dCantProSer>[^<]*</, '<dCantProSer>2.5<')
+      .replace(/<dTotOpeItem>[^<]*</, '<dTotOpeItem>12350.5<')
+      .replace(/<dTotGralOpe>[^<]*</, '<dTotGralOpe>12350<')
+      .replace(/<dSub10>[^<]*</, '<dSub10>12350.5<');
+
+  it('reads decimal prices, quantities and totals exactly', () => {
+    const model = readKudeInvoice(decimal(xml));
+    expect(model.items[0]).toMatchObject({ quantity: 2.5, unitPrice: 4940.2, total: 12350.5 });
+    expect(model.totals).toMatchObject({ subtotal10: 12350.5, totalOperation: 12350 });
+  });
+
+  it('still rejects an amount a number cannot hold exactly', () => {
+    const lossy = xml.replace(/<dTotGralOpe>[^<]*</, '<dTotGralOpe>1.12345678901234567890123<');
+    expect(() => readKudeInvoice(lossy)).toThrow(KudeSourceError);
+    expect(() => readKudeInvoice(lossy)).toThrow(/dTotGralOpe/);
+  });
+
+  it('still rejects text that is not a number', () => {
+    expect(() => readKudeInvoice(xml.replace(/<dTotGralOpe>[^<]*</, '<dTotGralOpe>1e3<'))).toThrow(
+      /dTotGralOpe/,
+    );
   });
 });

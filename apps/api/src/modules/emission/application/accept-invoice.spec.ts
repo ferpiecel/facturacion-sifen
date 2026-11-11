@@ -3,6 +3,7 @@ import { parseCdc } from '../domain/cdc.js';
 import type { InvoiceDraft } from '../domain/invoice-draft.js';
 import {
   createAcceptInvoice,
+  CertificateExpiringError,
   IdempotencyKeyReusedError,
   InvoiceValidationError,
   IssuerNotConfiguredError,
@@ -40,7 +41,7 @@ const DRAFT: InvoiceDraft = {
   location: { departmentCode: 11 },
 };
 
-function setup(issuer: IssuerContext | null = ISSUER) {
+function setup(issuer: IssuerContext | null = ISSUER, validation = {}) {
   const inserted: NewDocument[] = [];
   const resolveIssuer = vi.fn(() => Promise.resolve(issuer));
   const nextNumber = vi.fn(() =>
@@ -58,6 +59,9 @@ function setup(issuer: IssuerContext | null = ISSUER) {
     nextNumber,
     insertDocument,
     recordAudit,
+    // An FE never looks at an association (HU-E7-01).
+    findAssociatedInvoice: () => Promise.reject(new Error('an FE must not read an association')),
+    sumCreditNotes: () => Promise.reject(new Error('an FE must not sum credit notes')),
   };
   const run = vi.fn();
   const unitOfWork: AcceptanceUnitOfWork = {
@@ -68,6 +72,7 @@ function setup(issuer: IssuerContext | null = ISSUER) {
   };
   const acceptInvoice = createAcceptInvoice({
     unitOfWork,
+    validation,
     // 2026-03-06T01:30Z is still 2026-03-05 in Paraguay (UTC-3).
     now: () => new Date('2026-03-06T01:30:00Z'),
   });
@@ -146,6 +151,19 @@ describe('acceptInvoice', () => {
       },
     });
     expect(inserted[0].totalAmount).toBe('107400');
+  });
+
+  it('stores the exact net total of decimal lines when decimals are enabled', async () => {
+    const { acceptInvoice, input, inserted } = setup(ISSUER, { allowDecimals: true });
+    await acceptInvoice({
+      ...input,
+      draft: {
+        ...DRAFT,
+        items: [{ quantity: 2.3, unitPrice: 100, vatRate: 10 }],
+        roundingPyg: 30,
+      },
+    });
+    expect(inserted[0].totalAmount).toBe('200');
   });
 
   it('records the series when numbering rolled over', async () => {
@@ -256,5 +274,36 @@ describe('acceptInvoice', () => {
       await expect(acceptInvoice(input)).rejects.toBeInstanceOf(IdempotencyKeyCollisionError);
       expect(mocks.run).toHaveBeenCalledTimes(2);
     });
+  });
+});
+
+/** Spec: HU-E3-03. Emission is refused from the day before the certificate expires. */
+describe('acceptInvoice with an expiring certificate', () => {
+  // The fixed clock is 2026-03-06T01:30Z.
+  const issuerExpiring = (notAfter: Date | null) => ({ ...ISSUER, certificateNotAfter: notAfter });
+
+  it('refuses before numbering when the certificate expires within a day', async () => {
+    const { acceptInvoice, input, mocks } = setup(issuerExpiring(new Date('2026-03-07T01:00:00Z')));
+
+    const error = await acceptInvoice(input).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(CertificateExpiringError);
+    expect((error as CertificateExpiringError).notAfter).toEqual(new Date('2026-03-07T01:00:00Z'));
+    expect(mocks.nextNumber).not.toHaveBeenCalled();
+  });
+
+  it('refuses an already expired certificate', async () => {
+    const { acceptInvoice, input } = setup(issuerExpiring(new Date('2026-03-01T00:00:00Z')));
+    await expect(acceptInvoice(input)).rejects.toBeInstanceOf(CertificateExpiringError);
+  });
+
+  it('accepts when the certificate has more than a day left', async () => {
+    const { acceptInvoice, input } = setup(issuerExpiring(new Date('2026-03-07T02:00:00Z')));
+    await expect(acceptInvoice(input)).resolves.toMatchObject({ documentId: 'doc-1' });
+  });
+
+  it('accepts when the tenant has no active certificate: signing parks the document instead', async () => {
+    const { acceptInvoice, input } = setup(issuerExpiring(null));
+    await expect(acceptInvoice(input)).resolves.toMatchObject({ documentId: 'doc-1' });
   });
 });

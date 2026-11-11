@@ -111,6 +111,25 @@ describe('parseCreateDocument', () => {
     expect(fields({ ...BODY, items: [item] })).toContain(`items[0].${key}`);
   });
 
+  it('accepts a plain receiver email', () => {
+    const result = parseCreateDocument({
+      ...BODY,
+      receiver: { ...NAMED, email: 'cliente@ejemplo.com' },
+    });
+    expect(result.ok && result.value.receiver).toMatchObject({ email: 'cliente@ejemplo.com' });
+  });
+
+  it.each([
+    'a@b',
+    'Cliente <c@ejemplo.com>',
+    'a@ejemplo.com, b@ejemplo.com',
+    'a b@ejemplo.com',
+    `${'x'.repeat(70)}@ejemplo.com`,
+    '',
+  ])('rejects receiver.email = %j', (email) => {
+    expect(fields({ ...BODY, receiver: { ...NAMED, email } })).toContain('receiver.email');
+  });
+
   it.each([
     ['name', 'abc'],
     ['name', 'x'.repeat(256)],
@@ -180,7 +199,14 @@ describe('toInvoiceDraft', () => {
     expect(draft.receiver).toEqual({
       kind: 'named',
       isPublicEntity: false,
-      address: { street: 'Av. Mariscal Lopez', houseNumber: '123', cityCode: 1 },
+      address: {
+        street: 'Av. Mariscal Lopez',
+        houseNumber: '123',
+        districtCode: 1,
+        districtDescription: 'ASUNCION (DISTRITO)',
+        cityCode: 1,
+        cityDescription: 'ASUNCION (DISTRITO)',
+      },
     });
     expect(draft.location).toEqual({ departmentCode: 11 });
   });

@@ -30,7 +30,7 @@ import {
   RECEPTION_UPLOAD_CONFIG,
 } from './reception.tokens.js';
 
-/** Reception bounded context (ADR-0019): intake, extraction and review of received documents. */
+/** Reception bounded context (ADR-0024): intake, extraction and review of received documents. */
 @Module({
   controllers: [ReceivedDocumentsController],
   providers: [

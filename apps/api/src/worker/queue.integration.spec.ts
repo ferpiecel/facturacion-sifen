@@ -2,12 +2,18 @@ import { randomUUID } from 'node:crypto';
 import { Queue } from 'bullmq';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  createDeadlineWatchQueue,
+  createDeadlineWatchScheduleStore,
+  createDeadlineWatchWorker,
   createRedisConnection,
   createTenantScheduleStore,
   createTransmissionWorker,
   createWebhookDeliveryQueue,
   createWebhookDeliveryWorker,
   createWebhookScheduleStore,
+  createDocumentEmailQueue,
+  createDocumentEmailScheduleStore,
+  createDocumentEmailWorker,
 } from './queue.js';
 import { startTransmissionWorker } from './start-transmission-worker.js';
 import { createRedisTenantRunLock } from './tenant-run-lock.js';
@@ -157,5 +163,60 @@ describe.skipIf(!REDIS_URL)('BullMQ transmission queue (real Redis)', () => {
     await until(() => seen.length >= 2);
 
     expect(new Set(seen)).toEqual(new Set(['t1']));
+  });
+
+  /** Spec: HU-E11-02. The `document-email` queue is its own and delivers one repeatable job per tenant. */
+  it('keeps one document email schedule per tenant and runs its job with the tenant id', async () => {
+    const { prefix, connection } = open();
+    const queue = createDocumentEmailQueue(connection, { error: () => undefined }, prefix);
+    cleanup.push(() => queue.close());
+    const store = createDocumentEmailScheduleStore(queue);
+    const seen: string[] = [];
+    const worker = createDocumentEmailWorker({
+      connection,
+      prefix,
+      concurrency: 1,
+      process: (data) => {
+        seen.push(data.tenantId);
+        return Promise.resolve();
+      },
+    });
+    cleanup.push(() => worker.close());
+
+    await store.upsert('t1', 100);
+    await store.upsert('t1', 100); // idempotent: still one
+    expect(await store.list()).toEqual(['t1']);
+    await until(() => seen.length >= 2);
+
+    expect(new Set(seen)).toEqual(new Set(['t1']));
+  });
+
+  /** Spec: HU-E6-07. The `deadline-watch` queue is its own and delivers one repeatable job per tenant. */
+  it('keeps one deadline watch schedule per tenant and runs its job with the tenant id', async () => {
+    const { prefix, connection } = open();
+    const queue = createDeadlineWatchQueue(connection, { error: () => undefined }, prefix);
+    cleanup.push(() => queue.close());
+    const store = createDeadlineWatchScheduleStore(queue);
+    const seen: string[] = [];
+    const worker = createDeadlineWatchWorker({
+      connection,
+      prefix,
+      concurrency: 2,
+      process: (data) => {
+        seen.push(data.tenantId);
+        return Promise.resolve();
+      },
+    });
+    cleanup.push(() => worker.close());
+
+    await store.upsert('t1', 100);
+    await store.upsert('t1', 100); // idempotent: still one
+    await store.upsert('t2', 100);
+    expect([...(await store.list())].sort()).toEqual(['t1', 't2']);
+    await until(() => seen.length >= 4);
+    expect(new Set(seen)).toEqual(new Set(['t1', 't2']));
+
+    await store.remove('t1');
+    expect(await store.list()).toEqual(['t2']);
   });
 });

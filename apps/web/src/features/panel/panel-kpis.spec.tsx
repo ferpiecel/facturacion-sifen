@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -8,13 +8,21 @@ import { PanelKpis } from './panel-kpis';
 const { router } = vi.hoisted(() => ({ router: { push: vi.fn(), replace: vi.fn() } }));
 vi.mock('next/navigation', () => ({ useRouter: () => router }));
 
+// While loading, a placeholder section with the same name is mounted; the loaded one replaces it.
+const region = async () => {
+  await waitFor(() => {
+    expect(screen.queryByRole('status', { name: 'Cargando indicadores' })).toBeNull();
+  });
+  return screen.getByRole('region', { name: 'Indicadores' });
+};
+
 describe('PanelKpis (panel indicators from the summary API)', () => {
   it('shows a loading state, then billing, issued, queue and rejected from the last 30 days', async () => {
     const client = fakeSummaryClient();
     render(<PanelKpis client={client} />);
 
     expect(screen.getByRole('status', { name: 'Cargando indicadores' })).toBeInTheDocument();
-    const kpis = await screen.findByRole('region', { name: 'Indicadores' });
+    const kpis = await region();
     expect(within(kpis).getByText('Facturación (30 días)')).toBeInTheDocument();
     expect(within(kpis).getByText('₲ 16.100.000')).toBeInTheDocument();
     expect(within(kpis).getByText('120')).toBeInTheDocument();
@@ -29,7 +37,7 @@ describe('PanelKpis (panel indicators from the summary API)', () => {
   it('shows zeros and no percentages for a tenant without documents', async () => {
     render(<PanelKpis client={fakeSummaryClient({ kind: 'ok', summary: EMPTY })} />);
 
-    const kpis = await screen.findByRole('region', { name: 'Indicadores' });
+    const kpis = await region();
     expect(within(kpis).getByText('₲ 0')).toBeInTheDocument();
     expect(within(kpis).getByText('Sin período previo para comparar')).toBeInTheDocument();
     expect(within(kpis).getByText('Sin pendientes')).toBeInTheDocument();

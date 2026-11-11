@@ -5,12 +5,18 @@ import {
   type ValidationConfig,
   type ValidationError,
 } from '../domain/invoice-draft.js';
+import { invoiceTotals } from '../domain/invoice-totals.js';
 import { requestHash } from '../domain/request-hash.js';
 import { generateSecurityCode, type RandomBytes } from '../domain/security-code.js';
 import type { AuditEntry } from '../../audit/application/ports/record-audit.port.js';
 import {
+  DEFAULT_EMISSION_BLOCK_DAYS,
+  isEmissionBlocked,
+} from '../../certificates/domain/certificate-expiry.js';
+import {
   IdempotencyKeyCollisionError,
   type AcceptanceUnitOfWork,
+  type IssuerContext,
 } from './ports/acceptance-unit-of-work.port.js';
 
 /** iTiDE of an electronic invoice (FE). */
@@ -31,6 +37,28 @@ export class IssuerNotConfiguredError extends Error {
   constructor() {
     super('Establishment, expedition point or active timbrado not configured for this tenant');
     this.name = 'IssuerNotConfiguredError';
+  }
+}
+
+/** HU-E3-03: the active certificate expires within the preventive window (or already did). */
+export class CertificateExpiringError extends Error {
+  constructor(readonly notAfter: Date) {
+    super(
+      `The signing certificate expires on ${notAfter.toISOString()}; upload a renewed certificate before issuing documents`,
+    );
+    this.name = 'CertificateExpiringError';
+  }
+}
+
+/** Refuses emission from `blockDays` before the active certificate's expiry; no certificate is not a block here. */
+export function assertCertificateUsable(
+  issuer: IssuerContext,
+  now: Date,
+  blockDays = DEFAULT_EMISSION_BLOCK_DAYS,
+): void {
+  const { certificateNotAfter } = issuer;
+  if (certificateNotAfter && isEmissionBlocked(certificateNotAfter, now, blockDays)) {
+    throw new CertificateExpiringError(certificateNotAfter);
   }
 }
 
@@ -61,6 +89,8 @@ export interface AcceptInvoiceDependencies {
   now?: () => Date;
   randomBytes?: RandomBytes;
   validation?: ValidationConfig;
+  /** Days before the certificate's expiry from which emission is refused (HU-E3-03). */
+  certificateBlockDays?: number;
 }
 
 export interface AcceptedInvoice {
@@ -69,18 +99,13 @@ export interface AcceptedInvoice {
 }
 
 /** Calendar date in Paraguay (`YYYY-MM-DD`), used for the CDC and the timbrado validity. */
-function paraguayDate(instant: Date): string {
+export function paraguayDate(instant: Date): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: PARAGUAY_TIME_ZONE,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
   }).format(instant);
-}
-
-function netTotal(draft: InvoiceDraft): number {
-  const gross = draft.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-  return gross - draft.roundingPyg;
 }
 
 /**
@@ -131,6 +156,7 @@ export function createAcceptInvoice(deps: AcceptInvoiceDependencies) {
         issueDate,
       });
       if (!issuer) throw new IssuerNotConfiguredError();
+      assertCertificateUsable(issuer, issuedAt, deps.certificateBlockDays);
 
       const { series, number } = await unit.nextNumber(issuer, INVOICE_DOCUMENT_TYPE);
       const securityCode = generateSecurityCode(number, deps.randomBytes);
@@ -159,7 +185,7 @@ export function createAcceptInvoice(deps: AcceptInvoiceDependencies) {
         securityCode,
         receiverRuc: input.receiverRuc,
         issuedAt,
-        totalAmount: String(netTotal(input.draft)),
+        totalAmount: invoiceTotals(input.draft).net.toString(),
         currency: 'PYG',
         payload: input.payload,
         idempotencyKey: input.idempotencyKey,

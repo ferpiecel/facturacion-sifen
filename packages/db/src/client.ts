@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { PGlite } from '@electric-sql/pglite';
+import { btree_gist } from '@electric-sql/pglite/contrib/btree_gist';
 import { drizzle as drizzlePglite, type PgliteDatabase } from 'drizzle-orm/pglite';
 import { migrate as migratePglite } from 'drizzle-orm/pglite/migrator';
 import { drizzle as drizzleNodePostgres, type NodePgDatabase } from 'drizzle-orm/node-postgres';
@@ -31,7 +32,7 @@ export interface DatabaseHandle {
  * the default local/test driver so the suite runs without Docker.
  */
 export function createPgliteDatabase(dataDir?: string): DatabaseHandle {
-  const client = new PGlite(dataDir);
+  const client = new PGlite({ dataDir, extensions: { btree_gist } });
   const db = drizzlePglite(client, { schema });
 
   return {

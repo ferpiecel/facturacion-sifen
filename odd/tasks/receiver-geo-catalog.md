@@ -4,7 +4,7 @@
 - Engram mirror: `odd/receiver-geo-catalog/tasks`
 - TDD: strict (source: `openspec/config.yaml`, `strict_tdd: true`) · runner: Vitest (`pnpm --filter @sifen/api exec vitest run`, thresholds 85%)
 - Delivery: `ask-on-risk`, chain `stacked-to-main`; each PR about 400 changed lines or less (advisory), generated data declared per PR.
-- Status: slice A done in two chained PRs (A1: T1 + domain half of T2; A2: rest of T2 + T3); slices B-E pending.
+- Status: T0-T7 done (PRs #241-#244, #251, #258-#260 and the docs PR); T8 (Prevalidador) open, blocked on the certificate.
 
 ## Objective
 
@@ -68,10 +68,10 @@ Out: Nota de Remision address rules, emission of other document types, transport
 - [x] T2 Contract alignment: optional address block, conditional rules, B2F rules, `location.departmentCode` optional; domain tests first.
 - [x] T3 Confirm how the TIPS builder emits B2F and optional address; adjust `invoice-xml.ts` so `cDepRec` and `cCiuRec` are omitted for B2F and the receiver block omits absent fields. XSD check on the generated XML.
 - [x] T4 Vendor the catalog (generation script or reviewed conversion, checksum test, README entry) and remove the stale claim in `department.ts`.
-- [ ] T5 Catalog validation: district and city exist, city belongs to district, district belongs to department, descriptions match codes; new `ValidationError` rules with SIFEN codes.
-- [ ] T6 Read endpoints with OpenAPI regeneration (`pnpm --filter @sifen/api openapi`) and Fastify `inject()` e2e tests.
-- [ ] T7 Docs: update `docs/integracion/emision.md` (address optional, B2F, catalog endpoints), `docs/api`, and the PR descriptions.
-- [ ] T8 Operational check: confirm optional address and B2F with the Prevalidador and record the evidence.
+- [x] T5 Catalog validation: district and city exist, city belongs to district, district belongs to department, descriptions match codes; new `ValidationError` rules with SIFEN codes.
+- [x] T6 Read endpoints with OpenAPI regeneration (`pnpm --filter @sifen/api openapi`) and Fastify `inject()` e2e tests.
+- [x] T7 Docs: update `docs/integracion/emision.md` (address optional, B2F, catalog endpoints), `docs/api`, and the PR descriptions.
+- [ ] T8 Operational check: confirm optional address and B2F with the Prevalidador and record the evidence. **Open: blocked on the signing certificate (Prevalidador access).**
 
 ## PR slices (chained, each about 400 changed lines or less)
 
@@ -132,3 +132,27 @@ such in the PR description.
 
 - Zip reader: no `maxOutputLength` on inflate, no ZIP64 or CRC check.
 - Sheet parser: phonetic runs (`rPh`) in shared strings and numeric XML entities are not handled.
+
+## Slice D (T6) record
+
+- Route: delegated direct, one writer (writer trigger: new module plus package loader, spec and OpenAPI). TDD strict, runner Vitest.
+- RED observed: `load-geo-catalog.spec.ts`, `geo-catalog.spec.ts` and `geo-query.spec.ts` failed on missing modules; `test/geo.e2e.spec.ts` 5 failed | 1 passed with `GeoModule` unwired; `openapi.spec.ts` 2 failed (undocumented routes) plus the checked-in `openapi.json` drift. GREEN after each.
+- Decisions: `GET /v1/geo/departments|districts|cities`, API key only (no scope, ADR-0017), `{ items: [...] }`; missing or malformed parent 400, unknown parent 404. Loader `loadGeoCatalog()` lives in `@sifen/sifen-xsd` next to the vendored data.
+
+## Slice C (T5) record
+
+- Route: delegated direct, one writer. TDD strict, runner Vitest. Split in two chained PRs (C1 acceptance rules, C2 XML).
+- Finding: `xmlgen`'s tables equal the November 2025 catalog except district 289 (xmlgen "PUERTO ADELA", DNIT "LAUREL"). `xmlgen` derives receiver department and district from the city (overwriting what is passed) and takes the issuer department/district/city text from its own table, never from the establishment. For documents whose codes nest in the catalog the XML is therefore byte-identical (golden hash `e12a73...cd66` unchanged); the only difference is district 289.
+- Rules (acceptance only, `validateGeo`): `receiver-district-unknown`, `receiver-city-unknown`, `receiver-city-not-in-district`, `receiver-district-not-in-department`, `receiver-city-not-in-department` (no district informed), `receiver-district-description-mismatch` (1325), `receiver-city-description-mismatch` (1329). Signing uses `signingValidationConfig()` (catalog text, no catalog checks) so documents accepted before these rules still sign; their department/district keep the value `xmlgen` derives.
+- Behaviour change: a receiver whose district is not in the informed department is now a 422. Test fixtures that sent department 11 with Asuncion's district/city now send department 1.
+- XML: `generateInvoiceXml` writes the catalog description for the code the XML carries (receiver and issuer) and, for validated drafts, fails on a code `xmlgen` changed (`cCiuRec is X but the validated code is Y`).
+- RED observed: `geo-catalog.spec.ts` lookups 1 failed; `invoice-draft-geo.spec.ts` 6 failed | 3 passed; `create-document.request.spec.ts` 1 failed; `invoice-xml.spec.ts` 3 failed (district 289 receiver, district 289 issuer, override detection) and 1 more for the legacy signing case; `documents-geo.e2e.spec.ts` 6 failed with the rules switched off.
+- Review fixes (C1): descriptions compare normalized (case, accents, spaces); only the description rules carry SIFEN codes (1325, 1329), because the norm sources in the repo define none for unknown codes or nesting.
+- Review fixes (C2/C3): `xmlgen` already refuses an issuer whose department, district and city do not nest (deterministic error), so the issuer patch is lenient while signing (`validateGeo` false) and strict only for validated drafts; `establishment:add` now refuses an address that does not nest in the catalog (reading stored establishments stays lenient). Any `xmlgen` failure in `generateInvoiceXml` becomes an `InvoiceXmlError` with a reason (a city missing from its table crashes with a `TypeError`), so the document is held, not crash-looped. Escape/unescape are exact inverses and the replacement is a function. District 289 changes bytes by design (LAUREL, not PUERTO ADELA).
+
+## Slice E (T7) record
+
+- `docs/integracion/emision.md`: optional address block and its rules, B2F rejected by product decision (rules kept for when it is enabled), catalog validation with normalized descriptions and the `422` rule names, and the `/v1/geo/*` endpoints with an example. Route: inline (one document, understood content).
+- `docs/api/openapi.json` checked: `pnpm --filter @sifen/api openapi` output is identical to the checked-in file.
+- T8 stays open: the Prevalidador confirmation of the optional address (and of district 289 LAUREL) needs the signing certificate.
+

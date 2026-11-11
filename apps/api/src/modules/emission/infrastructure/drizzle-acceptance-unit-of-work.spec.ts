@@ -6,9 +6,11 @@ import {
   documents,
   tenantEstablishments,
   tenantExpeditionPoints,
+  tenantCertificates,
   tenantFiscalProfiles,
   tenants,
   tenantTimbrados,
+  usageCounters,
   webhookDeliveries,
   withTenantTransaction,
   type DatabaseHandle,
@@ -84,10 +86,11 @@ describe('AcceptInvoice with the Drizzle unit of work', () => {
     await handle.close();
   });
 
-  const accept = (now = '2026-03-06T01:30:00Z') =>
+  const accept = (now = '2026-03-06T01:30:00Z', validation = {}) =>
     createAcceptInvoice({
       unitOfWork: createDrizzleAcceptanceUnitOfWork(handle.db),
       now: () => new Date(now),
+      validation,
     });
 
   const input = (overrides: Partial<AcceptInvoiceInput> = {}): AcceptInvoiceInput => ({
@@ -105,6 +108,49 @@ describe('AcceptInvoice with the Drizzle unit of work', () => {
   const rows = () =>
     withTenantTransaction(handle.db, tenantId, (tx) => tx.select().from(documents));
 
+  /** Spec: HU-E3-03. The issuer carries the expiry of the active certificate for the tenant's environment. */
+  describe('certificate expiry in the issuer context', () => {
+    const NOT_AFTER = new Date('2026-12-31T00:00:00.000Z');
+    const sealed = {
+      v: 1,
+      keyId: 'k',
+      wrappedKey: 'AA==',
+      nonce: 'AA==',
+      tag: 'AA==',
+      ciphertext: 'AA==',
+    };
+    const certificate = (over: Partial<typeof tenantCertificates.$inferInsert> = {}) =>
+      handle.db.insert(tenantCertificates).values({
+        tenantId,
+        environment: 'test',
+        sealed,
+        fingerprint: 'a'.repeat(64),
+        subjectRuc: '80069563-1',
+        notBefore: new Date('2025-01-01T00:00:00.000Z'),
+        notAfter: NOT_AFTER,
+        ...over,
+      });
+    const issuer = (tenant = tenantId) =>
+      createDrizzleAcceptanceUnitOfWork(handle.db).run(tenant, (unit) =>
+        unit.resolveIssuer({
+          establishmentCode: '001',
+          expeditionPointCode: '002',
+          issueDate: '2026-03-05',
+        }),
+      );
+
+    it('is the notAfter of the active certificate', async () => {
+      await certificate();
+      expect((await issuer())?.certificateNotAfter).toEqual(NOT_AFTER);
+    });
+
+    it('is null without an active certificate for the tenant environment', async () => {
+      await certificate({ status: 'revoked', revokedAt: new Date('2026-01-01T00:00:00.000Z') });
+      await certificate({ environment: 'production', fingerprint: 'b'.repeat(64) });
+      expect((await issuer())?.certificateNotAfter).toBeNull();
+    });
+  });
+
   it('persists consecutive accepted documents under the active timbrado', async () => {
     const first = await accept()(input());
     const second = await accept()(input());
@@ -121,6 +167,22 @@ describe('AcceptInvoice with the Drizzle unit of work', () => {
       .from(tenantTimbrados)
       .where(eq(tenantTimbrados.number, '22222222'));
     expect(stored.every((r) => r.timbradoId === timbrado.id)).toBe(true);
+  });
+
+  it('stores a decimal draft with its exact payload and the net total (HU-E5-09)', async () => {
+    // 2.5 x 4940.2 = 12350.5; rounding 0.5 leaves a net of 12350, a multiple of 50 Gs.
+    const items = [{ quantity: 2.5, unitPrice: 4_940.2, vatRate: 10 as const }];
+    const { documentId } = await accept('2026-03-06T01:30:00Z', { allowDecimals: true })(
+      input({ draft: { ...DRAFT, items, roundingPyg: 0.5 }, payload: { items, roundingPyg: 0.5 } }),
+    );
+
+    const row = (await rows()).find((r) => r.id === documentId);
+    // numeric(23,8) answers eight decimals, so the read side trims them; the net is always whole.
+    expect(row?.totalAmount).toBe('12350.00000000');
+    expect(row?.payload).toMatchObject({
+      roundingPyg: 0.5,
+      items: [{ quantity: 2.5, unitPrice: 4940.2 }],
+    });
   });
 
   it('writes the audit row in the same transaction', async () => {
@@ -278,5 +340,21 @@ describe('AcceptInvoice with the Drizzle unit of work', () => {
     expect(row.payload).toMatchObject({
       data: { document_id: documentId, cdc, status: 'accepted' },
     });
+  });
+
+  it('counts each accepted document once in the Paraguay month of its acceptance (HU-E15-02)', async () => {
+    await accept('2026-10-31T12:00:00Z')(input());
+    await accept('2026-11-01T02:30:00Z')(input());
+    const replayKey = 'same-request';
+    await accept('2026-11-01T03:30:00Z')(input({ idempotencyKey: replayKey }));
+    await accept('2026-11-01T03:31:00Z')(input({ idempotencyKey: replayKey }));
+
+    const rows = await withTenantTransaction(handle.db, tenantId, (tx) =>
+      tx.select().from(usageCounters),
+    );
+    expect(rows.map((r) => [r.period, r.documentsIssued]).sort()).toEqual([
+      ['2026-10-01', 2],
+      ['2026-11-01', 1],
+    ]);
   });
 });

@@ -3,8 +3,9 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { type ChecksumManifest, readManifest, sha256Hex } from './checksums.ts';
 
-const ROOT_URL = 'https://ekuatia.set.gov.py/sifen/xsd/siRecepDE_v150.xsd';
 const BASE_URL = 'https://ekuatia.set.gov.py/sifen/xsd/';
+/** Schemas whose closures are vendored: the DE reception and the event reception (siRecepEvento includes Evento_v150 and Evento_Types_v150). */
+export const ROOT_FILES: readonly string[] = ['siRecepDE_v150.xsd', 'siRecepEvento_v150.xsd'];
 
 const SCHEMA_LOCATION_PATTERN = /schemaLocation\s*=\s*(["'])(.+?)\1/g;
 
@@ -66,7 +67,7 @@ async function fetchBytes(url: string, name: string): Promise<Buffer> {
 
 async function fetchClosure(): Promise<Map<string, Buffer>> {
   const closure = new Map<string, Buffer>();
-  const queue = [ROOT_URL];
+  const queue = ROOT_FILES.map((name) => `${BASE_URL}${name}`);
 
   for (let url = queue.shift(); url !== undefined; url = queue.shift()) {
     const name = url.slice(url.lastIndexOf('/') + 1);

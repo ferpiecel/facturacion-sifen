@@ -2,10 +2,16 @@ import { HttpException } from '@nestjs/common';
 import { DocumentNumberExhaustedError } from '@sifen/db';
 import { describe, expect, it } from 'vitest';
 import {
+  CertificateExpiringError,
   IdempotencyKeyReusedError,
   InvoiceValidationError,
   IssuerNotConfiguredError,
 } from '../../application/accept-invoice.js';
+import {
+  CorrectionTypeChangedError,
+  DocumentNotCorrectableError,
+  DocumentNotFoundError,
+} from '../../application/correct-document.js';
 import { toHttpException } from './document-http-errors.js';
 
 function statusOf(error: unknown): number | undefined {
@@ -28,6 +34,17 @@ describe('toHttpException', () => {
     expect(statusOf(new IssuerNotConfiguredError())).toBe(422);
   });
 
+  /** Spec: HU-E3-03. */
+  it('maps an expiring certificate to 422 with the expiry date and a stable code', () => {
+    const error = new CertificateExpiringError(new Date('2027-01-01T00:00:00.000Z'));
+    expect(statusOf(error)).toBe(422);
+    expect(toHttpException(error)?.getResponse()).toMatchObject({
+      code: 'certificate_expiring',
+      message: expect.stringContaining('2027-01-01') as string,
+      notAfter: '2027-01-01T00:00:00.000Z',
+    });
+  });
+
   it('maps a reused idempotency key with another payload to 409', () => {
     expect(statusOf(new IdempotencyKeyReusedError())).toBe(409);
     expect(toHttpException(new IdempotencyKeyReusedError())?.getResponse()).toMatchObject({
@@ -47,5 +64,11 @@ describe('toHttpException', () => {
   it('leaves unknown errors alone', () => {
     expect(toHttpException(new Error('boom'))).toBeNull();
     expect(toHttpException('nope')).toBeNull();
+  });
+
+  it('maps the correction failures (HU-E8-01)', () => {
+    expect(statusOf(new DocumentNotFoundError())).toBe(404);
+    expect(statusOf(new DocumentNotCorrectableError('accepted'))).toBe(409);
+    expect(statusOf(new CorrectionTypeChangedError())).toBe(422);
   });
 });

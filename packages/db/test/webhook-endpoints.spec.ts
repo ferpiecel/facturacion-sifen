@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import type { DatabaseHandle } from '../src/client.js';
-import { tenants, webhookEndpoints } from '../src/schema.js';
+import { tenants, WEBHOOK_EVENT_TYPES, webhookEndpoints } from '../src/schema.js';
 import { withTenantTransaction } from '../src/tenant-transaction.js';
 import { createTestDatabase, queryRows } from './support/harness.js';
 
@@ -99,6 +99,15 @@ describe('webhook_endpoints', () => {
     expect(await causeOf(db.insert(webhookEndpoints).values(endpoint(a, { url })))).toContain(
       'webhook_endpoints_url_https',
     );
+  });
+
+  it('accepts every event type the platform emits, the nomination and certificate ones included', async () => {
+    const { db, a } = await seed();
+    expect(WEBHOOK_EVENT_TYPES).toContain('document.nominated');
+    expect(WEBHOOK_EVENT_TYPES).toContain('certificate.expiring');
+    await db.insert(webhookEndpoints).values(endpoint(a, { events: [...WEBHOOK_EVENT_TYPES] }));
+    const rows = await db.select().from(webhookEndpoints);
+    expect(rows[0]?.events).toEqual([...WEBHOOK_EVENT_TYPES]);
   });
 
   it('rejects unknown event names and a half-set rotation overlap', async () => {

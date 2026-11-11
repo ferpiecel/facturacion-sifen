@@ -1,10 +1,11 @@
 import { fileURLToPath } from 'node:url';
 
 /** SIFEN XML document types this package can validate. */
-export type SifenSchema = 'siRecepDE';
+export type SifenSchema = 'siRecepDE' | 'siRecepEvento';
 
 const SCHEMA_ROOT_FILES: Record<SifenSchema, string> = {
   siRecepDE: 'siRecepDE_v150.xsd',
+  siRecepEvento: 'siRecepEvento_v150.xsd',
 };
 
 /** Absolute path to the vendored schema directory, resolved relative to this module. */

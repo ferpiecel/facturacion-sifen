@@ -23,7 +23,7 @@ async function causeOf(promise: Promise<unknown>): Promise<string> {
 }
 
 /**
- * Spec: ADR-0014 / ADR-0019. A partner sees operational metadata of its tenants, never the content of
+ * Spec: ADR-0014 / ADR-0024. A partner sees operational metadata of its tenants, never the content of
  * received documents: the `partner_viewer` role has no grant at all on the reception tables.
  */
 describe('reception tables are invisible to partner_viewer', () => {

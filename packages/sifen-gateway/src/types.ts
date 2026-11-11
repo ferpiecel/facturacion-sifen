@@ -43,6 +43,8 @@ export interface SifenProtocoloDE extends SifenRespuesta {
 
 export interface SifenConsDE extends SifenRespuesta {
   xmlDE: string | null;
+  /** The events registered on the DTE (`xContEv/rContEv/xEvento`), each as its exact source (MT v150 §9.4.3). */
+  eventos: string[];
 }
 
 export interface SifenResultadoEvento {

@@ -6,6 +6,7 @@ import {
   ReceiptText,
   Search,
   Store,
+  TriangleAlert,
   User,
 } from 'lucide-react';
 import Image from 'next/image';
@@ -18,11 +19,13 @@ import {
   type Environment,
 } from '../../design-system/components/environment-banner';
 import { LogoutButton } from '../auth/logout-button';
-import { SAMPLE_TENANT, SAMPLE_USER } from './sample-data';
+import { ActiveCompanyName, IdentityProvider, UserRoleLabel } from './identity';
+import type { AuthClient } from '../auth/auth-client';
 
 const NAV = [
   { href: '/', label: 'Panel de Control', icon: LayoutDashboard },
   { href: '/comprobantes', label: 'Comprobantes y KuDE', icon: ReceiptText },
+  { href: '/accion-requerida', label: 'Acción requerida', icon: TriangleAlert },
   { href: '/comercios', label: 'Mis Comercios', icon: Building2 },
 ] as const;
 
@@ -68,7 +71,7 @@ function Sidebar({ activePath }: { activePath: string }) {
                   EMPRESA ACTIVA
                 </span>
                 <span className="truncate font-body-sm text-body-sm font-semibold text-on-surface">
-                  {SAMPLE_TENANT}
+                  <ActiveCompanyName />
                 </span>
               </div>
             </div>
@@ -102,10 +105,10 @@ function Sidebar({ activePath }: { activePath: string }) {
             <Avatar />
             <div className="flex flex-col truncate">
               <span className="truncate font-body-sm text-body-sm font-semibold text-on-surface">
-                {SAMPLE_USER.name}
+                Mi cuenta
               </span>
               <span className="truncate font-label-sm text-label-sm text-outline">
-                {SAMPLE_USER.role}
+                <UserRoleLabel />
               </span>
             </div>
           </div>
@@ -168,12 +171,14 @@ interface PanelShellProps {
   environment: Environment;
   activePath: string;
   children?: ReactNode;
+  /** The session client; tests replace it. */
+  auth?: AuthClient;
 }
 
 /** Sidebar + topbar frame of the Stitch "Panel de Control" screen. */
-export function PanelShell({ environment, activePath, children }: PanelShellProps) {
+export function PanelShell({ environment, activePath, children, auth }: PanelShellProps) {
   return (
-    <>
+    <IdentityProvider auth={auth}>
       <Sidebar activePath={activePath} />
       <div className="pl-64">
         <div className="sticky top-0 z-40">
@@ -182,6 +187,6 @@ export function PanelShell({ environment, activePath, children }: PanelShellProp
         </div>
         <main className="min-h-screen w-full bg-surface">{children}</main>
       </div>
-    </>
+    </IdentityProvider>
   );
 }

@@ -30,7 +30,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # Object storage for the reception module (ADR-0020). Image tag is pinned
+  # Object storage for the reception module (ADR-0025). Image tag is pinned
   # (verified 4.48: flags -s3, -s3.port, -s3.config, -s3.externalUrl). Anonymous
   # access is disabled because identities are loaded from the rendered
   # s3.json. The dev credentials below are NON-secret defaults for local use only.

@@ -1,7 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { create as openFont } from 'fontkit';
 import PDFDocument from 'pdfkit';
-import QRCode from 'qrcode';
+import { fonts, remissionRows, renderQr, sanitize } from './kude-pdf-common.js';
 import type { KudeRenderer } from '../../application/ports/kude-renderer.port.js';
 import { fromAsuncionTimestamp } from '../../application/invoice-xml.js';
 import {
@@ -12,51 +10,19 @@ import {
   formatQuantity,
   groupCdc,
   KUDE_CONSULT_URL,
+  KUDE_CREDIT_NOTE_TITLE,
+  KUDE_DEBIT_NOTE_TITLE,
+  KUDE_REMISSION_TITLE,
+  KUDE_SELF_INVOICE_TITLE,
   KUDE_TITLE,
+  documentNumberOfCdc,
   type KudeInvoice,
   type KudeItem,
 } from '../../domain/kude-model.js';
 
-const PT_PER_MM = 72 / 25.4;
-/** MT v150 13.8.1: printed QR at least 25 mm wide, 22 mm of content plus the quiet zone. */
-const QR_CONTENT_MM = 24;
-/** Quiet zone per side, as a share of the QR content (about 12% of the printed width). */
-const QR_QUIET_SHARE = 0.16;
 const MARGIN = 36;
 const BOTTOM = 60;
 const FOOTER_BLOCK = 190;
-
-/** Noto Sans (SIL OFL 1.1, apps/api/assets/fonts): Latin, Guaraní tildes and the guaraní sign U+20B2. */
-const FONT_DIR = new URL('../../../../../assets/fonts/', import.meta.url);
-
-interface Fonts {
-  regular: Buffer;
-  bold: Buffer;
-  covers: (codePoint: number) => boolean;
-}
-
-let loaded: Fonts | undefined;
-function fonts(): Fonts {
-  if (loaded) return loaded;
-  const regular = readFileSync(new URL('NotoSans-Regular.ttf', FONT_DIR));
-  const bold = readFileSync(new URL('NotoSans-Bold.ttf', FONT_DIR));
-  const [r, b] = [openFont(regular), openFont(bold)] as const;
-  const covers = (cp: number) =>
-    'hasGlyphForCodePoint' in r &&
-    'hasGlyphForCodePoint' in b &&
-    r.hasGlyphForCodePoint(cp) &&
-    b.hasGlyphForCodePoint(cp);
-  loaded = { regular, bold, covers };
-  return loaded;
-}
-
-/** NFC, whitespace controls to spaces, and "?" for every code point the font cannot draw. */
-function sanitize(text: string): string {
-  const { covers } = fonts();
-  return Array.from(text.normalize('NFC').replace(/[\r\n\t]/g, ' '))
-    .map((char) => (covers(char.codePointAt(0) ?? 0) ? char : '?'))
-    .join('');
-}
 
 const COLUMNS = [
   { key: 'code', title: 'Cód.', width: 42, align: 'left', wrap: true },
@@ -69,10 +35,26 @@ const COLUMNS = [
   { key: 'vat5', title: '5%', width: 55, align: 'right', wrap: false },
   { key: 'vat10', title: '10%', width: 61, align: 'right', wrap: false },
 ] as const;
+type CellKey = (typeof COLUMNS)[number]['key'];
 
+/** An NRE has no prices or amounts: code, description, unit and quantity across the page. */
+const REMISSION_COLUMNS: readonly {
+  key: CellKey;
+  title: string;
+  width: number;
+  align: 'left' | 'right';
+  wrap: boolean;
+}[] = [
+  { key: 'code', title: 'Cód.', width: 80, align: 'left', wrap: true },
+  { key: 'description', title: 'Descripción', width: 290, align: 'left', wrap: true },
+  { key: 'unit', title: 'Unidad', width: 80, align: 'left', wrap: true },
+  { key: 'quantity', title: 'Cant.', width: 90, align: 'right', wrap: false },
+];
+
+type Column = (typeof REMISSION_COLUMNS)[number];
 type Doc = InstanceType<typeof PDFDocument>;
 
-function cells(item: KudeItem): Record<(typeof COLUMNS)[number]['key'], string> {
+function cells(item: KudeItem): Record<CellKey, string> {
   const at = (rate: 0 | 5 | 10) => (item.vatRate === rate ? formatPyg(item.total) : '0');
   return {
     code: item.code,
@@ -87,28 +69,40 @@ function cells(item: KudeItem): Record<(typeof COLUMNS)[number]['key'], string> 
   };
 }
 
+const titleOf = (invoice: KudeInvoice): string =>
+  invoice.debitNote
+    ? KUDE_DEBIT_NOTE_TITLE
+    : invoice.creditNote
+      ? KUDE_CREDIT_NOTE_TITLE
+      : invoice.selfInvoice
+        ? KUDE_SELF_INVOICE_TITLE
+        : invoice.remission
+          ? KUDE_REMISSION_TITLE
+          : KUDE_TITLE;
+
+const documentLabelOf = (invoice: KudeInvoice): string =>
+  invoice.debitNote
+    ? 'Nota de Débito Electrónica'
+    : invoice.creditNote
+      ? 'Nota de Crédito Electrónica'
+      : invoice.selfInvoice
+        ? 'Autofactura Electrónica'
+        : invoice.remission
+          ? 'Nota de Remisión Electrónica'
+          : 'Factura Electrónica';
+
 /** KuDE of an FE on A4 (MT v150 chapter 13, "Formato 1"), drawn with embedded Noto Sans. */
 export class PdfkitKudeRenderer implements KudeRenderer {
   async render(invoice: KudeInvoice): Promise<Uint8Array> {
     assertValidKudeInvoice(invoice);
-    const modules = QRCode.create(invoice.qrUrl, { errorCorrectionLevel: 'M' }).modules.size;
-    const quiet = Math.ceil(modules * QR_QUIET_SHARE);
-    const qr = {
-      png: await QRCode.toBuffer(invoice.qrUrl, {
-        type: 'png',
-        errorCorrectionLevel: 'M',
-        margin: quiet,
-        scale: 4,
-      }),
-      size: ((QR_CONTENT_MM * (modules + 2 * quiet)) / modules) * PT_PER_MM,
-    };
+    const qr = await renderQr(invoice);
     const created = fromAsuncionTimestamp(invoice.issuedAt);
     const doc = new PDFDocument({
       size: 'A4',
       margin: MARGIN,
       bufferPages: true,
       info: {
-        Title: `${KUDE_TITLE} ${formatDocumentNumber(invoice.establishment, invoice.point, invoice.documentNumber)}`,
+        Title: `${titleOf(invoice)} ${formatDocumentNumber(invoice.establishment, invoice.point, invoice.documentNumber)}`,
         Creator: 'facturacion-sifen',
         Producer: 'facturacion-sifen',
         CreationDate: created,
@@ -129,7 +123,8 @@ export class PdfkitKudeRenderer implements KudeRenderer {
     });
 
     const y = this.general(doc, invoice, this.header(doc, invoice, qr) + 12);
-    this.totals(doc, invoice, this.items(doc, invoice.items, y));
+    const columns = invoice.remission ? REMISSION_COLUMNS : COLUMNS;
+    this.totals(doc, invoice, this.items(doc, invoice.items, y, columns));
     this.pageNumbers(doc);
     doc.end();
     return done;
@@ -173,7 +168,7 @@ export class PdfkitKudeRenderer implements KudeRenderer {
   /** Draws the header and returns the y below its lowest block. */
   private header(doc: Doc, invoice: KudeInvoice, qr: { png: Buffer; size: number }): number {
     const { issuer, stamp } = invoice;
-    this.line(doc, KUDE_TITLE, MARGIN, MARGIN, {
+    this.line(doc, titleOf(invoice), MARGIN, MARGIN, {
       width: doc.page.width - 2 * MARGIN,
       align: 'center',
       bold: true,
@@ -201,7 +196,7 @@ export class PdfkitKudeRenderer implements KudeRenderer {
       stamp.validTo === undefined
         ? ''
         : `Fecha de Fin de Vigencia: ${formatDateDmy(stamp.validTo)}`,
-      `Factura Electrónica Nº ${documentNumber}`,
+      `${documentLabelOf(invoice)} Nº ${documentNumber}`,
     ].filter(Boolean);
     let middle = top;
     stampLines.forEach((text, i) => {
@@ -227,7 +222,9 @@ export class PdfkitKudeRenderer implements KudeRenderer {
     const rows: string[] = [
       [
         `Fecha y hora de emisión: ${invoice.issuedAt}`,
-        `Condición de Venta: ${invoice.operationCondition}`,
+        invoice.operationCondition === undefined
+          ? ''
+          : `Condición de Venta: ${invoice.operationCondition}`,
         invoice.installments === undefined ? '' : `Cuotas: ${String(invoice.installments)}`,
         `Moneda: ${invoice.currency}`,
         invoice.exchangeRate === undefined ? '' : `Tipo de Cambio: ${invoice.exchangeRate}`,
@@ -249,15 +246,37 @@ export class PdfkitKudeRenderer implements KudeRenderer {
     } else {
       rows.push('Nombre o Razón Social: Sin Nombre');
     }
-    rows.push(`Tipo de Operación: ${invoice.transactionType}`);
+    if (invoice.transactionType !== undefined) {
+      rows.push(`Tipo de Operación: ${invoice.transactionType}`);
+    }
+    if (invoice.selfInvoice) {
+      const { seller, place, certificate } = invoice.selfInvoice;
+      rows.push(
+        `Vendedor: ${seller.name}`,
+        `Documento del Vendedor: ${seller.idType} ${seller.idNumber}`,
+        `Dirección del Vendedor: ${seller.address}`,
+        `Lugar de la Transacción: ${place}`,
+        `Constancia: ${certificate.type} Nº ${certificate.number}`,
+      );
+    }
+    if (invoice.remission) rows.push(...remissionRows(invoice.remission));
+    const note = invoice.debitNote ?? invoice.creditNote;
+    if (note) {
+      const { reason, associatedCdc } = note;
+      rows.push(
+        `Motivo de Emisión: ${reason}`,
+        `Documento Asociado: Factura Electrónica Nº ${documentNumberOfCdc(associatedCdc)}`,
+        `CDC del documento asociado: ${groupCdc(associatedCdc)}`,
+      );
+    }
     let y = top;
     for (const text of rows) y = this.put(doc, text, MARGIN, y, { width });
     return y + 8;
   }
 
-  private tableHeader(doc: Doc, y: number): number {
+  private tableHeader(doc: Doc, y: number, columns: readonly Column[]): number {
     let x = MARGIN;
-    for (const column of COLUMNS) {
+    for (const column of columns) {
       this.line(doc, column.title, x, y, {
         width: column.width - 3,
         align: column.align,
@@ -272,24 +291,24 @@ export class PdfkitKudeRenderer implements KudeRenderer {
     return y + 15;
   }
 
-  private items(doc: Doc, items: KudeItem[], start: number): number {
-    let y = this.tableHeader(doc, start);
+  private items(doc: Doc, items: KudeItem[], start: number, columns: readonly Column[]): number {
+    let y = this.tableHeader(doc, start, columns);
     for (const item of items) {
       const values = cells(item);
       doc.font('regular').fontSize(8);
       // The row is as tall as its tallest cell; amounts never wrap (they shrink instead).
       const height = Math.max(
         10,
-        ...COLUMNS.filter((c) => c.wrap).map((c) =>
-          doc.heightOfString(sanitize(values[c.key]), { width: c.width - 3 }),
-        ),
+        ...columns
+          .filter((c) => c.wrap)
+          .map((c) => doc.heightOfString(sanitize(values[c.key]), { width: c.width - 3 })),
       );
       if (y + height > doc.page.height - BOTTOM) {
         doc.addPage();
-        y = this.tableHeader(doc, MARGIN);
+        y = this.tableHeader(doc, MARGIN, columns);
       }
       let x = MARGIN;
-      for (const column of COLUMNS) {
+      for (const column of columns) {
         if (column.wrap) {
           doc
             .font('regular')
@@ -318,6 +337,10 @@ export class PdfkitKudeRenderer implements KudeRenderer {
       .lineTo(MARGIN + width, y)
       .stroke();
     y += 5;
+    if (invoice.remission) {
+      this.consult(doc, invoice, y);
+      return;
+    }
     const subtotals: [string, number][] = [
       ['exempt', totals.subtotalExempt],
       ['vat5', totals.subtotal5],
@@ -339,11 +362,14 @@ export class PdfkitKudeRenderer implements KudeRenderer {
     summary.forEach((text, i) => {
       this.line(doc, text, MARGIN, y + 16 + i * 12, { bold: true, size: 9 });
     });
-    y += 16 + summary.length * 12 + 12;
+    this.consult(doc, invoice, y + 16 + summary.length * 12 + 12);
+  }
+
+  private consult(doc: Doc, invoice: KudeInvoice, y: number): void {
     this.line(doc, 'Información de consulta en SIFEN', MARGIN, y, { bold: true });
     this.line(
       doc,
-      'Consulte la validez de esta Factura Electrónica con el número de CDC impreso abajo en:',
+      `Consulte la validez de esta ${documentLabelOf(invoice)} con el número de CDC impreso abajo en:`,
       MARGIN,
       y + 12,
       {},

@@ -58,7 +58,7 @@ describe('validateTotals (ported from project A test_validacion_factura)', () =>
     expect(validateTotals(t, [], dec('5'))).toEqual([]);
   });
 
-  it('exposes the ADR-0021 default tolerance of 1', () => {
+  it('exposes the ADR-0026 default tolerance of 1', () => {
     expect(DEFAULT_TOTALS_TOLERANCE.equals(dec('1'))).toBe(true);
   });
 

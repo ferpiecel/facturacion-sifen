@@ -24,7 +24,7 @@ const SEALED = {
   ciphertext: 'AA==',
 };
 
-/** Spec: reception R4.5 (ADR-0023). Events are enqueued in the transaction of the state change. */
+/** Spec: reception R4.5 (ADR-0028). Events are enqueued in the transaction of the state change. */
 describe('DrizzleReceivedDocumentRepository event outbox', () => {
   let handle: DatabaseHandle;
   let tenantId: string;

@@ -77,6 +77,13 @@ export const consDEEncontradoXml = envelope(
   `<rResEnviConsDe xmlns="${NS}"><dFecProc>2026-10-02T12:00:00</dFecProc><dCodRes>0422</dCodRes>` +
     `<dMsgRes>CDC encontrado</dMsgRes><xContenDE><rContDe>${DE_XML}<dProtAut>1234567890</dProtAut></rContDe></xContenDE></rResEnviConsDe>`,
 );
+export const EVENTO_CANCELACION_XML = `<xEvento><gGroupGesEve><rGesEve><rEve Id="5"><gGroupTiEvt><rGeVeCan><Id>${CDC_A}</Id><mOtEve>Error de datos</mOtEve></rGeVeCan></gGroupTiEvt></rEve></rGesEve></gGroupGesEve></xEvento>`;
+/** siConsDE answer of a DTE that already carries a registered event (ContenedorEvento, MT 9.4.3). */
+export const consDEConEventosXml = envelope(
+  `<rResEnviConsDe xmlns="${NS}"><dFecProc>2026-10-02T12:00:00</dFecProc><dCodRes>0422</dCodRes>` +
+    `<dMsgRes>CDC encontrado</dMsgRes><xContenDE><rContDe>${DE_XML}<dProtAut>1234567890</dProtAut>` +
+    `<xContEv><rContEv>${EVENTO_CANCELACION_XML}</rContEv></xContEv></rContDe></xContenDE></rResEnviConsDe>`,
+);
 export const consDEInexistenteXml = envelope(
   `<rResEnviConsDe xmlns="${NS}"><dFecProc>2026-10-02T12:00:00</dFecProc><dCodRes>0420</dCodRes>` +
     '<dMsgRes>CDC inexistente</dMsgRes></rResEnviConsDe>',

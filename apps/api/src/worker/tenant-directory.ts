@@ -1,5 +1,6 @@
-import { asc, eq, sql } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { tenants, type Database } from '@sifen/db';
+import { asSystemPlatformAdmin } from './system-platform-use.js';
 
 /** Which tenants the worker serves. */
 export interface TenantDirectory {
@@ -14,10 +15,9 @@ export interface TenantDirectory {
 export function createDrizzleTenantDirectory(db: Database): TenantDirectory {
   return {
     async tenantIds() {
-      const rows = await db.transaction(async (tx) => {
-        await tx.execute(sql`SET LOCAL ROLE platform_admin`);
-        return tx.select({ id: tenants.id }).from(tenants).orderBy(asc(tenants.id));
-      });
+      const rows = await asSystemPlatformAdmin(db, 'worker:tenant-directory', ['tenants'], (tx) =>
+        tx.select({ id: tenants.id }).from(tenants).orderBy(asc(tenants.id)),
+      );
       return rows.map((row) => row.id);
     },
   };
@@ -32,13 +32,12 @@ export interface TenantEnvironments {
 export function createDrizzleTenantEnvironments(db: Database): TenantEnvironments {
   return {
     async environmentOf(tenantId) {
-      const rows = await db.transaction(async (tx) => {
-        await tx.execute(sql`SET LOCAL ROLE platform_admin`);
-        return tx
+      const rows = await asSystemPlatformAdmin(db, 'worker:tenant-environment', ['tenants'], (tx) =>
+        tx
           .select({ environment: tenants.environment })
           .from(tenants)
-          .where(eq(tenants.id, tenantId));
-      });
+          .where(eq(tenants.id, tenantId)),
+      );
       const row = rows.at(0);
       if (!row) throw new Error('tenant not found');
       return row.environment;

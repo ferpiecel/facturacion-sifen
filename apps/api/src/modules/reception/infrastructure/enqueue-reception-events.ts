@@ -36,7 +36,7 @@ function eventData(
   type: ReceptionEventType,
   actor: ReceptionActor | undefined,
 ): Record<string, unknown> {
-  // Identifiers, status and a link only (ADR-0023): never extracted fiscal data.
+  // Identifiers, status and a link only (ADR-0028): never extracted fiscal data.
   const data: Record<string, unknown> = {
     document_id: document.id,
     status: document.status,
@@ -54,7 +54,7 @@ function eventData(
 }
 
 /**
- * Transactional outbox for received-document events (ADR-0023, mirrors `enqueueDocumentEvents`):
+ * Transactional outbox for received-document events (ADR-0028, mirrors `enqueueDocumentEvents`):
  * call it with the writer's own transaction so the state change and its deliveries commit or roll
  * back together. One `pending` delivery, due at `at`, per active endpoint of the tenant whose
  * filter matches. A document that is not addressed to the tenant (`isOwnReceiver = false`, Q3)

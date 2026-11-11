@@ -1,13 +1,32 @@
+import { Decimal } from './decimal.js';
 import type { QrEnvironment } from './qr.js';
 
 /** MT v150 13.3: the KuDE denomination for an electronic invoice (FE). */
 export const KUDE_TITLE = 'KuDE de Factura Electrónica';
+/** MT v150 13.3: the KuDE denomination for an electronic credit note (NCE). */
+/** The KuDE denomination for an electronic debit note (NDE). */
+export const KUDE_DEBIT_NOTE_TITLE = 'KuDE de Nota de Débito Electrónica';
+/** MT v150 13.3: the KuDE denomination for an electronic self-invoice (AFE). */
+export const KUDE_SELF_INVOICE_TITLE = 'KuDE de Autofactura Electrónica';
+export const KUDE_REMISSION_TITLE = 'KuDE de Nota de Remisión Electrónica';
+export const KUDE_CREDIT_NOTE_TITLE = 'KuDE de Nota de Crédito Electrónica';
 
 /** MT v150 13.4.4: consultation portal per environment (with the trailing slash of the MT). */
 export const KUDE_CONSULT_URL: Readonly<Record<QrEnvironment, string>> = {
   production: 'https://ekuatia.set.gov.py/consultas/',
   test: 'https://ekuatia.set.gov.py/consultas-test/',
 };
+
+/**
+ * Paper layouts of a KuDE (MT v150 13.5 "Formato 1" letter, 13.6 "Formato 2" paper roll). The roll
+ * widths are the two thermal printer sizes: 80 mm and 58 mm.
+ */
+export const KUDE_FORMATS = ['letter', 'ticket-80', 'ticket-58'] as const;
+export type KudeFormat = (typeof KUDE_FORMATS)[number];
+
+export function parseKudeFormat(value: unknown): KudeFormat | undefined {
+  return KUDE_FORMATS.find((format) => format === value);
+}
 
 export interface KudeItem {
   /** E701 */
@@ -63,8 +82,8 @@ export interface KudeInvoice {
   documentNumber: string;
   /** dFeEmiDE, Paraguay local time `YYYY-MM-DDThh:mm:ss`. */
   issuedAt: string;
-  /** E602 */
-  operationCondition: string;
+  /** E602; absent in an NCE (no gCamCond). */
+  operationCondition?: string;
   /** D016. Amounts are PYG integers; foreign-currency KuDEs are out of scope. */
   currency: string;
   /** E644, only for credit operations. */
@@ -72,8 +91,32 @@ export interface KudeInvoice {
   /** D018 as written in the DE (decimal string), only when it applies. */
   exchangeRate?: string;
   receiver: KudeReceiver;
-  /** D012 */
-  transactionType: string;
+  /** D012; absent in an NCE (no iTipTra). */
+  transactionType?: string;
+  /** E402 and H004 of an NCE (iTiDE 5): the reason and the CDC of the FE it credits; absent in an FE. */
+  creditNote?: { reason: string; associatedCdc: string };
+  /** The same data of an NDE (iTiDE 6); never set together with `creditNote`. */
+  debitNote?: { reason: string; associatedCdc: string };
+  /** E300 and H of an AFE (iTiDE 4): the seller, where the transaction took place and the constancia. */
+  selfInvoice?: {
+    seller: { name: string; idType: string; idNumber: string; address: string };
+    place: string;
+    certificate: { type: string; number: string };
+  };
+  /** E5 and E10 of an NRE (iTiDE 7): the motive, the trip, the places, the vehicle and the carrier. */
+  remission?: {
+    motive: string;
+    responsible: string;
+    km: number;
+    invoiceDate?: string;
+    startDate?: string;
+    endDate?: string;
+    departure: string;
+    delivery: string;
+    vehicle: string;
+    carrier: string;
+    driver: string;
+  };
   items: KudeItem[];
   totals: {
     subtotalExempt: number;
@@ -87,6 +130,12 @@ export interface KudeInvoice {
   };
 }
 
+/** `001-002-0000123` of an associated document, taken from its CDC (positions 12-14, 15-17, 18-24). */
+export function documentNumberOfCdc(cdc: string): string {
+  if (!/^\d{44}$/.test(cdc)) throw new Error('CDC must be exactly 44 digits');
+  return formatDocumentNumber(cdc.slice(11, 14), cdc.slice(14, 17), cdc.slice(17, 24));
+}
+
 /** MT v150 13.4.4 / section 10: the CDC is shown in eleven groups of four digits. */
 export function groupCdc(cdc: string): string {
   if (!/^\d{44}$/.test(cdc)) throw new Error('CDC must be exactly 44 digits');
@@ -95,11 +144,21 @@ export function groupCdc(cdc: string): string {
 
 const thousands = (digits: string): string => digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 
-/** PYG amount with dot thousands separators; PYG has no decimals, so anything else is a bug upstream. */
+/**
+ * PYG amount with dot thousands separators. Whole amounts print exactly as before; decimal ones
+ * add a decimal comma (`1.234,5`), trimmed, never in exponent notation (HU-E5-09).
+ */
 export function formatPyg(amount: number): string {
-  if (!Number.isSafeInteger(amount))
-    throw new Error(`PYG amount must be a safe integer: ${String(amount)}`);
-  return `${amount < 0 ? '-' : ''}${thousands(String(Math.abs(amount)))}`;
+  if (Number.isInteger(amount)) {
+    if (!Number.isSafeInteger(amount))
+      throw new Error(`PYG amount must be a safe integer or an exact decimal: ${String(amount)}`);
+    return `${amount < 0 ? '-' : ''}${thousands(String(Math.abs(amount)))}`;
+  }
+  const parsed = Decimal.parse(amount);
+  if (!parsed.ok)
+    throw new Error(`PYG amount must be a safe integer or an exact decimal: ${String(amount)}`);
+  const [whole = '0', fraction = ''] = parsed.value.toString().replace('-', '').split('.');
+  return `${amount < 0 ? '-' : ''}${thousands(whole)},${fraction}`;
 }
 
 /** Quantity: dot thousands, decimal comma only when fractional; never exponent notation. */

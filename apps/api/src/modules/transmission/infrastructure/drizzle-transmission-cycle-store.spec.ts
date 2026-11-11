@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
 import {
   createPgliteDatabase,
   documents,
   loteDocuments,
   lotes,
+  rucBlocks,
   tenantEstablishments,
   tenantExpeditionPoints,
   tenantFiscalProfiles,
@@ -402,14 +403,20 @@ describe('DrizzleTransmissionCycleStore', () => {
       .where(eq(documents.id, waiting));
     // `moved` was queued again (the door: its lote is processed), long before the newer lote that
     // now carries it was created: that newer lote is its own recoverable business.
-    await handle.db
-      .update(documents)
-      .set({
-        status: 'queued',
-        resentAt: new Date(Date.now() - 3_600_000),
-        transmissionAttempts: 1,
-      })
-      .where(eq(documents.id, moved));
+    await handle.db.execute(sql`alter table documents disable trigger documents_resent_seq`);
+    try {
+      await handle.db
+        .update(documents)
+        .set({
+          status: 'queued',
+          resentAt: new Date(Date.now() - 3_600_000),
+          resentAfterSeq: 0,
+          transmissionAttempts: 1,
+        })
+        .where(eq(documents.id, moved));
+    } finally {
+      await handle.db.execute(sql`alter table documents enable trigger documents_resent_seq`);
+    }
     await handle.db.update(documents).set({ status: 'submitted' }).where(eq(documents.id, moved));
     const newer = await addLote(tenantId, 'sent', [moved], at(40));
     expect(newer).not.toBe(lotMoved);
@@ -418,5 +425,51 @@ describe('DrizzleTransmissionCycleStore', () => {
     expect(ids).toContain(lotOpen);
     expect(ids).not.toContain(lotWaiting);
     expect(ids).not.toContain(lotMoved);
+  });
+
+  describe('rucBlockedUntil (HU-E6-05)', () => {
+    const block = (tenant: string, until: Date, environment: 'test' | 'production' = 'test') =>
+      handle.db.insert(rucBlocks).values({
+        tenantId: tenant,
+        environment,
+        blockedAt: at(0),
+        blockedUntil: until,
+        reason: 'RUC bloqueado',
+      });
+
+    it('is null when the tenant was never blocked or the pause is over', async () => {
+      expect(await store().rucBlockedUntil(at(30))).toBeNull();
+      await block(tenantId, at(30));
+      expect(await store().rucBlockedUntil(at(30))).toBeNull();
+    });
+
+    it('returns the end of the longest active pause of the tenant', async () => {
+      await block(tenantId, at(40));
+      await block(tenantId, at(55));
+      await block(tenantId, at(10));
+      expect(await store().rucBlockedUntil(at(30))).toEqual(at(55));
+    });
+
+    it('ignores a pause an operator lifted, and keeps the others', async () => {
+      await handle.db.insert(rucBlocks).values({
+        tenantId,
+        environment: 'test',
+        blockedAt: at(0),
+        blockedUntil: at(90),
+        reason: 'RUC bloqueado',
+        liftedAt: at(10),
+        liftedBy: 'op',
+        liftReason: 'resolved with DNIT',
+      });
+      expect(await store().rucBlockedUntil(at(30))).toBeNull();
+      await block(tenantId, at(55));
+      expect(await store().rucBlockedUntil(at(30))).toEqual(at(55));
+    });
+
+    it('ignores other tenants and other environments', async () => {
+      await block(otherTenantId, at(90));
+      await block(tenantId, at(90), 'production');
+      expect(await store().rucBlockedUntil(at(30))).toBeNull();
+    });
   });
 });

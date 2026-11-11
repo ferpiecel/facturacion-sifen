@@ -16,7 +16,7 @@ const base = {
 };
 
 describe('webhook event envelope (HU-E11-01)', () => {
-  it('lists the v1.0 §13 events, the v1.1 §19 additions and the reception events (ADR-0023)', () => {
+  it('lists the v1.0 §13 events, the v1.1 §19 additions and the reception events (ADR-0028)', () => {
     expect(WEBHOOK_EVENT_TYPES).toEqual([
       'document.created',
       'document.signed',
@@ -26,9 +26,11 @@ describe('webhook event envelope (HU-E11-01)', () => {
       'document.rejected',
       'document.cancelled',
       'document.number_voided',
+      'document.nominated',
       'document.transmission_deadline_warning',
       'document.notification.delivered',
       'document.notification.failed',
+      'certificate.expiring',
       'reception.document.confirmed',
       'reception.document.needs_review',
       'reception.document.extraction_failed',

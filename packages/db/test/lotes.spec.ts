@@ -182,7 +182,6 @@ describe('lotes', () => {
   it.each([
     ['pending', 'sent'],
     ['pending', 'rejected'],
-    ['sending', 'pending'],
     ['sent', 'pending'],
     ['sent', 'sending'],
     ['sent', 'rejected'],
@@ -255,6 +254,18 @@ describe('lotes', () => {
     );
     const [kept] = await update(db, a, row.id, { responseMessage: 'still there' });
     expect(kept.sendAttemptedAt).toEqual(first);
+  });
+
+  it('releases a claim: sending -> pending only while clearing the send attempt (HU-E6-08)', async () => {
+    const { db, a, lote } = await seed();
+    const [row] = await db.insert(lotes).values(lote(a)).returning();
+    const at = new Date('2026-10-05T12:00:00Z');
+    await update(db, a, row.id, { status: 'sending', sendAttemptedAt: at });
+    expect(await causeOf(update(db, a, row.id, { status: 'pending' }))).toContain(
+      'invalid status transition',
+    );
+    const [released] = await update(db, a, row.id, { status: 'pending', sendAttemptedAt: null });
+    expect(released).toMatchObject({ status: 'pending', sendAttemptedAt: null });
   });
 
   it('allows updating other columns without changing the status', async () => {

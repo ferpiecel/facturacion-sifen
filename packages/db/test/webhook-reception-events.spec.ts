@@ -54,7 +54,7 @@ function rollbackStatements(file: string): string[] {
     .filter((statement) => statement.length > 0);
 }
 
-/** Spec: reception R4.5 (ADR-0023). The webhook event catalogue grows by the reception events. */
+/** Spec: reception R4.5 (ADR-0028). The webhook event catalogue grows by the reception events. */
 describe('reception webhook event types', () => {
   let handle: DatabaseHandle | undefined;
 
@@ -152,7 +152,7 @@ describe('reception webhook event types', () => {
 
   it('rolls back to the document-only catalogue', async () => {
     const { db, tenantId } = await seed();
-    for (const statement of rollbackStatements('0055_reception_webhook_events.down.sql')) {
+    for (const statement of rollbackStatements('0082_reception_webhook_events.down.sql')) {
       await db.execute(sql.raw(statement));
     }
     expect(

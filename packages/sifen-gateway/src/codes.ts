@@ -16,8 +16,12 @@ export const SIFEN_CODES = {
   LOTE_CONCLUIDO: '0362',
   /** Consulta extemporánea: lotes can be queried up to 48 h after sending (siResultLoteDE). */
   CONSULTA_EXTEMPORANEA: '0364',
+  /** Evento registrado correctamente (siRecepEvento, MT v150 BU01). */
+  EVENTO_REGISTRADO: '0600',
   /** Autorización del DE satisfactoria (siRecepDE, synchronous). */
   DE_AUTORIZADO: '0260',
+  /** RUC not enabled for the synchronous service (siRecepDE, MT validation 1264; ADR-0007). */
+  RUC_NO_HABILITADO_SINCRONICO: '1264',
   /**
    * siConsDE codes follow MT v150 §9.4.2 Tabla G. MT §12.3.4.3 contradicts it by
    * listing 0421 as "CDC encontrado"; per ADR-0012 this stays pending confirmation
@@ -29,6 +33,12 @@ export const SIFEN_CODES = {
   CDC_INEXISTENTE: '0420',
   /** RUC del certificado sin permiso para consultar el DE (siConsDE, Tabla G). */
   RUC_CERTIFICADO_SIN_PERMISO: '0421',
+  /** RUC consultado inexistente (siConsRUC, MT v150 Tabla H). */
+  RUC_INEXISTENTE: '0500',
+  /** El certificado no tiene permiso para usar el WS de consulta RUC (siConsRUC, Tabla H). */
+  RUC_SIN_PERMISO: '0501',
+  /** RUC encontrado (siConsRUC, Tabla H). */
+  RUC_ENCONTRADO: '0502',
   /** XML malformado (generic input validation). */
   XML_MALFORMADO: '0160',
 } as const;

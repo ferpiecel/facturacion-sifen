@@ -2,16 +2,32 @@ export { SIFEN_CODES } from './codes.ts';
 export type { SifenCode } from './codes.ts';
 export type {
   Ambiente,
+  CancellationEvent,
+  ConformityEvent,
+  DisconformityEvent,
   DeXmlBuilder,
+  EventSigner,
+  EventXmlBuilder,
   FacturaPocInput,
+  IssuerEvent,
+  IssuerEventBuildInput,
+  ReceiptNoticeEvent,
+  ReceiverEvent,
+  ReceiverParty,
+  UnawarenessEvent,
   LoadedCertificate,
   QrConfig,
   QrGenerator,
+  NominationEvent,
+  NominationEventReceiver,
+  VoidingEvent,
   XmlSigner,
 } from './emission-ports.ts';
 export {
+  SifenClientCertificateError,
   SifenFaultError,
   SifenProtocolError,
+  SifenTenantUnavailableError,
   SifenTimeoutError,
   SifenTransportError,
 } from './errors.ts';
@@ -60,3 +76,14 @@ export { SoapSifenGateway } from './soap/soap-sifen-gateway.ts';
 export type { SoapSifenGatewayOptions } from './soap/soap-sifen-gateway.ts';
 export { createSoapSifenGateway } from './soap/create-soap-gateway.ts';
 export type { CreateSoapSifenGatewayOptions } from './soap/create-soap-gateway.ts';
+export { CircuitBreaker } from './resilience/circuit-breaker.ts';
+export type {
+  Acquisition,
+  CircuitBreakerOptions,
+  CircuitState,
+} from './resilience/circuit-breaker.ts';
+export {
+  CircuitBreakerGateway,
+  SifenCircuitOpenError,
+} from './resilience/circuit-breaker-gateway.ts';
+export type { CircuitBreakerGatewayOptions } from './resilience/circuit-breaker-gateway.ts';

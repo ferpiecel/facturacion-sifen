@@ -97,6 +97,11 @@ jobs:
       # the ubuntu-24.04 runner has Docker preinstalled.
       - run: pnpm --filter @sifen/db test:postgres
 
+      # Race tests of @sifen/api that need two real connections (`*.pg.spec.ts`, HU-E7-01). They
+      # start their own postgres:16 container and use the built workspace packages.
+      - run: pnpm turbo run build --filter=@sifen/api^...
+      - run: pnpm --filter @sifen/api test:postgres
+
   worker-redis:
     name: worker-redis
     runs-on: ubuntu-24.04

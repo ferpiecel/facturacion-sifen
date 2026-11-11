@@ -6,6 +6,8 @@ export default defineConfig({
   test: {
     root: import.meta.dirname,
     environment: 'jsdom',
+    // Above the Testing Library asyncUtilTimeout (vitest.setup.ts).
+    testTimeout: 15_000,
     include: ['src/**/*.spec.{ts,tsx}'],
     setupFiles: ['./vitest.setup.ts'],
     coverage: {

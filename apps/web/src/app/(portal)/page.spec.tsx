@@ -36,7 +36,7 @@ describe('HomePage (Panel de Control)', () => {
       'aria-current',
       'page',
     );
-    expect(within(nav).getAllByRole('link')).toHaveLength(3);
+    expect(within(nav).getAllByRole('link')).toHaveLength(4);
   });
 
   it('lists recent documents with status, 44-digit CDC and Guaraní amounts', () => {

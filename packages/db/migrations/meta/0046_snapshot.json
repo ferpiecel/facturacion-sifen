@@ -1,5 +1,5 @@
 {
-  "id": "db442322-358d-4aa6-92b6-ffb57fe39722",
+  "id": "28f4b585-1819-46cd-8f9c-568fa3069523",
   "prevId": "730f96ae-76c1-4565-95e3-083f0feccbff",
   "version": "7",
   "dialect": "postgresql",
@@ -497,6 +497,12 @@
           "notNull": true,
           "default": "'PYG'"
         },
+        "associated_cdc": {
+          "name": "associated_cdc",
+          "type": "char(44)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "payload": {
           "name": "payload",
           "type": "jsonb",
@@ -573,7 +579,36 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "documents_associated_cdc_idx": {
+          "name": "documents_associated_cdc_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "environment",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "associated_cdc",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"documents\".\"associated_cdc\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "documents_tenant_id_tenants_id_fk": {
           "name": "documents_tenant_id_tenants_id_fk",
@@ -692,6 +727,18 @@
         "documents_cdc_format": {
           "name": "documents_cdc_format",
           "value": "\"documents\".\"cdc\" ~ '^[0-9]{44}$'"
+        },
+        "documents_associated_cdc_format": {
+          "name": "documents_associated_cdc_format",
+          "value": "\"documents\".\"associated_cdc\" ~ '^[0-9]{44}$'"
+        },
+        "documents_associated_cdc_not_self": {
+          "name": "documents_associated_cdc_not_self",
+          "value": "\"documents\".\"associated_cdc\" <> \"documents\".\"cdc\""
+        },
+        "documents_associated_cdc_not_invoice": {
+          "name": "documents_associated_cdc_not_invoice",
+          "value": "\"documents\".\"document_type\" <> 1 OR \"documents\".\"associated_cdc\" IS NULL"
         },
         "documents_security_code_format": {
           "name": "documents_security_code_format",
@@ -1083,133 +1130,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.received_artifacts": {
-      "name": "received_artifacts",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "storage_key": {
-          "name": "storage_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "content_type": {
-          "name": "content_type",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "sha256": {
-          "name": "sha256",
-          "type": "char(64)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "size_bytes": {
-          "name": "size_bytes",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "original_name": {
-          "name": "original_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "page_count": {
-          "name": "page_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "received_artifacts_tenant_id_tenants_id_fk": {
-          "name": "received_artifacts_tenant_id_tenants_id_fk",
-          "tableFrom": "received_artifacts",
-          "tableTo": "tenants",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "received_artifacts_storage_key_key": {
-          "name": "received_artifacts_storage_key_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "storage_key"
-          ]
-        },
-        "received_artifacts_tenant_id_key": {
-          "name": "received_artifacts_tenant_id_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "id"
-          ]
-        },
-        "received_artifacts_tenant_sha256_key": {
-          "name": "received_artifacts_tenant_sha256_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "sha256"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "received_artifacts_sha256_hex": {
-          "name": "received_artifacts_sha256_hex",
-          "value": "\"received_artifacts\".\"sha256\" ~ '^[0-9a-f]{64}$'"
-        },
-        "received_artifacts_size_nonneg": {
-          "name": "received_artifacts_size_nonneg",
-          "value": "\"received_artifacts\".\"size_bytes\" >= 0"
-        },
-        "received_artifacts_page_count_positive": {
-          "name": "received_artifacts_page_count_positive",
-          "value": "\"received_artifacts\".\"page_count\" IS NULL OR \"received_artifacts\".\"page_count\" > 0"
-        }
-      },
       "isRLSEnabled": false
     },
     "public.tenant_certificates": {

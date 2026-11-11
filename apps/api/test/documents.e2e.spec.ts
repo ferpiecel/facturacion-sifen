@@ -16,6 +16,7 @@ import { createTenant, issueApiKey } from '../src/cli/commands.js';
 import { createHttpAdapter } from '../src/bootstrap/http.js';
 import { AppModule } from '../src/app.module.js';
 import { DATABASE, DATABASE_HANDLE } from '../src/modules/database/database.module.js';
+import { WAIT_FOR_DOCUMENT } from '../src/modules/emission/emission.tokens.js';
 import { parseCdc } from '../src/modules/emission/domain/cdc.js';
 
 const LINE = { code: 'A-001', description: 'Servicio de consultoria', unitCode: 77 };
@@ -38,7 +39,7 @@ const BODY = {
   },
   items: [{ ...LINE, quantity: 1, unitPrice: 110_000, vatRate: 10 }],
   roundingPyg: 0,
-  location: { departmentCode: 11 },
+  location: { departmentCode: 1 },
 };
 
 /** Spec: HU-E5-01 (S3). `POST /v1/documents` through the real pipeline (guard, tenancy, pglite). */
@@ -93,16 +94,21 @@ describe('POST /v1/documents (e2e)', () => {
     const seeded = await seedTenant('Acme SA', true);
     tenantId = seeded.id;
     bearer = seeded.formattedKey;
+    app = await buildApp();
+  });
+
+  async function buildApp() {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(DATABASE_HANDLE)
       .useValue(handle)
       .overrideProvider(DATABASE)
       .useValue(handle.db)
       .compile();
-    app = moduleRef.createNestApplication<NestFastifyApplication>(createHttpAdapter());
-    await app.init();
-    await app.getHttpAdapter().getInstance().ready();
-  });
+    const created = moduleRef.createNestApplication<NestFastifyApplication>(createHttpAdapter());
+    await created.init();
+    await created.getHttpAdapter().getInstance().ready();
+    return created;
+  }
 
   afterEach(async () => {
     await app.close();
@@ -137,6 +143,163 @@ describe('POST /v1/documents (e2e)', () => {
     const rows = await handle.db.select().from(documents).where(eq(documents.id, documentId));
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ tenantId, cdc, receiverRuc: '80069563-1' });
+  });
+
+  it('keeps accepting an FE with the explicit `type: FE` discriminator', async () => {
+    expect((await post({ ...BODY, type: 'FE' })).statusCode).toBe(202);
+  });
+
+  it('answers 422 for an unknown `type` without consuming a number', async () => {
+    const response = await post({ ...BODY, type: 'XYZ' });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json<{ errors: Array<{ field: string }> }>().errors).toEqual([
+      expect.objectContaining({ field: 'type', rule: 'schema' }),
+    ]);
+    expect(await handle.db.select().from(documents)).toHaveLength(0);
+  });
+
+  it('validates a credit note body, then refuses an FE that does not exist (2403)', async () => {
+    const credit = {
+      type: 'NCE',
+      establishment: '001',
+      expeditionPoint: '002',
+      associatedCdc: '01800695631001002000000112026010111234567891',
+      reasonCode: 2,
+      items: [{ ...LINE, quantity: 1, unitPrice: 400_000, vatRate: 10 }],
+    };
+
+    const malformed = await post({ ...credit, reasonCode: 'x', receiver: { kind: 'unnamed' } });
+    expect(malformed.statusCode).toBe(422);
+    expect(
+      malformed
+        .json<{ errors: Array<{ field: string }> }>()
+        .errors.map((e) => e.field)
+        .sort(),
+    ).toEqual(['reasonCode', 'receiver']);
+
+    const valid = await post(credit);
+    expect(valid.statusCode).toBe(422);
+    expect(valid.json<{ errors: Array<{ rule: string }> }>().errors).toEqual([
+      expect.objectContaining({ rule: 'associated-document-not-found', sifenCode: '2403' }),
+    ]);
+    expect(await handle.db.select().from(documents)).toHaveLength(0);
+  });
+
+  describe('credit notes', () => {
+    const nce = (cdc: string) => ({
+      type: 'NCE',
+      establishment: '001',
+      expeditionPoint: '002',
+      associatedCdc: cdc,
+      reasonCode: 2,
+      items: [{ ...LINE, quantity: 1, unitPrice: 50_000, vatRate: 10 }],
+    });
+
+    it('accepts an NCE of an approved FE with 202, a 05 CDC and its own number', async () => {
+      const fe = (await post(BODY)).json<{ document_id: string; cdc: string }>();
+      for (const status of ['signed', 'submitted', 'approved']) {
+        await handle.db.update(documents).set({ status }).where(eq(documents.id, fe.document_id));
+      }
+
+      const response = await post(nce(fe.cdc));
+
+      expect(response.statusCode).toBe(202);
+      const { document_id: id, cdc } = response.json<{ document_id: string; cdc: string }>();
+      expect(cdc).toMatch(/^05\d{42}$/);
+      const [row] = await handle.db.select().from(documents).where(eq(documents.id, id));
+      expect(row).toMatchObject({
+        documentType: 5,
+        number: 1,
+        associatedCdc: fe.cdc,
+        status: 'accepted',
+      });
+    });
+
+    it('answers 422 with the credit note rule when the FE is not approved yet, burning no number', async () => {
+      const fe = (await post(BODY)).json<{ cdc: string }>();
+
+      const response = await post(nce(fe.cdc));
+
+      expect(response.statusCode).toBe(422);
+      expect(response.json<{ errors: Array<{ rule: string }> }>().errors).toEqual([
+        expect.objectContaining({ rule: 'associated-document-not-approved' }),
+      ]);
+      expect(
+        (await handle.db.select().from(documents)).filter((d) => d.documentType === 5),
+      ).toEqual([]);
+    });
+
+    it('replays an NCE with the same Idempotency-Key and refuses another body with 409', async () => {
+      const fe = (await post(BODY)).json<{ document_id: string; cdc: string }>();
+      for (const status of ['signed', 'submitted', 'approved']) {
+        await handle.db.update(documents).set({ status }).where(eq(documents.id, fe.document_id));
+      }
+      const first = await post(nce(fe.cdc), bearer, 'nce-key');
+      const again = await post(nce(fe.cdc), bearer, 'nce-key');
+      expect(again.json()).toEqual(first.json());
+      const other = { ...nce(fe.cdc), reasonCode: 3 };
+      expect((await post(other, bearer, 'nce-key')).statusCode).toBe(409);
+    });
+  });
+
+  describe('debit notes', () => {
+    const nde = (cdc: string) => ({
+      type: 'NDE',
+      establishment: '001',
+      expeditionPoint: '002',
+      associatedCdc: cdc,
+      reasonCode: 2,
+      items: [{ ...LINE, quantity: 1, unitPrice: 50_000, vatRate: 10 }],
+    });
+    const approvedFe = async () => {
+      const fe = (await post(BODY)).json<{ document_id: string; cdc: string }>();
+      for (const status of ['signed', 'submitted', 'approved']) {
+        await handle.db.update(documents).set({ status }).where(eq(documents.id, fe.document_id));
+      }
+      return fe;
+    };
+
+    it('accepts an NDE of an approved FE with 202, a 06 CDC and its own number', async () => {
+      const fe = await approvedFe();
+
+      const response = await post(nde(fe.cdc));
+
+      expect(response.statusCode).toBe(202);
+      const { document_id: id, cdc } = response.json<{ document_id: string; cdc: string }>();
+      expect(cdc).toMatch(/^06\d{42}$/);
+      const [row] = await handle.db.select().from(documents).where(eq(documents.id, id));
+      expect(row).toMatchObject({
+        documentType: 6,
+        number: 1,
+        associatedCdc: fe.cdc,
+        status: 'accepted',
+      });
+    });
+
+    it('refuses an FE that does not exist (2403) and one not approved yet, burning no number', async () => {
+      const missing = await post(nde('01800695631001002000000112026010111234567891'));
+      expect(missing.statusCode).toBe(422);
+      expect(missing.json<{ errors: Array<{ rule: string }> }>().errors).toEqual([
+        expect.objectContaining({ rule: 'associated-document-not-found' }),
+      ]);
+      const fe = (await post(BODY)).json<{ cdc: string }>();
+      const pending = await post(nde(fe.cdc));
+      expect(pending.statusCode).toBe(422);
+      expect(
+        (await handle.db.select().from(documents)).filter((d) => d.documentType === 6),
+      ).toEqual([]);
+    });
+
+    it('replays an NDE with the same Idempotency-Key and refuses another body with 409', async () => {
+      const fe = await approvedFe();
+      const first = await post(nde(fe.cdc), bearer, 'nde-key');
+      const again = await post(nde(fe.cdc), bearer, 'nde-key');
+      expect(again.json()).toEqual(first.json());
+      expect((await post({ ...nde(fe.cdc), reasonCode: 3 }, bearer, 'nde-key')).statusCode).toBe(
+        409,
+      );
+    });
   });
 
   it('rejects a request without a valid API key with 401', async () => {
@@ -249,7 +412,7 @@ describe('POST /v1/documents (e2e)', () => {
       ...BODY,
       operationType: 'B2C',
       receiver: { kind: 'unnamed' },
-      location: { departmentCode: 11 },
+      location: { departmentCode: 1 },
     });
 
     expect(response.statusCode).toBe(202);
@@ -308,6 +471,34 @@ describe('POST /v1/documents (e2e)', () => {
     expect(await handle.db.select().from(documents)).toHaveLength(0);
   });
 
+  it.each(['B2G', 'B2F'] as const)(
+    'answers 422 operation-type-not-supported for %s and consumes no number',
+    async (operationType) => {
+      const response = await post({
+        ...BODY,
+        operationType,
+        receiver:
+          operationType === 'B2F'
+            ? {
+                kind: 'named',
+                ruc: '80069563-1',
+                name: 'Cliente SA',
+                address: 'Main St 1',
+                houseNumber: '1',
+              }
+            : BODY.receiver,
+        location: operationType === 'B2F' ? undefined : BODY.location,
+      });
+
+      expect(response.statusCode).toBe(422);
+      expect(response.json<{ errors: Array<{ rule: string }> }>().errors).toContainEqual(
+        expect.objectContaining({ rule: 'operation-type-not-supported' }),
+      );
+      expect(await handle.db.select().from(documents)).toHaveLength(0);
+      expect(await handle.db.select().from(tenantDocumentSequences)).toHaveLength(0);
+    },
+  );
+
   it('stores the receiver and item XML data in the payload', async () => {
     const response = await post(BODY);
 
@@ -339,6 +530,148 @@ describe('POST /v1/documents (e2e)', () => {
 
     expect(response.statusCode).toBe(409);
     expect(response.json<{ message: string }>().message).toMatch(/exhausted/i);
+  });
+
+  describe('self-invoices (HU-E7-03)', () => {
+    const place = {
+      address: 'Calle 1',
+      houseNumber: '10',
+      departmentCode: 11,
+      districtCode: 143,
+      cityCode: 3344,
+    };
+    const AFE = {
+      type: 'AFE',
+      establishment: '001',
+      expeditionPoint: '002',
+      seller: { nature: 1, idType: 1, idNumber: '1234567', name: 'Juan Perez', ...place },
+      place,
+      certificate: { type: 1, number: '12345678901', control: 'ABCD1234' },
+      items: [{ ...LINE, quantity: 2, unitPrice: 50_000 }],
+    };
+
+    it('accepts an AFE with 202, a 04 CDC and its own number sequence', async () => {
+      const response = await post(AFE);
+
+      expect(response.statusCode).toBe(202);
+      const { document_id: id, cdc } = response.json<{ document_id: string; cdc: string }>();
+      expect(cdc).toMatch(/^04\d{42}$/);
+      const [row] = await handle.db.select().from(documents).where(eq(documents.id, id));
+      expect(row).toMatchObject({
+        documentType: 4,
+        number: 1,
+        associatedCdc: null,
+        status: 'accepted',
+      });
+    });
+
+    it('answers 422 naming the field of the rule that failed, burning no number', async () => {
+      const response = await post({
+        ...AFE,
+        certificate: { type: 1, number: '123', control: 'ABCD1234' },
+      });
+
+      expect(response.statusCode).toBe(422);
+      expect(response.json<{ errors: Array<{ rule: string }> }>().errors).toEqual([
+        expect.objectContaining({ rule: 'self-invoice-certificate-number' }),
+      ]);
+      expect(
+        (await handle.db.select().from(documents)).filter((d) => d.documentType === 4),
+      ).toEqual([]);
+    });
+
+    it('rejects a receiver in the body (it is the issuer) with 422', async () => {
+      const response = await post({ ...AFE, receiver: { kind: 'unnamed' } });
+      expect(response.statusCode).toBe(422);
+    });
+
+    it('replays an AFE with the same Idempotency-Key and refuses another body with 409', async () => {
+      const first = await post(AFE, bearer, 'afe-key');
+      const again = await post(AFE, bearer, 'afe-key');
+      expect(again.json()).toEqual(first.json());
+      const other = { ...AFE, items: [{ ...LINE, quantity: 3, unitPrice: 50_000 }] };
+      expect((await post(other, bearer, 'afe-key')).statusCode).toBe(409);
+    });
+  });
+
+  describe('remission notes (HU-E7-04)', () => {
+    const place = {
+      address: 'Calle 1',
+      houseNumber: '10',
+      departmentCode: 11,
+      districtCode: 143,
+      cityCode: 3344,
+    };
+    const NRE = {
+      type: 'NRE',
+      establishment: '001',
+      expeditionPoint: '002',
+      motive: 1,
+      responsible: 1,
+      km: 120,
+      receiver: { ruc: '80000001-3', name: 'Empresa Real SA', ...place },
+      transport: {
+        type: 1,
+        modality: 1,
+        freightResponsible: 1,
+        startDate: '2026-11-02',
+        endDate: '2026-11-03',
+        departure: place,
+        delivery: place,
+        vehicle: { type: 'Camion', brand: 'Volvo', idType: 1, idNumber: 'ABC123' },
+        carrier: {
+          contributor: true,
+          name: 'Transportes SA',
+          ruc: '80000002-1',
+          address: 'Ruta 1',
+          driver: { name: 'Pedro Gomez', idNumber: '2345678', address: 'Calle 3' },
+        },
+      },
+      items: [{ code: 'M-1', description: 'Maiz', unitCode: 77, quantity: 2 }],
+    };
+
+    it('accepts an NRE with 202, a 07 CDC and its own number sequence', async () => {
+      const response = await post(NRE);
+
+      expect(response.statusCode).toBe(202);
+      const { document_id: id, cdc } = response.json<{ document_id: string; cdc: string }>();
+      expect(cdc).toMatch(/^07\d{42}$/);
+      const [row] = await handle.db.select().from(documents).where(eq(documents.id, id));
+      expect(row).toMatchObject({
+        documentType: 7,
+        number: 1,
+        associatedCdc: null,
+        receiverRuc: '80000001-3',
+        status: 'accepted',
+      });
+    });
+
+    it('answers 422 naming the rule that failed, burning no number', async () => {
+      const response = await post({ ...NRE, motive: 77 });
+
+      expect(response.statusCode).toBe(422);
+      expect(response.json<{ errors: Array<{ rule: string }> }>().errors).toEqual([
+        expect.objectContaining({ rule: expect.stringContaining('motive') as string }),
+      ]);
+      expect(
+        (await handle.db.select().from(documents)).filter((d) => d.documentType === 7),
+      ).toEqual([]);
+    });
+
+    it('refuses motive 7 addressed to another RUC (2606)', async () => {
+      const response = await post({ ...NRE, motive: 7 });
+      expect(response.statusCode).toBe(422);
+      expect(response.json<{ errors: Array<{ sifenCode?: string }> }>().errors[0]).toMatchObject({
+        sifenCode: '2606',
+      });
+    });
+
+    it('replays an NRE with the same Idempotency-Key and refuses another body with 409', async () => {
+      const first = await post(NRE, bearer, 'nre-key');
+      const again = await post(NRE, bearer, 'nre-key');
+      expect(again.json()).toEqual(first.json());
+      expect((await post({ ...NRE, km: 130 }, bearer, 'nre-key')).statusCode).toBe(409);
+    });
   });
 
   describe('Idempotency-Key (HU-E5-02)', () => {
@@ -411,6 +744,95 @@ describe('POST /v1/documents (e2e)', () => {
 
       const good = await post(BODY, bearer, 'retry-4');
       expect(good.statusCode).toBe(202);
+    });
+  });
+
+  /** HU-E6-06: `?wait=true` only holds the response for a tenant with the synchronous flag. */
+  describe('?wait=true', () => {
+    const originalTimeout = process.env.SYNC_WAIT_TIMEOUT_MS;
+    afterEach(() => {
+      if (originalTimeout === undefined) delete process.env.SYNC_WAIT_TIMEOUT_MS;
+      else process.env.SYNC_WAIT_TIMEOUT_MS = originalTimeout;
+    });
+    const flagOn = () =>
+      handle.db
+        .update(tenantFiscalProfiles)
+        .set({ syncTransmission: true })
+        .where(eq(tenantFiscalProfiles.tenantId, tenantId));
+    const postWait = (key: string) =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/documents?wait=true',
+        payload: BODY,
+        headers: { authorization: `Bearer ${bearer}`, 'idempotency-key': key },
+      });
+
+    it('answers the usual 202 at once for a tenant without the flag', async () => {
+      const response = await postWait('wait-1');
+      expect(response.statusCode).toBe(202);
+      expect(response.json<{ document_id: string }>().document_id).toBeDefined();
+    });
+
+    it('answers 200 with the final document once SIFEN settles it', async () => {
+      await flagOn();
+      const pending = postWait('wait-2');
+      // The worker would walk the document through these; here a timer stands in for it.
+      const steps = ['signed', 'submitted', 'approved'];
+      const settle = setInterval(() => {
+        const status = steps.shift();
+        if (status) {
+          void Promise.resolve(handle.db.update(documents).set({ status }));
+        }
+      }, 200);
+      const response = await pending;
+      clearInterval(settle);
+      expect(response.statusCode).toBe(200);
+      expect(response.json<{ status: string; cdc: string }>()).toMatchObject({
+        status: 'approved',
+        cdc: expect.stringMatching(/^\d{44}$/) as string,
+      });
+    });
+
+    it('falls back to 202 when the document is not final by the timeout', async () => {
+      process.env.SYNC_WAIT_TIMEOUT_MS = '1000';
+      const short = await buildApp();
+      await flagOn();
+      const response = await short.inject({
+        method: 'POST',
+        url: '/v1/documents?wait=true',
+        payload: BODY,
+        headers: { authorization: `Bearer ${bearer}`, 'idempotency-key': 'wait-3' },
+      });
+      expect(response.statusCode).toBe(202);
+      await short.close();
+    });
+
+    it('answers the usual 202 when the wait itself fails: the document is already accepted', async () => {
+      const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+        .overrideProvider(DATABASE_HANDLE)
+        .useValue(handle)
+        .overrideProvider(DATABASE)
+        .useValue(handle.db)
+        .overrideProvider(WAIT_FOR_DOCUMENT)
+        .useValue(() => Promise.reject(new Error('db down')))
+        .compile();
+      const broken = moduleRef.createNestApplication<NestFastifyApplication>(createHttpAdapter());
+      await broken.init();
+      await broken.getHttpAdapter().getInstance().ready();
+      const response = await broken.inject({
+        method: 'POST',
+        url: '/v1/documents?wait=true',
+        payload: BODY,
+        headers: { authorization: `Bearer ${bearer}`, 'idempotency-key': 'wait-4' },
+      });
+      expect(response.statusCode).toBe(202);
+      expect(response.json<{ document_id: string }>().document_id).toBeDefined();
+      await broken.close();
+    });
+
+    it('refuses to boot with an out-of-range SYNC_WAIT_TIMEOUT_MS', async () => {
+      process.env.SYNC_WAIT_TIMEOUT_MS = '50';
+      await expect(buildApp()).rejects.toThrow(/SYNC_WAIT_TIMEOUT_MS/);
     });
   });
 });

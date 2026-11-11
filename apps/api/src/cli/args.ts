@@ -28,6 +28,50 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 export class OpsArgError extends Error {}
 
 export type OpsCommand =
+  | { kind: 'ruc:unblock'; tenantId: string; actor: string; reason: string }
+  | {
+      kind: 'document:deadline';
+      tenantId: string | undefined;
+      withinHours: number | undefined;
+      limit: number | undefined;
+    }
+  | { kind: 'certificate:expiring'; tenantId: string | undefined; days: number | undefined }
+  | {
+      kind: 'audit:list';
+      tenantId: string;
+      action: string | undefined;
+      from: string | undefined;
+      to: string | undefined;
+      limit: number | undefined;
+      afterSeq: number | undefined;
+    }
+  | { kind: 'audit:verify'; tenantId: string }
+  | { kind: 'usage:show'; tenantId: string; period: string | undefined }
+  | { kind: 'tenant:sync-transmission'; tenantId: string; enabled: boolean; actor: string }
+  | {
+      kind: 'subscription:assign';
+      tenantId: string;
+      planCode: string;
+      startsOn: string | undefined;
+    }
+  | {
+      kind: 'payment:record';
+      tenantId: string;
+      amount: number;
+      reference: string | undefined;
+      paidOn: string | undefined;
+    }
+  | { kind: 'plan:seed' }
+  | { kind: 'plan:list' }
+  | {
+      kind: 'plan:price-set';
+      planCode: string;
+      monthlyPrice: number;
+      includedDocuments: number;
+      overagePrice: number;
+      validFrom: string;
+      tiers: { fromDocuments: number; unitPrice: number }[];
+    }
   | { kind: 'partner:create'; name: string }
   | { kind: 'tenant:create'; name: string; partnerId: string | undefined }
   | {
@@ -56,6 +100,7 @@ export type OpsCommand =
       contact: EstablishmentContact;
     }
   | { kind: 'document:release-hold'; tenantId: string; documentId: string }
+  | { kind: 'correction:release-claim'; tenantId: string; documentId: string; actor: string }
   | { kind: 'document:release-holds'; tenantId: string; reason: string }
   | { kind: 'point:add'; tenantId: string; establishmentCode: string; point: ExpeditionPoint }
   | { kind: 'timbrado:add'; tenantId: string; timbrado: Timbrado }
@@ -105,6 +150,25 @@ function parseStrict<T extends ParseArgsConfig>(config: T) {
     const code = (error as { code?: string }).code ?? 'ERR_PARSE_ARGS';
     throw new OpsArgError(`invalid arguments (${code})`);
   }
+}
+
+function parseCount(value: string | undefined, flag: string): number {
+  const raw = requireOption(value, flag);
+  const number = Number(raw);
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(number)) {
+    throw new OpsArgError(`--${flag} must be a non-negative whole number`);
+  }
+  return number;
+}
+
+/** `--tier <from-documents>:<unit-price>`: the unit price applies from that document count upward. */
+function parseTier(value: string): { fromDocuments: number; unitPrice: number } {
+  const parts = value.split(':');
+  if (parts.length !== 2) {
+    throw new OpsArgError('--tier must be <from-documents>:<unit-price>');
+  }
+  const [from, price] = parts;
+  return { fromDocuments: parseCount(from, 'tier'), unitPrice: parseCount(price, 'tier') };
 }
 
 function requireOption(value: string | undefined, flag: string): string {
@@ -199,6 +263,175 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
   }
 
   switch (subcommand) {
+    case 'audit:list': {
+      const { values } = parseStrict({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          action: { type: 'string' },
+          from: { type: 'string' },
+          to: { type: 'string' },
+          limit: { type: 'string' },
+          'after-seq': { type: 'string' },
+        },
+      });
+      return {
+        kind: 'audit:list',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        action: values.action,
+        from: values.from,
+        to: values.to,
+        limit: values.limit === undefined ? undefined : parseCount(values.limit, 'limit'),
+        afterSeq:
+          values['after-seq'] === undefined
+            ? undefined
+            : parseCount(values['after-seq'], 'after-seq'),
+      };
+    }
+    case 'ruc:unblock': {
+      const { values } = parseStrict({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          actor: { type: 'string' },
+          reason: { type: 'string' },
+        },
+      });
+      return {
+        kind: 'ruc:unblock',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        actor: requireOption(values.actor, 'actor'),
+        reason: requireOption(values.reason, 'reason'),
+      };
+    }
+    case 'document:deadline': {
+      const { values } = parseStrict({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          'within-hours': { type: 'string' },
+          limit: { type: 'string' },
+        },
+      });
+      return {
+        kind: 'document:deadline',
+        tenantId: values.tenant,
+        withinHours:
+          values['within-hours'] === undefined
+            ? undefined
+            : parseCount(values['within-hours'], 'within-hours'),
+        limit: values.limit === undefined ? undefined : parseCount(values.limit, 'limit'),
+      };
+    }
+    case 'certificate:expiring': {
+      const { values } = parseStrict({
+        args: rest,
+        options: { tenant: { type: 'string' }, days: { type: 'string' } },
+      });
+      return {
+        kind: 'certificate:expiring',
+        tenantId: values.tenant,
+        days: values.days === undefined ? undefined : parseCount(values.days, 'days'),
+      };
+    }
+    case 'audit:verify': {
+      const { values } = parseStrict({ args: rest, options: { tenant: { type: 'string' } } });
+      return { kind: 'audit:verify', tenantId: requireOption(values.tenant, 'tenant') };
+    }
+    case 'tenant:sync-transmission': {
+      const { values } = parseStrict({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          on: { type: 'boolean' },
+          off: { type: 'boolean' },
+          actor: { type: 'string' },
+        },
+      });
+      if (values.on === values.off) throw new OpsArgError('pass exactly one of --on or --off');
+      return {
+        kind: 'tenant:sync-transmission',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        enabled: values.on === true,
+        actor: requireOption(values.actor, 'actor'),
+      };
+    }
+    case 'usage:show': {
+      const { values } = parseStrict({
+        args: rest,
+        options: { tenant: { type: 'string' }, period: { type: 'string' } },
+      });
+      return {
+        kind: 'usage:show',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        period: values.period,
+      };
+    }
+    case 'subscription:assign': {
+      const { values } = parseStrict({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          plan: { type: 'string' },
+          'starts-on': { type: 'string' },
+        },
+      });
+      return {
+        kind: 'subscription:assign',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        planCode: requireOption(values.plan, 'plan'),
+        startsOn: values['starts-on'],
+      };
+    }
+    case 'payment:record': {
+      const { values } = parseStrict({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          amount: { type: 'string' },
+          reference: { type: 'string' },
+          'paid-on': { type: 'string' },
+        },
+      });
+      const amount = parseCount(values.amount, 'amount');
+      if (amount === 0) {
+        throw new OpsArgError('--amount must be greater than zero');
+      }
+      return {
+        kind: 'payment:record',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        amount,
+        reference: values.reference,
+        paidOn: values['paid-on'],
+      };
+    }
+    case 'plan:seed':
+    case 'plan:list': {
+      parseStrict({ args: rest, options: {} });
+      return { kind: subcommand };
+    }
+    case 'plan:price-set': {
+      const { values } = parseStrict({
+        args: rest,
+        options: {
+          plan: { type: 'string' },
+          monthly: { type: 'string' },
+          included: { type: 'string' },
+          overage: { type: 'string' },
+          'valid-from': { type: 'string' },
+          tier: { type: 'string', multiple: true },
+        },
+      });
+      return {
+        kind: 'plan:price-set',
+        planCode: requireOption(values.plan, 'plan'),
+        monthlyPrice: parseCount(values.monthly, 'monthly'),
+        includedDocuments: parseCount(values.included, 'included'),
+        overagePrice: parseCount(values.overage, 'overage'),
+        validFrom: requireOption(values['valid-from'], 'valid-from'),
+        tiers: (values.tier ?? []).map(parseTier),
+      };
+    }
     case 'partner:create': {
       const { values } = parseStrict({ args: rest, options: { name: { type: 'string' } } });
       return { kind: 'partner:create', name: requireOption(values.name, 'name') };
@@ -368,6 +601,22 @@ export function parseOpsArgs(argv: string[]): OpsCommand {
         kind: 'document:release-hold',
         tenantId: requireOption(values.tenant, 'tenant'),
         documentId: requireOption(values.document, 'document'),
+      };
+    }
+    case 'correction:release-claim': {
+      const { values } = parseStrict({
+        args: rest,
+        options: {
+          tenant: { type: 'string' },
+          document: { type: 'string' },
+          actor: { type: 'string' },
+        },
+      });
+      return {
+        kind: 'correction:release-claim',
+        tenantId: requireOption(values.tenant, 'tenant'),
+        documentId: requireOption(values.document, 'document'),
+        actor: requireOption(values.actor, 'actor'),
       };
     }
     case 'document:release-holds': {

@@ -72,10 +72,69 @@ El helper de referencia es `verifyWebhookSignature` (`apps/api/src/modules/webho
 `created_at` va en UTC. `data` solo contiene JSON plano. Tipos (plan v1.0 §13 más las altas de v1.1 §19):
 `document.created`, `document.signed`, `document.submitted`, `document.approved`,
 `document.approved_with_observations` (v1.0: `approved_with_warnings`), `document.rejected`,
-`document.cancelled`, `document.number_voided`, `document.transmission_deadline_warning`,
-`document.notification.delivered`, `document.notification.failed`. Un endpoint sin filtro recibe todos.
+`document.cancelled`, `document.number_voided`, `document.nominated`, `document.transmission_deadline_warning`,
+`document.notification.delivered`, `document.notification.failed`, `certificate.expiring`. Un endpoint sin filtro recibe todos.
 
-## Eventos de documentos recibidos (ADR-0023)
+### `document.nominated`
+
+SIFEN aprobó la nominación de una FE emitida a un receptor innominado (`POST /v1/documents/{id}/nominate`). El documento
+conserva su estado (`approved`): el evento solo avisa que ya tiene receptor. Una nominación rechazada no genera aviso.
+`data` lleva `document_id`, `cdc`, `document_type`, `status` y, si existen, los `sifen_messages` del documento; el receptor
+nominado no viaja en el webhook (se informa por la API). El `id` es determinista por documento: una sola nominación abierta
+por FE (4453), así que el aviso sale una vez.
+
+### `document.transmission_deadline_warning`
+
+SIFEN da 72 h desde la firma para transmitir un documento (ADR-0008). Mientras un documento siga `signed`,
+`queued` o `submitted`, se emite este evento **una vez** al cumplirse las 48 h y **una vez** al cumplirse las 66 h
+desde la firma. Un documento aprobado, rechazado o cancelado, o ya vencido, no genera avisos.
+
+```json
+{
+  "id": "evt_...",
+  "type": "document.transmission_deadline_warning",
+  "created_at": "2026-10-04T12:00:00.000Z",
+  "tenant_id": "tnt_...",
+  "data": {
+    "document_id": "doc_...",
+    "cdc": "...",
+    "threshold_hours": 66,
+    "transmission_deadline": "2026-10-04T18:00:00.000Z",
+    "hours_remaining": 6
+  }
+}
+```
+
+`hours_remaining` va redondeado a una décima de hora. El `id` es determinista por documento y umbral, así que la
+deduplicación por `id` descarta cualquier repetición. El worker revisa cada `DEADLINE_WATCH_INTERVAL_MS`
+(5 min por defecto): el aviso puede llegar con ese retraso. Un documento que ya pasó las 66 h cuando el worker lo
+ve por primera vez recibe los dos avisos.
+
+### `certificate.expiring`
+
+Avisa que el certificado activo del tenant (en su ambiente vigente) está por vencer. Se emite **una vez** por
+certificado al cruzar cada umbral de `CERTIFICATE_ALERT_DAYS` (60, 30 y 7 días por defecto); si se cruzan varios
+a la vez (certificado cargado tarde, worker caído) llega solo el más cercano. Un certificado ya vencido no genera
+aviso. Desde el día anterior al vencimiento la API rechaza la emisión con `422`.
+
+```json
+{
+  "id": "evt_...",
+  "type": "certificate.expiring",
+  "created_at": "2026-12-02T12:00:00.000Z",
+  "tenant_id": "tnt_...",
+  "data": {
+    "certificate_id": "...",
+    "environment": "production",
+    "fingerprint": "<sha-256 hex>",
+    "not_after": "2027-01-01T00:00:00.000Z",
+    "threshold_days": 30,
+    "days_remaining": 29
+  }
+}
+```
+
+## Eventos de documentos recibidos (ADR-0028)
 
 Además de los eventos de emisión, la recepción publica cuatro eventos `reception.document.*`. Se
 suscriben igual que los demás (`events` del endpoint; sin filtro, todos) y usan el mismo sobre, firma y

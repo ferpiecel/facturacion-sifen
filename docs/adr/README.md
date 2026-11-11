@@ -20,8 +20,13 @@
 | [0016](0016-tenant-transaction-runner-sin-plugin-cls.md) | `TenantTransactionRunner` singleton en vez del plugin transaccional de nestjs-cls | Aceptado |
 | [0017](0017-direccion-del-receptor-y-catalogo-geografico.md) | Dirección del receptor y propiedad del catálogo geográfico | Aceptado |
 | [0018](0018-precision-decimal-en-montos-y-cantidades.md) | Precisión decimal exacta en montos y cantidades | Aceptado |
-| [0019](0019-contexto-acotado-reception-documentos-recibidos.md) | Contexto acotado `reception`: documentos recibidos como agregado propio | Propuesto |
-| [0020](0020-almacenamiento-de-objetos-seaweedfs-storage-provider.md) | Almacenamiento de objetos con SeaweedFS detrás del puerto `StorageProvider` | Propuesto |
-| [0021](0021-pipeline-de-extraccion-confianza-y-auto-confirmacion.md) | Pipeline de extracción, confianza por campo y política de auto-confirmación | Propuesto |
-| [0022](0022-consulta-a-ekuatia-por-cdc-con-recaptcha.md) | Consulta a eKuatia por CDC con reCAPTCHA v2 (2Captcha): integración de riesgo | Propuesto |
-| [0023](0023-eventos-de-webhook-de-recepcion-y-scopes.md) | Eventos de webhook de recepción y scopes `reception:*` | Propuesto |
+| [0019](0019-nota-de-credito-asociada-a-una-factura.md) | Nota de crédito electrónica asociada a una factura | Aceptado |
+| [0020](0020-eventos-del-emisor-almacenamiento-y-lotes.md) | Eventos del emisor, almacenamiento y envío en lotes | Aceptado |
+| [0021](0021-correccion-de-un-de-rechazado.md) | Corrección y reenvío de un DE rechazado | Aceptado |
+| [0022](0022-gateway-soap-por-tenant.md) | Gateway SOAP por tenant con el certificado del tenant | Aceptado |
+| [0023](0023-auditoria-de-platform-admin.md) | Auditoría de cada uso de `platform_admin` | Aceptado |
+| [0024](0024-contexto-acotado-reception-documentos-recibidos.md) | Contexto acotado `reception`: documentos recibidos como agregado propio | Propuesto |
+| [0025](0025-almacenamiento-de-objetos-seaweedfs-storage-provider.md) | Almacenamiento de objetos con SeaweedFS detrás del puerto `StorageProvider` | Propuesto |
+| [0026](0026-pipeline-de-extraccion-confianza-y-auto-confirmacion.md) | Pipeline de extracción, confianza por campo y política de auto-confirmación | Propuesto |
+| [0027](0027-consulta-a-ekuatia-por-cdc-con-recaptcha.md) | Consulta a eKuatia por CDC con reCAPTCHA v2 (2Captcha): integración de riesgo | Propuesto |
+| [0028](0028-eventos-de-webhook-de-recepcion-y-scopes.md) | Eventos de webhook de recepción y scopes `reception:*` | Propuesto |

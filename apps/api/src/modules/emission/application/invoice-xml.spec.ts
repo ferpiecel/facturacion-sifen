@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
-import { validateXml } from '@sifen/sifen-xsd';
+import { loadGeoCatalog, validateXml } from '@sifen/sifen-xsd';
 import { TipsDeXmlBuilder } from '@sifen/sifen-tips';
 import { createEstablishment } from '../../fiscal-config/domain/establishment.js';
 import { DEFAULT_TEST_DOCUMENT_LITERAL } from '../../fiscal-config/domain/document-environment.js';
@@ -8,13 +8,16 @@ import { createExpeditionPoint } from '../../fiscal-config/domain/expedition-poi
 import { createFiscalProfile } from '../../fiscal-config/domain/fiscal-profile.js';
 import { parseRuc } from '../../fiscal-config/domain/ruc.js';
 import { createTimbrado } from '../../fiscal-config/domain/timbrado.js';
+import { createGeoCatalog } from '../../geo/domain/geo-catalog.js';
 import { buildCdc } from '../domain/cdc.js';
 import type { InvoiceDraft } from '../domain/invoice-draft.js';
 import {
   generateInvoiceXml,
   InvoiceXmlError,
   mapInvoiceToXmlInput,
+  escapeText,
   toReceiverXml,
+  unescapeXmlText,
   toSifenXml,
   type InvoiceXmlContext,
   type XmlReceiver,
@@ -85,12 +88,75 @@ const builder = new TipsDeXmlBuilder();
 const noReceiver = (ctx: InvoiceXmlContext): InvoiceXmlContext => ({ ...ctx, receiver: undefined });
 
 function namedReceiver(ctx: InvoiceXmlContext): XmlReceiver {
-  if (ctx.receiver === undefined) throw new Error('the context has no named receiver');
+  if (ctx.receiver === undefined || 'nominated' in ctx.receiver) {
+    throw new Error('the context has no named receiver');
+  }
   return ctx.receiver;
 }
 
 const MISSING_SIGNATURE =
   "Element '{http://ekuatia.set.gov.py/sifen/xsd}rDE': Missing child element(s). Expected is ( {http://www.w3.org/2000/09/xmldsig#}Signature ).";
+
+describe('generateInvoiceXml with decimal amounts (HU-E5-09)', () => {
+  const decimals = { allowDecimals: true };
+  const withItems = (items: InvoiceDraft['items'], roundingPyg: number): InvoiceDraft => ({
+    ...draft,
+    items,
+    roundingPyg,
+  });
+  const text = (xml: string, tag: string) => new RegExp(`<${tag}>([^<]*)</${tag}>`).exec(xml)?.[1];
+
+  it('builds XSD-valid XML with exact totals for 2.3 x 100', async () => {
+    const d = withItems([{ quantity: 2.3, unitPrice: 100, vatRate: 10 }], 30);
+    const { xml } = await generateInvoiceXml(builder, d, context('production'), decimals);
+
+    expect(text(xml, 'dCantProSer')).toBe('2.3');
+    expect(text(xml, 'dTotBruOpeItem')).toBe('230');
+    expect(text(xml, 'dTotOpeItem')).toBe('230');
+    expect(text(xml, 'dTotOpe')).toBe('230');
+    expect(text(xml, 'dRedon')).toBe('30');
+    expect(text(xml, 'dTotGralOpe')).toBe('200');
+    expect(text(xml, 'dMonTiPag')).toBe('200.0000');
+  });
+
+  it('keeps the fractional rounding and the exact decimal item total for 0.5 x 1001', async () => {
+    const d = withItems([{ quantity: 0.5, unitPrice: 1001, vatRate: 5 }], 0.5);
+    const { xml } = await generateInvoiceXml(builder, d, context('production'), decimals);
+
+    expect(text(xml, 'dTotBruOpeItem')).toBe('500.5');
+    expect(text(xml, 'dSub5')).toBe('500.5');
+    expect(text(xml, 'dRedon')).toBe('0.5');
+    expect(text(xml, 'dTotGralOpe')).toBe('500');
+  });
+
+  it('prints decimal prices and quantities as plain strings, never with an exponent', async () => {
+    const d = withItems(
+      [
+        { quantity: 0.00000001, unitPrice: 1_000_000, vatRate: 10 },
+        { quantity: 1, unitPrice: 12_345.6789, vatRate: 0 },
+      ],
+      45.6889,
+    );
+    const { xml } = await generateInvoiceXml(builder, d, context('production'), decimals);
+
+    expect(text(xml, 'dCantProSer')).toBe('0.00000001');
+    expect(xml).not.toMatch(/<d\w+>-?[\d.]+e[+-]?\d+</i);
+  });
+
+  it('never rewrites free text that looks like an exponent number (product code 1E5)', async () => {
+    const d = withItems([{ quantity: 0.5, unitPrice: 1001, vatRate: 10 }], 0.5);
+    const ctx = context('production');
+    const withCode = { ...ctx, lines: [{ code: '1E5', description: '2e3', unitCode: 77 }] };
+    const { xml } = await generateInvoiceXml(builder, d, withCode, decimals);
+
+    expect(text(xml, 'dCodInt')).toBe('1E5');
+  });
+
+  it('still rejects decimals when the validation config does not allow them', async () => {
+    const d = withItems([{ quantity: 2.3, unitPrice: 100.5, vatRate: 10 }], 0);
+    await expect(generateInvoiceXml(builder, d, context('test'))).rejects.toThrow(/pyg-integer/);
+  });
+});
 
 describe('generateInvoiceXml', () => {
   it('builds XSD-valid XML (siRecepDE) whose DE Id is the CDC of the numbering results', async () => {
@@ -306,6 +372,24 @@ describe('unnamed receiver (innominado)', () => {
   });
 });
 
+describe('receiver email (D213 dEmailRec)', () => {
+  it('emits dEmailRec after the address block, XSD-valid', async () => {
+    const ctx = context('production');
+    const withEmail = { ...ctx, receiver: { ...namedReceiver(ctx), email: 'cliente@ejemplo.com' } };
+    const { xml } = await generateInvoiceXml(builder, draft, withEmail);
+
+    expect(xml).toContain('<dEmailRec>cliente@ejemplo.com</dEmailRec>');
+    expect(xml.indexOf('<dDesCiuRec>')).toBeLessThan(xml.indexOf('<dEmailRec>'));
+    expect(validateXml(xml, 'siRecepDE').errors.map((e) => e.message)).toEqual([MISSING_SIGNATURE]);
+  });
+
+  it('omits dEmailRec when the receiver has none', async () => {
+    const { xml } = await generateInvoiceXml(builder, draft, context('production'));
+
+    expect(xml).not.toContain('dEmailRec');
+  });
+});
+
 describe('receiver address block (D213-D223)', () => {
   const ADDRESS_TAGS = [
     'dDirRec',
@@ -412,6 +496,225 @@ describe('receiver address block (D213-D223)', () => {
 
     expect(data.cliente).not.toHaveProperty('distrito');
     expect(data.cliente).toMatchObject({ departamento: 11, ciudad: 3344 });
+  });
+});
+
+/** HU-E5-08: xmlgen rewrites department/district/descriptions from its own (older) table. */
+describe('geography in the XML carries the DNIT catalog, not the xmlgen table', () => {
+  const geo = { geoCatalog: createGeoCatalog(loadGeoCatalog()), validateGeo: true };
+  /** District 289 is LAUREL in the November 2025 table; xmlgen still calls it PUERTO ADELA. */
+  const laurel: InvoiceDraft = {
+    ...draft,
+    receiver: {
+      kind: 'named',
+      isPublicEntity: false,
+      address: {
+        street: 'Avda Prueba',
+        houseNumber: '100',
+        districtCode: 289,
+        districtDescription: 'LAUREL',
+        cityCode: 6438,
+        cityDescription: 'LAUREL',
+      },
+    },
+    location: { departmentCode: 18 },
+  };
+  const laurelContext = (): InvoiceXmlContext => ({
+    ...context('production'),
+    receiver: {
+      ...namedReceiver(context('production')),
+      districtCode: 289,
+      districtDescription: 'LAUREL',
+      cityCode: 6438,
+      cityDescription: 'LAUREL',
+    },
+  });
+
+  it('emits the same bytes as without the catalog when the codes exist and match', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-30T13:00:05Z'));
+    try {
+      const { xml } = await generateInvoiceXml(builder, draft, context('production'), geo);
+
+      expect(createHash('sha256').update(xml).digest('hex')).toBe(
+        'e12a7329daa6124ed0c85b9aefabe19c1c205966d56a1a7da3bfe6503566cd66',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('writes the catalog description of the receiver district, not the xmlgen one', async () => {
+    const { xml } = await generateInvoiceXml(builder, laurel, laurelContext(), geo);
+
+    expect(xml).toContain('<cDisRec>289</cDisRec><dDesDisRec>LAUREL</dDesDisRec>');
+    expect(xml).not.toContain('PUERTO ADELA');
+  });
+
+  it('keeps the xmlgen text when the catalog is not provided (legacy behaviour)', async () => {
+    const { xml } = await generateInvoiceXml(builder, laurel, laurelContext());
+
+    expect(xml).toContain('<dDesDisRec>PUERTO ADELA</dDesDisRec>');
+  });
+
+  it('leaves names with an apostrophe or accents exactly as xmlgen wrote them', async () => {
+    // City 9 (YBY YA'U) sits in district 2 of department 2.
+    const apostrophe: InvoiceDraft = {
+      ...draft,
+      receiver: {
+        kind: 'named',
+        isPublicEntity: false,
+        address: { street: 'Calle', houseNumber: '1', cityCode: 9 },
+      },
+      location: { departmentCode: 2 },
+    };
+    const ctx = {
+      ...context('production'),
+      receiver: {
+        ...namedReceiver(context('production')),
+        cityCode: 9,
+        cityDescription: "YBY YA'U",
+      },
+    };
+    // dFecFirma is the wall clock to the second: pin it so a second boundary between the two
+    // generations cannot change the bytes.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-30T13:00:05Z'));
+    try {
+      const without = await generateInvoiceXml(builder, apostrophe, ctx, { validateGeo: false });
+
+      const withCatalog = await generateInvoiceXml(builder, apostrophe, ctx, geo);
+
+      expect(withCatalog.xml).toBe(without.xml);
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 20_000);
+
+  it('still signs an earlier accepted document whose department disagrees with its city', async () => {
+    // Accepted before the catalog rules: department 11 with an Asuncion city. xmlgen derived 1.
+    const legacy: InvoiceDraft = {
+      ...draft,
+      receiver: {
+        kind: 'named',
+        isPublicEntity: false,
+        address: { street: 'Avda', houseNumber: '1', cityCode: 1 },
+      },
+      location: { departmentCode: 11 },
+    };
+    const ctx = {
+      ...context('production'),
+      receiver: { ...namedReceiver(context('production')), cityCode: 1, cityDescription: 'X' },
+    };
+
+    const { xml } = await generateInvoiceXml(builder, legacy, ctx, { ...geo, validateGeo: false });
+
+    expect(xml).toContain('<cDepRec>1</cDepRec><dDesDepRec>CAPITAL</dDesDepRec>');
+    expect(xml).toContain('<dDesCiuRec>ASUNCION (DISTRITO)</dDesCiuRec>');
+  });
+
+  it('holds a document whose establishment xmlgen cannot resolve with a clear, deterministic error', async () => {
+    const ctx: InvoiceXmlContext = {
+      ...context('production'),
+      establishment: createEstablishment({
+        code: '001',
+        address: 'Calle Falsa',
+        houseNumber: '123',
+        departmentCode: 1,
+        districtCode: '145',
+        districtDescription: 'CIUDAD DEL ESTE',
+        cityCode: '3383',
+        cityDescription: 'CIUDAD DEL ESTE',
+      }),
+    };
+
+    const signing = { ...geo, validateGeo: false };
+
+    await expect(generateInvoiceXml(builder, draft, ctx, signing)).rejects.toThrow(
+      /^Invalid invoice XML: xmlgen could not build the document: .*departamento/,
+    );
+  });
+
+  it('maps an xmlgen crash on a city missing from its table to an InvoiceXmlError', async () => {
+    const crashing = {
+      buildParaSifen: () =>
+        Promise.reject(
+          new TypeError("Cannot read properties of undefined (reading 'descripcion')"),
+        ),
+    };
+
+    const error = await generateInvoiceXml(crashing, draft, context('production'), geo).catch(
+      (e: unknown) => e,
+    );
+
+    expect(error).toBeInstanceOf(InvoiceXmlError);
+    expect((error as Error).message).toMatch(/not in the xmlgen geographic table/);
+  });
+
+  it('lets any other TypeError from xmlgen propagate unchanged', async () => {
+    const bug = new TypeError("Cannot read properties of undefined (reading 'length')");
+    const crashing = { buildParaSifen: () => Promise.reject(bug) };
+
+    await expect(generateInvoiceXml(crashing, draft, context('production'), geo)).rejects.toBe(bug);
+  });
+
+  it('is lenient with the issuer codes when signing, strict when the draft was validated', async () => {
+    const overridden = {
+      buildParaSifen: async (input: Parameters<typeof builder.buildParaSifen>[0]) =>
+        (await builder.buildParaSifen(input)).replace(
+          '<cCiuEmi>3432</cCiuEmi>',
+          '<cCiuEmi>3383</cCiuEmi>',
+        ),
+    };
+
+    await expect(
+      generateInvoiceXml(overridden, draft, context('production'), { ...geo, validateGeo: false }),
+    ).resolves.toBeDefined();
+    await expect(generateInvoiceXml(overridden, draft, context('production'), geo)).rejects.toThrow(
+      /cCiuEmi/,
+    );
+  });
+
+  it('escapes and unescapes XML text as exact inverses', () => {
+    for (const text of ['A & B', "O'LEARY", '"q"', '<a>', '&amp;', '&lt;&gt;', 'plain ñ']) {
+      expect(unescapeXmlText(escapeText(text))).toBe(text);
+    }
+    expect(escapeText('&amp;')).toBe('&amp;amp;');
+  });
+
+  it('writes the catalog description of the issuer establishment too', async () => {
+    const ctx: InvoiceXmlContext = {
+      ...context('production'),
+      establishment: createEstablishment({
+        code: '001',
+        address: 'Calle Falsa',
+        houseNumber: '123',
+        departmentCode: 18,
+        districtCode: '289',
+        districtDescription: 'LAUREL',
+        cityCode: '6438',
+        cityDescription: 'LAUREL',
+      }),
+    };
+
+    const { xml } = await generateInvoiceXml(builder, draft, ctx, geo);
+
+    expect(xml).toContain('<cDisEmi>289</cDisEmi><dDesDisEmi>LAUREL</dDesDisEmi>');
+    expect(xml).not.toContain('PUERTO ADELA');
+  });
+
+  it('fails instead of emitting codes other than the validated ones (an xmlgen override)', async () => {
+    const overridden = {
+      buildParaSifen: async (input: Parameters<typeof builder.buildParaSifen>[0]) =>
+        (await builder.buildParaSifen(input)).replace(
+          '<cCiuRec>3344</cCiuRec>',
+          '<cCiuRec>1</cCiuRec>',
+        ),
+    };
+
+    await expect(generateInvoiceXml(overridden, draft, context('production'), geo)).rejects.toThrow(
+      /cCiuRec/,
+    );
   });
 });
 

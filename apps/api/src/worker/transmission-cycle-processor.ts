@@ -1,4 +1,6 @@
 import { isValidTenantId } from '@sifen/db';
+import type { Telemetry } from '../modules/telemetry/application/ports/telemetry.port.js';
+import { NOOP_TELEMETRY } from '../modules/telemetry/infrastructure/noop-telemetry.js';
 import type { CycleReport } from '../modules/transmission/application/transmission-cycle.js';
 import type { TenantRunLock } from './tenant-run-lock.js';
 
@@ -18,6 +20,8 @@ export interface TransmissionCycleProcessorDeps {
   readonly now?: () => Date;
   /** The held-document id list is logged at most this often per tenant (default 10 minutes). */
   readonly heldListEveryMs?: number;
+  /** Metrics and spans (HU-E14-01); a no-op by default, so the alert log stays the baseline signal. */
+  readonly telemetry?: Telemetry;
 }
 
 export type CycleJobResult = { readonly status: 'done' | 'skipped' };
@@ -33,9 +37,21 @@ export class TransmissionCycleProcessor {
   constructor(private readonly deps: TransmissionCycleProcessorDeps) {}
 
   async process(data: unknown): Promise<CycleJobResult> {
-    const tenantId = (data as { tenantId?: unknown } | null)?.tenantId;
+    const job = data as { tenantId?: unknown; traceparent?: unknown } | null;
+    const tenantId = job?.tenantId;
     if (!isValidTenantId(tenantId)) throw new Error('invalid tenant id in job data');
+    // A producer that injected a W3C traceparent continues its trace; otherwise each cycle is a root.
+    const traceparent = typeof job?.traceparent === 'string' ? job.traceparent : undefined;
+    const telemetry = this.deps.telemetry ?? NOOP_TELEMETRY;
+    return telemetry.withSpan(
+      'transmission.cycle',
+      { 'tenant.id': tenantId },
+      () => this.runCycle(tenantId),
+      traceparent,
+    );
+  }
 
+  private async runCycle(tenantId: string): Promise<CycleJobResult> {
     const lease = await this.deps.lock.acquire(tenantId);
     if (!lease) {
       this.deps.logger.info(`transmission cycle skipped, tenant ${tenantId} already running`);
@@ -58,13 +74,22 @@ export class TransmissionCycleProcessor {
     logger.info(
       `transmission cycle tenant=${tenantId} signed=${String(report.signed)} ` +
         `skipped=${String(report.signSkipped)} assembled=${String(report.assembled)} ` +
-        `sent=${String(report.sent.length)} polled=${String(report.polled.length)} ` +
+        `sent=${String(report.sent.length)} deferred=${String(report.sendDeferred)} polled=${String(report.polled.length)} ` +
         `recovered=${String(report.recovered.length)} swept=${String(report.sweptSending)}`,
     );
     if (report.aborted) {
       logger.warn(
         `tenant ${tenantId} cycle lost the run lock and stopped early; the next run resumes`,
       );
+    }
+    if (report.rucBlocks > 0) {
+      // The alert: the tenant stops sending until the pause ends, then its documents go out again.
+      logger.error(
+        `tenant ${tenantId} RUC blocked by SIFEN: sends paused until ${report.sendPausedUntil?.toISOString() ?? 'unknown'}`,
+      );
+      this.deps.telemetry?.increment('sifen_ruc_blocks_total', report.rucBlocks);
+    } else if (report.sendPausedUntil) {
+      logger.warn(`tenant ${tenantId} sends paused until ${report.sendPausedUntil.toISOString()}`);
     }
     if (report.held.length > 0) logger.warn(this.heldMessage(tenantId, report.held));
     if (report.stalePending > 0) {

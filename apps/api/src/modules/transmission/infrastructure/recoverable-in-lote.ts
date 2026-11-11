@@ -4,9 +4,10 @@ import { documents } from '@sifen/db';
 /**
  * SQL condition: the recovery of lote `loteId` still owns the document (`documents` must be in the
  * query). A document the recovery queued again is owned by nobody while it waits for its new lote
- * (`resent_at` after that lote was created) and by the newer lote once it carries it. Without this
+ * (the resend left that lote behind: `resent_after_seq` at or above its `seq`) and by the newer lote once it carries it. Without this
  * the old lote would keep asking about, or deciding for, a document that has moved on.
- * Lote creation and `resent_at` both come from the database clock.
+ * Ordering is the lote sequence (`lotes.seq`) and the resend watermark (`documents.resent_after_seq`),
+ * never the database clock, which may step back.
  */
 export function recoverableInLote(loteId: SQLWrapper | string): SQL {
   return sql`(
@@ -17,11 +18,11 @@ export function recoverableInLote(loteId: SQLWrapper | string): SQL {
       JOIN lotes l1 ON l1.id = ${loteId}
       WHERE ld2.document_id = ${documents.id}
         AND l2.tenant_id = l1.tenant_id
-        AND (l2.created_at, l2.id) > (l1.created_at, l1.id)
+        AND l2.seq > l1.seq
     )
     AND (
-      ${documents.resentAt} IS NULL
-      OR ${documents.resentAt} <= (SELECT l3.created_at FROM lotes l3 WHERE l3.id = ${loteId})
+      ${documents.resentAfterSeq} IS NULL
+      OR ${documents.resentAfterSeq} < (SELECT l3.seq FROM lotes l3 WHERE l3.id = ${loteId})
     )
   )`;
 }

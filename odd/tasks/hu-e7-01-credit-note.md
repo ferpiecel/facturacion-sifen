@@ -5,7 +5,7 @@
 - TDD: strict (source: `openspec/config.yaml`, `strict_tdd: true`) · runner: Vitest (`pnpm --filter @sifen/api exec vitest run`, thresholds 85%)
 - Delivery: `ask-on-risk`, chain `stacked-to-main`; each PR about 400 changed lines or less (advisory).
 - Size: **XXL, 8 points** (see "Sizing"). Target 60M raw tokens, alarm 100M, hard stop 150M.
-- Status: planned, nothing implemented. No source change has been made. Code starts only after the
+- Status: slice A (ADR-0019 and TIPS spike) in review; slice B (migration) in a draft PR. No emission code changed. Code starts only after the
   prerequisites in "Ordering against in-flight features" have merged.
 
 ## Objective
@@ -84,7 +84,7 @@ examples). All citations are to `docs/referencia/dnit/`.
 | Test battery: NCE 5 approved + 5 rejected on the sync web service, same on the async one; 1 NCE number voiding | Guía de Pruebas e-Kuatia 2026-02, sections 4.2 and 4.3 | T11 (blocked on environment) |
 
 Gaps in the sources, to confirm in T0 and not assumed: whether SIFEN accepts an NCE that references an FE
-in `approved_with_observations`; whether a rejected NCE counts in 2417 (our rule: it does not); whether the
+in `approved_with_observations`; whether SIFEN counts a rejected NCE in 2417 (our rule, D5: it does count, because it is resent with the same CDC; only `cancelled` and `number_voided` release credit); whether the
 timbrado of the NCE is validated per document type (the platform resolves one timbrado per tenant,
 `drizzle-acceptance-unit-of-work.ts`); the exact content of Gráfica N° 10 (the MT page is an image).
 
@@ -165,7 +165,7 @@ an FE not issued by the platform; foreign currency and exchange rate (`multi-cur
 | D2 | The NCE request carries `associatedCdc`, `reasonCode` (1..8), items and `roundingPyg`; establishment and expedition point as the FE | Minimal surface; mirrors the API's flat naming |
 | D3 | The receiver is **not** in the request; the platform copies it from the stored payload of the FE | 2441 is satisfied by construction and the integrator cannot send inconsistent data. Cost: depends on the FE payload shape (hence after geo slice A). **Open**: accept an optional receiver and compare. |
 | D4 | Association is stored in a new nullable column `documents.associated_cdc char(44)` plus an index on (`tenant_id`, `environment`, `associated_cdc`) and a CHECK `^[0-9]{44}$`; that it must belong to an FE (`01...`) is a domain rule (2414), not a database one | Cheap and queryable for the sum; the `documents` table already has RLS. **Open**: a link table is more general for NDE and AFE but adds RLS surface; the NDE shares the same shape so the column is likely enough. |
-| D5 | The sum is computed in one query under `SELECT ... FOR UPDATE` on the FE row, summing `total_amount` of documents with that `associated_cdc`, type 5 and status not in (`cancelled`, `number_voided`) | Serializes concurrent NCEs on the same FE. **Decided**: only `number_voided` and `cancelled` release credit; `rejected` and `corrected` still count because they are resent with the same CDC (plan v1.1 sec. 8.0). |
+| D5 | The sum is computed in one query under `SELECT ... FOR NO KEY UPDATE` on the FE row (ADR-0019: serializes NCEs without blocking child FK inserts or the `FOR UPDATE` of createLote), summing `total_amount` of documents with that `associated_cdc`, type 5 and status not in (`cancelled`, `number_voided`) | Serializes concurrent NCEs on the same FE. **Decided**: only `number_voided` and `cancelled` release credit; `rejected` and `corrected` still count because they are resent with the same CDC (plan v1.1 sec. 8.0). |
 | D6 | The FE must be `approved` or `approved_with_observations` (**open**: the second, see T0) and not `cancelled` | MT 11.1.3: the NCE needs an FE already approved by SIFEN; 2403 and 2404 |
 | D7 | Rules are named like the FE ones (`rule` plus `sifenCode`): `credit-note-sum-exceeds-invoice` (2417), `credit-note-currency-mismatch` (2438), `associated-document-not-found` (2403), `associated-document-cancelled` (2404), `associated-document-not-approved` (the FE exists but SIFEN has not approved it yet; distinct from 2403, no SIFEN code), `associated-document-not-invoice` (2414), `credit-note-unnamed-receiver` (1331) | Same 422 problem format as `validationProblem` |
 | D8 | Generalize, do not fork: `INVOICE_DOCUMENT_TYPE` and the `'01'` in `generateInvoiceXml` become a per-document type input; `mapInvoiceToXmlInput` gets a credit-note branch that omits `factura`, `condicion` and sets the `notaCreditoDebito` and `documentoAsociado` blocks | Avoids a second pipeline; changes are guarded by the byte-identical FE test |
@@ -176,16 +176,16 @@ an FE not issued by the platform; foreign currency and exchange rate (`multi-cur
 ## Tasks
 
 - [ ] T0 Research and evidence: settle the gaps listed in "Normative basis"; extract the NCE KuDE content from the MT (Gráfica N° 10); confirm with the Prevalidador or test environment an NCE without D011 and E600, and a reference to an FE with observations. **Blocked on test environment access and a certificate.** The sub-items about internal state (D5) are not blocked.
-- [ ] T1 ADR-0019: NCE contract, association storage, sum concurrency, receiver derivation; resolve D1, D3, D4, D5, D6.
-- [ ] T2 TIPS spike (tests only, offline): build a type 5 document with `notaCreditoDebito` and `documentoAsociado`, validate against `siRecepDE`, assert the absent groups, record the `tipoTransaccion` behavior (D9).
-- [ ] T3 Migration `0046` (or next free): `documents.associated_cdc` with CHECK and index, rollback script, Drizzle schema, RLS coverage test stays green (no new table), `db-postgres` run.
-- [ ] T4 Domain: `credit-note-draft` types, reasons table, `validateCreditNoteDraft` (items and rounding reuse the invoice rules, unnamed receiver 1331), pure `creditNoteSumRule` and currency rule over `Decimal`. Tests first.
-- [ ] T5 Request contract: `type` discriminator, NCE schema, mapping to the use case input, backward compatibility test with an old FE body, OpenAPI regeneration.
-- [ ] T6 Application and persistence: `acceptCreditNote` use case and `AcceptanceUnit` port methods (`findAssociatedInvoice` with lock, `sumCreditNotes`), Drizzle implementation, numbering type 5, CDC `05`, audit action, idempotency, all checks before `nextNumber`. Concurrency test (two simultaneous NCEs).
-- [ ] T7 Signing path: signing store dispatches on type, builds the NCE context (reason, associated CDC, receiver from the FE), `invoice-xml.ts` credit-note branch (D8), CDC type from input, XSD check, QR unchanged. FE byte-identical test.
-- [ ] T8 KuDE: reader supports `iTiDE` 5, model and renderer title and associated document block, `gCamCond` optional; golden text assertions as the FE ones.
-- [ ] T9 Transmission and events: test that NCE documents form their own lotes and are sent; webhook payloads and portal listing show `NCE`; no code change expected, confirm.
-- [ ] T10 Docs: `docs/integracion/emision.md` section on NCE (contract, reasons, errors 2417 and 2438, innominado limit), `docs/api/openapi.json`, backlog and roadmap status.
+- [x] T1 ADR-0019 (done in PR A, `docs/adr/0019-nota-de-credito-asociada-a-una-factura.md`; also closes D9 and P4): NCE contract, association storage, sum concurrency, receiver derivation; resolve D1, D3, D4, D5, D6.
+- [x] T2 TIPS spike (done in PR A, `packages/sifen-tips/test/nce-type5.e2e.spec.ts`; the type 5 XML validates against siRecepDE) (tests only, offline): build a type 5 document with `notaCreditoDebito` and `documentoAsociado`, validate against `siRecepDE`, assert the absent groups, record the `tipoTransaccion` behavior (D9).
+- [x] T3 (done in PR B: migration `0046_documents_associated_cdc`, with a separate immutability trigger and extra CHECKs) Migration `0046` (or next free): `documents.associated_cdc` with CHECK and index, rollback script, Drizzle schema, RLS coverage test stays green (no new table), `db-postgres` run.
+- [x] T4 (PR C1, `credit-note-draft.ts`; takes the FE facts as input, lookups stay in slice D) Domain: `credit-note-draft` types, reasons table, `validateCreditNoteDraft` (items and rounding reuse the invoice rules, unnamed receiver 1331), pure `creditNoteSumRule` and currency rule over `Decimal`. Tests first.
+- [x] T5 (PR C2, `credit-note.request.ts`; the controller answers 422 `document-type-not-supported` until slice D) Request contract: `type` discriminator, NCE schema, mapping to the use case input, backward compatibility test with an old FE body, OpenAPI regeneration.
+- [x] T6 (PRs D1 and D2: use case, port methods, Drizzle unit, `associated_cdc`, controller behind a gate, signing store hold) Application and persistence: `acceptCreditNote` use case and `AcceptanceUnit` port methods (`findAssociatedInvoice` with lock, `sumCreditNotes`), Drizzle implementation, numbering type 5, CDC `05`, audit action, idempotency, all checks before `nextNumber`. Concurrency test (two simultaneous NCEs).
+- [x] T7 (PR E: `ctx.creditNote` in `invoice-xml.ts`, store dispatch by type, gate removed; QR unchanged) Signing path: signing store dispatches on type, builds the NCE context (reason, associated CDC, receiver from the FE), `invoice-xml.ts` credit-note branch (D8), CDC type from input, XSD check, QR unchanged. FE byte-identical test.
+- [x] T8 (PR F: reader, model and renderer for iTiDE 5; the FE PDF hash is pinned) KuDE: reader supports `iTiDE` 5, model and renderer title and associated document block, `gCamCond` optional; golden text assertions as the FE ones.
+- [x] T9 partly (PR F). Covered: `LoteBuilder` keeps a type 05 document out of an FE lote and gives NCE a lote of their own (`lote-builder.spec.ts`); no code change was needed. NOT covered by a test specific to type 5: webhook payloads and the portal listing (`NCE: 5` is already mapped in `portal-documents/domain/document-type.ts`), nor an end-to-end send of an NCE lote (T11, with the simulator or the test environment).
+- [x] T10 (PR F: `docs/integracion/emision.md`, OpenAPI regenerated) Docs: `docs/integracion/emision.md` section on NCE (contract, reasons, errors 2417 and 2438, innominado limit), `docs/api/openapi.json`, backlog and roadmap status.
 - [ ] T11 End to end and battery: FE accepted and approved (simulator) then partial NCE (202, signed); second NCE over the limit (422 rule 2417, no number consumed); then the Guía de Pruebas battery of 5 approved and 5 rejected NCE on both web services. **The battery is blocked on environment access**; the "rejected" cases need a dev/test-only path that bypasses local pre-checks (decided in ADR-0019).
 
 ## PR slices (chained, each about 400 changed lines or less)
@@ -250,7 +250,7 @@ Decided (the review found no product decision left):
 - D5 only `number_voided` and `cancelled` release credit in the 2417 sum.
 - Currency is PYG-only; 2438 is kept as an unreachable guard.
 
-Open, technical (tech lead), all closed in ADR-0019, T0 or T2: D1 endpoint shape, D3 receiver derivation versus accepting it, D4 association storage (column versus link table), D6 whether an FE `approved_with_observations` can be credited, D9 `tipoTransaccion` handling, and P4 the dev/test-only path to produce the battery's five rejected NCE.
+Closed in ADR-0019 (technical, tech lead): D1 same endpoint with a `type` discriminator, D3 receiver copied from the FE, D4 `associated_cdc` column, D6 `approved` and `approved_with_observations` can be credited (confirm in T0), D9 `tipoTransaccion` omitted (the spike showed the library does not require it for type 5), P4 CLI-only path guarded by `NODE_ENV` and test environment. Previously open: D1 endpoint shape, D3 receiver derivation versus accepting it, D4 association storage (column versus link table), D6 whether an FE `approved_with_observations` can be credited, D9 `tipoTransaccion` handling, and P4 the dev/test-only path to produce the battery's five rejected NCE.
 
 ## Progress and next step
 
@@ -264,3 +264,89 @@ Open, technical (tech lead), all closed in ADR-0019, T0 or T2: D1 endpoint shape
 
 - None run yet for implementation; this document changes no source. Pending: Prevalidador confirmation of the
   NCE structure (T0), the TIPS spike (T2) and the Guía de Pruebas battery (T11).
+
+### Slice B evidence (2026-10-14)
+
+- Route: T3 inline by the writer (schema, migration, rollback, one test block).
+- RED: the 5 new `associated CDC` tests in `packages/db/test/documents.spec.ts` failed before the migration
+  (column missing: `expected undefined to be null`, syntax error on the unknown column, index not found).
+- GREEN: `pnpm --filter @sifen/db exec vitest run` on PGlite: 35 files, 419 passed, 20 skipped (the skips are
+  the Postgres-only tests); lint, typecheck and `format:check` green.
+- Shape: nullable `char(44)`; CHECKs `^[0-9]{44}$`, not equal to the own CDC, and never on an FE (type 1);
+  partial index (`tenant_id`, `environment`, `associated_cdc`); trigger `documents_associated_cdc_guard`
+  keeps the value immutable without rewriting `documents_guard` (0034). No new table, so the RLS coverage test
+  needs no change and the existing `documents` policy covers the column.
+- Covered only in the `db-postgres` job: the same suite on a real PostgreSQL 16 (`pnpm --filter @sifen/db
+  test:postgres`, Docker, not run here). Rollback `rollback/0046_documents_associated_cdc.down.sql` is manual
+  like the others and has no automated test.
+- "Type 5 requires an association" (H001, 2400) is enforced by the domain, not by a CHECK: the column stays nullable because
+  types 7 and 8 may or may not carry one.
+### Slice A evidence (2026-10-14)
+
+- Route: T1 and T2 inline by the writer (one ADR, one test file); trigger evidence: 2 files, no mapping needed.
+- T2 RED/GREEN: the first run of the spike test failed 2 of 5 (regex of `gOpeCom` ignored `dDesTImp`; and the
+  plan's assumption that the validator rejects a missing `tipoTransaccion` for type 5 was wrong: it builds).
+  After correcting the assertions to the observed behaviour, 5/5 pass: the signed XML with QR validates against
+  `siRecepDE` (`valid: true`, no errors), carries `iTiDE` 5, `gCamNCDE`, `gCamDEAsoc/dCdCDERef`, `gOpeCom`, and
+  has no `gCamCond`, `gCamFE`, `iTipTra`, `gTransp`.
+- `pnpm --filter @sifen/sifen-tips` test (22 passed), lint and typecheck green.
+
+### Slice C evidence (2026-10-14)
+
+- Route: T4 and T5 inline by the writer (two new files plus small edits). `accept-invoice.ts`, `invoice-xml.ts`,
+  the KuDE and the signing store are untouched.
+- RED: both new specs failed first with "Cannot find module"; the e2e NCE case failed before the controller dispatched
+  on `type`; the OpenAPI spec failed on the missing `CreateCreditNoteRequest` and `oneOf`.
+- The FE schema takes `type` as optional with no default, so an old body parses to the same value (same hash and payload).
+- 2439 is unreachable by construction (lookup per tenant, one issuer per tenant): a foreign FE is "not found" (2403).
+- Slice D must make `drizzle-signing-store` re-parse the stored payload by document type (`parseDocumentRequest`),
+  or an NCE payload fails with `SigningDataIncompleteError`. Slice D also owns reading `type: "FE"` payloads.
+
+### Slice D evidence (2026-10-15)
+
+- Route: T6 inline by the writer, in two PRs (D1 use case and persistence; D2 controller, module gate, signing hold).
+- RED: `drizzle-credit-note-acceptance.spec.ts` failed first with "Cannot find module" (no use case); the e2e
+  `credit notes enabled` cases answered 422 `document-type-not-supported`; the signing store case failed on the
+  missing `DocumentTypeNotSignableError`. The transmission-cycle list was extended together with the set (no separate RED).
+- Gate decision: the API must not accept an NCE the worker cannot sign (XML is slice E). `CREDIT_NOTES_ENABLED` is
+  a provider token fixed to `false` in `EmissionModule`; the controller answers 422 `document-type-not-supported`
+  while it is off, and the e2e suite turns it on with `overrideProvider`. Slice E flips it and removes the gate.
+  Defence in depth: if an NCE row ever reaches the worker, `drizzle-signing-store` throws
+  `DocumentTypeNotSignableError` and the cycle holds it as `signing:DocumentTypeNotSignableError` (no retry loop).
+- Concurrency: `findAssociatedInvoice` takes `FOR NO KEY UPDATE` on the FE row before `sumCreditNotes`, so a second NCE
+  waits and then sees the first. PGlite is single-connection and serializes transactions, so the race test proves
+  the logic (exactly one of two 600k credits on a 1M FE is accepted, number 1, no gap) but not the row lock itself;
+  that needs a real Postgres (not run here).
+- Slice E must replace the gate and the hold: re-parse the stored payload by document type and build the NCE XML.
+
+### Slice E evidence (2026-10-15)
+
+- Route: T7 inline by the writer. The NCE reuses the FE pipeline: `InvoiceXmlContext.creditNote` (reason and associated
+  CDC) switches `mapInvoiceToXmlInput` to type 5 (reason and association instead of `factura` and `condicion`, D8)
+  and the CDC cross-check to `05`; the store builds the draft from the NCE items plus the FE's receiver, operation
+  and location (D3). `tipoTransaccion` stays as is: xmlgen never emits `iTipTra` for type 5 (D9).
+- RED: `invoice-xml.credit-note.spec.ts` (type stayed 1, CDC `01`, no reason check) and `credit-note-signing.spec.ts`
+  (worker path threw `DocumentTypeNotSignableError`); the e2e NCE cases answered `document-type-not-supported` while the
+  gate was on. GREEN: the NCE XML validates against siRecepDE, signs with QR and is stored `signed`; the existing
+  golden FE tests are unchanged.
+- The `CREDIT_NOTES_ENABLED` gate is gone: NCE is live end to end. Types other than 1 and 5 are still held with
+  `DocumentTypeNotSignableError`.
+- KuDE: generated on demand from the signed XML (`GET /v1/documents/{id}/kude`), outside the signing and transmission
+  cycle, so its `iTiDE: unsupported` error for an NCE does not block either. Slice F adds the NCE KuDE.
+- Review fixes on PR E: the KuDE of an NCE answers 422 (`KudeDocumentTypeUnsupportedError`, warn level) instead of a
+  500; hold tests for a missing FE, an unreadable FE payload and an invalid NCE payload; 1331 re-checked in the XML
+  generator. FE byte identity is held by the unchanged `invoice-xml.golden.spec.ts` hashes.
+
+### Slice F evidence and close (2026-10-16)
+
+- Route: T8 to T10 inline by the writer (one PR, about 400 lines with tests).
+- KuDE content (T0 uncertainty): MT v150 13.3 fixes the title "KuDE de Nota de Crédito Electrónica"; Gráfica N° 10 (the NCE
+  layout) is an image the text extraction cannot read, and 13.5 calls the graphics "referential". The NT notes add nothing for
+  the NCE KuDE. The layout follows the FE one, minus condition and transaction type, plus the reason (E402), the associated
+  FE number and its CDC in groups of four. Confirm it against Gráfica N° 10 and the Prevalidador before homologation.
+- RED: the NCE KuDE specs failed (iTiDE 5 unsupported, no title or reason); the FE PDF is pinned by a SHA-256 golden measured
+  on `main` before the change and unchanged after. `KudeDocumentTypeUnsupportedError` stays for types 6, 7 and 8 (422, warn).
+- Closing state: T1 to T10 done and verified in CI-equivalent runs per PR. **T0 and T11 stay open**: Prevalidador
+  confirmation (FE with observations as associated, NCE without D011/E600, the timbrado per type, Gráfica N° 10) and the
+  Guía de Pruebas battery (5 approved and 5 rejected NCE on both services, plus the dev-only path of ADR-0019 P4) need the
+  test environment and a certificate.

@@ -11,8 +11,11 @@ import {
   type DatabaseHandle,
 } from '@sifen/db';
 import { eq } from 'drizzle-orm';
-import { signedInvoiceWithQr } from './support/signed-invoice.js';
-import { pdfText } from '../src/modules/emission/infrastructure/kude/pdf-inspect.test-helper.js';
+import { remissionNote, selfInvoice, signedInvoiceWithQr } from './support/signed-invoice.js';
+import {
+  pageSizes,
+  pdfText,
+} from '../src/modules/emission/infrastructure/kude/pdf-inspect.test-helper.js';
 import { Logger } from '@nestjs/common';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTenant, issueApiKey } from '../src/cli/commands.js';
@@ -47,7 +50,7 @@ const BODY = {
     },
   ],
   roundingPyg: 0,
-  location: { departmentCode: 11 },
+  location: { departmentCode: 1 },
 };
 
 /** Spec: HU-E10-01. `GET /v1/documents/{id}/kude` through the real pipeline. */
@@ -160,6 +163,32 @@ describe('GET /v1/documents/{id}/kude (e2e)', () => {
     );
   });
 
+  it.each([
+    ['ticket-80', 80, 'kude-001-002-0000001-ticket-80.pdf'],
+    ['ticket-58', 58, 'kude-001-002-0000001-ticket-58.pdf'],
+  ])('returns the %s paper roll KuDE when `format` asks for it', async (format, mm, filename) => {
+    const { document_id: id } = await create(writer);
+    await sign(id);
+
+    const response = await get(`/v1/documents/${id}/kude?format=${format}`, reader);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-disposition']).toBe(`inline; filename="${filename}"`);
+    const [page] = await pageSizes(new Uint8Array(response.rawPayload));
+    expect(page.w).toBeCloseTo((mm * 72) / 25.4, 1);
+  });
+
+  it('keeps the letter KuDE for `format=letter` and answers 400 for an unknown format', async () => {
+    const { document_id: id } = await create(writer);
+    await sign(id);
+
+    const letter = await get(`/v1/documents/${id}/kude?format=letter`, reader);
+    expect(letter.headers['content-disposition']).toBe(
+      'inline; filename="kude-001-002-0000001.pdf"',
+    );
+    expect((await get(`/v1/documents/${id}/kude?format=a5`, reader)).statusCode).toBe(400);
+  });
+
   it('answers 409 while the document has no signed XML', async () => {
     const { document_id: id } = await create(writer);
 
@@ -189,6 +218,114 @@ describe('GET /v1/documents/{id}/kude (e2e)', () => {
     expect((await get('/v1/documents/nope/kude', reader)).statusCode).toBe(400);
     expect((await get(`/v1/documents/${id}/kude`, null)).statusCode).toBe(401);
     expect((await get(`/v1/documents/${id}/kude`, writeOnly)).statusCode).toBe(403);
+  });
+
+  const creditNoteXml = (cdc: string) =>
+    signedInvoiceWithQr((input) => {
+      const data = Object.fromEntries(
+        Object.entries(input.data).filter(([key]) => key !== 'factura' && key !== 'condicion'),
+      );
+      return {
+        ...input,
+        data: {
+          ...data,
+          tipoDocumento: 5,
+          notaCreditoDebito: { motivo: 2 },
+          documentoAsociado: { formato: 1, cdc },
+        },
+      };
+    });
+
+  it('returns the KuDE PDF of a signed NCE with its title, reason and associated invoice', async () => {
+    const { document_id: id, cdc } = await create(writer);
+    await handle.db
+      .update(documents)
+      .set({ status: 'signed', signedXml: await creditNoteXml(cdc), signedAt: new Date() })
+      .where(eq(documents.id, id));
+
+    const response = await get(`/v1/documents/${id}/kude`, reader);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toBe('application/pdf');
+    const text = await pdfText(new Uint8Array(response.rawPayload));
+    expect(text).toContain('KuDE de Nota de Crédito Electrónica');
+    expect(text).toContain('Motivo de Emisión: Devolución');
+    expect(text).toContain('Documento Asociado: Factura Electrónica Nº');
+  });
+
+  it('returns the KuDE PDF of a signed NDE with its own title', async () => {
+    const { document_id: id, cdc } = await create(writer);
+    const nde = (await creditNoteXml(cdc)).replace('<iTiDE>5</iTiDE>', '<iTiDE>6</iTiDE>');
+    await handle.db
+      .update(documents)
+      .set({ status: 'signed', signedXml: nde, signedAt: new Date() })
+      .where(eq(documents.id, id));
+
+    const response = await get(`/v1/documents/${id}/kude`, reader);
+
+    expect(response.statusCode).toBe(200);
+    const text = await pdfText(new Uint8Array(response.rawPayload));
+    expect(text).toContain('KuDE de Nota de Débito Electrónica');
+    expect(text).toContain('Motivo de Emisión: Devolución');
+  });
+
+  it('returns the KuDE PDF of a signed AFE with its own title, seller and constancia', async () => {
+    const { document_id: id } = await create(writer);
+    await handle.db
+      .update(documents)
+      .set({
+        status: 'signed',
+        signedXml: await signedInvoiceWithQr(selfInvoice),
+        signedAt: new Date(),
+      })
+      .where(eq(documents.id, id));
+
+    const response = await get(`/v1/documents/${id}/kude`, reader);
+
+    expect(response.statusCode).toBe(200);
+    const text = await pdfText(new Uint8Array(response.rawPayload));
+    expect(text).toContain('KuDE de Autofactura Electrónica');
+    expect(text).toContain('Vendedor: Juan Perez');
+    expect(text).toContain('Constancia: Constancia de no ser contribuyente Nº 12345678901');
+  });
+
+  it('returns the KuDE PDF of a signed NRE with its own title and the transport', async () => {
+    const { document_id: id } = await create(writer);
+    await handle.db
+      .update(documents)
+      .set({
+        status: 'signed',
+        signedXml: await signedInvoiceWithQr(remissionNote),
+        signedAt: new Date(),
+      })
+      .where(eq(documents.id, id));
+
+    const response = await get(`/v1/documents/${id}/kude`, reader);
+
+    expect(response.statusCode).toBe(200);
+    const text = await pdfText(new Uint8Array(response.rawPayload));
+    expect(text).toContain('KuDE de Nota de Remisión Electrónica');
+    expect(text).toContain('Motivo del traslado: Traslado por ventas');
+    expect(text).toContain('Transportista: Transportes SA');
+  });
+
+  it('answers a clear 422, logged below error level, for a signed type with no KuDE yet (a retention)', async () => {
+    const errors = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const { document_id: id, cdc } = await create(writer);
+    const afe = (await creditNoteXml(cdc)).replace('<iTiDE>5</iTiDE>', '<iTiDE>8</iTiDE>');
+    await handle.db
+      .update(documents)
+      .set({ status: 'signed', signedXml: afe, signedAt: new Date() })
+      .where(eq(documents.id, id));
+
+    const response = await get(`/v1/documents/${id}/kude`, reader);
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json<{ message: string }>().message).toMatch(
+      /not available for this document type/i,
+    );
+    expect(errors).not.toHaveBeenCalled();
+    errors.mockRestore();
   });
 
   it('answers a sanitized 500 and logs no XML when the stored XML cannot be printed', async () => {

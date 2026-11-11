@@ -1,4 +1,7 @@
 import { DEPARTMENTS } from '../../fiscal-config/domain/department.js';
+import type { GeoCatalog } from '../../geo/domain/geo-catalog.js';
+import { Decimal } from './decimal.js';
+import { amount, fitsAmount, parseAmount } from './invoice-totals.js';
 
 /** iTiOpe (D202): 1=B2B, 2=B2C, 3=B2G, 4=B2F. */
 export type OperationType = 'B2B' | 'B2C' | 'B2G' | 'B2F';
@@ -9,8 +12,13 @@ export interface DraftReceiverAddress {
   street: string;
   /** dNumCasRec (D218): mandatory when the address is informed. */
   houseNumber?: string;
+  /** cDisRec (D221) and dDesDisRec (D222): optional, informed together. */
+  districtCode?: number;
+  districtDescription?: string;
   /** cCiuRec (D223): mandatory when the address is informed, unless B2F. */
   cityCode?: number;
+  /** dDesCiuRec (D224): informed with the city. */
+  cityDescription?: string;
 }
 
 export type DraftReceiver =
@@ -20,8 +28,9 @@ export type DraftReceiver =
   | { kind: 'unnamed' };
 
 export interface DraftItem {
+  /** Up to 10 integer and 8 decimal digits (NT 023). */
   quantity: number;
-  /** Unit price in PYG (integer). */
+  /** Unit price in PYG: up to 15 integer and 8 decimal digits. */
   unitPrice: number;
   vatRate: 0 | 5 | 10;
 }
@@ -30,7 +39,7 @@ export interface InvoiceDraft {
   receiver: DraftReceiver;
   operationType: OperationType;
   items: DraftItem[];
-  /** dRedon (F013): rounding discounted from the operation total, in PYG. */
+  /** dRedon (F013): rounding discounted from the operation total, in PYG (0 up to 49.9999). */
   roundingPyg: number;
   /** cDepRec (D219): the receiver department; mandatory with an address, unless B2F. */
   location: { departmentCode?: number };
@@ -39,6 +48,19 @@ export interface InvoiceDraft {
 export interface ValidationConfig {
   /** Innominado limit in PYG (NT 024 sets 7,000,000; earlier MT v150 text said 60,000,000). */
   unnamedThresholdPyg?: number;
+  /**
+   * HU-E5-09: accept decimal prices, quantities and rounding. Off by default (PYG integers, as
+   * before) until the XML, QR and KuDE handle decimals (T5 to T7); the tests run with it on.
+   */
+  allowDecimals?: boolean;
+  /** DNIT geographic table (HU-E5-08): used to check the receiver and to write the XML text. */
+  geoCatalog?: GeoCatalog;
+  /**
+   * Reject receiver geography that does not match `geoCatalog` (1325, 1329). Off where the
+   * document was accepted before these rules existed: it must still sign, and the XML carries the
+   * catalog text either way.
+   */
+  validateGeo?: boolean;
 }
 
 export interface ValidationError {
@@ -49,22 +71,27 @@ export interface ValidationError {
 }
 
 export const DEFAULT_UNNAMED_THRESHOLD_PYG = 7_000_000;
-const ROUNDING_STEP = 50;
+const ROUNDING_STEP = amount('50');
+const DEFAULT_THRESHOLD_AMOUNT = amount(String(DEFAULT_UNNAMED_THRESHOLD_PYG));
+const ROUNDING_DECIMALS = 4;
+const QUANTITY_INTEGER_DIGITS = 10;
+const DIGITS = { integer: 15, decimals: 8 };
 /** Largest PYG amount the numeric(23,8) columns hold: 15 integer digits. */
 export const MAX_AMOUNT_PYG = 999_999_999_999_999;
-const withinRange = (amount: number) => Math.abs(amount) <= MAX_AMOUNT_PYG;
 
 /**
- * Pure pre-SIFEN validation: collects every violation. PYG amounts are integer-only and
- * rounding follows MT v150 group F (SEDECO Res. 347/2014): the total is rounded down to a
- * multiple of 50 Gs (107.437 -> 107.400), so dRedon must be in 0..49.
+ * Pure pre-SIFEN validation: collects every violation. Amounts are exact decimals (ADR-0018):
+ * up to 15 integer and 8 decimal digits, no `number` arithmetic. Rounding follows MT v150
+ * group F (SEDECO Res. 347/2014): the total is rounded down to a multiple of 50 Gs
+ * (107.437 -> 107.400), so dRedon must be in 0..49.9999.
  */
 export function validateInvoiceDraft(
   draft: InvoiceDraft,
   config: ValidationConfig,
 ): ValidationError[] {
   const errors: ValidationError[] = [];
-  let total = 0;
+  let total = Decimal.zero();
+  const state = { priceOverflow: false };
 
   if (draft.items.length === 0) {
     errors.push({
@@ -76,12 +103,20 @@ export function validateInvoiceDraft(
 
   draft.items.forEach((item, i) => {
     const path = `items[${String(i)}]`;
-    const validLine = item.quantity > 0 && item.unitPrice >= 0;
+    const quantity = parseAmount(item.quantity);
+    const unitPrice = parseAmount(item.unitPrice);
+    // A non-finite number is "not positive" (legacy rule); any other unreadable one is imprecise.
     if (!(item.quantity > 0)) {
       errors.push({
         field: `${path}.quantity`,
         rule: 'quantity-positive',
         message: 'Quantity must be greater than zero',
+      });
+    } else if (!quantity?.fitsIn(QUANTITY_INTEGER_DIGITS, DIGITS.decimals)) {
+      errors.push({
+        field: `${path}.quantity`,
+        rule: 'quantity-precision',
+        message: 'Quantity allows up to 10 integer and 8 decimal digits',
       });
     }
     // Zero is allowed (free-of-charge items); negatives are not.
@@ -91,6 +126,21 @@ export function validateInvoiceDraft(
         rule: 'unit-price-non-negative',
         message: 'Unit price must not be negative',
       });
+    } else if (!unitPrice?.fitsIn(DIGITS.integer, DIGITS.decimals)) {
+      errors.push({
+        field: `${path}.unitPrice`,
+        rule: 'unit-price-precision',
+        message: 'Unit price allows up to 15 integer and 8 decimal digits',
+      });
+      // Keep the pre-decimal contract: a price beyond the column is also an amount-range error.
+      if (Math.abs(item.unitPrice) > MAX_AMOUNT_PYG) {
+        state.priceOverflow = true;
+        errors.push({
+          field: `${path}.total`,
+          rule: 'amount-range',
+          message: `Item total must not exceed ${String(MAX_AMOUNT_PYG)} Gs`,
+        });
+      }
     }
     if (![0, 5, 10].includes(item.vatRate)) {
       errors.push({
@@ -99,57 +149,71 @@ export function validateInvoiceDraft(
         message: 'VAT rate must be 0, 5 or 10',
       });
     }
-    if (!Number.isInteger(item.unitPrice)) {
-      errors.push({
-        field: `${path}.unitPrice`,
-        rule: 'pyg-integer',
-        message: 'PYG unit price must be an integer',
-      });
+    if (!quantity || !unitPrice || !(item.quantity > 0) || !(item.unitPrice >= 0)) return;
+    if (!quantity.fitsIn(QUANTITY_INTEGER_DIGITS, DIGITS.decimals)) return;
+    if (!unitPrice.fitsIn(DIGITS.integer, DIGITS.decimals)) return;
+    const product = quantity.multiplyExact(unitPrice);
+    // Lines with a valid quantity and price count even when flagged, so they cannot bypass the threshold.
+    if (product) total = total.add(product);
+    if (!config.allowDecimals) {
+      if (unitPrice.decimalPlaces() > 0) {
+        errors.push({
+          field: `${path}.unitPrice`,
+          rule: 'pyg-integer',
+          message: 'PYG unit price must be an integer',
+        });
+      }
+      if (product && product.decimalPlaces() > 0) {
+        errors.push({
+          field: `${path}.total`,
+          rule: 'pyg-integer',
+          message: 'PYG item total (quantity x unit price) must be an integer',
+        });
+        return;
+      }
     }
-    const itemTotal = item.quantity * item.unitPrice;
-    if (!Number.isInteger(itemTotal)) {
+    if (!product) {
       errors.push({
         field: `${path}.total`,
-        rule: 'pyg-integer',
-        message: 'PYG item total (quantity x unit price) must be an integer',
+        rule: 'line-total-precision',
+        message: 'Item total (quantity x unit price) must not need more than 8 decimals',
       });
+      return;
     }
-    if (!withinRange(itemTotal)) {
+    if (!fitsAmount(product)) {
       errors.push({
         field: `${path}.total`,
         rule: 'amount-range',
         message: `Item total must not exceed ${String(MAX_AMOUNT_PYG)} Gs`,
       });
+      return;
     }
-    // Invalid lines never offset valid ones (they would bypass the threshold).
-    if (validLine) total += itemTotal;
   });
 
-  if (!withinRange(total)) {
+  // Lines are non-negative, so the running total only grows: checking once at the end is enough.
+  const totalInRange = fitsAmount(total) && !state.priceOverflow;
+  if (!totalInRange) {
     errors.push({
       field: 'total',
       rule: 'amount-range',
       message: `Invoice total must not exceed ${String(MAX_AMOUNT_PYG)} Gs`,
     });
   }
-  const net = total - draft.roundingPyg;
-  if (Number.isInteger(total)) {
-    const roundingOk =
-      Number.isInteger(draft.roundingPyg) &&
-      draft.roundingPyg >= 0 &&
-      draft.roundingPyg < ROUNDING_STEP &&
-      net % ROUNDING_STEP === 0;
-    if (!roundingOk) {
+  const rounding = parseAmount(draft.roundingPyg);
+  const net = rounding ? total.subtract(rounding) : total;
+  if (totalInRange && (config.allowDecimals || total.decimalPlaces() === 0)) {
+    if (!isValidRounding(total, rounding, config.allowDecimals ? ROUNDING_DECIMALS : 0)) {
       errors.push({
         field: 'roundingPyg',
         rule: 'rounding-multiple-of-50',
-        message: 'Total must be rounded down to a multiple of 50 Gs (rounding 0..49)',
+        message: 'Total must be rounded down to a multiple of 50 Gs (rounding 0..49.9999)',
       });
     }
   }
   const threshold = config.unnamedThresholdPyg ?? DEFAULT_UNNAMED_THRESHOLD_PYG;
+  const thresholdAmount = parseAmount(threshold) ?? DEFAULT_THRESHOLD_AMOUNT;
   // D208c / 1321 (NT 024): F014 >= threshold. Muestras medicas (D011=13) exemption is out of scope.
-  if (draft.receiver.kind === 'unnamed' && net >= threshold) {
+  if (draft.receiver.kind === 'unnamed' && net.compare(thresholdAmount) >= 0) {
     errors.push({
       field: 'receiver',
       rule: 'unnamed-receiver-over-threshold',
@@ -168,23 +232,45 @@ export function validateInvoiceDraft(
     });
   }
 
-  // D202b / 1332 (NT 020)
-  if (
-    draft.receiver.kind === 'named' &&
-    draft.receiver.isPublicEntity &&
-    draft.operationType !== 'B2G'
-  ) {
+  // MVP (PO decision 2026-10-14): B2G and B2F cannot be built yet (xmlgen needs public
+  // procurement data or a foreign receiver), so they are rejected before any number is consumed.
+  const unsupportedOperation = draft.operationType === 'B2G' || draft.operationType === 'B2F';
+  if (unsupportedOperation) {
+    errors.push({
+      field: 'operationType',
+      rule: 'operation-type-not-supported',
+      message: `El tipo de operación ${draft.operationType} no está soportado todavía`,
+    });
+  }
+
+  // D202b / 1332 (NT 020). A public-entity receiver needs B2G, which is unsupported for now, so
+  // it cannot be invoiced at all. Skipped with B2G/B2F: they already carry the error above.
+  if (draft.receiver.kind === 'named' && draft.receiver.isPublicEntity && !unsupportedOperation) {
     errors.push({
       field: 'operationType',
       rule: 'public-entity-requires-b2g',
       sifenCode: '1332',
-      message: 'Operation type must be B2G when the receiver is a public entity (OEE)',
+      message:
+        'Un receptor entidad pública (OEE) requiere B2G, que no está soportado todavía: no se puede facturar',
     });
   }
 
   validateReceiverAddress(draft, errors);
+  if (config.geoCatalog && config.validateGeo) {
+    validateReceiverGeography(draft, config.geoCatalog, errors);
+  }
 
   return errors;
+}
+
+/** dRedon in 0 up to 49.9999 (4 decimals) and total - dRedon a multiple of 50 Gs. */
+function isValidRounding(total: Decimal, rounding: Decimal | undefined, decimals: number): boolean {
+  if (!rounding || rounding.isNegative() || rounding.compare(ROUNDING_STEP) >= 0) return false;
+  if (!rounding.fitsIn(2, decimals)) return false;
+  const net = total.subtract(rounding);
+  // The quotient is truncated at 8 decimals, so it must also be whole and multiply back exactly.
+  const quotient = net.divide(ROUNDING_STEP, 'truncate');
+  return quotient.decimalPlaces() === 0 && quotient.multiply(ROUNDING_STEP, 'truncate').equals(net);
 }
 
 /**
@@ -192,9 +278,30 @@ export function validateInvoiceDraft(
  * all or nothing; B2F requires it and forbids department and city.
  */
 function validateReceiverAddress(draft: InvoiceDraft, errors: ValidationError[]): void {
-  const address = draft.receiver.kind === 'named' ? draft.receiver.address : undefined;
-  const { departmentCode } = draft.location;
-  const isB2f = draft.operationType === 'B2F';
+  validateAddressBlock(
+    {
+      operationType: draft.operationType,
+      unnamed: draft.receiver.kind === 'unnamed',
+      address: draft.receiver.kind === 'named' ? draft.receiver.address : undefined,
+      departmentCode: draft.location.departmentCode,
+    },
+    errors,
+  );
+}
+
+/** What the receiver address rules look at, whatever document carries the receiver. */
+export interface AddressBlockInput {
+  operationType: OperationType;
+  /** An innominado receiver: no address rule applies. */
+  unnamed: boolean;
+  address: DraftReceiverAddress | undefined;
+  departmentCode: number | undefined;
+}
+
+/** The receiver address rules (shared with the nomination of HU-E8-05). */
+export function validateAddressBlock(input: AddressBlockInput, errors: ValidationError[]): void {
+  const { address, departmentCode } = input;
+  const isB2f = input.operationType === 'B2F';
 
   if (departmentCode !== undefined && DEPARTMENTS[departmentCode] === undefined) {
     errors.push({
@@ -204,9 +311,10 @@ function validateReceiverAddress(draft: InvoiceDraft, errors: ValidationError[])
     });
   }
 
-  // Legacy clients always sent the department with an unnamed receiver: it is ignored, never
-  // rejected and never informed in the XML.
-  if (draft.receiver.kind === 'unnamed' && !isB2f) return;
+  // Legacy clients always sent the department with an unnamed receiver: it still has to be a
+  // valid code (checked above, as before), but no address rule applies and it is never informed
+  // in the XML.
+  if (input.unnamed && !isB2f) return;
 
   if (address === undefined) {
     if (isB2f) {
@@ -266,5 +374,108 @@ function validateReceiverAddress(draft: InvoiceDraft, errors: ValidationError[])
       sifenCode: '1327',
       message: 'The receiver city is required when the address is informed',
     });
+  }
+}
+
+/** Case, accents and repeated spaces do not matter: the XML is written from the catalog text anyway. */
+const sameText = (a: string, b: string): boolean => normalizeText(a) === normalizeText(b);
+const normalizeText = (text: string): string =>
+  text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+/**
+ * Codes exist and nest (city in district in department) and descriptions equal the table (1325,
+ * 1329). The repo's norm sources define SIFEN codes only for the descriptions; unknown codes and
+ * nesting failures carry none (none is invented).
+ */
+function validateReceiverGeography(
+  draft: InvoiceDraft,
+  catalog: GeoCatalog,
+  errors: ValidationError[],
+): void {
+  validateGeography(
+    draft.receiver.kind === 'named' ? draft.receiver.address : undefined,
+    draft.location.departmentCode,
+    catalog,
+    errors,
+  );
+}
+
+/** The geography rules (shared with the nomination of HU-E8-05). */
+export function validateGeography(
+  address: DraftReceiverAddress | undefined,
+  departmentCode: number | undefined,
+  catalog: GeoCatalog,
+  errors: ValidationError[],
+): void {
+  if (address === undefined) return;
+  const district =
+    address.districtCode === undefined ? undefined : catalog.district(address.districtCode);
+  const city = address.cityCode === undefined ? undefined : catalog.city(address.cityCode);
+  const add = (field: string, rule: string, message: string, sifenCode?: string) => {
+    errors.push({ field, rule, message, ...(sifenCode === undefined ? {} : { sifenCode }) });
+  };
+
+  if (address.districtCode !== undefined && district === undefined) {
+    add(
+      'receiver.districtCode',
+      'receiver-district-unknown',
+      'The district is not in the DNIT table',
+    );
+  }
+  if (address.cityCode !== undefined && city === undefined) {
+    add('receiver.cityCode', 'receiver-city-unknown', 'The city is not in the DNIT table');
+  }
+  if (district && city && city.districtCode !== district.code) {
+    add(
+      'receiver.cityCode',
+      'receiver-city-not-in-district',
+      'The city does not belong to the district',
+    );
+  }
+  if (district && departmentCode !== undefined && district.departmentCode !== departmentCode) {
+    add(
+      'receiver.districtCode',
+      'receiver-district-not-in-department',
+      'The district does not belong to the department',
+    );
+  }
+  if (address.districtCode === undefined && city && departmentCode !== undefined) {
+    // xmlgen derives the district from the city, so the city must sit in the department.
+    if (catalog.district(city.districtCode)?.departmentCode !== departmentCode) {
+      add(
+        'receiver.cityCode',
+        'receiver-city-not-in-department',
+        'The city does not belong to the department',
+      );
+    }
+  }
+  if (
+    district &&
+    address.districtDescription !== undefined &&
+    !sameText(address.districtDescription, district.name)
+  ) {
+    add(
+      'receiver.districtDescription',
+      'receiver-district-description-mismatch',
+      'The district description must be the one of the DNIT table for its code',
+      '1325',
+    );
+  }
+  if (
+    city &&
+    address.cityDescription !== undefined &&
+    !sameText(address.cityDescription, city.name)
+  ) {
+    add(
+      'receiver.cityDescription',
+      'receiver-city-description-mismatch',
+      'The city description must be the one of the DNIT table for its code',
+      '1329',
+    );
   }
 }

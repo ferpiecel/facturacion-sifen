@@ -298,7 +298,8 @@ async function holdOrResend(
     const attempts = doc.attempts + 1;
     await tx
       .update(documents)
-      // `now()`: the stamp and the lote creation time share the database clock, which orders them.
+      // Database clock only for the display stamp: ownership comes from `resent_after_seq`, set by
+      // trigger from the lote sequence, so a clock that stepped back changes nothing.
       .set({
         status: 'queued',
         resentAt: sql`now()`,

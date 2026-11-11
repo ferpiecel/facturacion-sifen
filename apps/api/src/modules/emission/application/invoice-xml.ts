@@ -1,4 +1,4 @@
-import type { DeXmlBuilder, FacturaPocInput } from '@sifen/sifen-gateway';
+import type { DeXmlBuilder, FacturaPocInput, NominationEventReceiver } from '@sifen/sifen-gateway';
 import { validateXml } from '@sifen/sifen-xsd';
 import {
   resolveIssuerDocumentContent,
@@ -13,8 +13,18 @@ import {
 import { getDepartmentDescription } from '../../fiscal-config/domain/department.js';
 import { formatRuc } from '../../fiscal-config/domain/ruc.js';
 import type { Timbrado } from '../../fiscal-config/domain/timbrado.js';
+import type { GeoCatalog } from '../../geo/domain/geo-catalog.js';
 import { buildCdc } from '../domain/cdc.js';
-import { validateInvoiceDraft, type InvoiceDraft } from '../domain/invoice-draft.js';
+import { CREDIT_NOTE_REASONS } from '../domain/credit-note-draft.js';
+import { Decimal } from '../domain/decimal.js';
+import {
+  validateInvoiceDraft,
+  type InvoiceDraft,
+  type ValidationConfig,
+} from '../domain/invoice-draft.js';
+import { invoiceTotals, lineTotal, parseAmount } from '../domain/invoice-totals.js';
+import { REMISSION_MOTIVES, type RemissionDraft } from '../domain/remission-draft.js';
+import type { SelfInvoiceDraft } from '../domain/self-invoice-draft.js';
 
 /** The draft, the XSD check or the XML post-processing cannot produce a valid document. */
 export class InvoiceXmlError extends Error {
@@ -26,8 +36,10 @@ export class InvoiceXmlError extends Error {
 
 /** Named receiver data that the draft does not carry (D2 group of the MT). */
 export interface XmlReceiver {
-  /** `<base>-<dv>`. */
-  ruc: string;
+  /** `<base>-<dv>`; absent for a foreign or non-taxpayer NRE receiver, who carries `document`. */
+  ruc?: string;
+  /** D208-D210 and the country of a receiver without RUC (NRE motives 3 and 5). */
+  document?: { type: number; number: string; countryCode?: string | undefined };
   name: string;
   /** D213-D223 are optional (0-1); the draft rules decide which combinations reach this mapper. */
   address?: string;
@@ -36,7 +48,18 @@ export interface XmlReceiver {
   districtDescription?: string;
   cityCode?: number;
   cityDescription?: string;
+  /** dEmailRec (D213b): the address the approved document is emailed to. */
+  email?: string;
 }
+
+/** The receiver SIFEN approved in the nomination of the FE an NCE or NDE is associated to (HU-E8-05). */
+export interface NominatedXmlReceiver {
+  nominated: NominationEventReceiver;
+}
+
+const isNominated = (
+  receiver: XmlReceiver | NominatedXmlReceiver,
+): receiver is NominatedXmlReceiver => 'nominated' in receiver;
 
 export interface InvoiceXmlContext {
   environment: TenantEnvironment;
@@ -51,11 +74,121 @@ export interface InvoiceXmlContext {
   /** Emission instant; dFeEmiDE and the CDC date are derived in America/Asuncion. */
   issuedAt: Date;
   /** Named receiver data; absent for an unnamed (innominado) receiver, which has none. */
-  receiver?: XmlReceiver;
+  receiver?: XmlReceiver | NominatedXmlReceiver;
   /** One entry per draft item, in order: dCodInt, dDesProSer, cUniMed. */
   lines: readonly { code: string; description: string; unitCode: number }[];
   /** Overrides the test literal (ADR-0012 D2). */
   testLiteral?: string;
+  /**
+   * Present when the document is an NCE (iTiDE 5, HU-E7-01): the FE it credits and the reason. The
+   * receiver, operation and location of the draft are the FE's (ADR-0019 D3).
+   */
+  creditNote?: { associatedCdc: string; reasonCode: number };
+  /** Present when the document is an NDE (iTiDE 6, HU-E7-02): same shape and rules as `creditNote`. */
+  debitNote?: { associatedCdc: string; reasonCode: number };
+  /**
+   * Present when the document is an AFE (iTiDE 4, HU-E7-03): the seller, the place of the
+   * transaction and the constancia. The receiver is the issuer, passed as `receiver`.
+   */
+  selfInvoice?: Pick<SelfInvoiceDraft, 'seller' | 'place' | 'certificate'>;
+  /**
+   * Present when the document is an NRE (iTiDE 7, HU-E7-04): the motive, the kilometres and the
+   * transport. The receiver is named and the items carry a quantity only.
+   */
+  remission?: Pick<RemissionDraft, 'motive' | 'responsible' | 'km' | 'invoiceDate' | 'transport'>;
+}
+
+/** iTiDE of the document the context describes: 4 AFE, 5 NCE, 6 NDE, 7 NRE, 1 FE. */
+const documentTypeOf = (ctx: InvoiceXmlContext): 1 | 4 | 5 | 6 | 7 =>
+  ctx.selfInvoice ? 4 : ctx.creditNote ? 5 : ctx.debitNote ? 6 : ctx.remission ? 7 : 1;
+
+/** E5 and E10 of an NRE for xmlgen: the motive, the kilometres and the transport (no E600). */
+function remissionInput({
+  motive,
+  responsible,
+  km,
+  invoiceDate,
+  transport: t,
+}: NonNullable<InvoiceXmlContext['remission']>) {
+  const stop = (p: RemissionDraft['transport']['departure']) => ({
+    direccion: p.address,
+    numeroCasa: p.houseNumber,
+    departamento: p.departmentCode,
+    distrito: p.districtCode,
+    ciudad: p.cityCode,
+  });
+  const { carrier } = t;
+  return {
+    // xmlgen requires the free text of a type 7 (dInfFisc); the motive text is the one it prints for it.
+    descripcion: REMISSION_MOTIVES[motive as keyof typeof REMISSION_MOTIVES],
+    remision: {
+      motivo: motive,
+      tipoResponsable: responsible,
+      kms: km,
+      ...(invoiceDate === undefined ? {} : { fechaFactura: invoiceDate }),
+    },
+    detalleTransporte: {
+      tipo: t.type,
+      modalidad: t.modality,
+      tipoResponsable: t.freightResponsible,
+      inicioEstimadoTranslado: t.startDate,
+      finEstimadoTranslado: t.endDate,
+      salida: stop(t.departure),
+      entrega: stop(t.delivery),
+      vehiculo: {
+        tipo: t.vehicle.type,
+        marca: t.vehicle.brand,
+        documentoTipo: t.vehicle.idType,
+        documentoNumero: t.vehicle.idNumber,
+      },
+      transportista: {
+        contribuyente: carrier.contributor,
+        nombre: carrier.name,
+        ...(carrier.contributor
+          ? { ruc: carrier.ruc }
+          : { documentoTipo: carrier.idType, documentoNumero: carrier.idNumber }),
+        direccion: carrier.address,
+        chofer: {
+          documentoNumero: carrier.driver.idNumber,
+          nombre: carrier.driver.name,
+          direccion: carrier.driver.address,
+        },
+      },
+    },
+  };
+}
+
+/** E300 and H of an AFE for xmlgen: the seller, the place of the transaction and the constancia. */
+function selfInvoiceInput({
+  seller,
+  place,
+  certificate,
+}: NonNullable<InvoiceXmlContext['selfInvoice']>) {
+  return {
+    autoFactura: {
+      tipoVendedor: seller.nature,
+      documentoTipo: seller.idType,
+      documentoNumero: seller.idNumber,
+      nombre: seller.name,
+      direccion: seller.address,
+      numeroCasa: seller.houseNumber,
+      departamento: seller.departmentCode,
+      distrito: seller.districtCode,
+      ciudad: seller.cityCode,
+      ubicacion: {
+        lugar: place.address,
+        departamento: place.departmentCode,
+        distrito: place.districtCode,
+        ciudad: place.cityCode,
+      },
+    },
+    documentoAsociado: {
+      formato: 3,
+      constanciaTipo: certificate.type,
+      constanciaNumero: certificate.number,
+      constanciaControl: certificate.control,
+    },
+  };
 }
 
 /**
@@ -83,9 +216,55 @@ function receiverAddress(receiver: XmlReceiver, departmentCode: number | undefin
   };
 }
 
-function requireNamedReceiver(receiver: XmlReceiver | undefined): XmlReceiver {
+function requireNamedReceiver(
+  receiver: XmlReceiver | NominatedXmlReceiver | undefined,
+): XmlReceiver | NominatedXmlReceiver {
   if (receiver === undefined) throw new InvoiceXmlError('a named receiver needs its D2 data');
   return receiver;
+}
+
+/**
+ * D2 for the receiver of an approved nomination (NT 015): a taxpayer by RUC, anyone else by
+ * identity document. The geographic descriptions are not stored; the catalog patch fills them.
+ */
+function nominatedReceiverInput(
+  { nominated: r }: NominatedXmlReceiver,
+  operationType: number,
+  departmentCode: number | undefined,
+) {
+  const identity =
+    r.kind === 'taxpayer'
+      ? {
+          contribuyente: true,
+          ruc: r.ruc,
+          tipoContribuyente: r.taxpayerType,
+          documentoTipo: 1,
+          documentoNumero: r.ruc.split('-')[0],
+        }
+      : { contribuyente: false, documentoTipo: r.documentType, documentoNumero: r.documentNumber };
+  const withGeo = departmentCode !== undefined;
+  return {
+    ...identity,
+    razonSocial: r.name,
+    ...(r.tradeName === undefined ? {} : { nombreFantasia: r.tradeName }),
+    tipoOperacion: operationType,
+    pais: r.country,
+    paisDescripcion: r.country === 'PRY' ? 'Paraguay' : r.country,
+    ...(r.address === undefined ? {} : { direccion: r.address }),
+    ...(r.houseNumber === undefined ? {} : { numeroCasa: r.houseNumber }),
+    ...(withGeo
+      ? {
+          departamento: departmentCode,
+          departamentoDescripcion: getDepartmentDescription(departmentCode),
+        }
+      : {}),
+    ...(r.districtCode === undefined ? {} : { distrito: r.districtCode }),
+    ...(withGeo && r.cityCode !== undefined ? { ciudad: r.cityCode } : {}),
+    ...(r.phone === undefined ? {} : { telefono: r.phone }),
+    ...(r.mobile === undefined ? {} : { celular: r.mobile }),
+    ...(r.email === undefined ? {} : { email: r.email }),
+    ...(r.customerCode === undefined ? {} : { codigo: r.customerCode }),
+  };
 }
 
 function namedReceiverInput(
@@ -93,12 +272,27 @@ function namedReceiverInput(
   operationType: number,
   departmentCode: number | undefined,
 ) {
+  if (receiver.ruc === undefined) {
+    const { document } = receiver;
+    if (document === undefined) throw new InvoiceXmlError('a receiver needs a RUC or a document');
+    return {
+      contribuyente: false,
+      razonSocial: receiver.name,
+      tipoOperacion: operationType,
+      ...receiverAddress(receiver, departmentCode),
+      pais: document.countryCode ?? 'PRY',
+      documentoTipo: document.type,
+      documentoNumero: document.number,
+      codigo: '0001',
+    };
+  }
   return {
     contribuyente: true,
     ruc: receiver.ruc,
     razonSocial: receiver.name,
     tipoOperacion: operationType,
     ...receiverAddress(receiver, departmentCode),
+    ...(receiver.email === undefined ? {} : { email: receiver.email }),
     pais: 'PRY',
     paisDescripcion: 'Paraguay',
     tipoContribuyente: 1,
@@ -107,6 +301,15 @@ function namedReceiverInput(
     codigo: '0001',
   };
 }
+
+const namedReceiver = (
+  receiver: XmlReceiver | NominatedXmlReceiver,
+  operationType: number,
+  departmentCode: number | undefined,
+) =>
+  isNominated(receiver)
+    ? nominatedReceiverInput(receiver, operationType, departmentCode)
+    : namedReceiverInput(receiver, operationType, departmentCode);
 
 /**
  * Innominado receiver (MT v150 D201 = 2, D208 = 5, D210 = 0, D211 = "Sin Nombre"; B2C only, NT 024
@@ -152,17 +355,89 @@ export function asuncionTimestamp(instant: Date): string {
 }
 
 /**
- * Maps the draft and its fiscal context to the xmlgen input (params + data).
- * PYG amounts are integers: validateInvoiceDraft rejects any fractional line total
- * (MT group F, no decimals in Guaranies) before this mapper runs. */
+ * PROVISIONAL until T1 (Prevalidador confirms how SIFEN wants PYG decimals; see ADR-0018): the 8
+ * decimals in subtotals and IVA sums may have to go back to integers like integer documents.
+ *
+ * xmlgen options for documents whose amounts carry decimals (ADR-0018): keep 8 decimals in item
+ * totals and subtotals instead of rounding to integers, and leave the 50 Gs rounding to
+ * `finalizeDecimalAmounts` (xmlgen's SEDECO rounding only understands integers). Never sent for
+ * integer documents, so their XML does not change.
+ */
+const DECIMAL_XMLGEN_OPTIONS = {
+  pygDecimals: 8,
+  pygTaxDecimals: 8,
+  redondeoSedeco: false,
+} as const;
+
+/** Amount and quantity elements xmlgen prints: the only ones whose exponent notation is rewritten. */
+const AMOUNT_TAGS = [
+  'dPUniProSer',
+  'dCantProSer',
+  'dDescItem',
+  'dDescGloItem',
+  'dAntPreUniIt',
+  'dAntGloPreUniIt',
+  'dTotBruOpeItem',
+  'dTotOpeItem',
+  'dBasGravIVA',
+  'dLiqIVAItem',
+  'dBasExe',
+  'dMonTiPag',
+  'dSubExe',
+  'dSubExo',
+  'dSub5',
+  'dSub10',
+  'dTotOpe',
+  'dTotDesc',
+  'dTotDescGlotem',
+  'dTotAntItem',
+  'dTotAnt',
+  'dPorcDescTotal',
+  'dDescTotal',
+  'dAnticipo',
+  'dRedon',
+  'dComi',
+  'dTotGralOpe',
+  'dIVA5',
+  'dIVA10',
+  'dLiqTotIVA5',
+  'dLiqTotIVA10',
+  'dTotIVA',
+  'dBaseGrav5',
+  'dBaseGrav10',
+  'dTBasGraIVA',
+  'dTotalGs',
+];
+const EXPONENT_AMOUNT = new RegExp(
+  `(<(?:${AMOUNT_TAGS.join('|')})>)(-?\\d+(?:\\.\\d+)?e[+-]?\\d+)(</)`,
+  'g',
+);
+
+/** True when a line total or the rounding is not a whole number of guaranies. */
+function hasDecimalAmounts(draft: InvoiceDraft): boolean {
+  const roundingDecimals = parseAmount(draft.roundingPyg)?.decimalPlaces() ?? 0;
+  return (
+    roundingDecimals > 0 || draft.items.some((item) => (lineTotal(item)?.decimalPlaces() ?? 0) > 0)
+  );
+}
+
+/** Whole numbers keep going as `number` (same bytes as before); the rest as plain strings. */
+const plainOrNumber = (value: number): number | string =>
+  Number.isInteger(value) ? value : (parseAmount(value)?.toString() ?? value);
+
+/**
+ * Maps the draft and its fiscal context to the xmlgen input (params + data). The draft has been
+ * validated (amounts are exact decimals, integers unless `allowDecimals`) before this runs.
+ */
 export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext): FacturaPocInput {
+  const note = ctx.creditNote ?? ctx.debitNote;
   const { issuer, establishment: est } = ctx;
   const content = resolveIssuerDocumentContent(
     ctx.environment,
     { legalName: issuer.legalName, firstItemDescription: ctx.lines[0]?.description ?? '' },
     ctx.testLiteral,
   );
-  const total = draft.items.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0);
+  const { net } = invoiceTotals(draft);
   const operationType = { B2B: 1, B2C: 2, B2G: 3, B2F: 4 }[draft.operationType];
   const { departmentCode } = draft.location;
 
@@ -198,7 +473,7 @@ export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext
       ],
     },
     data: {
-      tipoDocumento: 1,
+      tipoDocumento: documentTypeOf(ctx),
       establecimiento: est.code,
       punto: ctx.point.code,
       numero: ctx.numbering.documentNumber,
@@ -221,22 +496,40 @@ export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext
       cliente:
         draft.receiver.kind === 'unnamed'
           ? unnamedReceiverInput(operationType)
-          : namedReceiverInput(
+          : namedReceiver(
               requireNamedReceiver(ctx.receiver),
               operationType,
               draft.operationType === 'B2F' ? undefined : departmentCode,
             ),
-      factura: { presencia: 1 },
-      condicion: {
-        tipo: 1,
-        entregas: [{ tipo: 1, monto: String(total - draft.roundingPyg), moneda: 'PYG', cambio: 0 }],
-      },
+      // An NCE or NDE carries neither gCamFE nor gCamCond (E010, E600) but the reason and the association.
+      // An AFE has no gCamFE either, but its cash condition is mandatory (E600, 1503).
+      ...(note
+        ? {
+            notaCreditoDebito: { motivo: note.reasonCode },
+            documentoAsociado: { formato: 1, cdc: note.associatedCdc },
+          }
+        : {
+            ...(ctx.selfInvoice
+              ? selfInvoiceInput(ctx.selfInvoice)
+              : ctx.remission
+                ? remissionInput(ctx.remission)
+                : { factura: { presencia: 1 } }),
+            // An NRE has no condition either (E600 belongs to the types with amounts).
+            ...(ctx.remission
+              ? {}
+              : {
+                  condicion: {
+                    tipo: 1,
+                    entregas: [{ tipo: 1, monto: net.toString(), moneda: 'PYG', cambio: 0 }],
+                  },
+                }),
+          }),
       items: draft.items.map((item, i) => ({
         codigo: ctx.lines[i]?.code,
         descripcion: i === 0 ? content.firstItemDescription : ctx.lines[i]?.description,
         unidadMedida: ctx.lines[i]?.unitCode,
-        cantidad: item.quantity,
-        precioUnitario: item.unitPrice,
+        cantidad: plainOrNumber(item.quantity),
+        precioUnitario: plainOrNumber(item.unitPrice),
         cambio: 0,
         descuento: 0,
         anticipo: 0,
@@ -247,12 +540,216 @@ export function mapInvoiceToXmlInput(draft: InvoiceDraft, ctx: InvoiceXmlContext
         iva: item.vatRate,
       })),
     },
+    ...(hasDecimalAmounts(draft) ? { config: DECIMAL_XMLGEN_OPTIONS } : {}),
   };
+}
+
+/**
+ * Decimal documents only: sets dRedon and dTotGralOpe from the validated totals and rewrites any
+ * exponent number xmlgen printed (`1e-7`) as a plain decimal, which the XSD requires.
+ */
+function finalizeDecimalAmounts(xml: string, draft: InvoiceDraft): string {
+  const { net } = invoiceTotals(draft);
+  const rounding = parseAmount(draft.roundingPyg)?.toString() ?? '0';
+  return xml
+    .replace(/<dRedon>[^<]*<\/dRedon>/, `<dRedon>${rounding}</dRedon>`)
+    .replace(/<dTotGralOpe>[^<]*<\/dTotGralOpe>/, `<dTotGralOpe>${net.toString()}</dTotGralOpe>`)
+    .replace(EXPONENT_AMOUNT, (whole, open: string, text: string, close: string) => {
+      const plain = Decimal.parse(Number(text));
+      return plain.ok ? `${open}${plain.value.toString()}${close}` : whole;
+    });
+}
+
+interface GeoExpectation {
+  codeTag: string;
+  descriptionTag: string;
+  /** The validated code; with `strict` the XML must carry exactly this one. */
+  code: number | undefined;
+  nameOf: (code: number) => string | undefined;
+}
+
+/**
+ * xmlgen looks the department, district and city text up in its own table and derives the
+ * department and district from the city. Here the XML is held to the DNIT catalog: the
+ * description is the catalog's for the code the XML carries and, when `strict` (the draft was
+ * validated against the catalog), a code other than the validated one is an override and fails.
+ */
+function patchGeoGroup(
+  xml: string,
+  group: string,
+  expectations: GeoExpectation[],
+  strict: boolean,
+): string {
+  const block = new RegExp(`<${group}>[\\s\\S]*?</${group}>`).exec(xml);
+  if (block === null) return xml;
+  let patched = block[0];
+  for (const { codeTag, descriptionTag, code, nameOf } of expectations) {
+    const pair = new RegExp(
+      `<${codeTag}>(\\d+)</${codeTag}><${descriptionTag}>([^<]*)</${descriptionTag}>`,
+    );
+    const found = pair.exec(patched);
+    if (found === null) continue;
+    const carried = Number(found[1]);
+    if (strict && code !== undefined && carried !== code) {
+      throw new InvoiceXmlError(
+        `${codeTag} is ${found[1]} but the validated code is ${String(code)}`,
+      );
+    }
+    const name = nameOf(carried);
+    if (name !== undefined && unescapeXmlText(found[2]) !== name) {
+      // A function replacement: the text is literal, `$&`-style patterns must not be interpreted.
+      patched = patched.replace(
+        pair,
+        () =>
+          `<${codeTag}>${found[1]}</${codeTag}><${descriptionTag}>${escapeText(name)}</${descriptionTag}>`,
+      );
+    }
+  }
+  return xml.replace(block[0], () => patched);
+}
+
+function geoExpectations(
+  suffix: 'Rec' | 'Emi' | 'Ven' | 'Prov' | 'Sal' | 'Ent',
+  codes: { department?: number; district?: number; city?: number },
+  catalog: GeoCatalog,
+): GeoExpectation[] {
+  const parts: [string, number | undefined, GeoExpectation['nameOf']][] = [
+    ['Dep', codes.department, (c) => catalog.department(c)?.name],
+    ['Dis', codes.district, (c) => catalog.district(c)?.name],
+    ['Ciu', codes.city, (c) => catalog.city(c)?.name],
+  ];
+  return parts.map(([part, code, nameOf]) => ({
+    codeTag: `c${part}${suffix}`,
+    descriptionTag: `dDes${part}${suffix}`,
+    code,
+    nameOf,
+  }));
+}
+
+/** gCamAE: the seller's address (E310-E315, suffix Ven) and the place of the transaction (E317-E322, Prov). */
+function patchSelfInvoiceGeo(
+  xml: string,
+  { seller, place }: NonNullable<InvoiceXmlContext['selfInvoice']>,
+  catalog: GeoCatalog,
+  strict: boolean,
+): string {
+  const codes = (p: { departmentCode: number; districtCode: number; cityCode: number }) => ({
+    department: p.departmentCode,
+    district: p.districtCode,
+    city: p.cityCode,
+  });
+  return patchGeoGroup(
+    xml,
+    'gCamAE',
+    [
+      ...geoExpectations('Ven', codes(seller), catalog),
+      ...geoExpectations('Prov', codes(place), catalog),
+    ],
+    strict,
+  );
+}
+
+/** gCamSal (E921-E930, suffix Sal) and gCamEnt (E941-E950, suffix Ent) of an NRE. */
+function patchRemissionGeo(
+  xml: string,
+  { transport }: NonNullable<InvoiceXmlContext['remission']>,
+  catalog: GeoCatalog,
+  strict: boolean,
+): string {
+  const codes = (p: { departmentCode: number; districtCode: number; cityCode: number }) => ({
+    department: p.departmentCode,
+    district: p.districtCode,
+    city: p.cityCode,
+  });
+  const departed = patchGeoGroup(
+    xml,
+    'gCamSal',
+    geoExpectations('Sal', codes(transport.departure), catalog),
+    strict,
+  );
+  return patchGeoGroup(
+    departed,
+    'gCamEnt',
+    geoExpectations('Ent', codes(transport.delivery), catalog),
+    strict,
+  );
+}
+
+function applyCatalogGeography(
+  xml: string,
+  draft: InvoiceDraft,
+  ctx: InvoiceXmlContext,
+  validation: ValidationConfig & { geoCatalog: GeoCatalog },
+): string {
+  const { geoCatalog: catalog } = validation;
+  const strict = validation.validateGeo === true;
+  const { establishment: est } = ctx;
+  const issued = patchGeoGroup(
+    xml,
+    'gEmis',
+    geoExpectations(
+      'Emi',
+      {
+        department: est.departmentCode,
+        district: est.districtCode === null ? undefined : Number(est.districtCode),
+        city: Number(est.cityCode),
+      },
+      catalog,
+    ),
+    strict,
+  );
+  const withPlaces = ctx.remission
+    ? patchRemissionGeo(issued, ctx.remission, catalog, strict)
+    : issued;
+  const withSeller = ctx.selfInvoice
+    ? patchSelfInvoiceGeo(withPlaces, ctx.selfInvoice, catalog, strict)
+    : withPlaces;
+  const address = draft.receiver.kind === 'named' ? draft.receiver.address : undefined;
+  if (address === undefined) return withSeller;
+  // The district falls back to the city's, which is what xmlgen derives when it is not informed.
+  const district =
+    address.districtCode ??
+    (address.cityCode === undefined ? undefined : catalog.city(address.cityCode)?.districtCode);
+  return patchGeoGroup(
+    withSeller,
+    'gDatRec',
+    geoExpectations(
+      'Rec',
+      { department: draft.location.departmentCode, district, city: address.cityCode },
+      catalog,
+    ),
+    strict,
+  );
 }
 
 /** The one libxml2 error an unsigned, otherwise valid rDE produces (verified in the spec). */
 const MISSING_SIGNATURE =
   "Element '{http://ekuatia.set.gov.py/sifen/xsd}rDE': Missing child element(s). Expected is ( {http://www.w3.org/2000/09/xmldsig#}Signature ).";
+
+/**
+ * xmlgen validates its input and crashes on a code missing from its tables. Both are deterministic
+ * data problems: they surface as an `InvoiceXmlError` (the document is held with a clear reason)
+ * instead of an opaque crash that would be retried forever.
+ */
+async function buildWithXmlgen(
+  builder: DeXmlBuilder,
+  input: ReturnType<typeof mapInvoiceToXmlInput>,
+): Promise<string> {
+  try {
+    return await builder.buildParaSifen(input);
+  } catch (error) {
+    // xmlgen reads `.descripcion` of the row it looks a code up by; a missing row is that TypeError.
+    // Any other TypeError is a bug and propagates unchanged.
+    if (error instanceof TypeError) {
+      if (!/reading 'descripcion'/.test(error.message)) throw error;
+      throw new InvoiceXmlError(
+        `a department, district or city code is not in the xmlgen geographic table (${error.message})`,
+      );
+    }
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new InvoiceXmlError(`xmlgen could not build the document: ${reason}`);
+  }
+}
 
 /**
  * Validates the draft, builds the DE through the `DeXmlBuilder` port, checks
@@ -264,16 +761,30 @@ export async function generateInvoiceXml(
   builder: DeXmlBuilder,
   draft: InvoiceDraft,
   ctx: InvoiceXmlContext,
+  validation: ValidationConfig = {},
 ): Promise<{ xml: string; cdc: string }> {
-  const draftErrors = validateInvoiceDraft(draft, {});
+  const draftErrors = validateInvoiceDraft(draft, validation);
   if (draftErrors.length > 0) {
     throw new InvoiceXmlError(draftErrors.map((e) => `${e.field} (${e.rule})`).join(', '));
   }
+  const note = ctx.creditNote ?? ctx.debitNote;
+  const noteName = ctx.creditNote ? 'credit' : 'debit';
+  if (note && !Object.hasOwn(CREDIT_NOTE_REASONS, note.reasonCode)) {
+    throw new InvoiceXmlError(`${noteName} note reason ${String(note.reasonCode)} (E401)`);
+  }
+  if (note && draft.receiver.kind === 'unnamed') {
+    // Defence in depth: acceptance already refuses it (1331, NT 010).
+    throw new InvoiceXmlError(`a ${noteName} note cannot go to an unnamed receiver (1331)`);
+  }
   // xmlgen emits an empty cTipReg when the regime is unknown; the XSD makes it optional (MT 7.2.4: no empty tags).
-  const xml = (await builder.buildParaSifen(mapInvoiceToXmlInput(draft, ctx))).replace(
+  const built = (await buildWithXmlgen(builder, mapInvoiceToXmlInput(draft, ctx))).replace(
     /<cTipReg><\/cTipReg>|<cTipReg\/>/,
     '',
   );
+  const geoBuilt = validation.geoCatalog
+    ? applyCatalogGeography(built, draft, ctx, { ...validation, geoCatalog: validation.geoCatalog })
+    : built;
+  const xml = hasDecimalAmounts(draft) ? finalizeDecimalAmounts(geoBuilt, draft) : geoBuilt;
 
   const { errors } = validateXml(xml, 'siRecepDE');
   const [only] = errors;
@@ -282,7 +793,7 @@ export async function generateInvoiceXml(
   }
 
   const cdc = buildCdc({
-    documentType: '01',
+    documentType: String(documentTypeOf(ctx)).padStart(2, '0'),
     rucBase: ctx.issuer.ruc.base,
     rucDv: ctx.issuer.ruc.dv,
     establishment: ctx.establishment.code,
@@ -320,7 +831,16 @@ export function toSifenXml(xml: string): string {
   return editFuFd(xml, (body) => body.replace(INF_ADIC, ''));
 }
 
-function escapeText(text: string): string {
+export function unescapeXmlText(text: string): string {
+  return text
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&apos;', "'")
+    .replaceAll('&amp;', '&');
+}
+
+export function escapeText(text: string): string {
   return text
     .replace(XML_ILLEGAL, '')
     .replaceAll('&', '&amp;')

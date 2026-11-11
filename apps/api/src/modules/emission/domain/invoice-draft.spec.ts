@@ -15,6 +15,7 @@ function draft(overrides: Partial<InvoiceDraft> = {}): InvoiceDraft {
   };
 }
 
+const decimals = { allowDecimals: true };
 const rules = (d: InvoiceDraft, config = {}) => validateInvoiceDraft(d, config).map((e) => e.rule);
 
 describe('validateInvoiceDraft', () => {
@@ -85,20 +86,125 @@ describe('validateInvoiceDraft', () => {
           sifenCode: '1332',
         }),
       ]);
-      expect(validateInvoiceDraft(draft({ receiver: oee, operationType: 'B2G' }), {})).toEqual([]);
+      expect(rules(draft({ receiver: oee, operationType: 'B2G' }))).not.toContain(
+        'public-entity-requires-b2g',
+      );
+    });
+  });
+
+  describe('operation type support (MVP: B2G and B2F postponed)', () => {
+    const oee = { kind: 'named', isPublicEntity: true, address } as const;
+
+    it.each(['B2G', 'B2F'] as const)('rejects %s as not supported yet', (operationType) => {
+      const errors = validateInvoiceDraft(
+        draft({
+          operationType,
+          receiver:
+            operationType === 'B2F'
+              ? { ...named, address: { street: 'X', houseNumber: '1' } }
+              : named,
+          location: operationType === 'B2F' ? {} : { departmentCode: 1 },
+        }),
+        {},
+      );
+
+      expect(errors).toEqual([
+        expect.objectContaining({
+          field: 'operationType',
+          rule: 'operation-type-not-supported',
+          message: 'El tipo de operación ' + operationType + ' no está soportado todavía',
+        }),
+      ]);
+    });
+
+    it('reports a single error for a public entity receiver with B2G', () => {
+      expect(rules(draft({ receiver: oee, operationType: 'B2G' }))).toEqual([
+        'operation-type-not-supported',
+      ]);
+    });
+
+    it('says a public entity cannot be invoiced yet when it is sent as B2B', () => {
+      const errors = validateInvoiceDraft(draft({ receiver: oee, operationType: 'B2B' }), {});
+
+      expect(errors).toEqual([
+        expect.objectContaining({
+          rule: 'public-entity-requires-b2g',
+          sifenCode: '1332',
+          message: expect.stringMatching(/no se puede facturar/) as string,
+        }),
+      ]);
     });
   });
 
   describe('PYG amounts and 50 Gs rounding (MT v150 section F)', () => {
-    it('rejects non-integer unit prices and item totals', () => {
-      const d = draft({ items: [{ quantity: 1, unitPrice: 100.5, vatRate: 10 }] });
-      expect(validateInvoiceDraft(d, {})).toContainEqual(
-        expect.objectContaining({ field: 'items[0].unitPrice', rule: 'pyg-integer' }),
+    it('accepts decimal prices and quantities that SIFEN allows (HU-E5-09)', () => {
+      // 2.3 x 100 is 229.99999999999997 with number arithmetic; exactly 230 here.
+      const a = draft({ items: [{ quantity: 2.3, unitPrice: 100, vatRate: 10 }], roundingPyg: 30 });
+      expect(validateInvoiceDraft(a, decimals)).toEqual([]);
+      const b = draft({
+        items: [{ quantity: 0.5, unitPrice: 1001, vatRate: 10 }],
+        roundingPyg: 0.5,
+      });
+      expect(validateInvoiceDraft(b, decimals)).toEqual([]);
+      const c = draft({
+        items: [{ quantity: 1, unitPrice: 100.12345678, vatRate: 10 }],
+        roundingPyg: 0.12345678,
+      });
+      expect(rules(c, decimals)).toEqual(['rounding-multiple-of-50']);
+    });
+
+    it('rejects a unit price with more than 8 decimals or 15 integer digits', () => {
+      const tooMany = draft({ items: [{ quantity: 1, unitPrice: 1.123456789, vatRate: 10 }] });
+      expect(validateInvoiceDraft(tooMany, decimals)).toContainEqual(
+        expect.objectContaining({ field: 'items[0].unitPrice', rule: 'unit-price-precision' }),
       );
-      const q = draft({ items: [{ quantity: 1.5, unitPrice: 101, vatRate: 5 }] });
-      expect(validateInvoiceDraft(q, {})).toContainEqual(
-        expect.objectContaining({ field: 'items[0].total', rule: 'pyg-integer' }),
+      const digits = draft({ items: [{ quantity: 1, unitPrice: 1e15, vatRate: 10 }] });
+      expect(rules(digits, decimals)).toEqual(
+        expect.arrayContaining(['unit-price-precision', 'amount-range']),
       );
+    });
+
+    it('rejects a unit price that a JSON number cannot hold exactly', () => {
+      const d = draft({ items: [{ quantity: 1, unitPrice: 0.1 + 0.2, vatRate: 10 }] });
+      expect(rules(d, decimals)).toContain('unit-price-precision');
+    });
+
+    it('rejects a quantity with more than 8 decimals or 10 integer digits', () => {
+      for (const quantity of [0.123456789, 12_345_678_901]) {
+        const d = draft({ items: [{ quantity, unitPrice: 1, vatRate: 10 }] });
+        expect(validateInvoiceDraft(d, decimals)).toContainEqual(
+          expect.objectContaining({ field: 'items[0].quantity', rule: 'quantity-precision' }),
+        );
+      }
+    });
+
+    it('rejects a line whose exact product needs more than 8 decimals', () => {
+      const d = draft({ items: [{ quantity: 0.00001, unitPrice: 0.0001, vatRate: 10 }] });
+      expect(validateInvoiceDraft(d, decimals)).toContainEqual(
+        expect.objectContaining({ field: 'items[0].total', rule: 'line-total-precision' }),
+      );
+    });
+
+    it('rejects a fractional rounding beyond 4 decimals or outside 0..49', () => {
+      const items = [{ quantity: 1, unitPrice: 100.00001, vatRate: 10 as const }];
+      expect(rules(draft({ items, roundingPyg: 0.00001 }), decimals)).toContain(
+        'rounding-multiple-of-50',
+      );
+      expect(rules(draft({ items, roundingPyg: -0.5 }), decimals)).toContain(
+        'rounding-multiple-of-50',
+      );
+    });
+
+    it('keeps the integer-only rules while decimals are not enabled', () => {
+      const d = draft({ items: [{ quantity: 2.3, unitPrice: 100, vatRate: 10 }], roundingPyg: 30 });
+      expect(validateInvoiceDraft(d, {})).toEqual([]);
+      const half = draft({ items: [{ quantity: 1, unitPrice: 100.5, vatRate: 10 }] });
+      expect(rules(half)).toContain('pyg-integer');
+      const fractionalRounding = draft({
+        items: [{ quantity: 1, unitPrice: 1001, vatRate: 10 }],
+        roundingPyg: 1.5,
+      });
+      expect(rules(fractionalRounding)).toContain('rounding-multiple-of-50');
     });
 
     it('accepts rounding down to a multiple of 50', () => {
@@ -123,6 +229,21 @@ describe('validateInvoiceDraft', () => {
       });
       expect(rules(d)).toContain('rounding-multiple-of-50');
     });
+  });
+
+  it('falls back to the default threshold when the configured one is unusable', () => {
+    const at = (price: number) =>
+      draft({
+        receiver: { kind: 'unnamed' },
+        operationType: 'B2C',
+        items: [{ quantity: 1, unitPrice: price, vatRate: 10 }],
+      });
+    for (const unnamedThresholdPyg of [Number.NaN, 1e20]) {
+      expect(rules(at(7_000_000), { unnamedThresholdPyg })).toContain(
+        'unnamed-receiver-over-threshold',
+      );
+      expect(rules(at(6_999_950), { unnamedThresholdPyg })).toEqual([]);
+    }
   });
 
   it('rejects an unknown department (cDepEmi)', () => {
@@ -218,7 +339,7 @@ describe('validateInvoiceDraft', () => {
 
   describe('amount range (numeric(23,8) column)', () => {
     it('rejects a line total beyond 15 integer digits', () => {
-      const d = draft({ items: [{ quantity: 1, unitPrice: 1e15, vatRate: 10 }] });
+      const d = draft({ items: [{ quantity: 2, unitPrice: 999_999_999_999_999, vatRate: 10 }] });
       expect(validateInvoiceDraft(d, {})).toContainEqual(
         expect.objectContaining({ field: 'items[0].total', rule: 'amount-range' }),
       );
@@ -242,9 +363,12 @@ describe('validateInvoiceDraft', () => {
     const noAddress = { kind: 'named', isPublicEntity: false } as const;
     const optional = (overrides: Partial<InvoiceDraft> = {}) =>
       draft({ receiver: noAddress, location: {}, ...overrides });
+    // B2F is rejected as a whole in the MVP; the address rules are asserted apart from that.
+    const addressErrors = (d: InvoiceDraft) =>
+      validateInvoiceDraft(d, {}).filter((e) => e.rule !== 'operation-type-not-supported');
 
-    it('accepts a named receiver without address for B2B, B2C and B2G', () => {
-      for (const operationType of ['B2B', 'B2C', 'B2G'] as const) {
+    it('accepts a named receiver without address for B2B and B2C', () => {
+      for (const operationType of ['B2B', 'B2C'] as const) {
         expect(validateInvoiceDraft(optional({ operationType }), {})).toEqual([]);
       }
     });
@@ -295,7 +419,7 @@ describe('validateInvoiceDraft', () => {
     });
 
     it('requires an address for B2F (4478)', () => {
-      expect(validateInvoiceDraft(optional({ operationType: 'B2F' }), {})).toEqual([
+      expect(addressErrors(optional({ operationType: 'B2F' }))).toEqual([
         expect.objectContaining({
           field: 'receiver.address',
           rule: 'receiver-address-required',
@@ -305,7 +429,7 @@ describe('validateInvoiceDraft', () => {
     });
 
     it('rejects department and city for B2F (D219/D223 must not be informed)', () => {
-      expect(rules(draft({ operationType: 'B2F' }))).toEqual([
+      expect(addressErrors(draft({ operationType: 'B2F' })).map((e) => e.rule)).toEqual([
         'receiver-department-not-allowed',
         'receiver-city-not-allowed',
       ]);
@@ -317,7 +441,7 @@ describe('validateInvoiceDraft', () => {
         receiver: { ...named, address: { street: 'Main St', houseNumber: '1' } },
         location: {},
       });
-      expect(validateInvoiceDraft(d, {})).toEqual([]);
+      expect(addressErrors(d)).toEqual([]);
     });
   });
 });

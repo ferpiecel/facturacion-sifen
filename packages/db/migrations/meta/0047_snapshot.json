@@ -1,6 +1,6 @@
 {
-  "id": "e7b50fe6-146c-434b-b980-0f1cf0d84514",
-  "prevId": "db442322-358d-4aa6-92b6-ffb57fe39722",
+  "id": "d7960232-6f24-4686-b383-afa55392bf15",
+  "prevId": "28f4b585-1819-46cd-8f9c-568fa3069523",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -497,6 +497,12 @@
           "notNull": true,
           "default": "'PYG'"
         },
+        "associated_cdc": {
+          "name": "associated_cdc",
+          "type": "char(44)",
+          "primaryKey": false,
+          "notNull": false
+        },
         "payload": {
           "name": "payload",
           "type": "jsonb",
@@ -573,7 +579,36 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "documents_associated_cdc_idx": {
+          "name": "documents_associated_cdc_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "environment",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "associated_cdc",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"documents\".\"associated_cdc\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "documents_tenant_id_tenants_id_fk": {
           "name": "documents_tenant_id_tenants_id_fk",
@@ -693,6 +728,18 @@
           "name": "documents_cdc_format",
           "value": "\"documents\".\"cdc\" ~ '^[0-9]{44}$'"
         },
+        "documents_associated_cdc_format": {
+          "name": "documents_associated_cdc_format",
+          "value": "\"documents\".\"associated_cdc\" ~ '^[0-9]{44}$'"
+        },
+        "documents_associated_cdc_not_self": {
+          "name": "documents_associated_cdc_not_self",
+          "value": "\"documents\".\"associated_cdc\" <> \"documents\".\"cdc\""
+        },
+        "documents_associated_cdc_not_invoice": {
+          "name": "documents_associated_cdc_not_invoice",
+          "value": "\"documents\".\"document_type\" <> 1 OR \"documents\".\"associated_cdc\" IS NULL"
+        },
         "documents_security_code_format": {
           "name": "documents_security_code_format",
           "value": "\"documents\".\"security_code\" ~ '^[0-9]{9}$'"
@@ -712,6 +759,267 @@
         "documents_status_valid": {
           "name": "documents_status_valid",
           "value": "\"documents\".\"status\" IN ('accepted', 'signed', 'queued', 'submitted', 'approved', 'approved_with_observations', 'rejected', 'corrected', 'number_voided', 'cancelled')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.issuer_events": {
+      "name": "issuer_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "environment": {
+          "name": "environment",
+          "type": "tenant_environment",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "event_id": {
+          "name": "event_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "document_id": {
+          "name": "document_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "void_range": {
+          "name": "void_range",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "signed_xml": {
+          "name": "signed_xml",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "signed_at": {
+          "name": "signed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "batch_d_id": {
+          "name": "batch_d_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "send_attempted_at": {
+          "name": "send_attempted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "response_code": {
+          "name": "response_code",
+          "type": "varchar(8)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "response_message": {
+          "name": "response_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sifen_protocol": {
+          "name": "sifen_protocol",
+          "type": "varchar(16)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "responded_at": {
+          "name": "responded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "issuer_events_open_idx": {
+          "name": "issuer_events_open_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "document_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"issuer_events\".\"document_id\" IS NOT NULL AND \"issuer_events\".\"status\" <> 'rejected'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "issuer_events_to_send_idx": {
+          "name": "issuer_events_to_send_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "environment",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"issuer_events\".\"status\" = 'signed'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "issuer_events_tenant_id_tenants_id_fk": {
+          "name": "issuer_events_tenant_id_tenants_id_fk",
+          "tableFrom": "issuer_events",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "issuer_events_tenant_document_fk": {
+          "name": "issuer_events_tenant_document_fk",
+          "tableFrom": "issuer_events",
+          "tableTo": "documents",
+          "columnsFrom": [
+            "tenant_id",
+            "document_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "issuer_events_event_id_key": {
+          "name": "issuer_events_event_id_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "environment",
+            "event_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "issuer_events_kind_valid": {
+          "name": "issuer_events_kind_valid",
+          "value": "\"issuer_events\".\"kind\" IN ('cancellation', 'voiding', 'nomination')"
+        },
+        "issuer_events_status_valid": {
+          "name": "issuer_events_status_valid",
+          "value": "\"issuer_events\".\"status\" IN ('pending', 'signed', 'sending', 'approved', 'rejected', 'unknown')"
+        },
+        "issuer_events_event_id_range": {
+          "name": "issuer_events_event_id_range",
+          "value": "\"issuer_events\".\"event_id\" BETWEEN 1 AND 9999999999"
+        },
+        "issuer_events_reason_length": {
+          "name": "issuer_events_reason_length",
+          "value": "char_length(\"issuer_events\".\"reason\") BETWEEN 5 AND 500"
+        },
+        "issuer_events_subject": {
+          "name": "issuer_events_subject",
+          "value": "(\"issuer_events\".\"kind\" = 'voiding') = (\"issuer_events\".\"void_range\" IS NOT NULL) AND (\"issuer_events\".\"kind\" = 'voiding') = (\"issuer_events\".\"document_id\" IS NULL)"
+        },
+        "issuer_events_signed_pair": {
+          "name": "issuer_events_signed_pair",
+          "value": "(\"issuer_events\".\"signed_xml\" IS NULL) = (\"issuer_events\".\"signed_at\" IS NULL) AND (\"issuer_events\".\"status\" = 'pending') = (\"issuer_events\".\"signed_xml\" IS NULL)"
+        },
+        "issuer_events_sent_pair": {
+          "name": "issuer_events_sent_pair",
+          "value": "(\"issuer_events\".\"status\" IN ('pending', 'signed')) = (\"issuer_events\".\"batch_d_id\" IS NULL) AND (\"issuer_events\".\"batch_d_id\" IS NULL) = (\"issuer_events\".\"send_attempted_at\" IS NULL)"
+        },
+        "issuer_events_answered_pair": {
+          "name": "issuer_events_answered_pair",
+          "value": "(\"issuer_events\".\"response_code\" IS NULL) = (\"issuer_events\".\"responded_at\" IS NULL) AND (\"issuer_events\".\"status\" = 'unknown' OR (\"issuer_events\".\"status\" IN ('approved', 'rejected')) = (\"issuer_events\".\"response_code\" IS NOT NULL))"
         }
       },
       "isRLSEnabled": false
@@ -1083,133 +1391,6 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.received_artifacts": {
-      "name": "received_artifacts",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "storage_key": {
-          "name": "storage_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "content_type": {
-          "name": "content_type",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "sha256": {
-          "name": "sha256",
-          "type": "char(64)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "size_bytes": {
-          "name": "size_bytes",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "original_name": {
-          "name": "original_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "page_count": {
-          "name": "page_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "received_artifacts_tenant_id_tenants_id_fk": {
-          "name": "received_artifacts_tenant_id_tenants_id_fk",
-          "tableFrom": "received_artifacts",
-          "tableTo": "tenants",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "received_artifacts_storage_key_key": {
-          "name": "received_artifacts_storage_key_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "storage_key"
-          ]
-        },
-        "received_artifacts_tenant_id_key": {
-          "name": "received_artifacts_tenant_id_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "id"
-          ]
-        },
-        "received_artifacts_tenant_sha256_key": {
-          "name": "received_artifacts_tenant_sha256_key",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "sha256"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "received_artifacts_sha256_hex": {
-          "name": "received_artifacts_sha256_hex",
-          "value": "\"received_artifacts\".\"sha256\" ~ '^[0-9a-f]{64}$'"
-        },
-        "received_artifacts_size_nonneg": {
-          "name": "received_artifacts_size_nonneg",
-          "value": "\"received_artifacts\".\"size_bytes\" >= 0"
-        },
-        "received_artifacts_page_count_positive": {
-          "name": "received_artifacts_page_count_positive",
-          "value": "\"received_artifacts\".\"page_count\" IS NULL OR \"received_artifacts\".\"page_count\" > 0"
-        }
-      },
       "isRLSEnabled": false
     },
     "public.tenant_certificates": {

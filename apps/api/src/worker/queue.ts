@@ -1,6 +1,16 @@
 import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import {
+  DEADLINE_WATCH_QUEUE,
+  deadlineWatchJob,
+  type DeadlineWatchJobData,
+} from './deadline-watch.processor.js';
+import {
+  DOCUMENT_EMAIL_QUEUE,
+  documentEmailJob,
+  type DocumentEmailJobData,
+} from './document-email.processor.js';
+import {
   WEBHOOK_DELIVERY_QUEUE,
   webhookDeliveryJob,
   type WebhookDeliveryJobData,
@@ -12,6 +22,8 @@ export const TRANSMISSION_QUEUE = 'lote-build';
 /** The job carries only the tenant: Postgres is the source of truth and jobs are rebuildable. */
 export interface TransmissionJobData {
   readonly tenantId: string;
+  /** Optional W3C trace context of the producer; without it each cycle starts a root trace. */
+  readonly traceparent?: string;
 }
 
 /** Minimal logger the queue adapters need. */
@@ -180,5 +192,107 @@ export function createWebhookDeliveryWorker({
     { connection, concurrency, ...(prefix === undefined ? {} : { prefix }) },
   );
   if (logger) logQueueErrors(worker, 'webhook delivery worker', logger);
+  return worker;
+}
+
+const deadlineJob: TenantJob = (tenantId) => {
+  const { name, data } = deadlineWatchJob(tenantId);
+  return { name, data };
+};
+
+/** The `deadline-watch` schedules (HU-E6-07): same per-tenant scheduler keys, on their own queue. */
+export function createDeadlineWatchScheduleStore(queue: ScheduleQueue): TenantScheduleStore {
+  return createTenantScheduleStore(queue, deadlineJob);
+}
+
+/** The `deadline-watch` queue, with its errors routed to the logger. */
+export function createDeadlineWatchQueue(
+  connection: Redis,
+  logger: QueueLogger,
+  prefix?: string,
+): Queue<DeadlineWatchJobData> {
+  const queue = new Queue<DeadlineWatchJobData>(DEADLINE_WATCH_QUEUE, {
+    connection,
+    ...(prefix === undefined ? {} : { prefix }),
+  });
+  logQueueErrors(queue, 'deadline watch queue', logger);
+  return queue;
+}
+
+export interface DeadlineWatchWorkerOptions {
+  readonly connection: Redis;
+  readonly concurrency: number;
+  readonly process: (data: DeadlineWatchJobData) => Promise<unknown>;
+  readonly prefix?: string;
+  readonly logger?: QueueLogger;
+}
+
+/** The DeadlineWatchWorker (HU-E6-07): runs each tenant's repeatable watch job. */
+export function createDeadlineWatchWorker({
+  connection,
+  concurrency,
+  process,
+  prefix,
+  logger,
+}: DeadlineWatchWorkerOptions): Worker<DeadlineWatchJobData> {
+  const worker = new Worker<DeadlineWatchJobData>(
+    DEADLINE_WATCH_QUEUE,
+    (job) => process(job.data),
+    {
+      connection,
+      concurrency,
+      ...(prefix === undefined ? {} : { prefix }),
+    },
+  );
+  if (logger) logQueueErrors(worker, 'deadline watch worker', logger);
+  return worker;
+}
+
+const documentEmailTenantJob: TenantJob = (tenantId) => {
+  const { name, data } = documentEmailJob(tenantId);
+  return { name, data };
+};
+
+/** The `document-email` schedules (HU-E11-02): same per-tenant scheduler keys, on their own queue. */
+export function createDocumentEmailScheduleStore(queue: ScheduleQueue): TenantScheduleStore {
+  return createTenantScheduleStore(queue, documentEmailTenantJob);
+}
+
+/** The `document-email` queue, with its errors routed to the logger. */
+export function createDocumentEmailQueue(
+  connection: Redis,
+  logger: QueueLogger,
+  prefix?: string,
+): Queue<DocumentEmailJobData> {
+  const queue = new Queue<DocumentEmailJobData>(DOCUMENT_EMAIL_QUEUE, {
+    connection,
+    ...(prefix === undefined ? {} : { prefix }),
+  });
+  logQueueErrors(queue, 'document email queue', logger);
+  return queue;
+}
+
+export interface DocumentEmailWorkerOptions {
+  readonly connection: Redis;
+  readonly concurrency: number;
+  readonly process: (data: DocumentEmailJobData) => Promise<unknown>;
+  readonly prefix?: string;
+  readonly logger?: QueueLogger;
+}
+
+/** The DocumentEmailWorker (HU-E11-02): runs each tenant's repeatable send job. */
+export function createDocumentEmailWorker({
+  connection,
+  concurrency,
+  process,
+  prefix,
+  logger,
+}: DocumentEmailWorkerOptions): Worker<DocumentEmailJobData> {
+  const worker = new Worker<DocumentEmailJobData>(
+    DOCUMENT_EMAIL_QUEUE,
+    (job) => process(job.data),
+    { connection, concurrency, ...(prefix === undefined ? {} : { prefix }) },
+  );
+  if (logger) logQueueErrors(worker, 'document email worker', logger);
   return worker;
 }

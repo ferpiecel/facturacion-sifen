@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CycleReport } from '../modules/transmission/application/transmission-cycle.js';
+import type { Telemetry } from '../modules/telemetry/application/ports/telemetry.port.js';
+import { NOOP_TELEMETRY } from '../modules/telemetry/infrastructure/noop-telemetry.js';
 import type { TenantRunLock } from './tenant-run-lock.js';
 import { TransmissionCycleProcessor } from './transmission-cycle-processor.js';
 
@@ -8,6 +10,9 @@ const empty: CycleReport = {
   signed: 0,
   signSkipped: 0,
   sendSkipped: 0,
+  sendDeferred: 0,
+  rucBlocks: 0,
+  sendPausedUntil: null,
   assembled: 0,
   sent: [],
   polled: [],
@@ -20,9 +25,28 @@ const empty: CycleReport = {
 
 const lease = new AbortController();
 
+function recordingTelemetry(spans: string[] = []) {
+  const metrics: string[] = [];
+  const telemetry: Telemetry = {
+    ...NOOP_TELEMETRY,
+    increment: (name, by = 1) => void metrics.push(`${name}:${String(by)}`),
+    withSpan: (name, attributes, fn, traceparent) => {
+      spans.push(
+        `${name} tenant.id=${String(attributes['tenant.id'])} parent=${traceparent ?? 'root'}`,
+      );
+      return fn({ traceId: '' });
+    },
+  };
+  return { telemetry, metrics };
+}
+
 function setup(
   report: Partial<CycleReport> = {},
-  options: { locked?: boolean; fail?: boolean } = {},
+  options: {
+    locked?: boolean;
+    fail?: boolean;
+    telemetry?: Telemetry;
+  } = {},
 ) {
   const clock = { now: 0 };
   const received: (AbortSignal | undefined)[] = [];
@@ -57,6 +81,7 @@ function setup(
     }),
     now: () => new Date(clock.now),
     heldListEveryMs: 600_000,
+    telemetry: options.telemetry,
     logger: {
       info: (message) => logs.push({ level: 'info', message }),
       warn: (message) => logs.push({ level: 'warn', message }),
@@ -104,6 +129,58 @@ describe('TransmissionCycleProcessor', () => {
     });
     await processor.process({ tenantId: TENANT });
     expect(logs[0].message).toContain('polled=2 recovered=1 swept=3');
+  });
+
+  it('reports the lotes left pending by an open circuit in the cycle summary', async () => {
+    const { processor, logs } = setup({ sendDeferred: 2 });
+    await processor.process({ tenantId: TENANT });
+    expect(logs[0].message).toContain('deferred=2');
+  });
+
+  describe('tracing (HU-E14-01)', () => {
+    it('runs the cycle in a span that continues the job traceparent and carries the tenant', async () => {
+      const spans: string[] = [];
+      const { telemetry } = recordingTelemetry(spans);
+      const { processor } = setup({}, { telemetry });
+      const traceparent = '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01';
+      await processor.process({ tenantId: TENANT, traceparent });
+      expect(spans).toEqual([`transmission.cycle tenant.id=${TENANT} parent=${traceparent}`]);
+    });
+
+    it('starts a root trace when the job carries no traceparent, and marks a failure', async () => {
+      const spans: string[] = [];
+      const { telemetry } = recordingTelemetry(spans);
+      const { processor } = setup({}, { telemetry, fail: true });
+      await expect(processor.process({ tenantId: TENANT })).rejects.toThrow();
+      expect(spans).toEqual([`transmission.cycle tenant.id=${TENANT} parent=root`]);
+    });
+  });
+
+  describe('RUC block alert and metric (HU-E6-05)', () => {
+    it('raises an error-level alert and counts the block when a lote made SIFEN block the RUC', async () => {
+      const { telemetry, metrics } = recordingTelemetry();
+      const { processor, logs } = setup(
+        { rucBlocks: 1, sendPausedUntil: new Date('2026-10-02T12:30:00Z') },
+        { telemetry },
+      );
+      await processor.process({ tenantId: TENANT });
+      const alert = logs.find((log) => log.level === 'error');
+      expect(alert?.message).toContain(`tenant ${TENANT} RUC blocked`);
+      expect(alert?.message).toContain('2026-10-02T12:30:00.000Z');
+      expect(metrics).toEqual(['sifen_ruc_blocks_total:1']);
+    });
+
+    it('only warns while an earlier pause lasts, without counting it again', async () => {
+      const { telemetry, metrics } = recordingTelemetry();
+      const { processor, logs } = setup(
+        { sendPausedUntil: new Date('2026-10-02T12:30:00Z') },
+        { telemetry },
+      );
+      await processor.process({ tenantId: TENANT });
+      expect(logs.filter((log) => log.level === 'error')).toEqual([]);
+      expect(logs.some((log) => log.message.includes('sends paused until'))).toBe(true);
+      expect(metrics).toEqual([]);
+    });
   });
 
   it('logs a quiet summary, and warnings for held documents, stale lotes and failures', async () => {

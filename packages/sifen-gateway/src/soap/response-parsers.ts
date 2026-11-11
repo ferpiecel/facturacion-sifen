@@ -145,14 +145,22 @@ export function parseProtocoloDE(xml: string, options?: ParseOptions): SifenProt
 export function parseConsultaDE(xml: string, options?: ParseOptions): SifenConsDE {
   const body = bodyAs(xml, 'consultarDE', 'rResEnviConsDe', options);
   const container = firstChild(body, 'xContenDE');
-  const de =
-    container === undefined
-      ? undefined
-      : firstChild(firstChild(container, 'rContDe') ?? container, 'rDE');
+  const contDe =
+    container === undefined ? undefined : (firstChild(container, 'rContDe') ?? container);
+  const de = contDe === undefined ? undefined : firstChild(contDe, 'rDE');
+  // MT v150 nests xContEv under rContDe, but a response that places it beside rContDe or directly under the
+  // body must not read as "no events": a missed cancellation would be settled as rejected (ADR-0020).
+  const eventos = [...new Set([contDe, container, body])]
+    .flatMap((holder) => holder?.children ?? [])
+    .filter((child) => child.name === 'xContEv')
+    .flatMap((contEv) => (firstChild(contEv, 'rContEv') ?? contEv).children)
+    .filter((child) => child.name === 'xEvento')
+    .map((evento) => evento.raw);
   return {
     dCodRes: requireText(body, 'dCodRes', 'consultarDE'),
     dMsgRes: requireText(body, 'dMsgRes', 'consultarDE'),
     xmlDE: de?.raw ?? null,
+    eventos,
   };
 }
 

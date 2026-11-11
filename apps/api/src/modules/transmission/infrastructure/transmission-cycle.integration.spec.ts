@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { X509Certificate } from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import {
@@ -142,8 +142,27 @@ describe('TransmissionCycle end to end', () => {
   });
 
   afterEach(async () => {
+    vi.useRealTimers();
+    dbClockFollowsTestClock = false;
     await handle.close();
   });
+
+  /**
+   * PGlite reads its `now()` (and so `lotes.created_at` and the `resent_at` stamp) from JavaScript's
+   * `Date`. The recovery orders a resent document against its lotes with those database timestamps, and
+   * the machine's real clock can step between the lotes of one test (the order then inverts and the
+   * resend is never recovered). A test that depends on that order makes the database clock follow the
+   * injected one: every instant it uses is a value the test chose.
+   */
+  let dbClockFollowsTestClock = false;
+  const followTestClockInDatabase = () => {
+    dbClockFollowsTestClock = true;
+    vi.useFakeTimers({ toFake: ['Date'], now: clock });
+  };
+  const setClock = (iso: string) => {
+    clock = new Date(iso);
+    if (dbClockFollowsTestClock) vi.setSystemTime(clock);
+  };
 
   function buildCycle(
     gateway: FakeSifenGateway,
@@ -213,6 +232,53 @@ describe('TransmissionCycle end to end', () => {
     expect(gateway.callsTo('consultarLote')).toHaveLength(1);
   });
 
+  describe('synchronous transmission (HU-E6-06)', () => {
+    const enableSync = () => handle.db.update(tenantFiscalProfiles).set({ syncTransmission: true });
+    const readFlag = () =>
+      handle.db
+        .select({ on: tenantFiscalProfiles.syncTransmission })
+        .from(tenantFiscalProfiles)
+        .then((rows) => rows[0].on);
+
+    it("approves a flagged tenant's document in one run through siRecepDE, without a lote send", async () => {
+      await enableSync();
+      const gateway = new FakeSifenGateway();
+      const report = await buildCycle(gateway).run();
+
+      expect(report.sent.map((s) => s.status)).toEqual(['processed']);
+      expect((await readDocument()).status).toBe('approved');
+      expect(gateway.callsTo('enviarLote')).toEqual([]);
+      expect(gateway.callsTo('enviarDESincronico')).toHaveLength(1);
+      // Nothing left for the poll: the lote is already processed.
+      expect(await buildCycle(gateway).run()).toMatchObject({ sent: [], polled: [] });
+    });
+
+    it('on 1264 clears the flag, audits it and sends the same lote by batch', async () => {
+      await enableSync();
+      const gateway = new FakeSifenGateway();
+      gateway.enqueue('enviarDESincronico', {
+        dCodRes: '1264',
+        dMsgRes: 'RUC no habilitado',
+        dEstRes: 'Rechazado',
+        dProtAut: null,
+      });
+      gateway.enqueue('enviarLote', sifenScenarios.loteRecibido('4500123'));
+      const cycle = buildCycle(gateway);
+
+      const report = await cycle.run();
+
+      expect(report.sent.map((s) => s.status)).toEqual(['sent']);
+      expect((await readDocument()).status).toBe('submitted');
+      expect(await readFlag()).toBe(false);
+      const audited = await withTenantTransaction(handle.db, tenantId, (tx) =>
+        tx.select().from(auditLog).where(eq(auditLog.action, 'tenant.sync_transmission_disabled')),
+      );
+      expect(audited).toHaveLength(1);
+      // The flag stays off: the next document goes by batch directly.
+      expect(gateway.callsTo('enviarDESincronico')).toHaveLength(1);
+    });
+  });
+
   describe('unnamed receiver (innominado B2C, stored by an old build)', () => {
     beforeAll(() => {
       // Old payload: the unnamed receiver still carries the department the clients used to send.
@@ -244,7 +310,7 @@ describe('TransmissionCycle end to end', () => {
     const cycle = buildCycle(gateway);
     const first = await cycle.run();
     const loteId = first.sent[0].loteId;
-    clock = new Date('2026-10-04T12:11:00Z');
+    setClock('2026-10-04T12:11:00Z');
     gateway.enqueue('consultarLote', sifenScenarios.loteConcluido([]));
     expect((await cycle.run()).polled).toEqual([{ loteId, status: 'recovery' }]);
     expect((await readDocument()).status).toBe('submitted');
@@ -256,11 +322,12 @@ describe('TransmissionCycle end to end', () => {
     withTenantTransaction(handle.db, tenantId, (tx) => tx.select().from(lotes));
 
   it('resends once after a post-window 0420, with the same CDC, after verifying it again (HU-E6-04)', async () => {
+    followTestClockInDatabase();
     const gateway = new FakeSifenGateway();
     const { cycle, loteId } = await handedOverToRecovery(gateway);
 
     // Past the 48 h window a 0420 is definitive: the document is queued again (once), its old lote closes.
-    clock = new Date('2026-10-04T12:22:00Z');
+    setClock('2026-10-04T12:22:00Z');
     gateway.enqueue('consultarDE', sifenScenarios.cdcInexistente());
     expect((await cycle.run()).recovered).toEqual([{ loteId, status: 'incomplete' }]);
     expect(await readDocument()).toMatchObject({
@@ -273,13 +340,13 @@ describe('TransmissionCycle end to end', () => {
     expect((await allLotes()).map((l) => l.status)).toEqual(['processed']);
 
     // 8 minutes after the recovery's query the check must not ask again (10 min between queries).
-    clock = new Date('2026-10-04T12:30:00Z');
+    setClock('2026-10-04T12:30:00Z');
     const tooSoon = await cycle.run();
     expect(tooSoon).toMatchObject({ assembled: 0, sent: [] });
     expect(gateway.callsTo('consultarDE')).toHaveLength(1);
 
     // Ten minutes after it the next run verifies the CDC once more (still 0420), then sends it in a new lote.
-    clock = new Date('2026-10-04T12:33:00Z');
+    setClock('2026-10-04T12:33:00Z');
     gateway.enqueue('consultarDE', sifenScenarios.cdcInexistente());
     gateway.enqueue('enviarLote', sifenScenarios.loteRecibido('4500999'));
     const resend = await cycle.run();
@@ -295,10 +362,10 @@ describe('TransmissionCycle end to end', () => {
 
     // The resent lote is polled and handed to recovery; 48 h after ITS send a second 0420 holds the
     // document (no third send), with its own reason.
-    clock = new Date('2026-10-04T12:45:00Z');
+    setClock('2026-10-04T12:45:00Z');
     gateway.enqueue('consultarLote', sifenScenarios.loteConcluido([]));
     expect((await cycle.run()).polled).toEqual([{ loteId: resentLoteId, status: 'processed' }]);
-    clock = new Date('2026-10-06T12:34:00Z');
+    setClock('2026-10-06T12:34:00Z');
     gateway.enqueue('consultarDE', sifenScenarios.cdcInexistente());
     expect((await cycle.run()).recovered).toEqual([{ loteId: resentLoteId, status: 'incomplete' }]);
     expect(await readDocument()).toMatchObject({
@@ -527,7 +594,7 @@ describe('TransmissionCycle end to end', () => {
 
   it('backs off after a 0301, retries when due and holds the document at the cap', async () => {
     const gateway = new FakeSifenGateway();
-    gateway.setDefault('enviarLote', sifenScenarios.loteNoEncolado('RUC bloqueado'));
+    gateway.setDefault('enviarLote', sifenScenarios.loteNoEncolado('Lote invalido'));
     const cycle = buildCycle(gateway);
 
     await cycle.run();
@@ -555,5 +622,32 @@ describe('TransmissionCycle end to end', () => {
     expect(last.held).toEqual([
       { documentId: (await readDocument()).id, reason: 'transmission:attempts-exhausted' },
     ]);
+  });
+
+  it('pauses the tenant after a 0301 that blocks the RUC and requeues the document after the pause', async () => {
+    const gateway = new FakeSifenGateway();
+    gateway.setDefault(
+      'enviarLote',
+      sifenScenarios.loteNoEncolado('RUC bloqueado por envio de lotes invalidos'),
+    );
+    const cycle = buildCycle(gateway);
+
+    const first = await cycle.run();
+    expect(first.rucBlocks).toBe(1);
+    // Not the document's fault: no attempt is counted and nothing is held.
+    expect(await readDocument()).toMatchObject({
+      status: 'queued',
+      transmissionAttempts: 0,
+      transmissionHold: null,
+      nextTransmissionAt: new Date(clock.getTime() + 30 * 60_000),
+    });
+
+    clock = new Date(clock.getTime() + 20 * 60_000);
+    expect(await cycle.run()).toMatchObject({ sent: [], rucBlocks: 0 });
+    expect(gateway.callsTo('enviarLote')).toHaveLength(1);
+
+    clock = new Date(clock.getTime() + 11 * 60_000);
+    await cycle.run();
+    expect(gateway.callsTo('enviarLote')).toHaveLength(2);
   });
 });

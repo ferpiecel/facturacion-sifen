@@ -2,10 +2,9 @@ import { addAmounts } from '../domain/summary-amounts.js';
 import { portalDocumentType, type PortalDocumentType } from '../domain/document-type.js';
 import { trimDecimals } from '../domain/portal-document.js';
 import { asuncionToday, resolveSummaryPeriod } from '../domain/summary-period.js';
+import { TRANSMISSION_WINDOW_MS } from '../../transmission/domain/transmission-deadline.js';
 import type { PortalSummarySource } from './ports/portal-summary-source.port.js';
 
-/** SIFEN gives 72 h from signing to transmit (ADR-0008); there is no shared constant in the code yet. */
-export const TRANSMISSION_WINDOW_MS = 72 * 3_600_000;
 /** A pending document is "due soon" when its deadline is within this time. */
 export const DUE_SOON_MS = 12 * 3_600_000;
 

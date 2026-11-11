@@ -6,7 +6,9 @@ import { DocumentsBrowser } from './documents-browser';
 import { fakeDocumentsClient, PAGE } from './documents-fixtures';
 import { DocumentsHelpBanner } from './documents-help-banner';
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
+// Stable router, as Next's is: useRemote depends on it, a fresh object per render re-runs its request.
+const { router } = vi.hoisted(() => ({ router: { push: vi.fn(), replace: vi.fn() } }));
+vi.mock('next/navigation', () => ({ useRouter: () => router }));
 
 beforeEach(() => {
   URL.createObjectURL = vi.fn(() => 'blob:kude');

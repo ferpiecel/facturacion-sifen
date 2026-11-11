@@ -2,10 +2,16 @@ import { HttpException, HttpStatus } from '@nestjs/common';
 import { DocumentNumberExhaustedError } from '@sifen/db';
 import type { ValidationError } from '../../domain/invoice-draft.js';
 import {
+  CertificateExpiringError,
   IdempotencyKeyReusedError,
   InvoiceValidationError,
   IssuerNotConfiguredError,
 } from '../../application/accept-invoice.js';
+import {
+  CorrectionTypeChangedError,
+  DocumentNotCorrectableError,
+  DocumentNotFoundError,
+} from '../../application/correct-document.js';
 
 /** Postgres SQLSTATE unique_violation. */
 const UNIQUE_VIOLATION = '23505';
@@ -42,6 +48,12 @@ export function toHttpException(error: unknown): HttpException | null {
   if (error instanceof IssuerNotConfiguredError) {
     return problem(HttpStatus.UNPROCESSABLE_ENTITY, error.message);
   }
+  if (error instanceof CertificateExpiringError) {
+    return problem(HttpStatus.UNPROCESSABLE_ENTITY, error.message, {
+      code: 'certificate_expiring',
+      notAfter: error.notAfter.toISOString(),
+    });
+  }
   if (error instanceof IdempotencyKeyReusedError) {
     return problem(HttpStatus.CONFLICT, error.message);
   }
@@ -50,6 +62,17 @@ export function toHttpException(error: unknown): HttpException | null {
       HttpStatus.CONFLICT,
       'Document numbering is exhausted for this expedition point; use another point',
     );
+  }
+  if (error instanceof DocumentNotFoundError) {
+    return problem(HttpStatus.NOT_FOUND, error.message);
+  }
+  if (error instanceof DocumentNotCorrectableError) {
+    return problem(HttpStatus.CONFLICT, error.message, { code: 'document_not_correctable' });
+  }
+  if (error instanceof CorrectionTypeChangedError) {
+    return problem(HttpStatus.UNPROCESSABLE_ENTITY, error.message, {
+      code: 'correction_type_changed',
+    });
   }
   if (isUniqueViolation(error)) {
     return problem(

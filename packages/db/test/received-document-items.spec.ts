@@ -309,11 +309,11 @@ describe('received_document_items and received_document_field_confidences', () =
     expect(grants).toEqual([]);
   });
 
-  it('rolls back cleanly: RLS first (0051), then the tables (0050)', async () => {
+  it('rolls back cleanly: RLS first (0078), then the tables (0077)', async () => {
     const { db } = await seed();
     for (const file of [
-      '0051_received_document_items_and_confidences_rls.down.sql',
-      '0050_received_document_items_and_confidences.down.sql',
+      '0078_received_document_items_and_confidences_rls.down.sql',
+      '0077_received_document_items_and_confidences.down.sql',
     ]) {
       for (const statement of rollbackStatements(file)) {
         await db.execute(sql.raw(statement));

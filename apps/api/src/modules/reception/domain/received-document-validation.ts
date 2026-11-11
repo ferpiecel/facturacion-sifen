@@ -52,7 +52,7 @@ export interface ValidationOptions {
   readonly tolerance?: Decimal;
 }
 
-/** ADR-0021 `RECEPTION_TOTALS_TOLERANCE` default: 1.00 Gs. */
+/** ADR-0026 `RECEPTION_TOTALS_TOLERANCE` default: 1.00 Gs. */
 export const DEFAULT_TOTALS_TOLERANCE: Decimal = parseConstant('1');
 
 const ZERO = parseConstant('0');

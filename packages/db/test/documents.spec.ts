@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { DatabaseHandle } from '../src/client.js';
 import {
   documents,
@@ -580,5 +580,193 @@ describe('documents', () => {
     expect(await causeOf(db.update(documents).set({ requestHash: 'b'.repeat(64) }))).toContain(
       'immutable',
     );
+  });
+
+  /** Spec: HU-E7-01 (ADR-0019). The CDC of the FE a credit note is associated to. */
+  describe('associated CDC', () => {
+    const CDC_NCE = '05800695631001001000000112026010111234567893';
+
+    it('is null by default and set for a credit note', async () => {
+      const { db, a, setupA, doc } = await seed();
+      const [fe] = await db.insert(documents).values(doc(a, setupA)).returning();
+      expect(fe.associatedCdc).toBeNull();
+      const [nce] = await db
+        .insert(documents)
+        .values(
+          doc(a, setupA, {
+            documentType: 5,
+            cdc: CDC_NCE,
+            number: 2,
+            associatedCdc: CDC_A,
+          }),
+        )
+        .returning();
+      expect(nce.associatedCdc).toBe(CDC_A);
+    });
+
+    it('rejects a malformed value, a self reference and an invoice with an association', async () => {
+      const { db, a, setupA, doc } = await seed();
+      const nce = (overrides: Partial<typeof documents.$inferInsert>) =>
+        doc(a, setupA, { documentType: 5, cdc: CDC_NCE, number: 2, ...overrides });
+      expect(await causeOf(db.insert(documents).values(nce({ associatedCdc: '123' })))).toContain(
+        'documents_associated_cdc_format',
+      );
+      expect(
+        await causeOf(db.insert(documents).values(nce({ associatedCdc: 'a'.repeat(44) }))),
+      ).toContain('documents_associated_cdc_format');
+      expect(await causeOf(db.insert(documents).values(nce({ associatedCdc: CDC_NCE })))).toContain(
+        'documents_associated_cdc_not_self',
+      );
+      expect(
+        await causeOf(db.insert(documents).values(doc(a, setupA, { associatedCdc: CDC_B }))),
+      ).toContain('documents_associated_cdc_not_invoice');
+    });
+
+    it('is immutable once the document exists', async () => {
+      const { db, a, setupA, doc } = await seed();
+      await db
+        .insert(documents)
+        .values(doc(a, setupA, { documentType: 5, cdc: CDC_NCE, associatedCdc: CDC_A }));
+      expect(await causeOf(db.update(documents).set({ associatedCdc: CDC_B }))).toContain(
+        'associated_cdc is immutable',
+      );
+      expect(await causeOf(db.update(documents).set({ associatedCdc: null }))).toContain(
+        'associated_cdc is immutable',
+      );
+      const [row] = await db.update(documents).set({ status: 'signed' }).returning();
+      expect(row.associatedCdc).toBe(CDC_A);
+    });
+
+    it('is found by tenant, environment and associated CDC, and never across tenants', async () => {
+      const { db, a, b, setupA, setupB, doc } = await seed();
+      await db
+        .insert(documents)
+        .values(doc(a, setupA, { documentType: 5, cdc: CDC_NCE, associatedCdc: CDC_A }));
+      await db
+        .insert(documents)
+        .values(doc(b, setupB, { documentType: 5, cdc: CDC_B, associatedCdc: CDC_A }));
+      const credits = (tenantId: string) =>
+        withTenantTransaction(db, tenantId, (tx) =>
+          tx
+            .select({ cdc: documents.cdc })
+            .from(documents)
+            .where(eq(documents.associatedCdc, CDC_A)),
+        );
+      expect(await credits(a)).toEqual([{ cdc: CDC_NCE }]);
+      expect(await credits(b)).toEqual([{ cdc: CDC_B }]);
+    });
+
+    it('has a partial index for the credit sum lookup', async () => {
+      const { db } = await seed();
+      const result = await db.execute(
+        sql`SELECT indexdef FROM pg_indexes WHERE indexname = 'documents_associated_cdc_idx'`,
+      );
+      const def = (result as { rows: { indexdef: string }[] }).rows[0].indexdef;
+      expect(def).toContain('(tenant_id, environment, associated_cdc)');
+      expect(def).toContain('WHERE');
+    });
+  });
+  /** Spec: HU-E8-02 (MT v150 11.6.1, 4009/4010). The instant SIFEN approved the document. */
+  describe('approved_at', () => {
+    it('is null until the document is approved', async () => {
+      const { db, a, setupA, doc } = await seed();
+      const [row] = await db
+        .insert(documents)
+        .values(doc(a, setupA, { status: 'submitted' }))
+        .returning();
+      expect(row.approvedAt).toBeNull();
+      const [rejected] = await db
+        .update(documents)
+        .set({ status: 'rejected' })
+        .where(eq(documents.id, row.id))
+        .returning();
+      expect(rejected.approvedAt).toBeNull();
+    });
+
+    it.each(['approved', 'approved_with_observations'])(
+      'is stamped with the database clock when the status becomes %s',
+      async (status) => {
+        const { db, a, setupA, doc } = await seed();
+        const before = Date.now();
+        const [row] = await db
+          .insert(documents)
+          .values(doc(a, setupA, { status: 'submitted' }))
+          .returning();
+        const [approved] = await db
+          .update(documents)
+          .set({ status })
+          .where(eq(documents.id, row.id))
+          .returning();
+        expect(approved.approvedAt).toBeInstanceOf(Date);
+        expect((approved.approvedAt as Date).getTime()).toBeGreaterThanOrEqual(before - 1000);
+      },
+    );
+
+    it('keeps the instant the caller supplies (the processing time SIFEN reported)', async () => {
+      const { db, a, setupA, doc } = await seed();
+      const at = new Date('2026-10-05T12:00:00Z');
+      const [row] = await db
+        .insert(documents)
+        .values(doc(a, setupA, { status: 'submitted' }))
+        .returning();
+      const [approved] = await db
+        .update(documents)
+        .set({ status: 'approved', approvedAt: at })
+        .where(eq(documents.id, row.id))
+        .returning();
+      expect(approved.approvedAt).toEqual(at);
+    });
+
+    it('is write-once and survives later transitions', async () => {
+      const { db, a, setupA, doc } = await seed();
+      const at = new Date('2026-10-05T12:00:00Z');
+      const [row] = await db
+        .insert(documents)
+        .values(doc(a, setupA, { status: 'approved', approvedAt: at }))
+        .returning();
+      expect(
+        await causeOf(db.update(documents).set({ approvedAt: new Date('2026-10-06T00:00:00Z') })),
+      ).toContain('approved_at is write-once');
+      expect(await causeOf(db.update(documents).set({ approvedAt: null }))).toContain(
+        'approved_at is write-once',
+      );
+      const [cancelled] = await db
+        .update(documents)
+        .set({ status: 'cancelled' })
+        .where(eq(documents.id, row.id))
+        .returning();
+      expect(cancelled.approvedAt).toEqual(at);
+    });
+
+    it('can be set on an approved row that has none (a row approved before the column)', async () => {
+      const { db, a, setupA, doc } = await seed();
+      const [row] = await db
+        .insert(documents)
+        .values(doc(a, setupA, { status: 'approved' }))
+        .returning();
+      expect(row.approvedAt).toBeNull();
+      const at = new Date('2026-10-05T12:00:00Z');
+      const [stamped] = await db
+        .update(documents)
+        .set({ approvedAt: at })
+        .where(eq(documents.id, row.id))
+        .returning();
+      expect(stamped.approvedAt).toEqual(at);
+    });
+
+    it('cannot be set on a document that is not approved', async () => {
+      const { db, a, setupA, doc } = await seed();
+      expect(
+        await causeOf(
+          db
+            .insert(documents)
+            .values(doc(a, setupA, { status: 'submitted', approvedAt: new Date() })),
+        ),
+      ).toContain('approved_at');
+      await db.insert(documents).values(doc(a, setupA, { status: 'submitted' }));
+      expect(await causeOf(db.update(documents).set({ approvedAt: new Date() }))).toContain(
+        'approved_at',
+      );
+    });
   });
 });

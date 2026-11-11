@@ -46,3 +46,94 @@ export const unnamedReceiver = (input: FacturaPocInput): FacturaPocInput => ({
     },
   },
 });
+
+/**
+ * The same document as an AFE (iTiDE 4): the receiver is the issuer, items without VAT, plus the
+ * seller (gCamAE) and the constancia (gCamDEAsoc). Built by xmlgen, so the structure is the real one.
+ */
+export const selfInvoice = (raw: FacturaPocInput): FacturaPocInput => {
+  const input = exemptItem(raw);
+  const data = Object.fromEntries(Object.entries(input.data).filter(([key]) => key !== 'factura'));
+  return {
+    ...input,
+    data: {
+      ...data,
+      tipoDocumento: 4,
+      cliente: {
+        contribuyente: true,
+        ruc: '80000001-9',
+        razonSocial: 'DE generado en ambiente de prueba - sin valor comercial ni fiscal',
+        tipoOperacion: 2,
+        pais: 'PRY',
+        paisDescripcion: 'Paraguay',
+        tipoContribuyente: 2,
+        documentoTipo: 1,
+        documentoNumero: '1',
+      },
+      autoFactura: {
+        tipoVendedor: 1,
+        documentoTipo: 1,
+        documentoNumero: '1234567',
+        nombre: 'Juan Perez',
+        direccion: 'Calle 1',
+        numeroCasa: '10',
+        departamento: 11,
+        distrito: 143,
+        ciudad: 3344,
+        ubicacion: { lugar: 'Calle del Cultivo', departamento: 11, distrito: 143, ciudad: 3344 },
+      },
+      documentoAsociado: {
+        formato: 3,
+        constanciaTipo: 1,
+        constanciaNumero: '12345678901',
+        constanciaControl: 'ABCD1234',
+      },
+    },
+  };
+};
+
+/**
+ * The same document as an NRE (iTiDE 7): no condition, no FE group, items without a price and the
+ * remission and transport groups. Built by xmlgen, so the structure is the real one.
+ */
+export const remissionNote = (raw: FacturaPocInput): FacturaPocInput => {
+  const input = exemptItem(raw);
+  const data = Object.fromEntries(
+    Object.entries(input.data).filter(([key]) => key !== 'factura' && key !== 'condicion'),
+  );
+  const [item] = data.items as Record<string, unknown>[];
+  const place = {
+    direccion: 'Calle 1',
+    numeroCasa: '10',
+    departamento: 11,
+    distrito: 143,
+    ciudad: 3344,
+  };
+  return {
+    ...input,
+    data: {
+      ...data,
+      tipoDocumento: 7,
+      descripcion: 'Traslado por ventas',
+      items: [{ ...item, precioUnitario: 0 }],
+      remision: { motivo: 1, tipoResponsable: 1, kms: 120, fechaFactura: '2026-11-01' },
+      detalleTransporte: {
+        tipo: 1,
+        modalidad: 1,
+        tipoResponsable: 1,
+        inicioEstimadoTranslado: '2026-11-02',
+        finEstimadoTranslado: '2026-11-03',
+        salida: place,
+        entrega: { ...place, direccion: 'Calle 2' },
+        vehiculo: { tipo: 'Camion', marca: 'Volvo', documentoTipo: 1, documentoNumero: 'ABC123' },
+        transportista: {
+          contribuyente: true,
+          nombre: 'Transportes SA',
+          ruc: '80000002-1',
+          direccion: 'Ruta 1',
+          chofer: { documentoNumero: '2345678', nombre: 'Pedro Gomez', direccion: 'Calle 3' },
+        },
+      },
+    },
+  };
+};

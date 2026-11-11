@@ -1,5 +1,5 @@
 /**
- * Webhook events produced by received-document transitions (ADR-0023). The database CHECK lists and
+ * Webhook events produced by received-document transitions (ADR-0028). The database CHECK lists and
  * the webhooks event catalogue carry the same four names (parity specs in packages/db and webhooks).
  */
 export const RECEPTION_EVENT_TYPES = [

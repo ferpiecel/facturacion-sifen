@@ -1,6 +1,6 @@
 # Guía de integración: documentos recibidos
 
-Referencia para integradores que reciben facturas de sus proveedores a través de `/v1/received-documents`. El contrato máquina-legible es [`docs/api/openapi.json`](../api/openapi.json); los eventos están en [`webhooks.md`](webhooks.md). Decisiones: [ADR-0019](../adr/0019-contexto-acotado-reception-documentos-recibidos.md), [ADR-0021](../adr/0021-pipeline-de-extraccion-confianza-y-auto-confirmacion.md) y [ADR-0023](../adr/0023-eventos-de-webhook-de-recepcion-y-scopes.md).
+Referencia para integradores que reciben facturas de sus proveedores a través de `/v1/received-documents`. El contrato máquina-legible es [`docs/api/openapi.json`](../api/openapi.json); los eventos están en [`webhooks.md`](webhooks.md). Decisiones: [ADR-0024](../adr/0024-contexto-acotado-reception-documentos-recibidos.md), [ADR-0026](../adr/0026-pipeline-de-extraccion-confianza-y-auto-confirmacion.md) y [ADR-0028](../adr/0028-eventos-de-webhook-de-recepcion-y-scopes.md).
 
 ## Qué hace la plataforma y qué hace usted
 
@@ -316,7 +316,7 @@ Todos los errores usan `{ "statusCode", "code", "message" }` más campos extra s
 
 ## Privacidad
 
-Hoy solo se lee el XML de SIFEN, que se procesa dentro de la plataforma. Cuando se habilite la extracción de **PDF y fotos** (planificado), las imágenes de las facturas se enviarán a un modelo de un tercero (Anthropic) para extraer los datos ([ADR-0021](../adr/0021-pipeline-de-extraccion-confianza-y-auto-confirmacion.md), punto 7). Antes de habilitarlo hace falta la decisión del dueño del producto sobre datos personales y fiscales y el acuerdo de tratamiento de datos. Esta guía se actualizará entonces.
+Hoy solo se lee el XML de SIFEN, que se procesa dentro de la plataforma. Cuando se habilite la extracción de **PDF y fotos** (planificado), las imágenes de las facturas se enviarán a un modelo de un tercero (Anthropic) para extraer los datos ([ADR-0026](../adr/0026-pipeline-de-extraccion-confianza-y-auto-confirmacion.md), punto 7). Antes de habilitarlo hace falta la decisión del dueño del producto sobre datos personales y fiscales y el acuerdo de tratamiento de datos. Esta guía se actualizará entonces.
 
 ## Alcance actual y límites conocidos
 

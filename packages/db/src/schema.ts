@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  type AnyPgColumn,
   bigint,
   boolean,
   char,
@@ -343,6 +344,8 @@ export const tenantFiscalProfiles = pgTable(
     // ("Tabla 1 – Tipo de Régimen") not present in docs/referencia/dnit,
     // so only the format is enforced here.
     regimeCode: varchar('regime_code', { length: 2 }),
+    // HU-E6-06: opt-in to siRecepDE for single-DE lotes. SIFEN code 1264 (RUC not enabled) clears it.
+    syncTransmission: boolean('sync_transmission').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -604,6 +607,33 @@ export const auditLog = pgTable(
 );
 
 /**
+ * Append-only, hash-chained record of every use of the `platform_admin` role (no `tenant_id`: it
+ * describes cross-tenant access, ADR-0023). Only `withPlatformAdminTransaction` writes it; `seq`,
+ * `prev_hash`, `hash` and `occurred_at` are set by database triggers.
+ */
+export const platformAuditLog = pgTable(
+  'platform_audit_log',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+    actor: varchar('actor', { length: 255 }).notNull(),
+    purpose: varchar('purpose', { length: 100 }).notNull(),
+    scope: jsonb('scope').notNull(),
+    rowCount: integer('row_count'),
+    seq: bigint('seq', { mode: 'number' }).notNull().default(0),
+    prevHash: text('prev_hash').notNull().default(''),
+    hash: text('hash').notNull().default(''),
+  },
+  (table) => [
+    unique('platform_audit_log_seq_unique').on(table.seq),
+    index('platform_audit_log_actor_purpose_idx').on(table.actor, table.purpose, table.occurredAt),
+    check('platform_audit_log_actor_not_blank', sql`btrim(${table.actor}) <> ''`),
+    check('platform_audit_log_purpose_not_blank', sql`btrim(${table.purpose}) <> ''`),
+    check('platform_audit_log_scope_array', sql`jsonb_typeof(${table.scope}) = 'array'`),
+  ],
+);
+
+/**
  * Last `dId` (SIFEN request id, numeric 1..15 digits) issued per tenant and
  * environment (HU-E4-03). Only advanced by `nextRequestId` inside the
  * caller's tenant transaction.
@@ -725,9 +755,11 @@ export const WEBHOOK_EVENT_TYPES = [
   'document.rejected',
   'document.cancelled',
   'document.number_voided',
+  'document.nominated',
   'document.transmission_deadline_warning',
   'document.notification.delivered',
   'document.notification.failed',
+  'certificate.expiring',
   'reception.document.confirmed',
   'reception.document.needs_review',
   'reception.document.extraction_failed',
@@ -963,6 +995,12 @@ export const documents = pgTable(
     issuedAt: timestamp('issued_at', { withTimezone: true }).notNull(),
     totalAmount: numeric('total_amount', { precision: 23, scale: 8 }).notNull(),
     currency: char('currency', { length: 3 }).notNull().default('PYG'),
+    /**
+     * CDC of the document this one is associated to (`gCamDEAsoc/dCdCDERef`, HU-E7-01, ADR-0019): the FE
+     * a credit note credits. Set on insert, immutable, never on an FE. That the target exists and is an FE
+     * is a domain rule, not a foreign key: the CDC may belong to a document the platform did not issue.
+     */
+    associatedCdc: char('associated_cdc', { length: 44 }),
     /** The request body as received. */
     payload: jsonb('payload').notNull(),
     /** Final signed DE XML (signature and QR included), set once when the document is signed. */
@@ -976,6 +1014,21 @@ export const documents = pgTable(
      * (HU-E6-04): write-once, and the only door of the `submitted -> queued` transition.
      */
     resentAt: timestamp('resent_at', { withTimezone: true }),
+    /**
+     * Ownership watermark of the resend: the highest `lotes.seq` of the lotes that carried the
+     * document when the recovery queued it again. A lote with `seq` at or below it has left the
+     * document behind; only a later lote carries it. Set by trigger together with `resent_at`,
+     * immutable afterwards. Ordering never reads the clock (ADR-0007/0008, hardening E6).
+     */
+    resentAfterSeq: bigint('resent_after_seq', { mode: 'number' }),
+    /**
+     * When SIFEN approved the document (HU-E8-02): the 48 h / 168 h cancellation windows count from it
+     * (MT v150 11.6.1, 4009 and 4010). Write-once, only on an approved document, stamped by trigger 0056 when
+     * the status becomes approved. NULL on rows approved before the column existed (refreshed lazily).
+     */
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    /** Times a rejected document was rewritten in place and requeued with the same CDC (ADR-0021, migration 0069). */
+    correctionsCount: integer('corrections_count').notNull().default(0),
     /** Not eligible for a new lote before this instant (backoff after 0301). */
     nextTransmissionAt: timestamp('next_transmission_at', { withTimezone: true }),
     /**
@@ -1022,6 +1075,7 @@ export const documents = pgTable(
       name: 'documents_tenant_point_fk',
     }),
     unique('documents_tenant_idempotency_key_key').on(table.tenantId, table.idempotencyKey),
+    check('documents_corrections_count_range', sql`${table.correctionsCount} >= 0`),
     check('documents_transmission_attempts_range', sql`${table.transmissionAttempts} >= 0`),
     check(
       'documents_transmission_hold_format',
@@ -1036,6 +1090,17 @@ export const documents = pgTable(
     check('documents_idempotency_key_format', sql`${table.idempotencyKey} ~ '^[!-~]{1,255}$'`),
     check('documents_idempotency_hash_format', sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`),
     check('documents_cdc_format', sql`${table.cdc} ~ '^[0-9]{44}$'`),
+    check('documents_associated_cdc_format', sql`${table.associatedCdc} ~ '^[0-9]{44}$'`),
+    check('documents_associated_cdc_not_self', sql`${table.associatedCdc} <> ${table.cdc}`),
+    // An FE (iTiDE 1) is never associated to another document.
+    check(
+      'documents_associated_cdc_not_invoice',
+      sql`${table.documentType} <> 1 OR ${table.associatedCdc} IS NULL`,
+    ),
+    // Lookup of the credits of an FE (the 2417 sum), always scoped by tenant and environment.
+    index('documents_associated_cdc_idx')
+      .on(table.tenantId, table.environment, table.associatedCdc)
+      .where(sql`${table.associatedCdc} IS NOT NULL`),
     check('documents_security_code_format', sql`${table.securityCode} ~ '^[0-9]{9}$'`),
     check('documents_number_range', sql`${table.number} BETWEEN 1 AND 9999999`),
     // iTiDE (C002) range: 1..8.
@@ -1046,6 +1111,78 @@ export const documents = pgTable(
       'documents_status_valid',
       sql`${table.status} IN (${sql.raw(DOCUMENT_STATUSES.map((s) => `'${s}'`).join(', '))})`,
     ),
+  ],
+);
+
+/** Append-only history of the corrections of rejected documents (HU-E8-01, ADR-0021). */
+export const documentCorrections = pgTable(
+  'document_corrections',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    documentId: uuid('document_id').notNull(),
+    kind: varchar('kind', { length: 16 }).notNull(),
+    idempotencyKey: varchar('idempotency_key', { length: 255 }).notNull(),
+    requestHash: char('request_hash', { length: 64 }).notNull(),
+    previousPayload: jsonb('previous_payload').notNull(),
+    previousSifenMessages: jsonb('previous_sifen_messages'),
+    replacementDocumentId: uuid('replacement_document_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.tenantId, table.documentId],
+      foreignColumns: [documents.tenantId, documents.id],
+      name: 'document_corrections_tenant_document_fk',
+    }),
+    foreignKey({
+      columns: [table.tenantId, table.replacementDocumentId],
+      foreignColumns: [documents.tenantId, documents.id],
+      name: 'document_corrections_tenant_replacement_fk',
+    }),
+    unique('document_corrections_tenant_idempotency_key_key').on(
+      table.tenantId,
+      table.idempotencyKey,
+    ),
+    uniqueIndex('document_corrections_reissue_idx')
+      .on(table.tenantId, table.documentId)
+      .where(sql`${table.kind} = 'reissue'`),
+    check('document_corrections_kind_valid', sql`${table.kind} IN ('same_cdc', 'reissue')`),
+    check(
+      'document_corrections_replacement',
+      sql`(${table.kind} = 'reissue') = (${table.replacementDocumentId} IS NOT NULL)`,
+    ),
+    check('document_corrections_hash_format', sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`),
+  ],
+);
+
+/**
+ * The claim a reissue takes on a rejected document before it issues the replacement (HU-E8-01, ADR-0021): at most
+ * one in-flight correction per document, checked by the same-CDC rewrite and by the reissue. Deleted when the
+ * reissue fails before issuing anything; kept once the reissue is linked (the document is then final).
+ */
+export const documentCorrectionClaims = pgTable(
+  'document_correction_claims',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    documentId: uuid('document_id').notNull(),
+    idempotencyKey: varchar('idempotency_key', { length: 255 }).notNull(),
+    requestHash: char('request_hash', { length: 64 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.tenantId, table.documentId],
+      foreignColumns: [documents.tenantId, documents.id],
+      name: 'document_correction_claims_tenant_document_fk',
+    }),
+    unique('document_correction_claims_document_key').on(table.tenantId, table.documentId),
+    check('document_correction_claims_hash_format', sql`${table.requestHash} ~ '^[0-9a-f]{64}$'`),
   ],
 );
 
@@ -1074,6 +1211,11 @@ export const lotes = pgTable(
       .notNull()
       .references(() => tenants.id),
     environment: tenantEnvironment('environment').notNull(),
+    /**
+     * Monotonic creation order (identity sequence, never reused, backfilled by `created_at`). Ordering
+     * and ownership between lotes use it, not `created_at`: the database clock may step back.
+     */
+    seq: bigint('seq', { mode: 'number' }).notNull().generatedAlwaysAsIdentity(),
     /** `iTiDE`: a lote carries a single document type. */
     documentType: smallint('document_type').notNull(),
     status: varchar('status', { length: 16 }).notNull().default('pending'),
@@ -1103,6 +1245,7 @@ export const lotes = pgTable(
   },
   (table) => [
     unique('lotes_tenant_id_key').on(table.tenantId, table.id),
+    unique('lotes_seq_key').on(table.seq),
     check('lotes_document_type_range', sql`${table.documentType} BETWEEN 1 AND 8`),
     check(
       'lotes_status_valid',
@@ -1138,6 +1281,511 @@ export const loteDocuments = pgTable(
       foreignColumns: [documents.tenantId, documents.id],
       name: 'lote_documents_tenant_document_fk',
     }),
+  ],
+);
+
+export const ISSUER_EVENT_KINDS = ['cancellation', 'voiding', 'nomination'] as const;
+/** Events the tenant registers as the RECEIVER of someone else's DE/DTE (HU-E9-01); they target a CDC, not a document. */
+export const RECEIVER_EVENT_KINDS = [
+  'conformity',
+  'disconformity',
+  'unawareness',
+  'receipt_notice',
+] as const;
+export const EVENT_KINDS = [...ISSUER_EVENT_KINDS, ...RECEIVER_EVENT_KINDS] as const;
+export const ISSUER_EVENT_STATUSES = [
+  'pending',
+  'signed',
+  'sending',
+  'approved',
+  'rejected',
+  'unknown',
+] as const;
+
+export const DOCUMENT_EMAIL_STATUSES = ['pending', 'failed', 'sent', 'dead', 'skipped'] as const;
+
+/**
+ * Email outbox (HU-E11-02): the approved document (KuDE PDF + signed XML) owed to one receiver. One
+ * row per (document, recipient) is the idempotency key; it is also the retry queue and the history.
+ * The attachments are rendered at send time from the stored signed XML, so nothing sensitive is kept
+ * here besides the recipient. `last_error` is a code, never provider text. Never deleted.
+ */
+export const documentEmails = pgTable(
+  'document_emails',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    documentId: uuid('document_id').notNull(),
+    recipient: varchar('recipient', { length: 254 }),
+    status: varchar('status', { length: 16 }).notNull().default('pending'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }),
+    lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+    lastError: varchar('last_error', { length: 64 }),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'document_emails_tenant_document_fk',
+      columns: [table.tenantId, table.documentId],
+      foreignColumns: [documents.tenantId, documents.id],
+    }),
+    unique('document_emails_document_key').on(table.tenantId, table.documentId),
+    index('document_emails_due_idx')
+      .on(table.nextAttemptAt)
+      .where(sql`${table.status} IN ('pending', 'failed')`),
+    check(
+      'document_emails_status_valid',
+      sql`${table.status} IN (${sqlList(DOCUMENT_EMAIL_STATUSES)})`,
+    ),
+    check(
+      'document_emails_next_attempt_pair',
+      sql`(${table.status} IN ('pending', 'failed')) = (${table.nextAttemptAt} IS NOT NULL)`,
+    ),
+    check(
+      'document_emails_sent_pair',
+      sql`(${table.status} = 'sent') = (${table.sentAt} IS NOT NULL)`,
+    ),
+    check('document_emails_attempts_nonneg', sql`${table.attemptCount} >= 0`),
+    check(
+      'document_emails_recipient_format',
+      sql`${table.recipient} IS NULL OR (position('@' in ${table.recipient}) > 1 AND ${table.recipient} !~ '[[:space:]]')`,
+    ),
+    check(
+      'document_emails_skipped_pair',
+      sql`(${table.status} = 'skipped') = (${table.recipient} IS NULL)`,
+    ),
+  ],
+);
+
+/**
+ * Events the issuer sends to `siRecepEvento` (HU-E8-04, ADR-0020): one table, typed by `kind`. A
+ * cancellation or nomination points at a document; a voiding carries its number range. `event_id` is
+ * the `rEve/@Id` SIFEN echoes in its answer (from the tenant's `dId` counter). The signed XML is
+ * write-once; an answered event is final. A refused event may be requested again, an open one may not.
+ * Rows are never deleted.
+ */
+export const issuerEvents = pgTable(
+  'issuer_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    environment: tenantEnvironment('environment').notNull(),
+    kind: varchar('kind', { length: 16 }).notNull(),
+    /** `rEve/@Id`, 1 to 10 digits, unique per tenant and environment. */
+    eventId: bigint('event_id', { mode: 'bigint' }).notNull(),
+    documentId: uuid('document_id'),
+    /** `{ timbrado, establishment, point, from, to, type, series? }` of a voiding. */
+    voidRange: jsonb('void_range'),
+    /** `mOtEve`, 5 to 500 characters; absent only on a conformity and a receipt notice, which carry none. */
+    reason: text('reason'),
+    /** CDC of the foreign DE/DTE a receiver event is about (HU-E9-01); null on issuer events. */
+    targetCdc: char('target_cdc', { length: 44 }),
+    /** Fields of the receiver event that its XML needs: dates, conformity type, total (HU-E9-01). */
+    receiverData: jsonb('receiver_data'),
+    /** The approved receiver event this one corrects (HU-E9-02); each event is corrected at most once. */
+    correctsEventId: uuid('corrects_event_id').references((): AnyPgColumn => issuerEvents.id),
+    /** Why the receiver corrects the event (MT Tabla K: free text, 5 to 500 characters). */
+    correctionReason: text('correction_reason'),
+    /** The receiver a nomination names (HU-E8-05), as requested; set on insert, immutable, only on a nomination. */
+    nomination: jsonb('nomination'),
+    /** `Idempotency-Key` of the request that created the event (HU-E8-02), unique per tenant; null for older rows. */
+    idempotencyKey: varchar('idempotency_key', { length: 255 }),
+    /** sha-256 hex of the canonical request, to detect a reused key. */
+    requestHash: char('request_hash', { length: 64 }),
+    status: varchar('status', { length: 16 }).notNull().default('pending'),
+    signedXml: text('signed_xml'),
+    signedAt: timestamp('signed_at', { withTimezone: true }),
+    /** `dId` of the `siRecepEvento` call that carries it (up to 15 events share one). */
+    batchDId: bigint('batch_d_id', { mode: 'bigint' }),
+    sendAttemptedAt: timestamp('send_attempted_at', { withTimezone: true }),
+    /** `dCodRes` and `dMsgRes` of this event's result; `dProtAut` when SIFEN gave one. */
+    responseCode: varchar('response_code', { length: 8 }),
+    responseMessage: text('response_message'),
+    sifenProtocol: varchar('sifen_protocol', { length: 16 }),
+    respondedAt: timestamp('responded_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('issuer_events_event_id_key').on(table.tenantId, table.environment, table.eventId),
+    foreignKey({
+      columns: [table.tenantId, table.documentId],
+      foreignColumns: [documents.tenantId, documents.id],
+      name: 'issuer_events_tenant_document_fk',
+    }),
+    uniqueIndex('issuer_events_open_idx')
+      .on(table.tenantId, table.documentId, table.kind)
+      .where(sql`${table.documentId} IS NOT NULL AND ${table.status} <> 'rejected'`),
+    uniqueIndex('issuer_events_idempotency_idx')
+      .on(table.tenantId, table.idempotencyKey)
+      .where(sql`${table.idempotencyKey} IS NOT NULL`),
+    check(
+      'issuer_events_idempotency_pair',
+      sql`(${table.idempotencyKey} IS NULL) = (${table.requestHash} IS NULL)`,
+    ),
+    index('issuer_events_to_send_idx')
+      .on(table.tenantId, table.environment, table.createdAt)
+      .where(sql`${table.status} = 'signed'`),
+    // One open receiver event per CDC and kind; a partial and a total conformity count as different.
+    uniqueIndex('issuer_events_receiver_open_idx')
+      .on(
+        table.tenantId,
+        table.environment,
+        table.targetCdc,
+        table.kind,
+        sql`coalesce(${table.receiverData}->>'conformityType', '')`,
+      )
+      .where(sql`${table.targetCdc} IS NOT NULL AND ${table.status} <> 'rejected'`),
+    check(
+      'issuer_events_kind_valid',
+      sql`${table.kind} IN (${sql.raw(EVENT_KINDS.map((k) => `'${k}'`).join(', '))})`,
+    ),
+    check(
+      'issuer_events_status_valid',
+      sql`${table.status} IN (${sql.raw(ISSUER_EVENT_STATUSES.map((s) => `'${s}'`).join(', '))})`,
+    ),
+    check('issuer_events_event_id_range', sql`${table.eventId} BETWEEN 1 AND 9999999999`),
+    check(
+      'issuer_events_reason_length',
+      sql`${table.reason} IS NULL OR char_length(${table.reason}) BETWEEN 5 AND 500`,
+    ),
+    check(
+      'issuer_events_reason_required',
+      sql`(${table.reason} IS NULL) = (${table.kind} IN ('conformity', 'receipt_notice'))`,
+    ),
+    check(
+      'issuer_events_subject',
+      sql`(${table.kind} = 'voiding') = (${table.voidRange} IS NOT NULL) AND (${table.kind} IN ('cancellation', 'nomination')) = (${table.documentId} IS NOT NULL) AND (${table.kind} IN ('conformity', 'disconformity', 'unawareness', 'receipt_notice')) = (${table.targetCdc} IS NOT NULL) AND (${table.targetCdc} IS NOT NULL) = (${table.receiverData} IS NOT NULL)`,
+    ),
+    uniqueIndex('issuer_events_correction_idx')
+      .on(table.correctsEventId)
+      .where(sql`${table.correctsEventId} IS NOT NULL AND ${table.status} <> 'rejected'`),
+    check(
+      'issuer_events_correction_pair',
+      sql`(${table.correctsEventId} IS NULL) = (${table.correctionReason} IS NULL)`,
+    ),
+    check(
+      'issuer_events_correction_reason_length',
+      sql`${table.correctionReason} IS NULL OR char_length(${table.correctionReason}) BETWEEN 5 AND 500`,
+    ),
+    check(
+      'issuer_events_correction_subject',
+      sql`${table.correctsEventId} IS NULL OR (${table.targetCdc} IS NOT NULL AND ${table.kind} <> 'receipt_notice' AND ${table.correctsEventId} <> ${table.id})`,
+    ),
+    check(
+      'issuer_events_target_cdc_format',
+      sql`${table.targetCdc} IS NULL OR ${table.targetCdc} ~ '^[0-9]{44}$'`,
+    ),
+    check(
+      'issuer_events_nomination_subject',
+      sql`(${table.kind} = 'nomination') = (${table.nomination} IS NOT NULL)`,
+    ),
+    check(
+      'issuer_events_signed_pair',
+      sql`(${table.signedXml} IS NULL) = (${table.signedAt} IS NULL) AND (${table.status} = 'pending') = (${table.signedXml} IS NULL)`,
+    ),
+    check(
+      'issuer_events_sent_pair',
+      // A sent event has a batch id. The one exception is an event rejected locally before it was sent (a `LOC-` code).
+      sql`((${table.status} IN ('pending', 'signed')) = (${table.batchDId} IS NULL) OR (${table.status} = 'rejected' AND ${table.batchDId} IS NULL AND ${table.responseCode} LIKE 'LOC-%')) AND (${table.batchDId} IS NULL) = (${table.sendAttemptedAt} IS NULL)`,
+    ),
+    check(
+      'issuer_events_answered_pair',
+      // The answer comes as a pair. approved and rejected carry it; pending, signed and sending never do;
+      // unknown (an unanswered send) may carry it, as the reason it is unknown, or not.
+      sql`(${table.responseCode} IS NULL) = (${table.respondedAt} IS NULL) AND (${table.status} = 'unknown' OR (${table.status} IN ('approved', 'rejected')) = (${table.responseCode} IS NOT NULL))`,
+    ),
+  ],
+);
+
+export const SUBSCRIPTION_STATUSES = ['trialing', 'active', 'past_due', 'cancelled'] as const;
+
+/**
+ * SaaS plans (HU-E15-01). Platform-level catalog, no `tenant_id`: `app_user` reads it,
+ * only `platform_admin` writes it. Prices and included documents are NOT columns here:
+ * they live in effective-dated `plan_prices` rows so a change is never retroactive.
+ */
+export const plans = pgTable(
+  'plans',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    code: varchar('code', { length: 64 }).notNull().unique(),
+    name: varchar('name', { length: 255 }).notNull(),
+    currency: char('currency', { length: 3 }).notNull().default('PYG'),
+    apiCallLimit: integer('api_call_limit'),
+    /** `direct` = monthly plan for a tenant; `partner` = per-document pricing through `plan_price_tiers`. */
+    audience: text('audience').notNull().default('direct'),
+    features: jsonb('features')
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    active: boolean('active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check('plans_code_format', sql`${table.code} ~ '^[a-z0-9]+(-[a-z0-9]+)*$'`),
+    check('plans_audience_valid', sql`${table.audience} IN ('direct', 'partner')`),
+    check(
+      'plans_api_call_limit_nonneg',
+      sql`${table.apiCallLimit} IS NULL OR ${table.apiCallLimit} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * Effective-dated plan terms (HU-E15-01). A price change inserts a new row; history is kept.
+ * Validity is `[valid_from, valid_to]` (null `valid_to` = open); the migration adds an EXCLUDE
+ * constraint (btree_gist) that forbids overlapping validity per plan. Written by ops only.
+ */
+export const planPrices = pgTable(
+  'plan_prices',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    planId: uuid('plan_id')
+      .notNull()
+      .references(() => plans.id),
+    monthlyPrice: bigint('monthly_price', { mode: 'number' }).notNull(),
+    includedDocuments: integer('included_documents').notNull(),
+    overagePrice: bigint('overage_price', { mode: 'number' }).notNull(),
+    validFrom: date('valid_from').notNull(),
+    validTo: date('valid_to'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      'plan_prices_amounts_nonneg',
+      sql`${table.monthlyPrice} >= 0 AND ${table.includedDocuments} >= 0 AND ${table.overagePrice} >= 0`,
+    ),
+    check(
+      'plan_prices_valid_range',
+      sql`${table.validTo} IS NULL OR ${table.validTo} >= ${table.validFrom}`,
+    ),
+  ],
+);
+
+/** Partner volume tiers (M1): unit price per document from `from_documents` upward. */
+export const planPriceTiers = pgTable(
+  'plan_price_tiers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    planPriceId: uuid('plan_price_id')
+      .notNull()
+      .references(() => planPrices.id),
+    fromDocuments: integer('from_documents').notNull(),
+    unitPrice: bigint('unit_price', { mode: 'number' }).notNull(),
+  },
+  (table) => [
+    unique('plan_price_tiers_price_from_key').on(table.planPriceId, table.fromDocuments),
+    check(
+      'plan_price_tiers_amounts_nonneg',
+      sql`${table.fromDocuments} >= 0 AND ${table.unitPrice} >= 0`,
+    ),
+  ],
+);
+
+/** A tenant's plan over time; at most one non-cancelled row per tenant. Written by ops only. */
+export const subscriptions = pgTable(
+  'subscriptions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    planId: uuid('plan_id')
+      .notNull()
+      .references(() => plans.id),
+    status: text('status').notNull().default('active'),
+    /** Terms copied from `plan_prices` when assigned: a later price change never rewrites them. */
+    monthlyPrice: bigint('monthly_price', { mode: 'number' }),
+    overagePrice: bigint('overage_price', { mode: 'number' }),
+    documentQuota: integer('document_quota'),
+    startsAt: timestamp('starts_at', { withTimezone: true }).notNull().defaultNow(),
+    endsAt: timestamp('ends_at', { withTimezone: true }),
+    nextBillingAt: timestamp('next_billing_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('subscriptions_tenant_id_key').on(table.tenantId, table.id),
+    uniqueIndex('subscriptions_one_live_per_tenant')
+      .on(table.tenantId)
+      .where(sql`${table.status} <> 'cancelled'`),
+    check(
+      'subscriptions_terms_nonneg',
+      sql`coalesce(${table.monthlyPrice}, 0) >= 0 AND coalesce(${table.overagePrice}, 0) >= 0 AND coalesce(${table.documentQuota}, 0) >= 0`,
+    ),
+    check(
+      'subscriptions_snapshot_complete',
+      sql`(${table.monthlyPrice} IS NULL AND ${table.overagePrice} IS NULL AND ${table.documentQuota} IS NULL) OR (${table.monthlyPrice} IS NOT NULL AND ${table.overagePrice} IS NOT NULL AND ${table.documentQuota} IS NOT NULL)`,
+    ),
+    check(
+      'subscriptions_status_valid',
+      sql`${table.status} IN (${sqlList(SUBSCRIPTION_STATUSES)})`,
+    ),
+    check(
+      'subscriptions_period_valid',
+      sql`${table.endsAt} IS NULL OR ${table.endsAt} >= ${table.startsAt}`,
+    ),
+  ],
+);
+
+/** Manual payments recorded by ops (no gateway before v1.0). Append-only. */
+export const payments = pgTable(
+  'payments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    subscriptionId: uuid('subscription_id').notNull(),
+    amount: bigint('amount', { mode: 'number' }).notNull(),
+    currency: char('currency', { length: 3 }).notNull().default('PYG'),
+    method: text('method').notNull().default('manual'),
+    reference: text('reference'),
+    paidAt: timestamp('paid_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'payments_subscription_fk',
+      columns: [table.tenantId, table.subscriptionId],
+      foreignColumns: [subscriptions.tenantId, subscriptions.id],
+    }),
+    check('payments_amount_positive', sql`${table.amount} > 0`),
+    check('payments_method_valid', sql`${table.method} IN ('manual')`),
+  ],
+);
+
+export const INVOICE_SAAS_STATUSES = ['draft', 'issued', 'paid', 'void'] as const;
+
+/** Invoices of the SaaS itself to the tenant (not the tenant's own DE). One per subscription and month. */
+export const invoicesSaas = pgTable(
+  'invoices_saas',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    subscriptionId: uuid('subscription_id').notNull(),
+    period: date('period', { mode: 'string' }).notNull(),
+    amount: bigint('amount', { mode: 'number' }).notNull(),
+    currency: char('currency', { length: 3 }).notNull().default('PYG'),
+    status: text('status').notNull().default('draft'),
+    issuedAt: timestamp('issued_at', { withTimezone: true }),
+    pdfUrl: text('pdf_url'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      name: 'invoices_saas_subscription_fk',
+      columns: [table.tenantId, table.subscriptionId],
+      foreignColumns: [subscriptions.tenantId, subscriptions.id],
+    }),
+    unique('invoices_saas_subscription_period_key').on(table.subscriptionId, table.period),
+    check('invoices_saas_amount_nonneg', sql`${table.amount} >= 0`),
+    check(
+      'invoices_saas_period_first_day',
+      sql`${table.period} = date_trunc('month', ${table.period}::timestamp)::date`,
+    ),
+    check(
+      'invoices_saas_status_valid',
+      sql`${table.status} IN (${sqlList(INVOICE_SAAS_STATUSES)})`,
+    ),
+  ],
+);
+
+/**
+ * Usage per tenant and month (HU-E15-02). Incremented with a single
+ * `INSERT ... ON CONFLICT DO UPDATE`; a trigger forbids decrements.
+ */
+export const usageCounters = pgTable(
+  'usage_counters',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    period: date('period', { mode: 'string' }).notNull(),
+    documentsIssued: bigint('documents_issued', { mode: 'number' }).notNull().default(0),
+    apiCalls: bigint('api_calls', { mode: 'number' }).notNull().default(0),
+    notificationsSent: bigint('notifications_sent', { mode: 'number' }).notNull().default(0),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ name: 'usage_counters_pkey', columns: [table.tenantId, table.period] }),
+    check(
+      'usage_counters_period_first_day',
+      sql`${table.period} = date_trunc('month', ${table.period}::timestamp)::date`,
+    ),
+    check(
+      'usage_counters_nonneg',
+      sql`${table.documentsIssued} >= 0 AND ${table.apiCalls} >= 0 AND ${table.notificationsSent} >= 0`,
+    ),
+  ],
+);
+
+/**
+ * Pauses of a tenant's sends after SIFEN blocked its RUC (HU-E6-05, Guía 2024: 10 to 60 minutes).
+ * Append-only history: the active pause is the latest row whose `blocked_until` has not passed,
+ * and the row count is the metric.
+ */
+export const rucBlocks = pgTable(
+  'ruc_blocks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    environment: tenantEnvironment('environment').notNull(),
+    blockedAt: timestamp('blocked_at', { withTimezone: true }).notNull().defaultNow(),
+    blockedUntil: timestamp('blocked_until', { withTimezone: true }).notNull(),
+    /** SIFEN's `dMsgRes` for the refused lote, capped; never XML or credentials. */
+    reason: text('reason').notNull(),
+    /** Set by the operator CLI (`ruc:unblock`) when it lifts the pause early; the row itself is history. */
+    liftedAt: timestamp('lifted_at', { withTimezone: true }),
+    liftedBy: varchar('lifted_by', { length: 255 }),
+    liftReason: varchar('lift_reason', { length: 500 }),
+  },
+  (table) => [
+    index('ruc_blocks_active_idx').on(table.tenantId, table.environment, table.blockedUntil),
+    check('ruc_blocks_window', sql`${table.blockedUntil} > ${table.blockedAt}`),
+    check('ruc_blocks_reason_length', sql`char_length(${table.reason}) <= 500`),
+    check(
+      'ruc_blocks_lift_complete',
+      sql`(${table.liftedAt} IS NULL) = (${table.liftedBy} IS NULL) AND (${table.liftedAt} IS NULL) = (${table.liftReason} IS NULL)`,
+    ),
+  ],
+);
+
+/**
+ * Cache of `siConsRUC` answers (HU-E6-09). Global on purpose: the taxpayer registry is the same for every
+ * tenant, so the table has no `tenant_id` (and no RLS); it is keyed by SIFEN environment and RUC. Only
+ * definite answers are stored (found 0502, not found 0500); freshness is judged at read from `fetched_at`.
+ */
+export const rucLookupCache = pgTable(
+  'ruc_lookup_cache',
+  {
+    environment: tenantEnvironment('environment').notNull(),
+    /** RUC base, 5 to 8 digits, without the check digit. */
+    ruc: text('ruc').notNull(),
+    found: boolean('found').notNull(),
+    razonSocial: text('razon_social'),
+    /** `dCodEstCons`: ACT, SUS, SAD, BLQ, CAN or CDE. */
+    estado: text('estado'),
+    facturadorElectronico: boolean('facturador_electronico'),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.environment, table.ruc] }),
+    check('ruc_lookup_cache_ruc_format', sql`${table.ruc} ~ '^[0-9]{5,8}$'`),
+    check(
+      'ruc_lookup_cache_found_shape',
+      sql`(${table.found} AND ${table.razonSocial} IS NOT NULL AND ${table.estado} IS NOT NULL AND ${table.facturadorElectronico} IS NOT NULL) OR (NOT ${table.found} AND ${table.razonSocial} IS NULL AND ${table.estado} IS NULL AND ${table.facturadorElectronico} IS NULL)`,
+    ),
   ],
 );
 
@@ -1452,9 +2100,17 @@ export const receivedDocumentFieldConfidences = pgTable(
 export const TENANT_TABLES = [
   'api_keys',
   'audit_log',
+  'document_correction_claims',
+  'document_corrections',
+  'document_emails',
   'documents',
+  'issuer_events',
   'lote_documents',
+  'invoices_saas',
   'lotes',
+  'payments',
+  'ruc_blocks',
+  'subscriptions',
   'received_artifacts',
   'received_document_field_confidences',
   'received_document_items',
@@ -1470,6 +2126,7 @@ export const TENANT_TABLES = [
   'tenant_probe',
   'tenant_request_sequences',
   'tenant_timbrados',
+  'usage_counters',
   'webhook_deliveries',
   'webhook_endpoints',
 ] as const;

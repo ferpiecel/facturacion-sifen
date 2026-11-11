@@ -186,11 +186,11 @@ describe('received document soft removal and correction metadata', () => {
   it('rolls back newest first: guard back to identity-only, then the columns go away', async () => {
     const { db, itemId } = await seed();
     for (const statement of rollbackStatements(
-      '0054_received_document_items_removal_guard.down.sql',
+      '0081_received_document_items_removal_guard.down.sql',
     )) {
       await db.execute(sql.raw(statement));
     }
-    // The 0052 guard is back: removed rows are no longer frozen.
+    // The 0079 guard is back: removed rows are no longer frozen.
     await db
       .update(receivedDocumentItems)
       .set({ ...removeNow(itemId) })
@@ -199,7 +199,7 @@ describe('received document soft removal and correction metadata', () => {
       .update(receivedDocumentItems)
       .set({ removedAt: null, removedBy: null, description: 'Te' })
       .where(eq(receivedDocumentItems.id, itemId));
-    for (const statement of rollbackStatements('0053_received_document_corrections.down.sql')) {
+    for (const statement of rollbackStatements('0080_received_document_corrections.down.sql')) {
       await db.execute(sql.raw(statement));
     }
     const left = await queryRows<{ name: string }>(

@@ -1,4 +1,5 @@
 import {
+  CircuitBreakerGateway,
   FakeSifenGateway,
   SifenTimeoutError,
   SifenTransportError,
@@ -21,6 +22,11 @@ class InMemoryLoteStore implements LoteDispatchStore {
     if (this.states.get(loteId) !== 'pending') return Promise.resolve(false);
     this.states.set(loteId, 'sending');
     return Promise.resolve(true);
+  }
+
+  release(loteId: string): Promise<void> {
+    if (this.states.get(loteId) === 'sending') this.states.set(loteId, 'pending');
+    return Promise.resolve();
   }
 
   record(loteId: string, outcome: LoteDispatchOutcome): Promise<void> {
@@ -79,9 +85,9 @@ describe('SendLote', () => {
 
   it('records code and reason on 0301', async () => {
     const { gateway, store, send } = setup();
-    gateway.enqueue('enviarLote', sifenScenarios.loteNoEncolado('RUC bloqueado'));
+    gateway.enqueue('enviarLote', sifenScenarios.loteNoEncolado('Lote invalido'));
     const outcome = await send.execute({ loteId: 'lote-1', dId: 1n, lote });
-    expect(outcome).toEqual({ status: 'rejected', code: '0301', reason: 'RUC bloqueado' });
+    expect(outcome).toEqual({ status: 'rejected', code: '0301', reason: 'Lote invalido' });
     expect(store.states.get('lote-1')).toBe('rejected');
   });
 
@@ -153,5 +159,85 @@ describe('SendLote', () => {
     await expect(send.execute({ loteId: 'lote-1', dId: 1n, lote })).rejects.toThrow('db down');
     expect(store.states.get('lote-1')).toBe('sending');
     expect(gateway.callsTo('enviarLote')).toHaveLength(1);
+  });
+
+  describe('a 0301 that blocks the RUC (HU-E6-05)', () => {
+    it.each([
+      'RUC bloqueado por envio de lotes invalidos',
+      'Contribuyente BLOQUEADO temporalmente',
+      'El RUC se encuentra bloqueado',
+    ])('flags %j', async (reason) => {
+      const { gateway, send } = setup();
+      gateway.enqueue('enviarLote', sifenScenarios.loteNoEncolado(reason));
+      expect(await send.execute({ loteId: 'lote-1', dId: 1n, lote })).toEqual({
+        status: 'rejected',
+        code: '0301',
+        reason,
+        rucBlocked: true,
+      });
+    });
+
+    it('does not flag an ordinary refusal', async () => {
+      const { gateway, send } = setup();
+      gateway.enqueue('enviarLote', sifenScenarios.loteNoEncolado('Lote sin documentos'));
+      const outcome = await send.execute({ loteId: 'lote-1', dId: 1n, lote });
+      expect(outcome).toEqual({ status: 'rejected', code: '0301', reason: 'Lote sin documentos' });
+    });
+  });
+
+  describe('with SIFEN down (HU-E6-08)', () => {
+    const down = () => {
+      const inner = new FakeSifenGateway();
+      inner.setDefault('enviarLote', new SifenTransportError('enviarLote'));
+      const gateway = new CircuitBreakerGateway(inner, {
+        failureThreshold: 1,
+        baseOpenMs: 60_000,
+        now: () => new Date('2026-10-01T00:00:00Z'),
+      });
+      const store = new InMemoryLoteStore(['lote-1', 'lote-2']);
+      const send = new SendLote({
+        gateway,
+        store,
+        pausedUntil: () => gateway.pausedUntil('enviarLote'),
+      });
+      return { inner, store, send };
+    };
+
+    it('records unknown for the call that tripped the circuit: SIFEN may hold the lote', async () => {
+      const { store, send } = down();
+      const outcome = await send.execute({ loteId: 'lote-1', dId: 1n, lote });
+      expect(outcome.status).toBe('unknown');
+      expect(store.states.get('lote-1')).toBe('unknown');
+    });
+
+    it('defers while the circuit is open: nothing is claimed, sent or recorded', async () => {
+      const { inner, store, send } = down();
+      await send.execute({ loteId: 'lote-1', dId: 1n, lote });
+      const outcome = await send.execute({ loteId: 'lote-2', dId: 2n, lote });
+      expect(outcome).toEqual({
+        status: 'deferred',
+        retryAt: new Date('2026-10-01T00:01:00Z'),
+      });
+      expect(store.states.get('lote-2')).toBe('pending');
+      expect(store.outcomes.has('lote-2')).toBe(false);
+      expect(inner.callsTo('enviarLote')).toHaveLength(1);
+    });
+
+    it('releases the claim and defers when the circuit refuses the call: nothing was sent', async () => {
+      const inner = new FakeSifenGateway();
+      inner.setDefault('enviarLote', new SifenTransportError('enviarLote'));
+      const gateway = new CircuitBreakerGateway(inner, {
+        failureThreshold: 1,
+        baseOpenMs: 60_000,
+        now: () => new Date('2026-10-01T00:00:00Z'),
+      });
+      await gateway.enviarLote({ dId: 9n, des: ['<x/>'] }).catch(() => undefined);
+      const store = new InMemoryLoteStore(['lote-1']);
+      const send = new SendLote({ gateway, store, pausedUntil: () => null });
+      const outcome = await send.execute({ loteId: 'lote-1', dId: 1n, lote });
+      expect(outcome).toEqual({ status: 'deferred', retryAt: new Date('2026-10-01T00:01:00Z') });
+      expect(store.states.get('lote-1')).toBe('pending');
+      expect(store.outcomes.has('lote-1')).toBe(false);
+    });
   });
 });

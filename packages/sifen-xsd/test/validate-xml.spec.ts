@@ -79,3 +79,25 @@ describe('validateXml', () => {
     expect(references.filter((name) => !vendored.includes(name))).toEqual([]);
   });
 });
+
+describe('validateXml with the siRecepEvento schema', () => {
+  it('rejects a document that is not an event group, naming the element', () => {
+    const result = validateXml(
+      '<rDE xmlns="http://ekuatia.set.gov.py/sifen/xsd"/>',
+      'siRecepEvento',
+    );
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.map((error) => error.message).join('\n')).toMatch(/rDE/);
+  });
+
+  it('rejects an event group without its content', () => {
+    const result = validateXml(
+      '<gGroupGesEve xmlns="http://ekuatia.set.gov.py/sifen/xsd"/>',
+      'siRecepEvento',
+    );
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.map((error) => error.message).join('\n')).toMatch(/rGesEve/);
+  });
+});

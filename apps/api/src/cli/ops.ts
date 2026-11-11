@@ -5,8 +5,17 @@ import { CscVault } from '../modules/custody/infrastructure/csc-vault.js';
 import { MAX_PKCS12_BYTES } from '../modules/certificates/infrastructure/pkcs12-inspector.js';
 import { CertificateVault } from '../modules/certificates/infrastructure/certificate-vault.js';
 import { loadTrustedRoots } from '../modules/certificates/infrastructure/trusted-roots.js';
+import { listExpiringCertificates } from './certificate-expiring.js';
+import { DEFAULT_WITHIN_HOURS, listNearDeadline } from './deadline-commands.js';
+import { unblockRuc } from './ruc-unblock.js';
+import { listAudit, verifyAudit } from './audit-commands.js';
 import { BoundedReadError, readBoundedFile } from './bounded-file.js';
 import { getOpsDatabaseUrl, OpsArgError, parseOpsArgs, type OpsCommand } from './args.js';
+import {
+  DEFAULT_ALERT_DAYS,
+  parseAlertDays,
+} from '../modules/certificates/domain/certificate-expiry.js';
+import { emissionValidationConfig } from '../modules/emission/emission-validation-config.js';
 import {
   addEstablishment,
   addExpeditionPoint,
@@ -22,6 +31,12 @@ import {
   setFiscalProfile,
   setTenantEnvironment,
 } from './commands.js';
+import { releaseCorrectionClaim } from './correction-claim-commands.js';
+import { listPlans, setPlanPrice } from './plan-commands.js';
+import { seedPlans } from './plan-seed.js';
+import { assignSubscription, recordPayment } from './subscription-commands.js';
+import { setSyncTransmission } from './sync-transmission-commands.js';
+import { showUsage } from './usage-commands.js';
 import { createPortalUser } from './user-commands.js';
 
 /**
@@ -93,6 +108,128 @@ export async function runOpsCommand(
   certificates?: CertificateDeps,
 ): Promise<string> {
   switch (command.kind) {
+    case 'audit:list': {
+      const page = await listAudit(db, command);
+      if (page.entries.length === 0) return 'no audit entries';
+      const lines = page.entries.map(
+        (e) =>
+          `${String(e.seq)} ${e.id} ${e.occurredAt.toISOString()} ${e.actorType}:${e.actorId} ${e.action} ${e.entityType}:${e.entityId}`,
+      );
+      return [
+        ...lines,
+        ...(page.nextAfterSeq === null ? [] : [`next: --after-seq ${String(page.nextAfterSeq)}`]),
+      ].join('\n');
+    }
+    case 'ruc:unblock': {
+      const result = await unblockRuc(db, command, new Date());
+      return `RUC pause lifted for tenant ${result.tenantId}: ${String(result.lifted)} block(s)`;
+    }
+    case 'document:deadline': {
+      const now = new Date();
+      const rows = await listNearDeadline(db, command, now);
+      if (rows.length === 0) {
+        return `no documents within ${String(command.withinHours ?? DEFAULT_WITHIN_HOURS)} hours of the 72 h deadline`;
+      }
+      return rows
+        .map(
+          (r) =>
+            `${r.tenantId} ${r.id} ${r.cdc} ${r.status} signed ${r.signedAt.toISOString()} deadline ${r.deadline.toISOString()} ${String(r.hoursRemaining)}h`,
+        )
+        .join('\n');
+    }
+    case 'certificate:expiring': {
+      const days = command.days ?? Math.max(...DEFAULT_ALERT_DAYS);
+      const rows = await listExpiringCertificates(db, { ...command, days }, new Date());
+      if (rows.length === 0) return `no active certificates expire within ${String(days)} days`;
+      return rows
+        .map(
+          (r) =>
+            `${r.tenantId} ${r.environment} ${r.id} ${r.fingerprint} expires ${r.notAfter.toISOString()} (${String(r.daysRemaining)} days)`,
+        )
+        .join('\n');
+    }
+    case 'audit:verify': {
+      const result = await verifyAudit(db, command);
+      return result.ok
+        ? `audit chain intact: ${String(result.rows)} rows (head seq ${String(result.headSeq)})`
+        : `audit chain BROKEN at seq ${String(result.brokenAt.seq)} (${result.brokenAt.reason}, entry ${result.brokenAt.id})`;
+    }
+    case 'tenant:sync-transmission': {
+      const result = await setSyncTransmission(db, {
+        tenantId: command.tenantId,
+        enabled: command.enabled,
+        actor: command.actor,
+      });
+      const state = result.enabled ? 'enabled' : 'disabled';
+      return result.changed
+        ? `synchronous transmission ${state} for tenant ${result.tenantId}`
+        : `synchronous transmission already ${state} for tenant ${result.tenantId}`;
+    }
+    case 'usage:show': {
+      const report = await showUsage(
+        db,
+        { tenantId: command.tenantId, period: command.period },
+        new Date(),
+      );
+      const plan = report.subscription
+        ? `${report.subscription.planCode}, quota ${String(report.subscription.documentQuota)}, overage Gs. ${String(report.subscription.overagePrice)}`
+        : 'no subscription';
+      return [
+        `usage ${report.period.slice(0, 7)} (tenant ${report.tenantId}): ${plan}`,
+        `documents issued: ${String(report.documentsIssued)}`,
+        `overage: ${String(report.overageDocuments)} documents, Gs. ${String(report.overageAmount)}`,
+        `api calls: ${String(report.apiCalls)}, notifications: ${String(report.notificationsSent)}`,
+        ...(report.quotaWarning ? ['warning: 80% of the document quota reached'] : []),
+      ].join('\n');
+    }
+    case 'subscription:assign': {
+      const result = await assignSubscription(
+        db,
+        { tenantId: command.tenantId, planCode: command.planCode, startsOn: command.startsOn },
+        new Date(),
+      );
+      return `subscription created: ${result.id} (${result.planCode} from ${result.startsOn}, Gs. ${String(result.monthlyPrice)}/month, quota ${String(result.documentQuota)}, overage Gs. ${String(result.overagePrice)})`;
+    }
+    case 'payment:record': {
+      const result = await recordPayment(
+        db,
+        {
+          tenantId: command.tenantId,
+          amount: command.amount,
+          reference: command.reference,
+          paidOn: command.paidOn,
+        },
+        new Date(),
+      );
+      return `payment recorded: ${result.id} (Gs. ${String(result.amount)}, subscription ${result.subscriptionId})`;
+    }
+    case 'plan:seed': {
+      const { seeded } = await seedPlans(db, new Date());
+      return seeded.length > 0
+        ? `plans priced: ${seeded.join(', ')}`
+        : 'plans already priced: nothing changed';
+    }
+    case 'plan:list': {
+      const rows = await listPlans(db, new Date());
+      return rows
+        .map((plan) => {
+          const terms =
+            plan.monthlyPrice === null
+              ? 'no price in force'
+              : `Gs. ${String(plan.monthlyPrice)}/month, ${String(plan.includedDocuments)} documents, overage Gs. ${String(plan.overagePrice)} (from ${String(plan.validFrom)})`;
+          const tiers = plan.tiers
+            .map((tier) => `from ${String(tier.fromDocuments)}: Gs. ${String(tier.unitPrice)}`)
+            .join('; ');
+          return `${plan.code} [${plan.audience}${plan.active ? '' : ', inactive'}] ${terms}${tiers ? ` | tiers ${tiers}` : ''}`;
+        })
+        .join('\n');
+    }
+    case 'plan:price-set': {
+      const { changed } = await setPlanPrice(db, command);
+      return changed
+        ? `plan price set: ${command.planCode} from ${command.validFrom}`
+        : `plan price unchanged: ${command.planCode}`;
+    }
     case 'partner:create': {
       const { id } = await createPartner(db, command.name);
       return `partner created: ${id}`;
@@ -141,6 +278,7 @@ export async function runOpsCommand(
       const result = await addEstablishment(db, {
         tenantId: command.tenantId,
         establishment: command.establishment,
+        geoCatalog: emissionValidationConfig().geoCatalog,
       });
       return `establishment created: ${result.id} (code ${result.code})`;
     }
@@ -159,6 +297,14 @@ export async function runOpsCommand(
         documentId: command.documentId,
       });
       return `document hold released: ${result.id} (was ${result.hold})`;
+    }
+    case 'correction:release-claim': {
+      const result = await releaseCorrectionClaim(db, {
+        tenantId: command.tenantId,
+        documentId: command.documentId,
+        actor: command.actor,
+      });
+      return `correction claim released: ${result.documentId} (key ${result.idempotencyKey})`;
     }
     case 'document:release-holds': {
       const count = await releaseDocumentHolds(db, {
@@ -313,7 +459,12 @@ export interface CliIo {
 export async function runCli(io: CliIo): Promise<number> {
   try {
     const url = getOpsDatabaseUrl(io.env);
-    const command = parseOpsArgs(await resolveStdinSecrets(io.argv, io.readStdin));
+    const parsed = parseOpsArgs(await resolveStdinSecrets(io.argv, io.readStdin));
+    // The expiry window defaults to the largest alert threshold the worker uses (CERTIFICATE_ALERT_DAYS).
+    const command: OpsCommand =
+      parsed.kind === 'certificate:expiring' && parsed.days === undefined
+        ? { ...parsed, days: Math.max(...parseAlertDays(io.env.CERTIFICATE_ALERT_DAYS)) }
+        : parsed;
     const vault = command.kind === 'csc:add' ? createCscVault(io.env) : undefined;
     const certificates =
       command.kind === 'certificate:add'

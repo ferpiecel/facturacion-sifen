@@ -1,3 +1,5 @@
+import { loadGeoCatalog } from '@sifen/sifen-xsd';
+import { createGeoCatalog } from '../modules/geo/domain/geo-catalog.js';
 import {
   apiKeys,
   createPgliteDatabase,
@@ -243,6 +245,19 @@ describe('addEstablishment (HU-E2-02)', () => {
       cityCode: '3316',
       cityDescription: 'Ciudad del Este',
     });
+
+  it('refuses an establishment whose address does not nest in the DNIT catalog', async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const { id: tenantId } = await createTenant(handle.db, 'Geo Tenant');
+    const geoCatalog = createGeoCatalog(loadGeoCatalog());
+
+    // City 3316 belongs to district 143, not to 145.
+    await expect(
+      addEstablishment(handle.db, { tenantId, establishment: buildEstablishment(), geoCatalog }),
+    ).rejects.toThrow(/city 3316 does not belong to district 145/);
+    expect(await handle.db.select().from(tenantEstablishments)).toHaveLength(0);
+  });
 
   it('inserts an establishment for an existing tenant, persisting every field', async () => {
     handle = createPgliteDatabase();

@@ -55,7 +55,7 @@ module.exports = {
       name: 'sdk-libs-confined-to-infrastructure',
       severity: 'error',
       comment:
-        'AWS/Anthropic SDKs and PDF/QR/image libraries may only be imported from modules/*/infrastructure/ (ADR-0020, ADR-0021)',
+        'AWS/Anthropic SDKs and PDF/QR/image libraries may only be imported from modules/*/infrastructure/ (ADR-0025, ADR-0026)',
       from: { pathNot: '(^|/)modules/[^/]+/infrastructure/' },
       to: { path: SDK_LIBS },
     },

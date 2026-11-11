@@ -1,15 +1,58 @@
 import { Module, ServiceUnavailableException } from '@nestjs/common';
 import type { Database } from '@sifen/db';
+import { parseBlockDays } from '../certificates/domain/certificate-expiry.js';
 import { DATABASE } from '../database/database.module.js';
+import { createAcceptCreditNote, createAcceptDebitNote } from './application/accept-credit-note.js';
 import { createAcceptInvoice } from './application/accept-invoice.js';
+import { createAcceptRemission, createAcceptSelfInvoice } from './application/accept-standalone.js';
+import { createCorrectDocument } from './application/correct-document.js';
+import { createVoidNumbers } from '../issuer-events/application/void-numbers.js';
+import { createDrizzleVoidingUnitOfWork } from '../issuer-events/infrastructure/drizzle-voiding-unit-of-work.js';
 import { createGetDocument } from './application/get-document.js';
 import { createGetKude } from './application/get-kude.js';
-import { ACCEPT_INVOICE, GET_DOCUMENT, GET_KUDE } from './emission.tokens.js';
+import { createWaitForDocument } from './application/wait-for-document.js';
+import { emissionValidationConfig } from './emission-validation-config.js';
+import {
+  ACCEPT_CREDIT_NOTE,
+  ACCEPT_DEBIT_NOTE,
+  ACCEPT_INVOICE,
+  ACCEPT_REMISSION,
+  ACCEPT_SELF_INVOICE,
+  CORRECT_DOCUMENT,
+  GET_DOCUMENT,
+  GET_KUDE,
+  WAIT_FOR_DOCUMENT,
+} from './emission.tokens.js';
 import { createDrizzleAcceptanceUnitOfWork } from './infrastructure/drizzle-acceptance-unit-of-work.js';
+import { createDrizzleCorrectionUnitOfWork } from './infrastructure/drizzle-correction-unit-of-work.js';
 import { createDrizzleDocumentReader } from './infrastructure/drizzle-document-reader.js';
-import { PdfkitKudeRenderer } from './infrastructure/kude/pdfkit-kude-renderer.js';
+import { createDrizzleSyncFlagReader } from './infrastructure/drizzle-sync-flag-reader.js';
+import { parseSyncWaitTimeoutMs } from './sync-wait-config.js';
+import { createKudeRenderer } from './infrastructure/kude/kude-renderer.js';
 import { DocumentQueryController } from './infrastructure/http/document-query.controller.js';
 import { DocumentsController } from './infrastructure/http/documents.controller.js';
+
+/** `CERTIFICATE_EMISSION_BLOCK_DAYS` (HU-E3-03); an invalid value stops the API at startup. */
+function certificateBlockDays(): number {
+  return parseBlockDays(process.env.CERTIFICATE_EMISSION_BLOCK_DAYS);
+}
+
+function acceptanceDeps(db: Database) {
+  return {
+    unitOfWork: createDrizzleAcceptanceUnitOfWork(db),
+    validation: emissionValidationConfig(),
+    certificateBlockDays: certificateBlockDays(),
+  };
+}
+
+/** Acceptance use case of the API, with the validation config shared with the worker. */
+export function acceptInvoiceFor(db: Database) {
+  return createAcceptInvoice({
+    unitOfWork: createDrizzleAcceptanceUnitOfWork(db),
+    validation: emissionValidationConfig(),
+    certificateBlockDays: certificateBlockDays(),
+  });
+}
 
 /**
  * `POST /v1/documents` (HU-E5-01) and `GET /v1/documents` (HU-E5-07) and `GET /v1/documents/{id}/kude` (HU-E10-01). Without a `DATABASE` the app still boots and
@@ -32,17 +75,96 @@ import { DocumentsController } from './infrastructure/http/documents.controller.
         db
           ? createGetKude({
               reader: createDrizzleDocumentReader(db),
-              renderer: new PdfkitKudeRenderer(),
+              renderer: createKudeRenderer(),
             })
           : () => Promise.reject(new ServiceUnavailableException()),
       inject: [DATABASE],
     },
     {
-      provide: ACCEPT_INVOICE,
+      provide: ACCEPT_CREDIT_NOTE,
       useFactory: (db: Database | null) =>
         db
-          ? createAcceptInvoice({ unitOfWork: createDrizzleAcceptanceUnitOfWork(db) })
+          ? createAcceptCreditNote({
+              unitOfWork: createDrizzleAcceptanceUnitOfWork(db),
+              validation: emissionValidationConfig(),
+              certificateBlockDays: certificateBlockDays(),
+            })
           : () => Promise.reject(new ServiceUnavailableException()),
+      inject: [DATABASE],
+    },
+    {
+      provide: ACCEPT_DEBIT_NOTE,
+      useFactory: (db: Database | null) =>
+        db
+          ? createAcceptDebitNote({
+              unitOfWork: createDrizzleAcceptanceUnitOfWork(db),
+              validation: emissionValidationConfig(),
+              certificateBlockDays: certificateBlockDays(),
+            })
+          : () => Promise.reject(new ServiceUnavailableException()),
+      inject: [DATABASE],
+    },
+    {
+      provide: ACCEPT_SELF_INVOICE,
+      useFactory: (db: Database | null) =>
+        db
+          ? createAcceptSelfInvoice({
+              unitOfWork: createDrizzleAcceptanceUnitOfWork(db),
+              validation: emissionValidationConfig(),
+              certificateBlockDays: certificateBlockDays(),
+            })
+          : () => Promise.reject(new ServiceUnavailableException()),
+      inject: [DATABASE],
+    },
+    {
+      provide: ACCEPT_REMISSION,
+      useFactory: (db: Database | null) =>
+        db
+          ? createAcceptRemission({
+              unitOfWork: createDrizzleAcceptanceUnitOfWork(db),
+              validation: emissionValidationConfig(),
+            })
+          : () => Promise.reject(new ServiceUnavailableException()),
+      inject: [DATABASE],
+    },
+    {
+      provide: CORRECT_DOCUMENT,
+      useFactory: (db: Database | null) =>
+        db
+          ? createCorrectDocument({
+              unitOfWork: createDrizzleCorrectionUnitOfWork(db),
+              accept: {
+                FE: acceptInvoiceFor(db),
+                AFE: createAcceptSelfInvoice(acceptanceDeps(db)),
+                NCE: createAcceptCreditNote(acceptanceDeps(db)),
+                NDE: createAcceptDebitNote(acceptanceDeps(db)),
+              },
+              voidNumbers: createVoidNumbers({ unitOfWork: createDrizzleVoidingUnitOfWork(db) }),
+              validation: emissionValidationConfig(),
+              certificateBlockDays: certificateBlockDays(),
+            })
+          : () => Promise.reject(new ServiceUnavailableException()),
+      inject: [DATABASE],
+    },
+    {
+      // Read at boot so a bad SYNC_WAIT_TIMEOUT_MS stops the API (HU-E6-06).
+      provide: WAIT_FOR_DOCUMENT,
+      useFactory: (db: Database | null) => {
+        const timeoutMs = parseSyncWaitTimeoutMs(process.env);
+        return db
+          ? createWaitForDocument({
+              isSyncEnabled: createDrizzleSyncFlagReader(db),
+              getDocument: createGetDocument({ reader: createDrizzleDocumentReader(db) }),
+              timeoutMs,
+            })
+          : () => Promise.reject(new ServiceUnavailableException());
+      },
+      inject: [DATABASE],
+    },
+    {
+      provide: ACCEPT_INVOICE,
+      useFactory: (db: Database | null) =>
+        db ? acceptInvoiceFor(db) : () => Promise.reject(new ServiceUnavailableException()),
       inject: [DATABASE],
     },
   ],

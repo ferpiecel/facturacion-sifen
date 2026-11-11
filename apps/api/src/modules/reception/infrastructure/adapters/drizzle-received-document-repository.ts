@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, notInArray } from 'drizzle-orm';
 import {
   receivedArtifacts,
   receivedDocumentFieldConfidences,
@@ -285,6 +285,9 @@ async function writeConfidences(
   }
 }
 
+/** Actor stamped on items removed by an extraction rewrite (machine output, no API key). */
+const EXTRACTION_ACTOR = 'system:extraction';
+
 /** Upserts the extracted items and confidences by position / field, so a retry rewrites them. */
 async function writeExtractionChildren(
   tx: TenantTx,
@@ -301,6 +304,25 @@ async function writeExtractionChildren(
         set: { ...fields, updatedAt: new Date() },
       });
   }
+  // app_user has no DELETE (fiscal retention), so surplus positions from an earlier, longer write
+  // are soft-removed, like a correction removes an item. The extraction always writes the full
+  // fixed set of field confidences, so the confidence upsert below leaves no stale rows.
+  const at = new Date();
+  await tx
+    .update(receivedDocumentItems)
+    .set({ removedAt: at, removedBy: EXTRACTION_ACTOR, updatedAt: at })
+    .where(
+      and(
+        eq(receivedDocumentItems.receivedDocumentId, documentId),
+        isNull(receivedDocumentItems.removedAt),
+        write.items.length === 0
+          ? undefined
+          : notInArray(
+              receivedDocumentItems.position,
+              write.items.map((item) => item.position),
+            ),
+      ),
+    );
   for (const { fieldName, ...fields } of write.confidences) {
     await tx
       .insert(receivedDocumentFieldConfidences)

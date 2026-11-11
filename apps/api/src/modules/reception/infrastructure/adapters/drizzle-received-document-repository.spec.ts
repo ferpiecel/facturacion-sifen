@@ -344,6 +344,38 @@ describe('DrizzleReceivedDocumentRepository', () => {
       expect(graph?.confidences.map((c) => c.confidence)).toEqual(['0.800']);
     });
 
+    it('soft-removes surplus items when a repeated write carries fewer', async () => {
+      const { extracting, review } = await extractedGraph();
+      const write = {
+        document: review,
+        expectedVersion: extracting.version,
+        header: {},
+        items: [item(1), item(2), item(3)],
+        confidences: [confidence('totals', '0.700')],
+      };
+      await repo().saveExtraction(tenantId, write);
+      await repo().saveExtraction(tenantId, { ...write, items: [item(1)] });
+      const graph = await repo().load(tenantId, extracting.id);
+      expect(graph?.items).toEqual([item(1)]);
+      expect(graph?.removedPositions).toEqual([2, 3]);
+    });
+
+    it('soft-removes every earlier item when the repeated write has none', async () => {
+      const { extracting, review } = await extractedGraph();
+      const write = {
+        document: review,
+        expectedVersion: extracting.version,
+        header: {},
+        items: [item(1), item(2)],
+        confidences: [],
+      };
+      await repo().saveExtraction(tenantId, write);
+      await repo().saveExtraction(tenantId, { ...write, items: [] });
+      const graph = await repo().load(tenantId, extracting.id);
+      expect(graph?.items).toEqual([]);
+      expect(graph?.removedPositions).toEqual([1, 2]);
+    });
+
     it('rejects a stale version and reports a missing document', async () => {
       const { extracting, review } = await extractedGraph();
       const base = { document: review, header: {}, items: [], confidences: [] };

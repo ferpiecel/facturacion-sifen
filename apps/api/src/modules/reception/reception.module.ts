@@ -1,16 +1,21 @@
 import { randomUUID } from 'node:crypto';
-import { Module } from '@nestjs/common';
+import { Inject, Module, type OnApplicationShutdown } from '@nestjs/common';
 import type { Database } from '@sifen/db';
 import { DATABASE } from '../database/database.module.js';
 import { createCorrectReceivedDocument } from './application/correct-received-document.js';
 import { createGetArtifact, createGetArtifactUrl } from './application/get-artifact.js';
 import { createGetReceivedDocument } from './application/get-received-document.js';
 import { IngestSifenXml } from './application/ingest-sifen-xml.js';
+import { IngestUpload } from './application/ingest-upload.js';
 import { createListReceivedDocuments } from './application/list-received-documents.js';
 import type { StorageProvider } from './application/ports/storage-provider.port.js';
 import { createDrizzleReceivedDocumentQuery } from './infrastructure/adapters/drizzle-received-document-query.js';
 import { createDrizzleReceivedDocumentRepository } from './infrastructure/adapters/drizzle-received-document-repository.js';
 import { createDrizzleTenantFiscalIdentity } from './infrastructure/adapters/drizzle-tenant-fiscal-identity.js';
+import {
+  createReceptionJobQueue,
+  type ClosableReceptionJobQueue,
+} from './infrastructure/adapters/reception-job-queue-factory.js';
 import { Libxml2SifenXmlParser } from './infrastructure/adapters/libxml2-sifen-xml-parser.adapter.js';
 import { createS3StorageProvider } from './infrastructure/adapters/s3-storage-provider.adapter.js';
 import { ReceivedDocumentsController } from './infrastructure/http/received-documents.controller.js';
@@ -25,7 +30,9 @@ import {
   GET_RECEPTION_ARTIFACT,
   GET_RECEPTION_ARTIFACT_URL,
   INGEST_SIFEN_XML,
+  INGEST_UPLOAD,
   LIST_RECEIVED_DOCUMENTS,
+  RECEPTION_JOB_QUEUE,
   RECEPTION_STORAGE,
   RECEPTION_UPLOAD_CONFIG,
 } from './reception.tokens.js';
@@ -66,6 +73,33 @@ import {
             })
           : null,
       inject: [DATABASE, RECEPTION_STORAGE, RECEPTION_UPLOAD_CONFIG],
+    },
+    {
+      // Optional Redis producer: without `REDIS_URL` PDF and photo uploads answer 503
+      // `queue_unavailable` while XML uploads keep working (docs/configuracion.md).
+      provide: RECEPTION_JOB_QUEUE,
+      useFactory: (): ClosableReceptionJobQueue => createReceptionJobQueue(process.env),
+    },
+    {
+      // Single entry point of `POST /v1/received-documents`: XML stays synchronous, PDF and photos
+      // are stored, registered and queued for the extraction worker (R5.6).
+      provide: INGEST_UPLOAD,
+      useFactory: (
+        db: Database | null,
+        storage: StorageProvider | null,
+        ingestXml: IngestSifenXml | null,
+        queue: ClosableReceptionJobQueue,
+      ) =>
+        db && storage && ingestXml
+          ? new IngestUpload({
+              repository: createDrizzleReceivedDocumentRepository(db),
+              storage,
+              queue,
+              ingestXml,
+              newId: randomUUID,
+            })
+          : null,
+      inject: [DATABASE, RECEPTION_STORAGE, INGEST_SIFEN_XML, RECEPTION_JOB_QUEUE],
     },
     {
       provide: CORRECT_RECEIVED_DOCUMENT,
@@ -109,4 +143,10 @@ import {
     },
   ],
 })
-export class ReceptionModule {}
+export class ReceptionModule implements OnApplicationShutdown {
+  constructor(@Inject(RECEPTION_JOB_QUEUE) private readonly queue: ClosableReceptionJobQueue) {}
+
+  async onApplicationShutdown(): Promise<void> {
+    await this.queue.close();
+  }
+}

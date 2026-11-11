@@ -12,7 +12,7 @@ Todas tienen un valor por defecto, así que el entorno local funciona sin un arc
 | `POSTGRES_DB` | `sifen` | `docker-compose.yml` | Base de datos. |
 | `POSTGRES_PORT` | `5432` | `docker-compose.yml` | Puerto de PostgreSQL en el host. |
 | `REDIS_PORT` | `6379` | `docker-compose.yml` | Puerto de Redis en el host. |
-| `REDIS_URL` | *(sin valor)* | worker | URL de Redis (`redis://` o `rediss://`) para BullMQ (ADR-0013). Obligatoria para el worker; nunca se escribe en logs ni en errores. Local: `redis://localhost:6379` con `docker compose up -d redis`. |
+| `REDIS_URL` | *(sin valor)* | `apps/api` (opcional), worker | URL de Redis (`redis://` o `rediss://`) para BullMQ (ADR-0013). Obligatoria para el worker. En la API es **opcional** y solo la usa la subida de PDF y fotos, que encola la extracción (R5.6): sin ella, `POST /v1/received-documents` con PDF o foto responde `503 queue_unavailable` y el XML sigue funcionando; un valor que no es `redis://` ni `rediss://` hace **fallar** el arranque. La conexión se abre en el primer encolado y no bloquea el arranque. Nunca se escribe en logs ni en errores. Local: `redis://localhost:6379` con `docker compose up -d redis`. |
 | `RUC_CACHE_TTL_SECONDS` | `86400` | `apps/api` | Segundos que una respuesta de `siConsRUC` (RUC encontrado 0502 o inexistente 0500) se sirve desde la tabla `ruc_lookup_cache` antes de volver a consultar a SIFEN. Entero de 0 a 604800; `0` desactiva la caché. Un valor inválido impide arrancar la API. Un 0501 o un error nunca se guardan (HU-E6-09). |
 | `TRANSMISSION_CYCLE_INTERVAL_MS` | `60000` | worker | Cada cuánto corre el ciclo de transmisión de cada tenant (5 s a 1 h). |
 | `WORKER_CONCURRENCY` | `4` | worker | Tenants que un proceso worker atiende a la vez (1 a 32). |

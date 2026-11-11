@@ -9,6 +9,7 @@ export type ReceptionUploadErrorCode =
   | 'empty_upload'
   | 'invalid_request'
   | 'storage_unavailable'
+  | 'queue_unavailable'
   | 'service_unavailable'
   | 'not_found'
   | 'version_conflict'

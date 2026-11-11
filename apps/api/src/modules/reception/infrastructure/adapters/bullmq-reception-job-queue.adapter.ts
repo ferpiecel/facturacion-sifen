@@ -39,6 +39,8 @@ export interface BullmqReceptionJobQueueOptions {
   readonly queue: ReceptionExtractionQueue;
   /** Bounds the Redis round trip: an unreachable Redis must not hang the upload request. */
   readonly timeoutMs?: number;
+  /** First retry delay; doubles on each further retry. */
+  readonly backoffMs?: number;
 }
 
 /**
@@ -49,17 +51,19 @@ export interface BullmqReceptionJobQueueOptions {
 export class BullmqReceptionJobQueue implements ReceptionJobQueue {
   private readonly queue: ReceptionExtractionQueue;
   private readonly timeoutMs: number;
+  private readonly backoffMs: number;
 
   constructor(options: BullmqReceptionJobQueueOptions) {
     this.queue = options.queue;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_ADD_TIMEOUT_MS;
+    this.backoffMs = options.backoffMs ?? BACKOFF_DELAY_MS;
   }
 
   async enqueueExtraction(job: ExtractionJob): Promise<void> {
     const opts: JobOptions = {
       jobId: `${RECEPTION_EXTRACTION_QUEUE}:${job.documentId}:${String(job.attempt ?? 1)}`,
       attempts: RECEPTION_EXTRACTION_ATTEMPTS,
-      backoff: { type: 'exponential', delay: BACKOFF_DELAY_MS },
+      backoff: { type: 'exponential', delay: this.backoffMs },
       removeOnComplete: { age: COMPLETED_RETENTION_SECONDS },
       removeOnFail: FAILED_RETENTION_COUNT,
     };

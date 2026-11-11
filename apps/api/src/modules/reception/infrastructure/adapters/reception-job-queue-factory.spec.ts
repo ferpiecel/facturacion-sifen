@@ -33,4 +33,12 @@ describe('createReceptionJobQueue', () => {
     await queue.close(); // nothing was opened, nothing to close
     expect(queue).toBeDefined();
   });
+
+  it('turns an unreachable Redis into ReceptionQueueUnavailableError', async () => {
+    const queue = createReceptionJobQueue({ REDIS_URL: 'redis://127.0.0.1:1' });
+    await expect(queue.enqueueExtraction(job)).rejects.toBeInstanceOf(
+      ReceptionQueueUnavailableError,
+    );
+    await queue.close();
+  }, 10_000);
 });

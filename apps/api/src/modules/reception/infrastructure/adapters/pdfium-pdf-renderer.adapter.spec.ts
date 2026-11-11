@@ -280,6 +280,19 @@ describe('PdfiumPdfRenderer library lifecycle', () => {
     expect(initializeLibrary).toHaveBeenCalledTimes(1);
   });
 
+  it('treats a synchronous initialization throw like a rejected promise', async () => {
+    const initializeLibrary = vi
+      .fn<() => Promise<PDFiumLibrary>>()
+      .mockImplementationOnce(() => {
+        throw new Error('wasm missing');
+      })
+      .mockImplementation(() => PDFiumLibrary.init());
+    const subject = new PdfiumPdfRenderer({ maxInputBytes: 1024 * 1024, initializeLibrary });
+    await expect(subject.countPages(valid)).rejects.toBeInstanceOf(CorruptPdfError);
+    await expect(subject.countPages(valid)).resolves.toBe(1);
+    expect(initializeLibrary).toHaveBeenCalledTimes(2);
+  });
+
   it('retries initialization after it failed', async () => {
     const initializeLibrary = vi
       .fn<() => Promise<PDFiumLibrary>>()

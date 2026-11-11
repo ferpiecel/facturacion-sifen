@@ -183,7 +183,8 @@ export class PdfiumPdfRenderer implements PdfRenderer {
   }
 
   private async ensureLibrary(): Promise<PDFiumLibrary> {
-    const pending = (this.library ??= this.initializeLibrary());
+    // A synchronous throw from the initializer is an init failure, like a rejected promise.
+    const pending = (this.library ??= Promise.resolve().then(() => this.initializeLibrary()));
     try {
       return await pending;
     } catch {

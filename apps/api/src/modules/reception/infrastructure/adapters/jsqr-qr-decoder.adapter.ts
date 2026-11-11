@@ -61,8 +61,13 @@ function pngDimensions(bytes: Uint8Array): Dimensions | null {
   return { width: readU32(bytes, 16), height: readU32(bytes, 20) };
 }
 
-/** Walks the JPEG marker segments up to the first start-of-frame header. */
+/**
+ * Walks the JPEG marker segments up to the scan. A baseline or progressive JPEG has exactly one
+ * start-of-frame header; an image with a second one is hostile (a decoder may honour a different
+ * frame than the one the guard read), so it is refused.
+ */
 function jpegDimensions(bytes: Uint8Array): Dimensions | null {
+  let frame: Dimensions | null = null;
   let at = 2;
   while (at + 4 <= bytes.length) {
     if (bytes[at] !== 0xff) return null;
@@ -78,11 +83,11 @@ function jpegDimensions(bytes: Uint8Array): Dimensions | null {
     }
     const isFrame = marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker);
     if (isFrame) {
-      return at + 9 <= bytes.length
-        ? { height: readU16(bytes, at + 5), width: readU16(bytes, at + 7) }
-        : null;
+      if (frame !== null || at + 9 > bytes.length) return null;
+      frame = { height: readU16(bytes, at + 5), width: readU16(bytes, at + 7) };
+    } else if (marker === 0xd9 || marker === 0xda) {
+      return frame; // end of image / start of scan: no more headers to inspect
     }
-    if (marker === 0xd9 || marker === 0xda) return null; // end of image / scan before any frame
     at += 2 + readU16(bytes, at + 2);
   }
   return null;
@@ -192,6 +197,8 @@ export class JsqrQrDecoder implements QrDecoder {
         formatAsRGBA: true,
         maxResolutionInMP: Math.ceil(this.maxPixels / 1_000_000),
       });
+      // jpeg-js only enforces whole megapixels: hold the decoded size to the real budget too.
+      if (!this.withinBudget(decoded)) return null;
       return { width: decoded.width, height: decoded.height, data: decoded.data };
     }
     return null;
@@ -204,11 +211,13 @@ export class JsqrQrDecoder implements QrDecoder {
 
 /** The text of a QR code is a SIFEN URL, a percent-encoded URL or a bare CDC; anything else is not ours. */
 function cdcFromText(text: string): string | null {
-  for (const candidate of [text, safeDecode(text)]) {
+  // Decoded first: it is the raw text when nothing is encoded, and it exposes an `Id` parameter
+  // that a different bare 44-digit run in the raw text would otherwise shadow.
+  for (const candidate of new Set([safeDecode(text), text])) {
     try {
       return extractCdc(candidate);
     } catch {
-      // not found in this form: try the next
+      // `extractCdc` signals a miss by throwing: try the next form
     }
   }
   return null;

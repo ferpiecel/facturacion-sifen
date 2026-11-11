@@ -87,6 +87,14 @@ describe('JsqrQrDecoder.decodeCdc', () => {
     await expect(decoder.decodeCdc(toPng(renderQr(encoded)))).resolves.toBe(CDC);
   });
 
+  it('reads the percent-decoded form when the raw text carries a different 44-digit run', async () => {
+    const decoy = '9'.repeat(44);
+    const text = `https://example.test/r?ts=${decoy}&u=${encodeURIComponent(`?Id=${CDC}`)}`;
+    // The raw text has only the decoy as a bare run; the Id parameter exists only once decoded.
+    expect(text).not.toContain(`Id=${CDC}`);
+    await expect(decoder.decodeCdc(toPng(renderQr(text)))).resolves.toBe(CDC);
+  });
+
   it('reads a rotated code', async () => {
     await expect(decoder.decodeCdc(toPng(renderQr(SIFEN_URL, { rotate: true })))).resolves.toBe(
       CDC,
@@ -186,6 +194,25 @@ describe('JsqrQrDecoder.decodeCdc', () => {
     hostile.writeUInt16BE(60_000, sof + 5); // height
     hostile.writeUInt16BE(60_000, sof + 7); // width
     await expect(decoder.decodeCdc(hostile)).resolves.toBeNull();
+  });
+
+  it('applies its own pixel budget to a valid JPEG (not only the decoder cap)', async () => {
+    const image = toJpeg(renderQr(SIFEN_URL));
+    await expect(decoder.decodeCdc(image)).resolves.toBe(CDC);
+    // Far below the whole-megapixel step of the jpeg-js cap, so only the adapter guard can refuse it.
+    const strict = new JsqrQrDecoder({ maxInputBytes: 20 * 1024 * 1024, maxPixels: 1000 });
+    await expect(strict.decodeCdc(image)).resolves.toBeNull();
+  });
+
+  it('refuses a JPEG with a second frame header that could hide a larger size', async () => {
+    const image = toJpeg(renderQr(SIFEN_URL));
+    const sof = image.indexOf(Buffer.from([0xff, 0xc0]));
+    expect(sof).toBeGreaterThan(0);
+    const decoy = Buffer.from(image.subarray(sof, sof + 2 + image.readUInt16BE(sof + 2)));
+    decoy.writeUInt16BE(8, 5); // height of the decoy frame header
+    decoy.writeUInt16BE(8, 7); // width of the decoy frame header
+    const crafted = Buffer.concat([image.subarray(0, sof), decoy, image.subarray(sof)]);
+    await expect(decoder.decodeCdc(crafted)).resolves.toBeNull();
   });
 
   it('honours a lower pixel budget', async () => {

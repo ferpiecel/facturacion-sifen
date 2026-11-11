@@ -338,6 +338,7 @@ describe('createAnthropicExtractionLlm', () => {
     model: 'primary-model',
     fallbackModel: 'fallback-model',
     autoConfirmThreshold: 0.85,
+    timeoutMs: 45_000,
   };
 
   it('returns a disabled stub without an API key and never builds a client', async () => {
@@ -351,8 +352,26 @@ describe('createAnthropicExtractionLlm', () => {
     const { client, create } = fakeClient(okMessage());
     const clientFactory = vi.fn(() => client);
     const llm = createAnthropicExtractionLlm({ ...base, apiKey: 'sk-test' }, { clientFactory });
-    expect(clientFactory).toHaveBeenCalledWith('sk-test');
+    expect(clientFactory).toHaveBeenCalledWith('sk-test', expect.any(Object));
     await llm.extract(request);
     expect(firstCall(create).model).toBe('primary-model');
+  });
+
+  it('disables SDK retries and bounds the request timeout', () => {
+    const { client } = fakeClient(okMessage());
+    const clientFactory = vi.fn(() => client);
+    createAnthropicExtractionLlm({ ...base, apiKey: 'sk-test' }, { clientFactory });
+    expect(clientFactory).toHaveBeenCalledWith('sk-test', { maxRetries: 0, timeout: 45_000 });
+  });
+
+  it('never falls back when the fallback is explicitly disabled', async () => {
+    const { client, create } = fakeClient(okMessage());
+    create.mockRejectedValueOnce(new Error('boom'));
+    const llm = createAnthropicExtractionLlm(
+      { ...base, apiKey: 'sk-test', fallbackModel: null },
+      { clientFactory: () => client },
+    );
+    await expect(llm.extract(request)).rejects.toBeDefined();
+    expect(create).toHaveBeenCalledTimes(1);
   });
 });

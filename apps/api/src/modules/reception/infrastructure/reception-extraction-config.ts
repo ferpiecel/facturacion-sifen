@@ -3,8 +3,10 @@ export interface ReceptionExtractionConfig {
   /** `null` means extraction is disabled (not an error). Never log or echo it. */
   readonly apiKey: string | null;
   readonly model: string;
-  /** `null` when no fallback is configured. */
+  /** `null` when the fallback is explicitly disabled (`none` or `off`). */
   readonly fallbackModel: string | null;
+  /** Per-request timeout of the SDK call; the adapter owns retries, the SDK does none. */
+  readonly timeoutMs: number;
   /** The single read of the auto-confirm threshold; feeds `ConfidencePolicy.create` (ADR-0026). */
   readonly autoConfirmThreshold: number;
 }
@@ -13,6 +15,9 @@ export interface ReceptionExtractionConfig {
 export const DEFAULT_EXTRACTION_MODEL = 'claude-sonnet-5';
 export const DEFAULT_EXTRACTION_FALLBACK_MODEL = 'claude-haiku-4-5';
 export const DEFAULT_AUTO_CONFIRM_THRESHOLD = 0.85;
+export const DEFAULT_EXTRACTION_TIMEOUT_MS = 120_000;
+const MIN_TIMEOUT_MS = 1_000;
+const MAX_TIMEOUT_MS = 600_000;
 
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 const UNIT_INTERVAL = /^(?:0(?:\.\d+)?|1(?:\.0+)?)$/;
@@ -29,6 +34,25 @@ function readModel(env: Env, name: string, fallback: string): string {
   if (value === undefined) return fallback;
   if (!MODEL_ID.test(value)) throw new Error(`${name} is not a valid model id.`);
   return value;
+}
+
+function readFallbackModel(env: Env): string | null {
+  const name = 'RECEPTION_EXTRACTION_FALLBACK_MODEL';
+  const value = read(env, name);
+  if (value !== undefined && /^(?:none|off)$/i.test(value)) return null;
+  return readModel(env, name, DEFAULT_EXTRACTION_FALLBACK_MODEL);
+}
+
+function readTimeoutMs(env: Env): number {
+  const value = read(env, 'RECEPTION_EXTRACTION_TIMEOUT_MS');
+  if (value === undefined) return DEFAULT_EXTRACTION_TIMEOUT_MS;
+  const parsed = /^\d+$/.test(value) ? Number(value) : Number.NaN;
+  if (!(parsed >= MIN_TIMEOUT_MS && parsed <= MAX_TIMEOUT_MS)) {
+    throw new Error(
+      `RECEPTION_EXTRACTION_TIMEOUT_MS must be an integer between ${String(MIN_TIMEOUT_MS)} and ${String(MAX_TIMEOUT_MS)}.`,
+    );
+  }
+  return parsed;
 }
 
 function readThreshold(env: Env): number {
@@ -48,11 +72,8 @@ export function loadReceptionExtractionConfig(env: Env): ReceptionExtractionConf
   return {
     apiKey: read(env, 'ANTHROPIC_API_KEY') ?? null,
     model: readModel(env, 'RECEPTION_EXTRACTION_MODEL', DEFAULT_EXTRACTION_MODEL),
-    fallbackModel: readModel(
-      env,
-      'RECEPTION_EXTRACTION_FALLBACK_MODEL',
-      DEFAULT_EXTRACTION_FALLBACK_MODEL,
-    ),
+    fallbackModel: readFallbackModel(env),
+    timeoutMs: readTimeoutMs(env),
     autoConfirmThreshold: readThreshold(env),
   };
 }

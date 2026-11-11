@@ -8,6 +8,7 @@ describe('loadReceptionExtractionConfig', () => {
       model: 'claude-sonnet-5',
       fallbackModel: 'claude-haiku-4-5',
       autoConfirmThreshold: 0.85,
+      timeoutMs: 120_000,
     });
   });
 
@@ -28,8 +29,28 @@ describe('loadReceptionExtractionConfig', () => {
       model: 'model-a',
       fallbackModel: 'model-b',
       autoConfirmThreshold: 0.9,
+      timeoutMs: 120_000,
     });
   });
+
+  it.each(['none', 'OFF', ' None '])('opts out of the fallback with %j', (value) => {
+    const config = loadReceptionExtractionConfig({ RECEPTION_EXTRACTION_FALLBACK_MODEL: value });
+    expect(config.fallbackModel).toBeNull();
+  });
+
+  it('reads the request timeout in milliseconds', () => {
+    const config = loadReceptionExtractionConfig({ RECEPTION_EXTRACTION_TIMEOUT_MS: ' 30000 ' });
+    expect(config.timeoutMs).toBe(30_000);
+  });
+
+  it.each(['999', '600001', '1.5', 'abc', '-1', '1e3'])(
+    'rejects timeout %s and names the variable',
+    (value) => {
+      expect(() =>
+        loadReceptionExtractionConfig({ RECEPTION_EXTRACTION_TIMEOUT_MS: value }),
+      ).toThrow('RECEPTION_EXTRACTION_TIMEOUT_MS');
+    },
+  );
 
   it('falls back to the defaults for blank model variables', () => {
     const config = loadReceptionExtractionConfig({

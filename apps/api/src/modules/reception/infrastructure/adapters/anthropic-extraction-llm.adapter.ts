@@ -192,9 +192,21 @@ const disabled: ExtractionLlm = {
   extract: () => Promise.reject(new ExtractionLlmDisabledError()),
 };
 
+/**
+ * The adapter owns the retry policy (one fallback attempt), so the SDK must not retry on its own
+ * (its default is 2 retries) and every call is bounded by a finite timeout.
+ */
+export interface AnthropicClientOptions {
+  readonly maxRetries: 0;
+  readonly timeout: number;
+}
+
 export interface CreateAnthropicExtractionLlmDeps {
-  /** Builds the SDK client from the API key; replaced in tests. */
-  readonly clientFactory?: (apiKey: string) => AnthropicMessagesClient;
+  /** Builds the SDK client from the API key and client options; replaced in tests. */
+  readonly clientFactory?: (
+    apiKey: string,
+    options: AnthropicClientOptions,
+  ) => AnthropicMessagesClient;
 }
 
 /** Builds the adapter, or a stub that raises `ExtractionLlmDisabledError` when no key is set. */
@@ -203,9 +215,11 @@ export function createAnthropicExtractionLlm(
   deps: CreateAnthropicExtractionLlmDeps = {},
 ): ExtractionLlm {
   if (config.apiKey === null) return disabled;
-  const clientFactory = deps.clientFactory ?? ((apiKey: string) => new Anthropic({ apiKey }));
+  const clientFactory =
+    deps.clientFactory ??
+    ((apiKey: string, options: AnthropicClientOptions) => new Anthropic({ apiKey, ...options }));
   return new AnthropicExtractionLlm({
-    client: clientFactory(config.apiKey),
+    client: clientFactory(config.apiKey, { maxRetries: 0, timeout: config.timeoutMs }),
     model: config.model,
     fallbackModel: config.fallbackModel,
   });

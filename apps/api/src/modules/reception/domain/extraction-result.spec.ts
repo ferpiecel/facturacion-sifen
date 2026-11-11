@@ -3,6 +3,7 @@ import { RECEIVED_FIELD_NAMES } from './confidence-policy.js';
 import {
   InvalidExtractionResultError,
   parseExtractionResult,
+  hasUnverifiableItems,
   toReceivedDocumentFields,
 } from './extraction-result.js';
 import { validateReceivedDocument } from './received-document-validation.js';
@@ -176,5 +177,27 @@ describe('toReceivedDocumentFields', () => {
     expect(fields.issuerRuc).toBe('80012345-6');
     expect(fields.itemAmounts).toEqual(['204000']);
     expect(fields.totals?.total).toBe('204000');
+  });
+});
+
+describe('hasUnverifiableItems', () => {
+  const item = (subtotal: string | null) => ({
+    description: 'x',
+    quantity: '1',
+    unitPrice: '10',
+    subtotal,
+    vatRate: 10,
+  });
+
+  it('is true when there are items and every subtotal is null', () => {
+    const result = parseExtractionResult(raw({ items: [item(null), item(null)] }));
+    expect(hasUnverifiableItems(result)).toBe(true);
+  });
+
+  it('is false when at least one subtotal is present or there are no items', () => {
+    expect(
+      hasUnverifiableItems(parseExtractionResult(raw({ items: [item(null), item('10')] }))),
+    ).toBe(false);
+    expect(hasUnverifiableItems(parseExtractionResult(raw({ items: [] })))).toBe(false);
   });
 });

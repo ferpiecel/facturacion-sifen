@@ -16,6 +16,7 @@ import {
   VersionConflictError,
   type ArtifactMatch,
   type CorrectionWrite,
+  type ExtractionWrite,
   type CreateReceivedDocumentResult,
   type FieldConfidence,
   type NewReceivedArtifact,
@@ -217,6 +218,7 @@ async function writeState(
       confidenceOverall: document.confidenceOverall,
       extractionAttempts: document.extractionAttempts,
       confirmedAt: document.confirmedAt,
+      isOwnReceiver: document.isOwnReceiver,
       updatedAt: new Date(),
     })
     .where(and(byId, eq(receivedDocuments.version, expectedVersion)))
@@ -280,6 +282,36 @@ async function writeConfidences(
           eq(receivedDocumentFieldConfidences.fieldName, correction.fieldName),
         ),
       );
+  }
+}
+
+/** Upserts the extracted items and confidences by position / field, so a retry rewrites them. */
+async function writeExtractionChildren(
+  tx: TenantTx,
+  tenantId: string,
+  documentId: string,
+  write: ExtractionWrite,
+): Promise<void> {
+  for (const { position, ...fields } of write.items) {
+    await tx
+      .insert(receivedDocumentItems)
+      .values({ ...fields, position, tenantId, receivedDocumentId: documentId })
+      .onConflictDoUpdate({
+        target: [receivedDocumentItems.receivedDocumentId, receivedDocumentItems.position],
+        set: { ...fields, updatedAt: new Date() },
+      });
+  }
+  for (const { fieldName, ...fields } of write.confidences) {
+    await tx
+      .insert(receivedDocumentFieldConfidences)
+      .values({ ...fields, fieldName, tenantId, receivedDocumentId: documentId })
+      .onConflictDoUpdate({
+        target: [
+          receivedDocumentFieldConfidences.receivedDocumentId,
+          receivedDocumentFieldConfidences.fieldName,
+        ],
+        set: { ...fields, updatedAt: new Date() },
+      });
   }
 }
 
@@ -477,6 +509,15 @@ export function createDrizzleReceivedDocumentRepository(db: Database): ReceivedD
       return inTenant(tenantId, async (tx) => {
         await writeState(tx, tenantId, document, expectedVersion, change?.header);
         await enqueueRequested(tx, tenantId, document, change?.events);
+      });
+    },
+
+    saveExtraction(tenantId, write) {
+      return inTenant(tenantId, async (tx) => {
+        const { document } = write;
+        await writeState(tx, tenantId, document, write.expectedVersion, write.header);
+        await writeExtractionChildren(tx, tenantId, document.id, write);
+        await enqueueRequested(tx, tenantId, document, write.events);
       });
     },
 

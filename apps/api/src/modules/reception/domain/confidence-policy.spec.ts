@@ -92,6 +92,26 @@ describe('decideExtractionOutcome', () => {
     });
   });
 
+  it('needs review when the items cannot be checked against the total', () => {
+    expect(decideExtractionOutcome(policy, { ...good, unverifiableItems: true })).toEqual({
+      status: 'needs_review',
+      reasons: ['items_without_subtotals'],
+    });
+    expect(decideExtractionOutcome(policy, { ...good, unverifiableItems: false }).status).toBe(
+      'confirmed',
+    );
+  });
+
+  it('places the unverifiable-items reason before low confidence', () => {
+    expect(
+      decideExtractionOutcome(policy, {
+        ...good,
+        overallConfidence: 0.1,
+        unverifiableItems: true,
+      }),
+    ).toEqual({ status: 'needs_review', reasons: ['items_without_subtotals', 'low_confidence'] });
+  });
+
   it('honours a custom threshold', () => {
     const strict = ConfidencePolicy.create(0.99);
     expect(decideExtractionOutcome(strict, good).status).toBe('needs_review');

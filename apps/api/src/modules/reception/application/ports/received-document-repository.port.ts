@@ -210,6 +210,21 @@ export interface CorrectionWrite {
   };
 }
 
+/**
+ * What a finished extraction writes: the final state (or `extraction_failed`), the header, the
+ * items and the per-field confidences, all in one transaction. Items and confidences are upserted
+ * by position / field name, so a retried job rewrites the same rows.
+ */
+export interface ExtractionWrite {
+  readonly document: ReceivedDocument;
+  readonly expectedVersion: number;
+  readonly header: ReceivedDocumentHeaderInput;
+  readonly items: readonly ReceivedDocumentItem[];
+  readonly confidences: readonly FieldConfidence[];
+  /** Enqueued with the write; nothing is enqueued when the version check fails. */
+  readonly events?: ReceptionEventRequest;
+}
+
 /** Every method runs in its own tenant transaction; `tenantId` always comes first. */
 export interface ReceivedDocumentRepository {
   /**
@@ -238,6 +253,15 @@ export interface ReceivedDocumentRepository {
     expectedVersion: number,
     change?: StateChange,
   ): Promise<void>;
+
+  /**
+   * Persists the result of an extraction atomically. Unlike `save`, it also writes
+   * `is_own_receiver` (known only once the receiver was read), the items and the confidences.
+   *
+   * @throws VersionConflictError when the stored version is not `expectedVersion`.
+   * @throws ReceivedDocumentNotFoundError when the document does not exist for the tenant.
+   */
+  saveExtraction(tenantId: string, write: ExtractionWrite): Promise<void>;
 
   /**
    * Applies a correction atomically: state columns and header (version-checked), items, field

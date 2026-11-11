@@ -1,0 +1,612 @@
+import { describe, expect, it, vi } from 'vitest';
+import { computeCdcCheckDigit } from '../../emission/domain/cdc.js';
+import { computeRucCheckDigit } from '../../fiscal-config/domain/ruc.js';
+import { ConfidencePolicy, RECEIVED_FIELD_NAMES } from '../domain/confidence-policy.js';
+import { createReceivedDocument, type ReceivedDocument } from '../domain/received-document.js';
+import type { ReceivedDocumentSource } from '../domain/source.js';
+import {
+  EXTRACTION_DPI,
+  EXTRACTION_MAX_PAGES,
+  ExtractReceivedDocument,
+  type ExtractReceivedDocumentInput,
+  type ExtractReceivedDocumentResult,
+} from './extract-received-document.js';
+import {
+  ExtractionLlmDisabledError,
+  ExtractionLlmInvalidOutputError,
+  ExtractionLlmProviderError,
+  ExtractionLlmRateLimitedError,
+  ExtractionLlmRefusalError,
+  type ExtractionLlm,
+  type ExtractionLlmRequest,
+} from './ports/extraction-llm.port.js';
+import {
+  CorruptPdfError,
+  EmptyPdfError,
+  TooManyPagesError,
+  type PdfRenderer,
+  type RasterizeOptions,
+} from './ports/pdf-renderer.port.js';
+import type { QrDecoder } from './ports/qr-decoder.port.js';
+import { VersionConflictError } from './ports/received-document-repository.port.js';
+import { InMemoryReceptionRepository, InMemoryStorage } from './testing/in-memory-reception.js';
+
+const TENANT = '11111111-1111-4111-8111-111111111111';
+const AT = new Date('2026-11-10T12:00:00.000Z');
+const ISSUER = '80000000';
+const OWN = '80000001';
+const OWN_DV = computeRucCheckDigit(OWN);
+const cdcBody = '018000000000010010000001120261106100000000'.padEnd(43, '1');
+const CDC = `${cdcBody}${String(computeCdcCheckDigit(cdcBody))}`;
+
+/** Structurally valid CDC (what `createCdcReference` accepts), for the QR hint. */
+const HINT_CDC = '01800695631001001000000612021112917595714694';
+
+const PDF_BYTES = new TextEncoder().encode('%PDF-1.7 test');
+const PNG_BYTES = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+const JPEG_BYTES = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+const PAGE = (n: number) => Uint8Array.from([0x89, 0x50, 0x4e, 0x47, n]);
+
+const confidences = Object.fromEntries(RECEIVED_FIELD_NAMES.map((n) => [n, 0.95]));
+const item = (subtotal: string | null) => ({
+  description: 'Servicio',
+  productCode: null,
+  quantity: '1',
+  unitOfMeasure: null,
+  unitPrice: '110000',
+  discount: null,
+  subtotal,
+  vatRate: 10,
+  taxableBase: '100000',
+  vatAmount: '10000',
+});
+
+function llmJson(over: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    cdc: null,
+    issuerRuc: `${ISSUER}-${String(computeRucCheckDigit(ISSUER))}`,
+    issuerLegalName: 'Proveedor SA',
+    documentNumber: '001-002-0000123',
+    issueDate: '2026-11-06',
+    receiverRuc: `${OWN}-${String(OWN_DV)}`,
+    paymentCondition: 'cash',
+    totals: {
+      exempt: '0',
+      exonerated: '0',
+      taxable5: '0',
+      taxable10: '100000',
+      vat5: '0',
+      vat10: '10000',
+      total: '110000',
+    },
+    items: [item('110000')],
+    fieldConfidences: confidences,
+    overallConfidence: 0.95,
+    notes: '',
+    ...over,
+  });
+}
+
+class Harness {
+  readonly repository = new InMemoryReceptionRepository();
+  readonly storage = new InMemoryStorage();
+  llmText: string | Error = llmJson();
+  llmRequests: ExtractionLlmRequest[] = [];
+  pdfPages = 2;
+  pdfText = 'FACTURA texto';
+  qrCdc: string | null = null;
+  pdfError: Error | null = null;
+  rasterizeCalls: RasterizeOptions[] = [];
+  identity: { rucBase: string; dv: number } | null = { rucBase: OWN, dv: OWN_DV };
+  readonly decodeCdc = vi.fn<(image: Uint8Array) => Promise<string | null>>(() =>
+    Promise.resolve(this.qrCdc),
+  );
+
+  readonly llm: ExtractionLlm = {
+    extract: (request) => {
+      this.llmRequests.push(request);
+      if (this.llmText instanceof Error) return Promise.reject(this.llmText);
+      return Promise.resolve({
+        rawText: this.llmText,
+        modelId: 'm',
+        usage: {
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0,
+        },
+      });
+    },
+  };
+
+  readonly pdf: PdfRenderer = {
+    countPages: () =>
+      this.pdfError ? Promise.reject(this.pdfError) : Promise.resolve(this.pdfPages),
+    extractText: () => Promise.resolve(this.pdfText),
+    rasterize: (_pdf, options) => {
+      this.rasterizeCalls.push(options);
+      const count = Math.min(this.pdfPages, options.maxPages);
+      return Promise.resolve(Array.from({ length: count }, (_v, i) => PAGE(i + 1)));
+    },
+  };
+
+  readonly qr: QrDecoder = { decodeCdc: this.decodeCdc };
+
+  readonly useCase = new ExtractReceivedDocument({
+    repository: this.repository,
+    storage: this.storage,
+    pdfRenderer: this.pdf,
+    qrDecoder: this.qr,
+    llm: this.llm,
+    fiscalIdentity: { getRucIdentity: () => Promise.resolve(this.identity) },
+    policy: ConfidencePolicy.create(0.85),
+    now: () => AT,
+  });
+
+  async seed(
+    source: ReceivedDocumentSource = 'pdf',
+    bytes: Uint8Array = PDF_BYTES,
+    id = 'doc-1',
+  ): Promise<string> {
+    const key = `tenants/${TENANT}/received/${source}/${id}`;
+    this.storage.objects.set(key, bytes);
+    await this.repository.create(TENANT, {
+      document: createReceivedDocument({ id, tenantId: TENANT, source, isOwnReceiver: true }),
+      artifact: {
+        storageKey: key,
+        contentType: null,
+        sha256: id.padEnd(64, '0'),
+        sizeBytes: bytes.byteLength,
+        originalName: null,
+        pageCount: null,
+      },
+    });
+    return id;
+  }
+
+  run(documentId = 'doc-1', extra: Partial<ExtractReceivedDocumentInput> = {}) {
+    return this.useCase.execute({ tenantId: TENANT, documentId, ...extra });
+  }
+
+  get events() {
+    return this.repository.events.flatMap((e) => e.request.types);
+  }
+
+  doc(id = 'doc-1'): ReceivedDocument {
+    return this.repository.document(id);
+  }
+}
+
+function extracted(result: ExtractReceivedDocumentResult) {
+  if (result.kind !== 'extracted') throw new Error(`expected extracted, got ${result.kind}`);
+  return result;
+}
+
+function failed(result: ExtractReceivedDocumentResult) {
+  if (result.kind !== 'failed') throw new Error(`expected failed, got ${result.kind}`);
+  return result;
+}
+
+describe('ExtractReceivedDocument: success paths', () => {
+  it('auto-confirms a valid high-confidence PDF and stores header, items and confidences', async () => {
+    const h = new Harness();
+    await h.seed();
+    const result = extracted(await h.run());
+
+    expect(result.status).toBe('confirmed');
+    expect(result.events).toEqual(['reception.document.confirmed']);
+    expect(h.events).toEqual(['reception.document.confirmed']);
+    // received -> extracting (claim) -> confirmed (extracted is transient inside the write)
+    expect(h.repository.statusLog).toEqual(['received', 'extracting', 'confirmed']);
+    const stored = await h.repository.load(TENANT, 'doc-1');
+    expect(stored?.document).toMatchObject({
+      status: 'confirmed',
+      isOwnReceiver: true,
+      extractionAttempts: 1,
+      confidenceOverall: '0.950',
+      version: 2,
+    });
+    expect(stored?.header).toMatchObject({
+      issuerRucBase: ISSUER,
+      issuerLegalName: 'Proveedor SA',
+      establishmentCode: '001',
+      expeditionPointCode: '002',
+      documentNumber: '0000123',
+      issuedAt: new Date('2026-11-06T00:00:00.000Z'),
+      receiverRucBase: OWN,
+      paymentCondition: 'cash',
+      totalAmount: '110000',
+      totalVat: '10000',
+      extractionErrorCode: null,
+      cdc: null,
+    });
+    expect(stored?.items).toHaveLength(1);
+    expect(stored?.items[0]).toMatchObject({ position: 1, subtotal: '110000', vatRate: 10 });
+    expect(stored?.confidences.map((c) => c.fieldName).sort()).toEqual(
+      [...RECEIVED_FIELD_NAMES].sort(),
+    );
+    expect(stored?.confidences[0]?.confidence).toBe('0.950');
+  });
+
+  it('sends the rasterized pages, the text layer and no hint to the LLM', async () => {
+    const h = new Harness();
+    await h.seed();
+    await h.run();
+    expect(h.llmRequests).toHaveLength(1);
+    expect(h.llmRequests[0]).toEqual({
+      pages: [
+        { bytes: PAGE(1), mediaType: 'image/png' },
+        { bytes: PAGE(2), mediaType: 'image/png' },
+      ],
+      pdfText: 'FACTURA texto',
+      cdcHint: null,
+    });
+  });
+
+  it('truncates a long PDF to the configured page cap and dpi, overridable per call', async () => {
+    const h = new Harness();
+    h.pdfPages = 9;
+    await h.seed();
+    await h.run();
+    expect(h.rasterizeCalls[0]).toEqual({
+      maxPages: EXTRACTION_MAX_PAGES,
+      dpi: EXTRACTION_DPI,
+      overflow: 'truncate',
+    });
+    expect(EXTRACTION_MAX_PAGES).toBe(5);
+    expect(EXTRACTION_DPI).toBe(200);
+    expect(h.llmRequests[0]?.pages).toHaveLength(5);
+
+    const h2 = new Harness();
+    h2.pdfPages = 9;
+    await h2.seed();
+    await h2.run('doc-1', { options: { maxPages: 2, dpi: 150 } });
+    expect(h2.rasterizeCalls[0]).toEqual({ maxPages: 2, dpi: 150, overflow: 'truncate' });
+    expect(h2.llmRequests[0]?.pages).toHaveLength(2);
+  });
+
+  it('sends an empty text layer as null', async () => {
+    const h = new Harness();
+    h.pdfText = '   ';
+    await h.seed();
+    await h.run();
+    expect(h.llmRequests[0]?.pdfText).toBeNull();
+  });
+
+  it.each([
+    ['PNG', PNG_BYTES, 'image/png'],
+    ['JPEG', JPEG_BYTES, 'image/jpeg'],
+  ])('sends a %s photo directly, without rendering a PDF', async (_n, bytes, mediaType) => {
+    const h = new Harness();
+    await h.seed('photo', bytes);
+    extracted(await h.run());
+    expect(h.llmRequests[0]).toEqual({
+      pages: [{ bytes, mediaType }],
+      pdfText: null,
+      cdcHint: null,
+    });
+    expect(h.rasterizeCalls).toEqual([]);
+  });
+
+  it('passes a valid QR CDC found on the first page as a hint', async () => {
+    const h = new Harness();
+    h.qrCdc = HINT_CDC;
+    await h.seed();
+    await h.run();
+    expect(h.decodeCdc).toHaveBeenCalledWith(PAGE(1));
+    expect(h.llmRequests[0]?.cdcHint).toBe(HINT_CDC);
+  });
+
+  it('drops a QR hint whose check digit is wrong', async () => {
+    const h = new Harness();
+    h.qrCdc = `${HINT_CDC.slice(0, 43)}${String((Number(HINT_CDC[43]) + 1) % 10)}`;
+    await h.seed();
+    await h.run();
+    expect(h.llmRequests[0]?.cdcHint).toBeNull();
+  });
+
+  it('keeps going when the QR decoder fails: the hint is optional', async () => {
+    const h = new Harness();
+    h.decodeCdc.mockRejectedValueOnce(new Error('boom'));
+    await h.seed();
+    expect(extracted(await h.run()).status).toBe('confirmed');
+  });
+
+  it('stores a valid extracted CDC in the header', async () => {
+    const h = new Harness();
+    h.llmText = llmJson({ cdc: CDC });
+    await h.seed();
+    extracted(await h.run());
+    expect((await h.repository.load(TENANT, 'doc-1'))?.header.cdc).toBe(CDC);
+  });
+});
+
+describe('ExtractReceivedDocument: review decisions', () => {
+  it('sends a low-confidence extraction to needs_review with the reason and an event', async () => {
+    const h = new Harness();
+    h.llmText = llmJson({ overallConfidence: 0.5 });
+    await h.seed();
+    const result = extracted(await h.run());
+    expect(result.status).toBe('needs_review');
+    expect(h.doc()).toMatchObject({
+      status: 'needs_review',
+      needsReview: true,
+      needsReviewReasons: ['low_confidence'],
+      confidenceOverall: '0.500',
+      version: 1,
+    });
+    expect(h.events).toEqual(['reception.document.needs_review']);
+  });
+
+  it('sends a failed validation to needs_review even with high confidence', async () => {
+    const h = new Harness();
+    h.llmText = llmJson({
+      totals: {
+        exempt: '0',
+        exonerated: '0',
+        taxable5: '0',
+        taxable10: '100000',
+        vat5: '0',
+        vat10: '10000',
+        total: '999999',
+      },
+    });
+    await h.seed();
+    const result = extracted(await h.run());
+    expect(result.status).toBe('needs_review');
+    expect(h.doc().needsReviewReasons).toContain('totals_blocks_sum_mismatch');
+  });
+
+  it('does not store a CDC that fails its check digit, but flags it', async () => {
+    const h = new Harness();
+    h.llmText = llmJson({ cdc: `${CDC.slice(0, 43)}${String((Number(CDC[43]) + 1) % 10)}` });
+    await h.seed();
+    extracted(await h.run());
+    expect(h.doc().needsReviewReasons).toContain('cdc_check_digit_mismatch');
+    expect((await h.repository.load(TENANT, 'doc-1'))?.header.cdc).toBeNull();
+  });
+
+  it('decides the all-null-subtotals case: items without any subtotal need review', async () => {
+    const h = new Harness();
+    h.llmText = llmJson({ items: [item(null), item(null)] });
+    await h.seed();
+    const result = extracted(await h.run());
+    expect(result.status).toBe('needs_review');
+    expect(h.doc().needsReviewReasons).toEqual(['items_without_subtotals']);
+  });
+
+  it('still confirms when there are no items at all', async () => {
+    const h = new Harness();
+    h.llmText = llmJson({ items: [] });
+    await h.seed();
+    expect(extracted(await h.run()).status).toBe('confirmed');
+  });
+
+  it('emits nothing for a receiver that is not the tenant, and marks the document not own', async () => {
+    const h = new Harness();
+    h.llmText = llmJson({ receiverRuc: '80000009-3' });
+    await h.seed();
+    const result = extracted(await h.run());
+    expect(result.status).toBe('confirmed');
+    expect(result.events).toEqual([]);
+    expect(h.events).toEqual([]);
+    expect(h.doc().isOwnReceiver).toBe(false);
+  });
+
+  it('treats a tenant without a fiscal profile as not own', async () => {
+    const h = new Harness();
+    h.identity = null;
+    await h.seed();
+    extracted(await h.run());
+    expect(h.doc().isOwnReceiver).toBe(false);
+    expect(h.events).toEqual([]);
+  });
+
+  it('fails a CDC that already belongs to another document instead of violating the unique index', async () => {
+    const h = new Harness();
+    h.llmText = llmJson({ cdc: CDC });
+    await h.seed('pdf', PDF_BYTES, 'doc-1');
+    await h.seed('pdf', PDF_BYTES, 'doc-2');
+    extracted(await h.run('doc-1'));
+    const result = failed(await h.run('doc-2'));
+    expect(result).toMatchObject({ code: 'duplicate_document', retryable: false });
+    expect(h.doc('doc-2').status).toBe('extraction_failed');
+  });
+});
+
+describe('ExtractReceivedDocument: failures', () => {
+  const retryAfter = new ExtractionLlmRateLimitedError(30);
+  it.each<[string, () => Error, string, boolean]>([
+    ['corrupt PDF', () => new CorruptPdfError(), 'corrupt_pdf', false],
+    ['empty PDF', () => new EmptyPdfError(), 'empty_pdf', false],
+    ['too many pages', () => new TooManyPagesError(9, 5), 'too_many_pages', false],
+    ['refusal', () => new ExtractionLlmRefusalError(), 'llm_refusal', false],
+    [
+      'unusable provider output',
+      () => new ExtractionLlmInvalidOutputError('empty'),
+      'llm_invalid_output',
+      false,
+    ],
+    [
+      'transient provider error',
+      () => new ExtractionLlmProviderError('503', { retryable: true }),
+      'llm_provider_error',
+      true,
+    ],
+    [
+      'permanent provider error',
+      () => new ExtractionLlmProviderError('400', { retryable: false }),
+      'llm_provider_error',
+      false,
+    ],
+    ['rate limit', () => retryAfter, 'llm_rate_limited', true],
+    ['disabled LLM', () => new ExtractionLlmDisabledError(), 'llm_disabled', false],
+  ])('%s -> extraction_failed (%s, retryable %s)', async (_name, makeError, code, retryable) => {
+    const h = new Harness();
+    const error = makeError();
+    if (error instanceof CorruptPdfError || error instanceof EmptyPdfError) h.pdfError = error;
+    else if (error instanceof TooManyPagesError) {
+      h.pdf.rasterize = () => Promise.reject(error);
+    } else h.llmText = error;
+    await h.seed();
+
+    const result = failed(await h.run());
+    expect(result).toMatchObject({ code, retryable });
+    expect(h.doc().status).toBe('extraction_failed');
+    expect((await h.repository.load(TENANT, 'doc-1'))?.header.extractionErrorCode).toBe(code);
+    // The failure event goes out once the job is final (the default).
+    expect(h.events).toEqual(['reception.document.extraction_failed']);
+  });
+
+  it('exposes the rate limit delay for the retry backoff and never persists provider text', async () => {
+    const h = new Harness();
+    h.llmText = new ExtractionLlmRateLimitedError(30);
+    await h.seed();
+    const result = failed(await h.run());
+    expect(result.retryAfterSeconds).toBe(30);
+    expect(JSON.stringify([...h.repository.rows.values()])).not.toContain('rate limit');
+  });
+
+  it.each([
+    ['not JSON', 'sorry, I cannot'],
+    ['a schema violation', JSON.stringify({ issuerRuc: 5 })],
+  ])('treats %s from the model as invalid output, not retryable', async (_n, text) => {
+    const h = new Harness();
+    h.llmText = text;
+    await h.seed();
+    expect(failed(await h.run())).toMatchObject({ code: 'llm_invalid_output', retryable: false });
+    expect(h.doc().status).toBe('extraction_failed');
+  });
+
+  it('suppresses the webhook while a retry is still coming, and emits it on the final attempt', async () => {
+    const h = new Harness();
+    h.llmText = new ExtractionLlmProviderError('503', { retryable: true });
+    await h.seed();
+    failed(await h.run('doc-1', { attempt: 1, finalAttempt: false }));
+    expect(h.events).toEqual([]);
+    expect(h.doc().status).toBe('extraction_failed');
+
+    // BullMQ runs the job again: a failed document is picked up, not skipped.
+    failed(await h.run('doc-1', { attempt: 2, finalAttempt: true }));
+    expect(h.events).toEqual(['reception.document.extraction_failed']);
+    expect(h.doc().extractionAttempts).toBe(2);
+  });
+
+  it('a retried job succeeds after a transient failure and clears the error code', async () => {
+    const h = new Harness();
+    h.llmText = new ExtractionLlmProviderError('503', { retryable: true });
+    await h.seed();
+    failed(await h.run('doc-1', { attempt: 1, finalAttempt: false }));
+    h.llmText = llmJson();
+    expect(extracted(await h.run('doc-1', { attempt: 2 })).status).toBe('confirmed');
+    expect((await h.repository.load(TENANT, 'doc-1'))?.header.extractionErrorCode).toBeNull();
+  });
+
+  it('does not burn a document on a disabled LLM: it stays reprocessable in extraction_failed', async () => {
+    const h = new Harness();
+    h.llmText = new ExtractionLlmDisabledError();
+    await h.seed();
+    failed(await h.run());
+    expect(h.doc().status).toBe('extraction_failed');
+    // Once the key is configured, the same document extracts normally (reprocess path).
+    h.llmText = llmJson();
+    expect(extracted(await h.run('doc-1', { attempt: 2 })).status).toBe('confirmed');
+  });
+
+  it('fails a missing artifact object as not retryable', async () => {
+    const h = new Harness();
+    await h.seed();
+    h.storage.objects.clear();
+    expect(failed(await h.run())).toMatchObject({ code: 'artifact_missing', retryable: false });
+  });
+
+  it('fails bytes that are neither a PDF nor an image for a vision document', async () => {
+    const h = new Harness();
+    await h.seed('pdf', new TextEncoder().encode('hello'));
+    expect(failed(await h.run())).toMatchObject({ code: 'unsupported_source', retryable: false });
+    const h2 = new Harness();
+    await h2.seed('photo', PDF_BYTES);
+    expect(failed(await h2.run())).toMatchObject({ code: 'unsupported_source' });
+  });
+
+  it('records an unexpected error as a retryable internal_error and hands the cause back', async () => {
+    const h = new Harness();
+    const boom = new TypeError('bug');
+    h.pdf.extractText = () => Promise.reject(boom);
+    await h.seed();
+    const result = failed(await h.run());
+    expect(result).toMatchObject({ code: 'internal_error', retryable: true, cause: boom });
+    expect(h.doc().status).toBe('extraction_failed');
+  });
+});
+
+describe('ExtractReceivedDocument: guards', () => {
+  it('skips an unknown document', async () => {
+    const h = new Harness();
+    await expect(h.run('nope')).resolves.toEqual({ kind: 'skipped', reason: 'not_found' });
+  });
+
+  it('is a no-op for a document already extracted: no LLM call, no write, no event', async () => {
+    const h = new Harness();
+    await h.seed();
+    await h.run();
+    const writes = h.repository.statusLog.length;
+    h.llmRequests = [];
+    await expect(h.run()).resolves.toEqual({ kind: 'skipped', reason: 'already_processed' });
+    expect(h.llmRequests).toEqual([]);
+    expect(h.repository.statusLog).toHaveLength(writes);
+    expect(h.events).toEqual(['reception.document.confirmed']);
+  });
+
+  it.each(['needs_review'] as const)('is a no-op for a %s document', async () => {
+    const h = new Harness();
+    h.llmText = llmJson({ overallConfidence: 0.1 });
+    await h.seed();
+    await h.run();
+    await expect(h.run('doc-1', { attempt: 2 })).resolves.toEqual({
+      kind: 'skipped',
+      reason: 'already_processed',
+    });
+  });
+
+  it('does not touch XML documents', async () => {
+    const h = new Harness();
+    await h.seed('sifen_xml', new TextEncoder().encode('<rDE/>'));
+    await expect(h.run()).resolves.toEqual({ kind: 'skipped', reason: 'not_vision_source' });
+  });
+
+  it('skips a document another worker is extracting, unless this is a retry of a crashed attempt', async () => {
+    const h = new Harness();
+    await h.seed();
+    // A first worker claims and "crashes" before writing the outcome.
+    const doc = h.doc();
+    await h.repository.save(TENANT, { ...doc, status: 'extracting', extractionAttempts: 1 }, 1);
+    await expect(h.run('doc-1', { attempt: 1 })).resolves.toEqual({
+      kind: 'skipped',
+      reason: 'in_progress',
+    });
+    // BullMQ retries the stalled job (attempt 2): resume from `extracting`.
+    expect(extracted(await h.run('doc-1', { attempt: 2 })).status).toBe('confirmed');
+  });
+
+  it('skips when another worker wins the claim (version conflict)', async () => {
+    const h = new Harness();
+    await h.seed();
+    vi.spyOn(h.repository, 'save').mockRejectedValueOnce(new VersionConflictError('doc-1', 1, 2));
+    await expect(h.run()).resolves.toEqual({ kind: 'skipped', reason: 'in_progress' });
+    expect(h.llmRequests).toEqual([]);
+  });
+
+  it('fails a vision document that has no artifact', async () => {
+    const h = new Harness();
+    await h.repository.create(TENANT, {
+      document: createReceivedDocument({
+        id: 'bare',
+        tenantId: TENANT,
+        source: 'pdf',
+        isOwnReceiver: true,
+      }),
+    });
+    expect(failed(await h.run('bare'))).toMatchObject({ code: 'artifact_missing' });
+  });
+});

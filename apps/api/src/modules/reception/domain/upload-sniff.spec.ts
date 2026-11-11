@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sniffUpload } from './upload-sniff.js';
+import { imageMediaType, sniffUpload } from './upload-sniff.js';
 
 const bytes = (...values: number[]) => Uint8Array.from(values);
 const text = (value: string) => new TextEncoder().encode(value);
@@ -20,5 +20,17 @@ describe('sniffUpload', () => {
     expect(sniffUpload(text('hello'))).toBe('unknown');
     expect(sniffUpload(bytes())).toBe('unknown');
     expect(sniffUpload(bytes(0xff, 0xfe, 0x3c, 0x00))).toBe('unknown');
+  });
+});
+
+describe('imageMediaType', () => {
+  it('tells PNG from JPEG by magic bytes', () => {
+    expect(imageMediaType(bytes(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a))).toBe('image/png');
+    expect(imageMediaType(bytes(0xff, 0xd8, 0xff, 0xe0))).toBe('image/jpeg');
+  });
+
+  it('returns null for anything else', () => {
+    expect(imageMediaType(text('%PDF-1.4'))).toBeNull();
+    expect(imageMediaType(bytes())).toBeNull();
   });
 });

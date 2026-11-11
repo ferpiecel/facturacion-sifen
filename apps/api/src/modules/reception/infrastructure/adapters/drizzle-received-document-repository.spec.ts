@@ -9,7 +9,11 @@ import {
   type NewReceivedDocument,
   type ReceivedDocumentItem,
 } from '../../application/ports/received-document-repository.port.js';
-import { createReceivedDocument, type ReceivedDocument } from '../../domain/received-document.js';
+import {
+  createReceivedDocument,
+  rehydrateReceivedDocument,
+  type ReceivedDocument,
+} from '../../domain/received-document.js';
 import { transitionReceivedDocument } from '../../domain/received-document.js';
 import { createDrizzleReceivedDocumentRepository } from './drizzle-received-document-repository.js';
 
@@ -284,5 +288,72 @@ describe('DrizzleReceivedDocumentRepository', () => {
       ReceivedDocumentNotFoundError,
     );
     expect((await repo().load(tenantId, document.id))?.document.status).toBe('received');
+  });
+
+  describe('saveExtraction', () => {
+    const extractedGraph = async () => {
+      const { document } = await repo().create(tenantId, {
+        document: fresh(tenantId, 'pdf'),
+        artifact: artifact(),
+      });
+      const extracting = transitionReceivedDocument(document, 'extracting', { at: AT }).document;
+      await repo().save(tenantId, extracting, document.version);
+      const extracted = transitionReceivedDocument(extracting, 'extracted', { at: AT }).document;
+      const review = transitionReceivedDocument(extracted, 'needs_review', {
+        at: AT,
+        reasons: ['low_confidence'],
+        confidenceOverall: '0.500',
+      }).document;
+      return { extracting, review };
+    };
+
+    it('writes state, receiver flag, header, items and confidences in one go', async () => {
+      const { extracting, review } = await extractedGraph();
+      const notOwn = rehydrateReceivedDocument({ ...review, isOwnReceiver: false });
+      await repo().saveExtraction(tenantId, {
+        document: notOwn,
+        expectedVersion: extracting.version,
+        header: { issuerLegalName: 'Proveedor SA', extractionErrorCode: null, rawData: { a: 1 } },
+        items: [item(1), item(2)],
+        confidences: [confidence('totals', '0.700')],
+      });
+      const graph = await repo().load(tenantId, extracting.id);
+      expect(graph?.document).toEqual(notOwn);
+      expect(graph?.header).toMatchObject({ issuerLegalName: 'Proveedor SA', rawData: { a: 1 } });
+      expect(graph?.items).toEqual([item(1), item(2)]);
+      expect(graph?.confidences.map((c) => c.fieldName)).toEqual(['totals']);
+    });
+
+    it('is safe to repeat: items and confidences are upserted, not duplicated', async () => {
+      const { extracting, review } = await extractedGraph();
+      const write = {
+        document: review,
+        expectedVersion: extracting.version,
+        header: {},
+        items: [item(1)],
+        confidences: [confidence('totals', '0.700')],
+      };
+      await repo().saveExtraction(tenantId, write);
+      await repo().saveExtraction(tenantId, {
+        ...write,
+        items: [item(1, { description: 'Changed' })],
+        confidences: [confidence('totals', '0.800')],
+      });
+      const graph = await repo().load(tenantId, extracting.id);
+      expect(graph?.items).toEqual([item(1, { description: 'Changed' })]);
+      expect(graph?.confidences.map((c) => c.confidence)).toEqual(['0.800']);
+    });
+
+    it('rejects a stale version and reports a missing document', async () => {
+      const { extracting, review } = await extractedGraph();
+      const base = { document: review, header: {}, items: [], confidences: [] };
+      await expect(
+        repo().saveExtraction(tenantId, { ...base, expectedVersion: 99 }),
+      ).rejects.toBeInstanceOf(VersionConflictError);
+      await expect(
+        repo().saveExtraction(otherTenantId, { ...base, expectedVersion: extracting.version }),
+      ).rejects.toBeInstanceOf(ReceivedDocumentNotFoundError);
+      expect((await repo().load(tenantId, extracting.id))?.document.status).toBe('extracting');
+    });
   });
 });

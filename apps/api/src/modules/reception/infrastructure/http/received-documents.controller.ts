@@ -50,6 +50,7 @@ import {
   LIST_RECEIVED_DOCUMENTS,
   RECEPTION_UPLOAD_CONFIG,
 } from '../../reception.tokens.js';
+import { sniffUpload } from '../../domain/upload-sniff.js';
 import { parseCorrectionRequest } from './correct-received-document.request.js';
 import {
   presentReceivedDocumentDetail,
@@ -57,7 +58,6 @@ import {
 } from './received-document.presenter.js';
 import { receptionProblem } from './reception-http-errors.js';
 import type { ReceptionUploadConfig } from './reception-upload-config.js';
-import { sniffUpload } from './upload-sniff.js';
 
 interface HttpRequest {
   readonly headers: Record<string, string | string[] | undefined>;

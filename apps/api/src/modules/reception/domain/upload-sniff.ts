@@ -24,3 +24,9 @@ export function sniffUpload(bytes: Uint8Array): UploadKind {
   if (startsWith(bytes, PNG) || startsWith(bytes, JPEG)) return 'image';
   return bytes[contentStart(bytes)] === 0x3c ? 'xml' : 'unknown';
 }
+
+/** Media type of a PNG or JPEG upload by magic bytes, or null for anything else. */
+export function imageMediaType(bytes: Uint8Array): 'image/png' | 'image/jpeg' | null {
+  if (startsWith(bytes, PNG)) return 'image/png';
+  return startsWith(bytes, JPEG) ? 'image/jpeg' : null;
+}

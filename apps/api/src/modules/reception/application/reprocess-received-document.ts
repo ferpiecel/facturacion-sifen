@@ -119,9 +119,12 @@ export const RETRY_PENDING_WINDOW_MS = 5 * 60_000;
  *
  * Allowed from `received` (the queue failed after the upload, or its job is stuck), `extraction_failed`
  * and a stalled `extracting` (untouched for `staleExtractingAfterMs`: it is first moved to
- * `extraction_failed`, silently, because its job is gone). `needs_review` and `confirmed` are
- * refused ({@link ReprocessNotAllowedError}): the state machine has no way back to `extracting`,
- * and re-extracting would overwrite the machine output a person may have corrected.
+ * `extraction_failed`, silently, because its job is gone). A PDF or photo in `needs_review` or
+ * `confirmed` may be reprocessed too: the job is flagged `reprocess`, the worker claims the
+ * document back into `extracting` and re-extracts it KEEPING the human corrections (see
+ * `preserveCorrections`); the audit entry lists the corrected fields it will keep. A parsed SIFEN
+ * XML in those states is refused ({@link ReprocessNotAllowedError}): the same bytes cannot read
+ * differently.
  *
  * A vision reprocess must not start a second live job (two jobs spend twice), so it only goes
  * ahead when the original job cannot still be alive: a `received` document must be older than
@@ -169,9 +172,12 @@ export function createReprocessReceivedDocument(deps: ReprocessReceivedDocumentD
         RETRYABLE_FAILURE_CODES.has(graph.header.extractionErrorCode ?? '') &&
         age < RETRY_PENDING_WINDOW_MS;
       if (retryMayBePending) return { kind: 'in_progress', document };
+    } else if ((loaded.status === 'needs_review' || loaded.status === 'confirmed') && !isXml) {
+      // Reviewed: no job of the document is alive, and the worker keeps the human corrections.
     } else {
       throw new ReprocessNotAllowedError(loaded.status, loaded.source);
     }
+    const reviewed = loaded.status === 'needs_review' || loaded.status === 'confirmed';
 
     if (isXml) {
       const bytes = await readStored(id, artifact.storageKey, 'download');
@@ -184,6 +190,7 @@ export function createReprocessReceivedDocument(deps: ReprocessReceivedDocumentD
         tenantId,
         documentId: id,
         attempt: document.extractionAttempts + PAST_PREVIOUS_JOBS,
+        ...(reviewed ? { reprocess: true } : {}),
       }));
     } catch (error) {
       if (error instanceof ReceptionQueueUnavailableError) throw error;
@@ -191,12 +198,20 @@ export function createReprocessReceivedDocument(deps: ReprocessReceivedDocumentD
     }
     // A repeated request finds the job already queued: it is a no-op, not a second audit entry.
     if (enqueued) {
+      const preservedCorrections = graph.confidences
+        .filter((row) => row.correctedAt !== null)
+        .map((row) => row.fieldName);
       await repository.appendAudit(tenantId, {
         documentId: id,
         actor,
         action: 'received_document.reprocess_requested',
         before,
-        after: { status: document.status, version: document.version, queued: true },
+        after: {
+          status: document.status,
+          version: document.version,
+          queued: true,
+          ...(preservedCorrections.length === 0 ? {} : { preservedCorrections }),
+        },
       });
     }
     return { kind: 'queued', document };

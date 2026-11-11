@@ -5,8 +5,10 @@ import {
   auditLog,
   createPgliteDatabase,
   tenantFiscalProfiles,
+  webhookDeliveries,
   type DatabaseHandle,
 } from '@sifen/db';
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppModule } from '../src/app.module.js';
 import { createHttpAdapter } from '../src/bootstrap/http.js';
@@ -79,8 +81,20 @@ const llmJson = (over: Record<string, unknown> = {}) =>
     ...over,
   });
 
+const EVENTS = [
+  'reception.document.confirmed',
+  'reception.document.needs_review',
+  'reception.document.updated',
+];
+
 interface Body {
   id: string;
+  issuer?: { legal_name: string | null };
+  field_confidences?: {
+    field: string;
+    extracted_value: string | null;
+    corrected_by: string | null;
+  }[];
   status: string;
   version: number;
   code?: string;
@@ -105,7 +119,7 @@ describe('POST /v1/received-documents/{id}/reprocess (e2e)', () => {
   const kmsKey = randomBytes(32).toString('base64');
 
   const request = (
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PATCH',
     url: string,
     options: { key?: string; payload?: Buffer; type?: string } = {},
   ) =>
@@ -120,6 +134,20 @@ describe('POST /v1/received-documents/{id}/reprocess (e2e)', () => {
     });
   const detail = async (id: string) =>
     (await request('GET', `/v1/received-documents/${id}`)).json<Body>();
+  const patch = (id: string, payload: unknown) =>
+    request('PATCH', `/v1/received-documents/${id}`, {
+      payload: Buffer.from(JSON.stringify(payload)),
+      type: 'application/json',
+    });
+  const outboxTypes = async () =>
+    (
+      await handle.db
+        .select()
+        .from(webhookDeliveries)
+        .where(eq(webhookDeliveries.tenantId, tenantA))
+    )
+      .map((row) => row.eventType)
+      .sort();
   const reprocess = (id: string, key?: string) =>
     request('POST', `/v1/received-documents/${id}/reprocess`, key === undefined ? {} : { key });
   const upload = async () => {
@@ -132,7 +160,7 @@ describe('POST /v1/received-documents/{id}/reprocess (e2e)', () => {
   };
 
   /** Runs the job queued last with an LLM that is either disabled or answers `llmJson()`. */
-  async function runWorker(llm: 'disabled' | 'enabled'): Promise<void> {
+  async function runWorker(llm: 'disabled' | 'enabled', text = llmJson()): Promise<void> {
     const job = jobs.at(-1);
     if (job === undefined) throw new Error('no job queued');
     const fake: ExtractionLlm = {
@@ -140,7 +168,7 @@ describe('POST /v1/received-documents/{id}/reprocess (e2e)', () => {
         llm === 'disabled'
           ? Promise.reject(new ExtractionLlmDisabledError())
           : Promise.resolve({
-              rawText: llmJson(),
+              rawText: text,
               modelId: 'm',
               usage: {
                 inputTokens: 1,
@@ -181,7 +209,7 @@ describe('POST /v1/received-documents/{id}/reprocess (e2e)', () => {
     const tenantB = (await createTenant(handle.db, 'Other SA')).id;
     const key = async (tenantId: string, scopes: string[]) =>
       (await issueApiKey(handle.db, { tenantId, environment: 'live', scopes })).formattedKey;
-    keyA = await key(tenantA, ['reception:write', 'reception:read']);
+    keyA = await key(tenantA, ['reception:write', 'reception:read', 'webhooks:write']);
     keyB = await key(tenantB, ['reception:write', 'reception:read']);
     keyReadOnly = await key(tenantA, ['reception:read']);
     await handle.db.insert(tenantFiscalProfiles).values({
@@ -214,6 +242,12 @@ describe('POST /v1/received-documents/{id}/reprocess (e2e)', () => {
     app = moduleRef.createNestApplication<NestFastifyApplication>(createHttpAdapter());
     await app.init();
     await app.getHttpAdapter().getInstance().ready();
+    await request('POST', '/v1/webhooks/endpoints', {
+      payload: Buffer.from(
+        JSON.stringify({ url: 'https://erp.example.com/hooks', events: EVENTS }),
+      ),
+      type: 'application/json',
+    });
   });
 
   afterEach(async () => {
@@ -254,16 +288,84 @@ describe('POST /v1/received-documents/{id}/reprocess (e2e)', () => {
     expect(jobs).toHaveLength(2); // the upload job plus one reprocess job
   });
 
-  it('answers 409 invalid_state for a confirmed document', async () => {
+  it('reprocesses a confirmed document: updated is announced, never a second confirmed', async () => {
     const id = await upload();
     await runWorker('enabled');
+    const confirmed = await detail(id);
+    expect(confirmed.status).toBe('confirmed');
+
     const response = await reprocess(id);
-    expect(response.statusCode).toBe(409);
-    expect(response.json<Body & { status: string }>()).toMatchObject({
-      code: 'invalid_state',
-      status: 'confirmed',
+    expect(response.statusCode).toBe(202);
+    expect(jobs.at(-1)).toMatchObject({ documentId: id, reprocess: true });
+    expect((await detail(id)).status).toBe('confirmed'); // the worker has not claimed it yet
+
+    await runWorker('enabled', llmJson({ issuerLegalName: 'Nuevo SA' }));
+    const done = await detail(id);
+    expect(done).toMatchObject({ status: 'confirmed', version: confirmed.version + 2 });
+    expect(done.issuer?.legal_name).toBe('Nuevo SA');
+    expect(await outboxTypes()).toEqual([
+      'reception.document.confirmed',
+      'reception.document.updated',
+    ]);
+    const audits = await handle.db.select().from(auditLog);
+    expect(audits.map((a) => a.action)).toContain('received_document.reprocess_requested');
+  });
+
+  it('keeps what a person corrected when the document is re-extracted', async () => {
+    const id = await upload();
+    await runWorker('enabled');
+    const before = await detail(id);
+    const patched = await patch(id, {
+      version: before.version,
+      issuer: { legal_name: 'Proveedor SRL' },
     });
-    expect(jobs).toHaveLength(1);
+    expect(patched.statusCode).toBe(200);
+
+    expect((await reprocess(id)).statusCode).toBe(202);
+    await runWorker(
+      'enabled',
+      llmJson({ issuerLegalName: 'Leido otra vez SA', paymentCondition: 'credit' }),
+    );
+
+    const done = await detail(id);
+    expect(done.status).toBe('confirmed');
+    expect(done.issuer?.legal_name).toBe('Proveedor SRL');
+    const field = done.field_confidences?.find((c) => c.field === 'issuer_legal_name');
+    expect(field).toMatchObject({ extracted_value: 'Leido otra vez SA' });
+    expect(field?.corrected_by).not.toBeNull();
+    const audits = await handle.db.select().from(auditLog);
+    const request = audits.find((a) => a.action === 'received_document.reprocess_requested');
+    expect(JSON.stringify(request?.after)).toContain('issuer_legal_name');
+  });
+
+  it('reprocesses a needs_review document and confirms it when the new reading is clean', async () => {
+    const id = await upload();
+    await runWorker(
+      'enabled',
+      llmJson({ overallConfidence: 0.4, fieldConfidences: confidence(0.4) }),
+    );
+    expect((await detail(id)).status).toBe('needs_review');
+
+    expect((await reprocess(id)).statusCode).toBe(202);
+    await runWorker('enabled');
+
+    expect((await detail(id)).status).toBe('confirmed');
+    expect(await outboxTypes()).toEqual([
+      'reception.document.confirmed',
+      'reception.document.needs_review',
+    ]);
+  });
+
+  it('stays silent for a reprocessed document whose receiver is not the tenant', async () => {
+    const id = await upload();
+    const other = `80000009-${String(computeRucCheckDigit('80000009'))}`;
+    await runWorker('enabled', llmJson({ receiverRuc: other }));
+    expect((await detail(id)).status).toBe('confirmed');
+
+    expect((await reprocess(id)).statusCode).toBe(202);
+    await runWorker('enabled', llmJson({ receiverRuc: other }));
+
+    expect(await outboxTypes()).toEqual([]);
   });
 
   it('answers 409 artifact_not_available for a document without a stored artifact', async () => {

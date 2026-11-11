@@ -230,7 +230,7 @@ export class InMemoryReceptionRepository implements ReceivedDocumentRepository {
         ...row,
         document: write.document,
         header: { ...row.header, ...write.header },
-        items: write.items,
+        items: write.keepItems === true ? row.items : write.items,
         confidences: write.confidences,
         updatedAt: this.clock(),
       });

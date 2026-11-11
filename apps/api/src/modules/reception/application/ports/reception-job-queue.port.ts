@@ -7,6 +7,11 @@ export interface ExtractionJob {
    * twice never creates two jobs.
    */
   readonly attempt?: number;
+  /**
+   * A reprocess job: only such a job may take a `needs_review` or `confirmed` document back into
+   * extraction. A stale upload job (or a retry of one) must never re-extract a reviewed document.
+   */
+  readonly reprocess?: boolean;
 }
 
 /** The queue could not take the job (Redis down, timeout). Carries no document content. */

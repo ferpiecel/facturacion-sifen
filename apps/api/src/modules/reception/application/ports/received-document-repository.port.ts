@@ -222,6 +222,12 @@ export interface ExtractionWrite {
   readonly expectedVersion: number;
   readonly header: ReceivedDocumentHeaderInput;
   readonly items: readonly ReceivedDocumentItem[];
+  /**
+   * True when the stored items are a human override of a re-extraction: `items` is ignored, no
+   * active item is rewritten or soft-removed (and the removed ones stay removed).
+   */
+  readonly keepItems?: boolean;
+  /** Written as given, `corrected_*` included: the caller merges human corrections in (R5.8b). */
   readonly confidences: readonly FieldConfidence[];
   /** Enqueued with the write; nothing is enqueued when the version check fails. */
   readonly events?: ReceptionEventRequest;

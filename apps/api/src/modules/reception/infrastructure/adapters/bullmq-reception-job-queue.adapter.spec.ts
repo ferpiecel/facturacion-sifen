@@ -35,6 +35,22 @@ describe('BullmqReceptionJobQueue', () => {
     expect(opts.jobId).toBe(`reception-extraction:${DOC}:1`);
   });
 
+  it('marks the job data of a reprocess and only then', async () => {
+    const queue = fakeQueue();
+    const adapter = new BullmqReceptionJobQueue({ queue });
+    await adapter.enqueueExtraction({ tenantId: TENANT, documentId: DOC, reprocess: true });
+    await adapter.enqueueExtraction({ tenantId: TENANT, documentId: DOC });
+    expect((queue.add.mock.calls[0] as unknown[])[1]).toEqual({
+      tenantId: TENANT,
+      documentId: DOC,
+      reprocess: true,
+    });
+    expect((queue.add.mock.calls[1] as unknown[])[1]).toEqual({
+      tenantId: TENANT,
+      documentId: DOC,
+    });
+  });
+
   it('puts an explicit attempt in the job id', async () => {
     const queue = fakeQueue();
     await new BullmqReceptionJobQueue({ queue }).enqueueExtraction({

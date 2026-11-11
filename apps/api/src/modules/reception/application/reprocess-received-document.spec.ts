@@ -140,7 +140,7 @@ class Harness {
   async seed(
     status: Status,
     source: ReceivedDocumentSource = 'pdf',
-    options: { artifact?: boolean; bytes?: boolean; errorCode?: string } = {},
+    options: { artifact?: boolean; bytes?: boolean; errorCode?: string; corrected?: string[] } = {},
   ): Promise<void> {
     const artifact: NewReceivedArtifact = {
       storageKey: source === 'sifen_xml' ? 'tenants/t/received/sifen_xml/abc.xml' : KEY,
@@ -153,6 +153,18 @@ class Harness {
     await this.repository.create(TENANT, {
       document: documentIn(status, source),
       ...(options.artifact === false ? {} : { artifact }),
+      ...(options.corrected === undefined
+        ? {}
+        : {
+            confidences: options.corrected.map((fieldName) => ({
+              fieldName,
+              confidence: '0.900',
+              extractedValue: null,
+              correctedValue: 'x',
+              correctedBy: ACTOR,
+              correctedAt: NOW,
+            })),
+          }),
       ...(options.errorCode === undefined
         ? {}
         : { header: { extractionErrorCode: options.errorCode } }),
@@ -238,18 +250,54 @@ describe('reprocessReceivedDocument (vision sources)', () => {
   });
 
   it.each(['needs_review', 'confirmed'] as const)(
-    'refuses a %s document: re-extraction would overwrite reviewed data',
+    'queues a %s document as a reprocess job and keeps its state until the worker claims it',
     async (status) => {
       const h = new Harness();
       await h.seed(status);
-      await expect(h.reprocess()).rejects.toMatchObject({
-        constructor: ReprocessNotAllowedError,
-        status,
+      const before = h.repository.document('doc-1');
+      const result = await h.reprocess();
+
+      expect(result).toMatchObject({ kind: 'queued' });
+      expect(h.queue.jobs).toEqual([
+        {
+          tenantId: TENANT,
+          documentId: 'doc-1',
+          attempt: before.extractionAttempts + 2,
+          reprocess: true,
+        },
+      ]);
+      expect(h.repository.document('doc-1')).toEqual(before);
+      expect(h.repository.audits[0]).toMatchObject({
+        before: { status, version: before.version },
+        after: { status, queued: true },
       });
-      expect(h.queue.jobs).toEqual([]);
-      expect(h.repository.audits).toEqual([]);
     },
   );
+
+  it('answers a double click on a reviewed document with one job and one audit entry', async () => {
+    const h = new Harness();
+    await h.seed('confirmed');
+    await h.reprocess();
+    await h.reprocess();
+    expect(h.queue.jobs).toHaveLength(1);
+    expect(h.repository.audits).toHaveLength(1);
+  });
+
+  it('records in the audit entry which human corrections the re-extraction will keep', async () => {
+    const h = new Harness();
+    await h.seed('confirmed', 'pdf', { corrected: ['totals', 'items'] });
+    await h.reprocess();
+    expect(h.repository.audits[0]?.after).toMatchObject({
+      queued: true,
+      preservedCorrections: ['totals', 'items'],
+    });
+  });
+
+  it('does not wait out the retry window for a reviewed document', async () => {
+    const h = new Harness();
+    await h.seed('needs_review');
+    expect(await h.reprocess()).toMatchObject({ kind: 'queued' });
+  });
 
   it('leaves a recent received document alone: its upload job may still be queued', async () => {
     const h = new Harness();

@@ -12,6 +12,8 @@ export const RECEPTION_EXTRACTION_JOB_NAME = 'extract';
 export interface ReceptionExtractionJobData {
   readonly tenantId: string;
   readonly documentId: string;
+  /** Set by a reprocess request; absent on the job of an upload. */
+  readonly reprocess?: boolean;
 }
 
 /** The slice of a BullMQ `Queue` the adapter needs, so the library stays out of the signature. */
@@ -73,7 +75,11 @@ export class BullmqReceptionJobQueue implements ReceptionJobQueue {
     const existing = await this.queue.getJob(opts.jobId);
     await this.queue.add(
       RECEPTION_EXTRACTION_JOB_NAME,
-      { tenantId: job.tenantId, documentId: job.documentId },
+      {
+        tenantId: job.tenantId,
+        documentId: job.documentId,
+        ...(job.reprocess === true ? { reprocess: true } : {}),
+      },
       opts,
     );
     return existing === undefined || existing === null;

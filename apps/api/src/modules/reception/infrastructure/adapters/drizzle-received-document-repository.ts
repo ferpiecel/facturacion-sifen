@@ -321,7 +321,17 @@ async function writeExtractionChildren(
   documentId: string,
   write: ExtractionWrite,
 ): Promise<void> {
-  const items = await positionsAvoidingRemoved(tx, documentId, write.items);
+  if (write.keepItems !== true) await writeExtractedItems(tx, tenantId, documentId, write.items);
+  await writeExtractedConfidences(tx, tenantId, documentId, write);
+}
+
+async function writeExtractedItems(
+  tx: TenantTx,
+  tenantId: string,
+  documentId: string,
+  extracted: readonly ReceivedDocumentItem[],
+): Promise<void> {
+  const items = await positionsAvoidingRemoved(tx, documentId, extracted);
   for (const { position, ...fields } of items) {
     await tx
       .insert(receivedDocumentItems)
@@ -350,6 +360,14 @@ async function writeExtractionChildren(
             ),
       ),
     );
+}
+
+async function writeExtractedConfidences(
+  tx: TenantTx,
+  tenantId: string,
+  documentId: string,
+  write: ExtractionWrite,
+): Promise<void> {
   for (const { fieldName, ...fields } of write.confidences) {
     await tx
       .insert(receivedDocumentFieldConfidences)

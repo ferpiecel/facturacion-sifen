@@ -409,6 +409,108 @@ describe('DrizzleReceivedDocumentRepository', () => {
       expect(graph?.removedPositions).toEqual([2, 3]);
     });
 
+    it('leaves the stored items untouched when they are a human override', async () => {
+      const { extracting, review } = await extractedGraph();
+      const write = {
+        document: review,
+        expectedVersion: extracting.version,
+        header: {},
+        items: [item(1), item(2), item(3)],
+        confidences: [confidence('totals', '0.700')],
+      };
+      await repo().saveExtraction(tenantId, write);
+      // Position 3 is soft-removed (as a person's correction would leave it).
+      await repo().saveExtraction(tenantId, { ...write, items: [item(1), item(2)] });
+
+      await repo().saveExtraction(tenantId, {
+        ...write,
+        items: [item(1, { description: 'machine' })],
+        keepItems: true,
+      });
+
+      const graph = await repo().load(tenantId, extracting.id);
+      expect(graph?.items).toEqual([item(1), item(2)]);
+      expect(graph?.removedPositions).toEqual([3]);
+    });
+
+    it('keeps corrected_* on a confidence row while refreshing what the machine reads', async () => {
+      const { extracting, review } = await extractedGraph();
+      const humanAt = new Date('2026-11-09T10:00:00.000Z');
+      const write = {
+        document: review,
+        expectedVersion: extracting.version,
+        header: {},
+        items: [],
+        confidences: [
+          {
+            ...confidence('totals', '0.700'),
+            correctedValue: '110',
+            correctedBy: 'key-1',
+            correctedAt: humanAt,
+          },
+        ],
+      };
+      await repo().saveExtraction(tenantId, write);
+      await repo().saveExtraction(tenantId, {
+        ...write,
+        confidences: [
+          {
+            ...write.confidences[0],
+            confidence: '0.400',
+            extractedValue: 'new reading',
+          },
+        ],
+      });
+
+      const row = (await repo().load(tenantId, extracting.id))?.confidences[0];
+      expect(row).toMatchObject({
+        confidence: '0.400',
+        extractedValue: 'new reading',
+        correctedValue: '110',
+        correctedBy: 'key-1',
+        correctedAt: humanAt,
+      });
+    });
+
+    it('survives a confirmed -> extracting -> confirmed round trip keeping the first confirmedAt', async () => {
+      const { extracting } = await extractedGraph();
+      const first = transitionReceivedDocument(
+        transitionReceivedDocument(extracting, 'extracted', { at: AT }).document,
+        'confirmed',
+        { at: AT },
+      );
+      await repo().saveExtraction(tenantId, {
+        document: first.document,
+        expectedVersion: extracting.version,
+        header: {},
+        items: [],
+        confidences: [],
+      });
+      const later = new Date('2026-11-12T09:00:00.000Z');
+      const again = transitionReceivedDocument(first.document, 'extracting', { at: later });
+      await repo().save(tenantId, again.document, first.document.version);
+      expect((await repo().load(tenantId, extracting.id))?.document).toMatchObject({
+        status: 'extracting',
+        confirmedAt: AT,
+        version: first.document.version + 1,
+      });
+
+      const review = transitionReceivedDocument(
+        transitionReceivedDocument(again.document, 'extracted', { at: later }).document,
+        'needs_review',
+        { at: later, reasons: ['low_confidence'] },
+      );
+      await repo().saveExtraction(tenantId, {
+        document: review.document,
+        expectedVersion: again.document.version,
+        header: {},
+        items: [],
+        confidences: [],
+      });
+      const stored = (await repo().load(tenantId, extracting.id))?.document;
+      expect(stored).toMatchObject({ status: 'needs_review', confirmedAt: AT });
+    });
+
     it('rejects a stale version and reports a missing document', async () => {
       const { extracting, review } = await extractedGraph();
       const base = { document: review, header: {}, items: [], confidences: [] };

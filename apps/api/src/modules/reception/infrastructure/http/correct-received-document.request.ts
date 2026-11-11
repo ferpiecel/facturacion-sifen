@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { RECEIVED_FIELD_NAMES } from '../../domain/confidence-policy.js';
 import type {
   CorrectReceivedDocumentInput,
   HeaderPatch,
@@ -37,11 +38,10 @@ export const correctReceivedDocumentRequestSchema = z.strictObject({
   version: z.number().int().min(1),
   confirm: z.boolean().optional(),
   /**
-   * Curated fields (`issuer_ruc`, `issuer_legal_name`, `issued_on`, `document_number`,
-   * `receiver_ruc`, `payment_condition`, `totals`, `items`) the caller checked against the source
-   * and kept as extracted. Names are checked by the use case (422 `invalid_correction`).
+   * Curated fields (`RECEIVED_FIELD_NAMES`) the caller checked against the source and kept as
+   * extracted. Names are checked by the use case (422 `invalid_correction`).
    */
-  reviewed_fields: z.array(z.string().min(1).max(64)).max(8).optional(),
+  reviewed_fields: z.array(z.string().min(1).max(64)).max(RECEIVED_FIELD_NAMES.length).optional(),
   document_type: optional(z.number().int()),
   timbrado: optional(text),
   series: optional(text),

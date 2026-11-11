@@ -506,6 +506,7 @@ const snapshot = (changes: HeaderChange, source: object): HeaderChange =>
  *   WHOLE request (corrections are not persisted), see {@link ValidationFailedError};
  * - a correction that does not confirm moves a `needs_review` document's version and refreshes
  *   its reasons (`awaiting_confirmation` when the data is valid but unconfirmed);
+ * - `reviewedFields` only counts on a `needs_review` document; on a confirmed one it is ignored;
  * - every applied request writes one audit entry in the same transaction;
  * - documents that came from extraction (R5.7) keep `low_confidence` / `items_without_subtotals`
  *   after a non-confirming correction only while they still hold (see {@link carriedReasons}), and
@@ -534,9 +535,12 @@ export function createCorrectReceivedDocument(deps: CorrectReceivedDocumentDeps)
     const corrections = confidenceCorrections(merged, changes, items);
     // A review only counts for a field that has a row (no row, nothing to clear) and is not yet
     // corrected or covered by this very request.
+    // A confirmed document is past review: `reviewedFields` is validated but never recorded there,
+    // so a reviewed-only request cannot bump the version, stamp a corrector or emit `updated`.
     const reviewed: ConfidenceCorrectionWrite[] = parseReviewedFields(input.reviewedFields)
       .filter(
         (field) =>
+          document.status === 'needs_review' &&
           !corrections.some((c) => c.fieldName === field) &&
           graph.confidences.some((row) => row.fieldName === field && row.correctedAt === null),
       )

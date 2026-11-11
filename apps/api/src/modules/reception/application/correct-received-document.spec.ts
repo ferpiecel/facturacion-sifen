@@ -612,4 +612,19 @@ describe('correctReceivedDocument: extracted documents', () => {
     ).rejects.toBeInstanceOf(ValidationFailedError);
     expect(confirmed.repository.writes).toHaveLength(1);
   });
+
+  it('ignores reviewed_fields on a confirmed document: no write, no version bump, no event', async () => {
+    const confirmed = setup(
+      'confirmed',
+      { header: VALID, confidences: [confidence('issuer_legal_name', '0.600')] },
+      { source: 'photo', confidenceOverall: '0.900' },
+    );
+    const result = await confirmed.run({
+      expectedVersion: 2,
+      reviewedFields: ['issuer_legal_name'],
+    });
+    expect(result.events).toEqual([]);
+    expect(result.document.version).toBe(2);
+    expect(confirmed.repository.writes).toHaveLength(0);
+  });
 });

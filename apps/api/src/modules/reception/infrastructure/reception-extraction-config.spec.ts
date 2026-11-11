@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { loadReceptionExtractionConfig } from './reception-extraction-config.js';
+import {
+  loadAutoConfirmThreshold,
+  loadReceptionExtractionConfig,
+} from './reception-extraction-config.js';
 
 describe('loadReceptionExtractionConfig', () => {
   it('uses documented defaults and reports a missing key as disabled, not as an error', () => {
@@ -119,5 +122,28 @@ describe('loadReceptionExtractionConfig', () => {
     } catch (error) {
       expect((error as Error).message).not.toContain('SECRET');
     }
+  });
+});
+
+describe('loadAutoConfirmThreshold', () => {
+  it('defaults to 0.85 and reads the variable', () => {
+    expect(loadAutoConfirmThreshold({})).toBe(0.85);
+    expect(loadAutoConfirmThreshold({ RECEPTION_AUTO_CONFIRM_THRESHOLD: ' 0.9 ' })).toBe(0.9);
+  });
+
+  it('ignores invalid worker-only variables', () => {
+    expect(
+      loadAutoConfirmThreshold({
+        RECEPTION_EXTRACTION_TIMEOUT_MS: 'abc',
+        RECEPTION_EXTRACTION_CONCURRENCY: '99',
+        RECEPTION_EXTRACTION_MODEL: 'not a model',
+      }),
+    ).toBe(0.85);
+  });
+
+  it.each(['1.1', '-0.1', 'abc'])('rejects threshold %s and names the variable', (value) => {
+    expect(() => loadAutoConfirmThreshold({ RECEPTION_AUTO_CONFIRM_THRESHOLD: value })).toThrow(
+      'RECEPTION_AUTO_CONFIRM_THRESHOLD',
+    );
   });
 });

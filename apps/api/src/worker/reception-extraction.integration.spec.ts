@@ -48,7 +48,6 @@ describe.skipIf(!REDIS_URL)('reception extraction queue (real Redis)', () => {
   ) => {
     const worker = createReceptionExtractionWorker({
       connection: ctx.connection,
-      llmTimeoutMs: 120_000,
       concurrency: 1,
       prefix: ctx.prefix,
       process: createReceptionExtractionProcessor({
@@ -104,7 +103,6 @@ describe.skipIf(!REDIS_URL)('reception extraction queue (real Redis)', () => {
     });
     const worker = createReceptionExtractionWorker({
       connection: ctx.connection,
-      llmTimeoutMs: 120_000,
       concurrency: 1,
       prefix: ctx.prefix,
       process: createReceptionExtractionProcessor({

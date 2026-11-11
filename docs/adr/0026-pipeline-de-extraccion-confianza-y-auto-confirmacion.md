@@ -43,3 +43,20 @@ Decisión: `libxml2-wasm` 0.7.2 (licencia MIT, 1,3 MB instalado, ya fijado en `p
 - **Formas:** `rDE` con o sin espacio de nombres y envuelto en otro elemento; la búsqueda usa `local-name()`.
 - **Medido:** los 5 XML dorados (4 a 8 KB) se parsean en milisegundos dentro de la suite (21 pruebas en unos 40 ms en total). No se hizo un benchmark formal; no se afirma más.
 - **Riesgo conocido:** `xmlRegisterInputProvider` de libxml2-wasm es global al proceso (lo registra `@sifen/sifen-xsd`); el parser no resuelve recursos externos, así que no depende de él.
+
+## Adenda R5.4 (spike del renderizador de PDF)
+
+Decisión: `@hyzyla/pdfium` 3.0.0 (licencia MIT, PDFium compilado a WebAssembly), declarado como dependencia exacta de `apps/api` y usado solo en `modules/reception/infrastructure/adapters/pdfium-pdf-renderer.adapter.ts` detrás del puerto `PdfRenderer`. Se agregó a la regla `sdk-libs-confined-to-infrastructure` de `.dependency-cruiser.cjs`. Es el mismo motor que usa A (`pypdfium2`), de modo que el comportamiento de texto y rasterización se mantiene.
+
+| Candidato | Licencia | Tamaño instalado | Node 22 | Binarios nativos | Texto | Rasterización | Resultado |
+|---|---|---|---|---|---|---|---|
+| `@hyzyla/pdfium` 3.0.0 | MIT (PDFium: Apache-2.0/BSD) | 14 MB (wasm de 5,3 MB, cero dependencias) | Sí (`engines >=22`) | No (wasm puro) | Sí (`page.getText()`) | Sí, a bitmap RGBA; el PNG se codifica con `node:zlib` | **Elegido** |
+| `pdfjs-dist` (ya es devDependency, 6.3.289) | Apache-2.0 | 35 MB (37 MB en 6.5.438) | Sí (`>=22.13`) | Sí para rasterizar: exige `@napi-rs/canvas` (binario nativo por plataforma, 34 MB en linux-x64-gnu) | Sí | Solo con ese canvas nativo | Descartado: el binario nativo por plataforma complica CI y Docker |
+| `mupdf` 1.28.6 (wasm) | **AGPL-3.0-or-later** | 14 MB | Sí | No | Sí | Sí | Descartado: la AGPL no es compatible con un SaaS propietario sin licencia comercial; no se verificó ninguna excepción |
+| `pdf-lib` 1.17.1 | MIT | 19 MB | Sí | No | No | No (escribe PDF, no lo renderiza) | Descartado: no es un renderizador |
+
+- **Arranque en frío medido:** `import` más `PDFiumLibrary.init()` en unos 28 ms y 73 MB de RSS del proceso en esta máquina (una sola medición, no un benchmark formal). El import de `pdfjs-dist/legacy` tardó unos 505 ms. La biblioteca se inicializa de forma perezosa y se reutiliza.
+- **Entrada hostil:** PDFium en wasm no incluye motor de JavaScript ni acceso a red, así que scripts (`/OpenAction`) y referencias externas son inertes (la prueba lo cubre con un documento con `/OpenAction` de JavaScript). Además el adaptador acota los bytes de entrada (`maxInputBytes`, alineado con `RECEPTION_MAX_UPLOAD_BYTES`, se inyecta), el lado mayor de cada página renderizada (4096 px por defecto: se reduce la escala, no se recorta), el total de bytes PNG por llamada (40 MiB) y valida `dpi` (36 a 600) y `maxPages`. Los formularios no se renderizan.
+- **Errores:** bytes ilegibles, cifrados, por encima del tope o que exceden el presupuesto de salida son `CorruptPdfError`; un PDF válido sin páginas es `EmptyPdfError`; superar `maxPages` con `overflow: 'reject'` es `TooManyPagesError`, y con `truncate` se renderizan las primeras `maxPages`.
+- **PNG propio:** se codifica RGB de 8 bits con `node:zlib` (sin `sharp` ni `pngjs`); evita una segunda dependencia y los binarios nativos de `sharp`. El mismo criterio se evalúa para el decodificador de imágenes del QR en R5.5.
+- **Consecuencias:** +14 MB en `node_modules` y en la imagen del worker; la rasterización a 200 dpi de una página A4 ocupa unos 15 MB de RGBA en memoria, liberados al cerrar la página. PDFium es de un solo hilo: las llamadas se ejecutan en el event loop, por lo que el procesador del worker debe limitar la concurrencia (R5.6/R5.9). Sin verificar: PDFs reales de facturas (no se usaron), desempeño con documentos grandes y versiones de PDFium con CVE futuros (revisar al actualizar la dependencia).

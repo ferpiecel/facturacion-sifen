@@ -22,7 +22,7 @@ La recepción ingiere documentos de terceros desde XML SIFEN, enlace CDC/QR y PD
 
 ## Consecuencias
 
-El umbral y la tolerancia son configurables y viven en un solo lugar. El QR y el texto del PDF reducen llamadas al LLM, y con ellas costo y exposición de datos. Aumenta la superficie de configuración (modelos, umbral, topes) y se depende de un proveedor externo; sin `ANTHROPIC_API_KEY` la extracción responde 503 `extraction_unavailable` y el XML sigue funcionando. El QR no es obligatorio: A lo trataba como opcional y aquí también (su ausencia no falla el documento). Si los spikes descartan todas las opciones sin binarios de sistema, se enmienda este ADR.
+El umbral y la tolerancia son configurables y viven en un solo lugar. El QR y el texto del PDF reducen llamadas al LLM, y con ellas costo y exposición de datos. Aumenta la superficie de configuración (modelos, umbral, topes) y se depende de un proveedor externo; sin `ANTHROPIC_API_KEY` la subida de PDF o foto se acepta y el documento termina en `extraction_failed` con código `llm_disabled` (sin reintento automático), y el XML sigue funcionando. El QR no es obligatorio: A lo trataba como opcional y aquí también (su ausencia no falla el documento). Si los spikes descartan todas las opciones sin binarios de sistema, se enmienda este ADR.
 
 ## Alternativas descartadas
 

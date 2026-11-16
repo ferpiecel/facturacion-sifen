@@ -7,6 +7,7 @@ import type { ReceivedDocumentStatus } from '../domain/received-document-status.
 import { validateReceivedDocument } from '../domain/received-document-validation.js';
 import { matchReceiver } from '../domain/receiver-match.js';
 import type { ReceptionEventType } from '../domain/reception-events.js';
+import { ExtractionQuotaExceededError, type ExtractionQuota } from './extraction-quota.js';
 import {
   CONFIDENCE_FIELDS,
   FULL_CONFIDENCE,
@@ -40,6 +41,8 @@ export interface ReprocessReceivedDocumentDeps {
   readonly parser: SifenXmlParser;
   readonly fiscalIdentity: TenantFiscalIdentity;
   readonly queue: ReceptionJobQueue;
+  /** Daily extraction cap per tenant: a reprocess that queues a job takes one slot (R5.9). */
+  readonly quota: ExtractionQuota;
   readonly now: () => Date;
   /**
    * An `extracting` document untouched for this long is taken as stalled (its job died or was
@@ -139,6 +142,10 @@ export const RETRY_PENDING_WINDOW_MS = 5 * 60_000;
  * - SIFEN XML: only an unreadable one (`extraction_failed`) is re-read, synchronously, from the
  *   stored bytes; a parsed XML would read the same, so it is refused.
  *
+ * Each request that queues a NEW job takes one slot of the tenant's daily extraction cap and is
+ * refused with {@link ExtractionQuotaExceededError} once it is spent; the slot is given back when
+ * no job results (queue down, or the job already existed). The XML re-read never uses the LLM.
+ *
  * One audit entry is appended per accepted request that did work (a NEW job, or the XML re-read).
  */
 export function createReprocessReceivedDocument(deps: ReprocessReceivedDocumentDeps) {
@@ -184,6 +191,11 @@ export function createReprocessReceivedDocument(deps: ReprocessReceivedDocumentD
       return reprocessXml(tenantId, actor, document, before, bytes);
     }
     await readStored(id, artifact.storageKey, 'exists');
+    // Only a request that is about to queue a job spends; the slot returns if no job results.
+    const reservation = await deps.quota.reserve(tenantId);
+    if (!reservation.ok) {
+      throw new ExtractionQuotaExceededError(reservation.cap, reservation.retryAfterSeconds);
+    }
     let enqueued: boolean;
     try {
       ({ enqueued } = await deps.queue.enqueueExtraction({
@@ -193,9 +205,11 @@ export function createReprocessReceivedDocument(deps: ReprocessReceivedDocumentD
         ...(reviewed ? { reprocess: true } : {}),
       }));
     } catch (error) {
+      await reservation.release();
       if (error instanceof ReceptionQueueUnavailableError) throw error;
       throw new ReceptionQueueUnavailableError('enqueue failed');
     }
+    if (!enqueued) await reservation.release();
     // A repeated request finds the job already queued: it is a no-op, not a second audit entry.
     if (enqueued) {
       const preservedCorrections = graph.confidences

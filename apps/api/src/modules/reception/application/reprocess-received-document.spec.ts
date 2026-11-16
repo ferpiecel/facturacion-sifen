@@ -7,7 +7,9 @@ import {
   type ReceivedDocument,
 } from '../domain/received-document.js';
 import type { ReceivedDocumentSource } from '../domain/source.js';
+import { ExtractionQuota, ExtractionQuotaExceededError } from './extraction-quota.js';
 import {
+  InMemoryExtractionUsageStore,
   InMemoryReceptionRepository,
   InMemoryStorage,
   FakeJobQueue,
@@ -112,6 +114,7 @@ class Harness {
   readonly repository = new InMemoryReceptionRepository();
   readonly storage = new InMemoryStorage();
   readonly queue = new FakeJobQueue();
+  readonly usage = new InMemoryExtractionUsageStore();
   parse: () => ParsedSifenDocument = parsedDoc;
   identity: { rucBase: string; dv: number } | null = {
     rucBase: RECEIVER_BASE,
@@ -122,20 +125,30 @@ class Harness {
 
   readonly parser: SifenXmlParser = { parse: () => this.parse() };
 
-  readonly run = createReprocessReceivedDocument({
-    repository: this.repository,
-    storage: this.storage,
-    parser: this.parser,
-    fiscalIdentity: {
-      getRucIdentity: () =>
-        this.identityFails === null
-          ? Promise.resolve(this.identity)
-          : Promise.reject(this.identityFails),
-    },
-    queue: this.queue,
-    now: () => this.now,
-    staleExtractingAfterMs: STALE_MS,
-  });
+  readonly run: ReturnType<typeof createReprocessReceivedDocument>;
+
+  constructor(dailyCap = 100) {
+    this.run = createReprocessReceivedDocument({
+      repository: this.repository,
+      storage: this.storage,
+      parser: this.parser,
+      fiscalIdentity: {
+        getRucIdentity: () =>
+          this.identityFails === null
+            ? Promise.resolve(this.identity)
+            : Promise.reject(this.identityFails),
+      },
+      queue: this.queue,
+      quota: new ExtractionQuota({
+        store: this.usage,
+        dailyCap: dailyCap,
+        now: () => this.now,
+        log: () => undefined,
+      }),
+      now: () => this.now,
+      staleExtractingAfterMs: STALE_MS,
+    });
+  }
 
   async seed(
     status: Status,
@@ -489,5 +502,62 @@ describe('reprocessReceivedDocument (SIFEN XML)', () => {
 
     expect(h.repository.document('doc-1').status).toBe('extraction_failed');
     expect(h.repository.rows.get('doc-1')?.header.extractionErrorCode).toBe('internal_error');
+  });
+
+  describe('daily extraction quota (R5.9)', () => {
+    const used = (h: Harness) => [...h.usage.used.values()];
+    const stale = (h: Harness) => (h.now = new Date(NOW.getTime() + STALE_MS));
+
+    it('takes one slot per queued reprocess', async () => {
+      const h = new Harness();
+      await h.seed('needs_review', 'photo');
+      await h.reprocess();
+      expect(h.queue.jobs).toHaveLength(1);
+      expect(used(h)).toEqual([1]);
+    });
+
+    it('refuses with ExtractionQuotaExceededError at the cap: nothing queued, nothing audited', async () => {
+      const h = new Harness(1);
+      await h.seed('needs_review', 'pdf');
+      h.usage.used.set(`${TENANT}|2026-11-11`, 1);
+      const error = await h.reprocess().catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(ExtractionQuotaExceededError);
+      expect(error).toMatchObject({ cap: 1, retryAfterSeconds: 43_200 });
+      expect(h.queue.jobs).toEqual([]);
+      expect(h.repository.audits).toEqual([]);
+    });
+
+    it('a no-op (job already queued) does not consume a slot', async () => {
+      const h = new Harness();
+      await h.seed('received', 'pdf');
+      stale(h);
+      await h.reprocess();
+      await h.reprocess();
+      expect(h.queue.jobs).toHaveLength(1);
+      expect(used(h)).toEqual([1]);
+    });
+
+    it('in-progress answers consume nothing, even at the cap', async () => {
+      const h = new Harness(1);
+      await h.seed('extracting', 'pdf');
+      h.usage.used.set(`${TENANT}|2026-11-11`, 1);
+      await expect(h.reprocess()).resolves.toMatchObject({ kind: 'in_progress' });
+    });
+
+    it('gives the slot back when the queue is down', async () => {
+      const h = new Harness();
+      await h.seed('needs_review', 'pdf');
+      h.queue.failWith = new Error('x');
+      await expect(h.reprocess()).rejects.toBeInstanceOf(ReceptionQueueUnavailableError);
+      expect(used(h)).toEqual([0]);
+    });
+
+    it('does not count the synchronous XML re-read, nor does the cap block it', async () => {
+      const h = new Harness(1);
+      await h.seed('extraction_failed', 'sifen_xml');
+      h.usage.used.set(`${TENANT}|2026-11-11`, 1);
+      await expect(h.reprocess()).resolves.toMatchObject({ kind: 'reprocessed' });
+      expect(used(h)).toEqual([1]);
+    });
   });
 });

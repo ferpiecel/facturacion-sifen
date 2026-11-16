@@ -16,7 +16,8 @@ export type ReceptionUploadErrorCode =
   | 'invalid_state'
   | 'artifact_not_available'
   | 'validation_failed'
-  | 'invalid_correction';
+  | 'invalid_correction'
+  | 'extraction_quota_exceeded';
 
 /** The API's `{ statusCode, message }` envelope plus a stable `code` (and optional extras). */
 export function receptionProblem(

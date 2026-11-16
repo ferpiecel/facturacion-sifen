@@ -218,7 +218,7 @@ describe('PATCH /v1/received-documents/{id} on extracted documents (e2e)', () =>
       .useValue({
         enqueueExtraction: (job: ExtractionJob) => {
           jobs.push(job);
-          return Promise.resolve();
+          return Promise.resolve({ enqueued: true });
         },
         close: () => Promise.resolve(),
       })

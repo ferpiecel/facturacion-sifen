@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
-import { Inject, Module, type OnApplicationShutdown } from '@nestjs/common';
+import { Inject, Logger, Module, type OnApplicationShutdown } from '@nestjs/common';
 import type { Database } from '@sifen/db';
 import { DATABASE } from '../database/database.module.js';
 import { ConfidencePolicy } from './domain/confidence-policy.js';
 import {
   loadAutoConfirmThreshold,
+  loadExtractionDailyCap,
   loadExtractionStaleAfterMs,
 } from './infrastructure/reception-extraction-config.js';
+import { ExtractionQuota } from './application/extraction-quota.js';
 import { createCorrectReceivedDocument } from './application/correct-received-document.js';
 import { createGetArtifact, createGetArtifactUrl } from './application/get-artifact.js';
 import { createGetReceivedDocument } from './application/get-received-document.js';
@@ -15,6 +17,7 @@ import { IngestUpload } from './application/ingest-upload.js';
 import { createListReceivedDocuments } from './application/list-received-documents.js';
 import { createReprocessReceivedDocument } from './application/reprocess-received-document.js';
 import type { StorageProvider } from './application/ports/storage-provider.port.js';
+import { createDrizzleExtractionUsageStore } from './infrastructure/adapters/drizzle-extraction-usage-store.js';
 import { createDrizzleReceivedDocumentQuery } from './infrastructure/adapters/drizzle-received-document-query.js';
 import { createDrizzleReceivedDocumentRepository } from './infrastructure/adapters/drizzle-received-document-repository.js';
 import { createDrizzleTenantFiscalIdentity } from './infrastructure/adapters/drizzle-tenant-fiscal-identity.js';
@@ -32,6 +35,7 @@ import {
 import { loadStorageConfig } from './infrastructure/storage-config.js';
 import {
   CORRECT_RECEIVED_DOCUMENT,
+  EXTRACTION_QUOTA,
   GET_RECEIVED_DOCUMENT,
   GET_RECEPTION_ARTIFACT,
   GET_RECEPTION_ARTIFACT_URL,
@@ -61,6 +65,23 @@ import {
           return null;
         }
       },
+    },
+    {
+      // Daily cap of LLM extractions per tenant (R5.9). Logs ids and counts only.
+      provide: EXTRACTION_QUOTA,
+      useFactory: (db: Database | null) => {
+        if (!db) return null;
+        const logger = new Logger('ReceptionExtractionQuota');
+        return new ExtractionQuota({
+          store: createDrizzleExtractionUsageStore(db),
+          dailyCap: loadExtractionDailyCap(process.env),
+          now: () => new Date(),
+          log: (message, fields) => {
+            logger.log(`${message} ${JSON.stringify(fields)}`);
+          },
+        });
+      },
+      inject: [DATABASE],
     },
     {
       provide: INGEST_SIFEN_XML,
@@ -96,9 +117,11 @@ import {
         storage: StorageProvider | null,
         ingestXml: IngestSifenXml | null,
         queue: ClosableReceptionJobQueue,
+        quota: ExtractionQuota | null,
       ) =>
-        db && storage && ingestXml
+        db && storage && ingestXml && quota
           ? new IngestUpload({
+              quota,
               repository: createDrizzleReceivedDocumentRepository(db),
               storage,
               queue,
@@ -106,7 +129,13 @@ import {
               newId: randomUUID,
             })
           : null,
-      inject: [DATABASE, RECEPTION_STORAGE, INGEST_SIFEN_XML, RECEPTION_JOB_QUEUE],
+      inject: [
+        DATABASE,
+        RECEPTION_STORAGE,
+        INGEST_SIFEN_XML,
+        RECEPTION_JOB_QUEUE,
+        EXTRACTION_QUOTA,
+      ],
     },
     {
       provide: CORRECT_RECEIVED_DOCUMENT,
@@ -130,9 +159,11 @@ import {
         storage: StorageProvider | null,
         queue: ClosableReceptionJobQueue,
         upload: ReceptionUploadConfig,
+        quota: ExtractionQuota | null,
       ) =>
-        db && storage
+        db && storage && quota
           ? createReprocessReceivedDocument({
+              quota,
               repository: createDrizzleReceivedDocumentRepository(db),
               storage,
               parser: new Libxml2SifenXmlParser({ maxBytes: upload.maxBytes }),
@@ -142,7 +173,13 @@ import {
               staleExtractingAfterMs: loadExtractionStaleAfterMs(process.env),
             })
           : null,
-      inject: [DATABASE, RECEPTION_STORAGE, RECEPTION_JOB_QUEUE, RECEPTION_UPLOAD_CONFIG],
+      inject: [
+        DATABASE,
+        RECEPTION_STORAGE,
+        RECEPTION_JOB_QUEUE,
+        RECEPTION_UPLOAD_CONFIG,
+        EXTRACTION_QUOTA,
+      ],
     },
     {
       provide: LIST_RECEIVED_DOCUMENTS,

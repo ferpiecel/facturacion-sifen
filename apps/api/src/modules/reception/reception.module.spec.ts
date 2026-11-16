@@ -97,4 +97,11 @@ describe('ReceptionModule', () => {
       'RECEPTION_EXTRACTION_STALE_AFTER_MS',
     );
   });
+
+  it('fails the API boot on an invalid daily extraction cap', async () => {
+    vi.stubEnv('RECEPTION_EXTRACTION_DAILY_CAP', '0');
+    await expect(compile({}, new InMemoryStorageProvider())).rejects.toThrow(
+      'RECEPTION_EXTRACTION_DAILY_CAP',
+    );
+  });
 });

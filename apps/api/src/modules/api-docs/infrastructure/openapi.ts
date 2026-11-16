@@ -561,16 +561,18 @@ export function buildOpenApiDocument() {
         post: {
           operationId: 'uploadReceivedDocument',
           tags: ['Reception'],
-          summary: 'Upload a received SIFEN XML',
+          summary: 'Upload a received SIFEN XML, PDF or photo',
           description:
-            'Stores the XML and extracts it; the processing contract is asynchronous (202), although a SIFEN XML is read before the answer. ' +
-            'The status in the body is `confirmed` when the document passes validation, `needs_review` otherwise. A document whose receiver is not the tenant (`is_own_receiver` false) is stored the same way but never produces webhook events. ' +
-            'Webhooks `reception.document.needs_review` and `reception.document.confirmed` announce the result (see docs/integracion/recepcion.md). ' +
-            'Send the XML as a raw `application/xml` or `text/xml` body, as a `multipart/form-data` upload with one `file` part, or as JSON `{ "xml": "<...>" }` (JSON is limited to 1 MiB). ' +
+            'The processing contract is asynchronous (202). A SIFEN XML is read before the answer, so its body already carries `confirmed` or `needs_review`. ' +
+            'A PDF, PNG or JPEG is stored and queued for extraction: the body carries `received` and the result arrives later (`GET /v1/received-documents/{id}` or webhooks): `confirmed`, `needs_review` (reasons include `low_confidence` and `items_without_subtotals`) or `extraction_failed` (`extraction_error_code`: `corrupt_pdf`, `empty_pdf`, `too_many_pages`, `llm_disabled`, `llm_refusal`, `llm_invalid_output`, `llm_provider_error`, `llm_rate_limited`, `duplicate_document`, `artifact_missing`, `internal_error`). ' +
+            'A document whose receiver is not the tenant (`is_own_receiver` false) is stored the same way but never produces webhook events. ' +
+            'Webhooks `reception.document.needs_review`, `reception.document.confirmed` and `reception.document.extraction_failed` announce the result (see docs/integracion/recepcion.md). ' +
+            'Send the bytes as a raw body (`application/xml`, `text/xml`, `application/pdf`, `image/png`, `image/jpeg`), as a `multipart/form-data` upload with one `file` part, or, for XML only, as JSON `{ "xml": "<...>" }` (JSON is limited to 1 MiB). ' +
             'Content is recognized by its first bytes, not by the declared type. ' +
             'The same bytes, or the same CDC, uploaded again answer 200 with the existing document. ' +
-            'PDF, photo and CDC-only requests answer 422 `unsupported_source` for now. ' +
-            'The maximum upload size is `RECEPTION_MAX_UPLOAD_BYTES` (default 2 MiB). ' +
+            'A CDC-only request answers 422 `unsupported_source` for now. ' +
+            'If the extraction queue is down the answer is 503 `queue_unavailable` with the `document_id`: the upload is kept and sending the same bytes again queues it. ' +
+            'The maximum upload size is `RECEPTION_MAX_UPLOAD_BYTES` (default 2 MiB, up to 15 MiB). ' +
             'Errors carry a stable `code`.',
           ...secured(['reception:write']),
           requestBody: {
@@ -578,6 +580,9 @@ export function buildOpenApiDocument() {
             content: {
               'application/xml': { schema: { type: 'string' } },
               'text/xml': { schema: { type: 'string' } },
+              'application/pdf': { schema: { type: 'string', format: 'binary' } },
+              'image/png': { schema: { type: 'string', format: 'binary' } },
+              'image/jpeg': { schema: { type: 'string', format: 'binary' } },
               'multipart/form-data': {
                 schema: {
                   type: 'object',
@@ -610,15 +615,15 @@ export function buildOpenApiDocument() {
               'ReceptionProblem',
             ),
             '415': problem(
-              'The bytes do not look like XML (`unsupported_media_type`)',
+              'The bytes are not a SIFEN XML, a PDF or a PNG/JPEG image (`unsupported_media_type`)',
               'ReceptionProblem',
             ),
             '422': problem(
-              '`unsupported_source` (PDF, photo, CDC only), `extraction_failed` (stored but unreadable; carries `document_id`), `empty_upload` or `invalid_request`',
+              '`unsupported_source` (a bare CDC), `extraction_failed` (stored but unreadable; carries `document_id`), `empty_upload` or `invalid_request`',
               'ReceptionProblem',
             ),
             '503': problem(
-              'Document storage is not available (`storage_unavailable`)',
+              'Document storage is not available (`storage_unavailable`) or the extraction queue is down (`queue_unavailable`, carries `document_id`)',
               'ReceptionProblem',
             ),
           },
@@ -938,6 +943,7 @@ export function buildOpenApiDocument() {
                 'empty_upload',
                 'invalid_request',
                 'storage_unavailable',
+                'queue_unavailable',
                 'service_unavailable',
                 'not_found',
                 'version_conflict',
@@ -984,7 +990,7 @@ export function buildOpenApiDocument() {
               examples: ['needs_review'],
             },
             version: { type: 'integer', minimum: 1 },
-            source: { type: 'string', enum: ['sifen_xml'] },
+            source: { type: 'string', enum: ['sifen_xml', 'pdf', 'photo'] },
           },
         },
         ReceivedDocumentSummary: {

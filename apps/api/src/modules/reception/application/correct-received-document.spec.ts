@@ -126,6 +126,10 @@ class FakeRepository implements ReceivedDocumentRepository {
     );
   }
 
+  saveExtraction() {
+    return Promise.reject(new Error('unused'));
+  }
+
   saveCorrection(_tenantId: string, write: CorrectionWrite) {
     const current = this.graph;
     if (current === null) return Promise.reject(new ReceivedDocumentNotFoundError(DOC_ID));

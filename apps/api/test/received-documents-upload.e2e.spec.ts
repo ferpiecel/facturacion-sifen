@@ -161,19 +161,11 @@ describe('POST /v1/received-documents (e2e)', () => {
     expect((await post(keyA, 'text/plain', 'x')).statusCode).toBe(415);
   });
 
-  it('answers 422 unsupported_source for PDF, images and CDC-only requests', async () => {
-    const pdf = await post(keyA, 'application/pdf', Buffer.from('%PDF-1.7\n'));
-    const png = await post(
-      keyA,
-      'application/octet-stream',
-      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    );
+  it('answers 422 unsupported_source for a CDC-only request (PDF and photos are R5.6)', async () => {
     const cdc = await post(keyA, 'application/json', JSON.stringify({ cdc: '1'.repeat(44) }));
 
-    for (const response of [pdf, png, cdc]) {
-      expect(response.statusCode).toBe(422);
-      expect(response.json<Body>().code).toBe('unsupported_source');
-    }
+    expect(cdc.statusCode).toBe(422);
+    expect(cdc.json<Body>().code).toBe('unsupported_source');
   });
 
   it('answers 422 extraction_failed with the stored document id for malformed XML', async () => {

@@ -167,3 +167,11 @@ export function toReceivedDocumentFields(result: ExtractionResult): ReceivedDocu
     itemAmounts: result.items.flatMap((item) => (item.subtotal === null ? [] : [item.subtotal])),
   };
 }
+
+/**
+ * True when the extraction lists items but every subtotal is null: `toReceivedDocumentFields` then
+ * hands over no item amounts and the items-sum check is skipped, so the result is not auto-confirmable.
+ */
+export function hasUnverifiableItems(result: ExtractionResult): boolean {
+  return result.items.length > 0 && result.items.every((item) => item.subtotal === null);
+}

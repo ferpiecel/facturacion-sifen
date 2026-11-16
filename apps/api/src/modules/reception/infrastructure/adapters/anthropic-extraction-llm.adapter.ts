@@ -211,7 +211,7 @@ export interface CreateAnthropicExtractionLlmDeps {
 
 /** Builds the adapter, or a stub that raises `ExtractionLlmDisabledError` when no key is set. */
 export function createAnthropicExtractionLlm(
-  config: ReceptionExtractionConfig,
+  config: Pick<ReceptionExtractionConfig, 'apiKey' | 'model' | 'fallbackModel' | 'timeoutMs'>,
   deps: CreateAnthropicExtractionLlmDeps = {},
 ): ExtractionLlm {
   if (config.apiKey === null) return disabled;

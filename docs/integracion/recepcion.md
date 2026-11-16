@@ -14,12 +14,12 @@ El flujo es **API-first**: el ERP es quien corrige. La plataforma deja el docume
 
 ## Estado actual
 
-Hoy **solo se procesa el XML de SIFEN** (`rDE`). El resto de las fuentes llega en fases posteriores y responde `422` con `code: "unsupported_source"`:
+Se procesan el **XML de SIFEN** (`rDE`, de forma síncrona) y los **PDF y fotos** (PNG o JPEG, de forma asíncrona con extracción por modelo de visión). La consulta por CDC llega en una fase posterior y responde `422` con `code: "unsupported_source"`:
 
 | Fuente | Estado |
 |---|---|
 | XML de SIFEN (cuerpo crudo, `multipart` o JSON `{ "xml": ... }`) | Disponible |
-| PDF y fotos (JPEG, PNG) | Planificado. Hoy `422 unsupported_source` |
+| PDF y fotos (JPEG, PNG): cuerpo crudo o `multipart` | Disponible. Procesamiento asíncrono, ver [PDF y fotos](#pdf-y-fotos) |
 | Solo el CDC (`{ "cdc": "..." }`, consulta a eKuatia) | Planificado. Hoy `422 unsupported_source` |
 | Reprocesar un documento en `extraction_failed` | Planificado. No hay ruta en la API todavía |
 
@@ -54,29 +54,43 @@ received → extracting → extracted → confirmed
 | `confirmed` | Validado y confirmado. Se puede seguir editando; cada edición genera un evento `updated` |
 | `extraction_failed` | El archivo no se pudo leer como documento SIFEN soportado |
 
-Con el XML de SIFEN la lectura ocurre **dentro de la petición**: la respuesta `202` ya trae el estado final, que es `confirmed` si el documento pasa la validación o `needs_review` si no. Los estados `received`, `extracting` y `extracted` solo se verán cuando se procesen PDF y fotos de forma asíncrona. Un documento en `extraction_failed` se rechaza con `422` al subirlo (ver [errores](#errores)), pero queda guardado y se puede consultar con `GET`.
+Con el XML de SIFEN la lectura ocurre **dentro de la petición**: la respuesta `202` ya trae el estado final, que es `confirmed` si el documento pasa la validación o `needs_review` si no. Un XML ilegible se rechaza con `422` al subirlo (ver [errores](#errores)), pero queda guardado y se puede consultar con `GET`.
+
+Con PDF y fotos la respuesta `202` trae `received` y el resultado llega después (ver [PDF y fotos](#pdf-y-fotos)). `extracted` es transitorio y no se llega a observar: el documento pasa de `extracting` directamente a `confirmed` o `needs_review`.
 
 Cada documento tiene un número de `version` que empieza en 1. Sube al confirmarse y con cada edición posterior. Es lo que espera `PATCH`.
 
 ## Subir un documento
 
-`POST /v1/received-documents` (scope `reception:write`). Tres formas de enviar el XML:
+`POST /v1/received-documents` (scope `reception:write`). Tres formas de enviar el archivo (el JSON solo sirve para XML):
 
 | Forma | Encabezado | Cuerpo |
 |---|---|---|
-| Cuerpo crudo | `Content-Type: application/xml` o `text/xml` | El XML |
+| Cuerpo crudo | `Content-Type: application/xml`, `text/xml`, `application/pdf`, `image/png` o `image/jpeg` | Los bytes del archivo |
 | Multipart | `Content-Type: multipart/form-data` | Una parte `file` (se guarda el nombre original) |
 | JSON | `Content-Type: application/json` | `{ "xml": "<rDE ...>" }` (tope de 1 MiB) |
 
-El contenido se reconoce por sus **primeros bytes**, no por el tipo declarado: un `Content-Type: application/xml` con un PDF dentro responde `422 unsupported_source`; con bytes que no son XML, `415`.
+El contenido se reconoce por sus **primeros bytes**, no por el tipo declarado: un `Content-Type: application/pdf` con un XML dentro se procesa como XML; con bytes que no son XML, PDF, PNG ni JPEG, `415`.
 
 | Respuesta | Cuándo | Cuerpo |
 |---|---|---|
-| `202` | Documento nuevo. Incluye `Location: /v1/received-documents/{id}` | `{ "id", "status", "version", "source" }` |
+| `202` | Documento nuevo. Incluye `Location: /v1/received-documents/{id}`. Con PDF o foto, `status` es `received` | `{ "id", "status", "version", "source" }` |
 | `200` | Ya se había recibido (mismos bytes o mismo CDC). Incluye `Location` | Lo mismo, del documento existente |
-| `4xx` / `503` | Ver [errores](#errores) | `{ "statusCode", "code", "message" }` |
+| `4xx` / `503` | Ver [errores](#errores) (`503 queue_unavailable` trae además `document_id`) | `{ "statusCode", "code", "message" }` |
 
 El cuerpo de la respuesta es solo un acuse. Los datos fiscales se leen con `GET`.
+
+### PDF y fotos
+
+El archivo se guarda, se registra el documento en `received` y se encola su extracción. Un worker lo lee con un modelo de visión (hasta 5 páginas a 200 dpi), intenta leer el QR de la factura para obtener el CDC, valida los datos como cualquier otro documento y deja el documento en:
+
+- `confirmed`: la confianza global supera el umbral configurado, el emisor está completo y las validaciones pasan.
+- `needs_review`: algo requiere revisión. Además de los motivos de validación de siempre, hay dos propios de esta fuente: `low_confidence` (la confianza global no alcanza el umbral) e `items_without_subtotals` (hay ítems pero ninguno trae subtotal, así que la suma no se puede verificar).
+- `extraction_failed`: no se pudo extraer. `extraction_error_code` lo explica: `corrupt_pdf`, `empty_pdf`, `too_many_pages`, `llm_disabled` (la extracción no está habilitada en el servicio), `llm_refusal`, `llm_invalid_output`, `llm_provider_error`, `llm_rate_limited`, `duplicate_document` (el CDC extraído ya pertenece a otro documento), `artifact_missing`, `internal_error`. Los fallos transitorios (proveedor, límite de tasa, error interno) se reintentan con espera creciente hasta 3 intentos en total (la primera ejecución más 2 reintentos); el evento `extraction_failed` se envía solo cuando el fallo es definitivo.
+
+Para saber cuándo terminó, escuche los webhooks `reception.document.confirmed`, `reception.document.needs_review` y `reception.document.extraction_failed`, o consulte el documento con `GET` hasta que su estado deje de ser `received` o `extracting`.
+
+Si la cola de extracción no está disponible, la respuesta es `503 queue_unavailable` con el `document_id`: el archivo **queda guardado** y el documento en `received`. Volver a subir los mismos bytes lo encola de nuevo (responde `200`). Los servicios sin Redis configurado responden siempre `503 queue_unavailable` para PDF y fotos; el XML no se ve afectado.
 
 ### Duplicados
 
@@ -86,7 +100,7 @@ El cuerpo de la respuesta es solo un acuse. Los datos fiscales se leen con `GET`
 
 ### Tamaño máximo
 
-Por defecto 2 MiB por archivo. Lo cambia el operador con `RECEPTION_MAX_UPLOAD_BYTES` (entre 1 byte y 15 MiB), ver [`configuracion.md`](../configuracion.md). Lo que lo supera responde `413 payload_too_large`.
+Por defecto 2 MiB por archivo (un XML de SIFEN pesa unos KB, pero una foto de celular puede superar ese valor: el operador debe subirlo para fotos). Lo cambia el operador con `RECEPTION_MAX_UPLOAD_BYTES` (entre 1 byte y 15 MiB), ver [`configuracion.md`](../configuracion.md). Lo que lo supera responde `413 payload_too_large`.
 
 ### Receptor que no es el tenant
 
@@ -304,23 +318,24 @@ Todos los errores usan `{ "statusCode", "code", "message" }` más campos extra s
 | `409` | `version_conflict` | La `version` enviada no es la actual. Trae `current_version` | Releer y reintentar |
 | `409` | `invalid_state` | `PATCH` sobre un documento que no está en `needs_review` ni `confirmed`. Trae `status` | No reintentar igual |
 | `413` | `payload_too_large` | El archivo supera `RECEPTION_MAX_UPLOAD_BYTES` | Enviar un archivo menor |
-| `415` | `unsupported_media_type` | Los bytes no son XML (ni PDF ni imagen) | Enviar un XML de SIFEN |
-| `422` | `unsupported_source` | PDF, foto o solo CDC: aún no se procesan | Esperar la fase correspondiente |
+| `415` | `unsupported_media_type` | Los bytes no son XML de SIFEN, PDF, PNG ni JPEG | Enviar un archivo soportado |
+| `422` | `unsupported_source` | Solo CDC (`{ "cdc": ... }`): aún no se procesa. Cualquier otro contenido que no sea XML de SIFEN, PDF, PNG ni JPEG responde `415` | Enviar el archivo |
 | `422` | `empty_upload` | Archivo vacío | Enviar el archivo |
 | `422` | `invalid_request` | Falta la parte `file` en `multipart`, o el JSON no trae un `xml` de tipo cadena | Corregir la petición |
 | `422` | `extraction_failed` | El XML no se pudo leer como documento SIFEN soportado. Trae `document_id` (el archivo queda guardado) | Revisar el archivo; no hay reproceso por API todavía |
 | `422` | `validation_failed` | `PATCH` revalidado falló. Trae `reasons`; no se guardó nada | Corregir los motivos |
 | `422` | `invalid_correction` | `position` desconocida, o editar o re-agregar un ítem eliminado | Corregir los ítems |
 | `503` | `storage_unavailable` | El almacenamiento de objetos no está configurado o no responde | Avisar al operador |
+| `503` | `queue_unavailable` | PDF o foto: la cola de extracción no está disponible. Trae `document_id`; el archivo quedó guardado | Reintentar la misma subida más tarde |
 | `503` | `service_unavailable` | La recepción no está disponible (sin base de datos) | Reintentar; avisar al operador |
 
 ## Privacidad
 
-Hoy solo se lee el XML de SIFEN, que se procesa dentro de la plataforma. Cuando se habilite la extracción de **PDF y fotos** (planificado), las imágenes de las facturas se enviarán a un modelo de un tercero (Anthropic) para extraer los datos ([ADR-0026](../adr/0026-pipeline-de-extraccion-confianza-y-auto-confirmacion.md), punto 7). Antes de habilitarlo hace falta la decisión del dueño del producto sobre datos personales y fiscales y el acuerdo de tratamiento de datos. Esta guía se actualizará entonces.
+El XML de SIFEN se procesa dentro de la plataforma. Al extraer **PDF y fotos**, las imágenes de las facturas se envían a un modelo de un tercero (Anthropic) para extraer los datos ([ADR-0026](../adr/0026-pipeline-de-extraccion-confianza-y-auto-confirmacion.md), punto 7). Antes de habilitarlo en producción (`ANTHROPIC_API_KEY`) hace falta la decisión del dueño del producto sobre datos personales y fiscales y el acuerdo de tratamiento de datos; sin la clave, los PDF y fotos terminan en `extraction_failed` con `llm_disabled`.
 
 ## Alcance actual y límites conocidos
 
-- Solo XML de SIFEN. PDF, fotos y consulta por CDC están planificados (`422 unsupported_source`).
+- XML de SIFEN, PDF y fotos (PNG, JPEG). La consulta por CDC está planificada (`422 unsupported_source`).
 - No hay ruta para reprocesar un documento en `extraction_failed`.
 - El portal es de solo lectura: no sube, corrige ni confirma. Hoy tampoco genera eventos `portal` ni `system`.
 - El `POST` no usa `Idempotency-Key`; la deduplicación es por contenido y por CDC.

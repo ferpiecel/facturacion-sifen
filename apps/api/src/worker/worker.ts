@@ -16,6 +16,7 @@ import {
   createDeadlineWatchWorker,
   createRedisConnection,
   createTenantScheduleStore,
+  createReceptionExtractionWorker,
   createTransmissionQueue,
   createTransmissionWorker,
   createWebhookDeliveryQueue,
@@ -43,6 +44,21 @@ import {
   createWebhookDeliveryDeps,
   createWebhookDeliveryProcessor,
 } from './webhook-delivery.processor.js';
+import { createReceptionExtractionProcessor } from './reception-extraction.processor.js';
+import { ExtractReceivedDocument } from '../modules/reception/application/extract-received-document.js';
+import { ConfidencePolicy } from '../modules/reception/domain/confidence-policy.js';
+import { createAnthropicExtractionLlm } from '../modules/reception/infrastructure/adapters/anthropic-extraction-llm.adapter.js';
+import { createDrizzleReceivedDocumentRepository } from '../modules/reception/infrastructure/adapters/drizzle-received-document-repository.js';
+import { createDrizzleTenantFiscalIdentity } from '../modules/reception/infrastructure/adapters/drizzle-tenant-fiscal-identity.js';
+import { JsqrQrDecoder } from '../modules/reception/infrastructure/adapters/jsqr-qr-decoder.adapter.js';
+import { PdfiumPdfRenderer } from '../modules/reception/infrastructure/adapters/pdfium-pdf-renderer.adapter.js';
+import { createS3StorageProvider } from '../modules/reception/infrastructure/adapters/s3-storage-provider.adapter.js';
+import { loadReceptionUploadConfig } from '../modules/reception/infrastructure/http/reception-upload-config.js';
+import { loadReceptionExtractionConfig } from '../modules/reception/infrastructure/reception-extraction-config.js';
+import {
+  isStorageUnconfigured,
+  loadStorageConfig,
+} from '../modules/reception/infrastructure/storage-config.js';
 import { createWorkerSifen } from './worker-gateway.js';
 import { createDrizzleTenantEnvironment } from '../modules/transmission/infrastructure/drizzle-tenant-environment.js';
 import { readFileSync } from 'node:fs';
@@ -194,6 +210,11 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
     gaugeTimer.unref();
   }
 
+  // Reception extraction (R5.6): needs object storage for the uploaded bytes. Settings are read once
+  // here and invalid values fail the start. Without ANTHROPIC_API_KEY the worker still runs and
+  // fails each document with `llm_disabled` (reprocessable later) instead of leaving it `received`.
+  const receptionWorker = startReceptionExtraction(env, appHandle.db, connection);
+
   const running = await startTransmissionWorker({
     cycleIntervalMs: config.cycleIntervalMs,
     reconcileEveryMs: RECONCILE_EVERY_MS,
@@ -261,6 +282,7 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
           clearInterval(gaugeTimer);
           return running.stop();
         },
+        () => receptionWorker?.close(),
         // After the cycles stopped: zeroize every cached certificate and cancel the sweep timer.
         () => {
           certificateCache.clear();
@@ -305,6 +327,47 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
   process.on('SIGINT', () => {
     shutdown('SIGINT');
   });
+}
+
+function startReceptionExtraction(
+  env: NodeJS.ProcessEnv,
+  db: Parameters<typeof createDrizzleReceivedDocumentRepository>[0],
+  connection: ReturnType<typeof createRedisConnection>,
+): { close(): Promise<void> } | undefined {
+  if (isStorageUnconfigured(env)) {
+    logger.info('reception extraction is off (object storage is not configured)');
+    return undefined;
+  }
+  const storage = loadStorageConfig(env, env.NODE_ENV);
+  if (storage.status === 'disabled') {
+    logger.info('reception extraction is off (object storage is not configured)');
+    return undefined;
+  }
+  const config = loadReceptionExtractionConfig(env);
+  const { maxBytes } = loadReceptionUploadConfig(env);
+  const extract = new ExtractReceivedDocument({
+    repository: createDrizzleReceivedDocumentRepository(db),
+    storage: createS3StorageProvider(storage.config),
+    pdfRenderer: new PdfiumPdfRenderer({ maxInputBytes: maxBytes }),
+    qrDecoder: new JsqrQrDecoder({ maxInputBytes: maxBytes }),
+    llm: createAnthropicExtractionLlm(config),
+    fiscalIdentity: createDrizzleTenantFiscalIdentity(db),
+    policy: ConfidencePolicy.create(config.autoConfirmThreshold),
+    now: () => new Date(),
+  });
+  const worker = createReceptionExtractionWorker({
+    connection,
+    llmTimeoutMs: config.timeoutMs,
+    concurrency: config.concurrency,
+    process: createReceptionExtractionProcessor({ extract, logger }),
+    logger,
+  });
+  logger.info(
+    `reception extraction worker started (concurrency ${String(config.concurrency)}, ${
+      config.apiKey === null ? 'LLM disabled: documents will fail with llm_disabled' : 'LLM enabled'
+    })`,
+  );
+  return worker;
 }
 
 const isMainModule =

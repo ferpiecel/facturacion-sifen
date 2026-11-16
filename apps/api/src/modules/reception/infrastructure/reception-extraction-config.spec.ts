@@ -9,6 +9,7 @@ describe('loadReceptionExtractionConfig', () => {
       fallbackModel: 'claude-haiku-4-5',
       autoConfirmThreshold: 0.85,
       timeoutMs: 120_000,
+      concurrency: 2,
     });
   });
 
@@ -30,6 +31,7 @@ describe('loadReceptionExtractionConfig', () => {
       fallbackModel: 'model-b',
       autoConfirmThreshold: 0.9,
       timeoutMs: 120_000,
+      concurrency: 2,
     });
   });
 
@@ -51,6 +53,18 @@ describe('loadReceptionExtractionConfig', () => {
       ).toThrow('RECEPTION_EXTRACTION_TIMEOUT_MS');
     },
   );
+
+  it('reads the worker concurrency', () => {
+    expect(
+      loadReceptionExtractionConfig({ RECEPTION_EXTRACTION_CONCURRENCY: ' 4 ' }).concurrency,
+    ).toBe(4);
+  });
+
+  it.each(['0', '9', '1.5', 'abc', '-1'])('rejects concurrency %s and names the variable', (v) => {
+    expect(() => loadReceptionExtractionConfig({ RECEPTION_EXTRACTION_CONCURRENCY: v })).toThrow(
+      'RECEPTION_EXTRACTION_CONCURRENCY',
+    );
+  });
 
   it('falls back to the defaults for blank model variables', () => {
     const config = loadReceptionExtractionConfig({

@@ -35,7 +35,7 @@ import {
 } from '../../application/ports/received-document-repository.port.js';
 import type { createGetArtifact, createGetArtifactUrl } from '../../application/get-artifact.js';
 import type { createGetReceivedDocument } from '../../application/get-received-document.js';
-import type { IngestSifenXml } from '../../application/ingest-sifen-xml.js';
+import type { IngestUpload } from '../../application/ingest-upload.js';
 import {
   InvalidReceivedDocumentQueryError,
   type createListReceivedDocuments,
@@ -46,10 +46,11 @@ import {
   GET_RECEIVED_DOCUMENT,
   GET_RECEPTION_ARTIFACT,
   GET_RECEPTION_ARTIFACT_URL,
-  INGEST_SIFEN_XML,
+  INGEST_UPLOAD,
   LIST_RECEIVED_DOCUMENTS,
   RECEPTION_UPLOAD_CONFIG,
 } from '../../reception.tokens.js';
+import { sniffUpload } from '../../domain/upload-sniff.js';
 import { parseCorrectionRequest } from './correct-received-document.request.js';
 import {
   presentReceivedDocumentDetail,
@@ -57,7 +58,6 @@ import {
 } from './received-document.presenter.js';
 import { receptionProblem } from './reception-http-errors.js';
 import type { ReceptionUploadConfig } from './reception-upload-config.js';
-import { sniffUpload } from './upload-sniff.js';
 
 interface HttpRequest {
   readonly headers: Record<string, string | string[] | undefined>;
@@ -93,7 +93,7 @@ const tooLarge = () =>
 @Controller('v1/received-documents')
 export class ReceivedDocumentsController {
   constructor(
-    @Inject(INGEST_SIFEN_XML) private readonly ingest: IngestSifenXml | null,
+    @Inject(INGEST_UPLOAD) private readonly ingest: IngestUpload | null,
     @Inject(RECEPTION_UPLOAD_CONFIG) private readonly config: ReceptionUploadConfig,
     @Inject(LIST_RECEIVED_DOCUMENTS)
     private readonly listDocuments: ReturnType<typeof createListReceivedDocuments> | null,
@@ -109,9 +109,13 @@ export class ReceivedDocumentsController {
   ) {}
 
   /**
-   * Accepts an upload (raw XML, multipart `file` or JSON `{ xml }`): 202 with `Location` for a new
-   * document, 200 when the same bytes or the same CDC were already received. Only SIFEN XML is
-   * processed today; PDF, photos and CDC-only requests answer 422 `unsupported_source`.
+   * Accepts an upload (raw bytes, multipart `file` or JSON `{ xml }`). The bytes decide the kind:
+   * SIFEN XML is processed synchronously (202 new / 200 duplicate, 422 `extraction_failed` when it
+   * is unreadable); PDF, PNG and JPEG are stored and queued for asynchronous extraction (202 with
+   * `Location`, status `received`; 200 when the same bytes were uploaded before; 503
+   * `queue_unavailable` when the job could not be queued, the upload is kept and re-uploading the
+   * same bytes queues it again). A bare CDC and any other bytes answer 422 `unsupported_source`
+   * or 415 `unsupported_media_type`.
    */
   @Post()
   @RequireScopes('reception:write')
@@ -136,34 +140,45 @@ export class ReceivedDocumentsController {
       );
     }
     if (upload.bytes.byteLength > this.config.maxBytes) throw tooLarge();
-    switch (sniffUpload(upload.bytes)) {
-      case 'xml':
-        break;
-      case 'pdf':
-      case 'image':
-        throw unsupportedSource();
-      default:
-        throw notXml();
-    }
+    if (sniffUpload(upload.bytes) === 'unknown') throw notSupportedMedia();
 
     const result = await this.ingest.execute({
       tenantId: this.cls.get(TENANT_ID_CLS_KEY),
-      xml: upload.bytes,
+      bytes: upload.bytes,
       originalName: upload.originalName,
     });
     // Reception events were enqueued by the repository, in the document's own transaction (R4.5).
-    const { document } = result;
-    if (document.status === 'extraction_failed') {
-      throw receptionProblem(
-        HttpStatus.UNPROCESSABLE_ENTITY,
-        'extraction_failed',
-        'The XML could not be read as a supported SIFEN document',
-        { document_id: document.id },
-      );
+    switch (result.kind) {
+      case 'unsupported_source':
+        throw unsupportedSource();
+      case 'queue_unavailable':
+        throw receptionProblem(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          'queue_unavailable',
+          'The extraction queue is not available; the upload was kept, retry the same upload later',
+          { document_id: result.document.id },
+        );
+      case 'accepted':
+        return accepted(reply, HttpStatus.ACCEPTED, result.document);
+      case 'duplicate':
+        return accepted(reply, HttpStatus.OK, result.document);
+      case 'xml': {
+        const { document } = result.result;
+        if (document.status === 'extraction_failed') {
+          throw receptionProblem(
+            HttpStatus.UNPROCESSABLE_ENTITY,
+            'extraction_failed',
+            'The XML could not be read as a supported SIFEN document',
+            { document_id: document.id },
+          );
+        }
+        return accepted(
+          reply,
+          result.result.created ? HttpStatus.ACCEPTED : HttpStatus.OK,
+          document,
+        );
+      }
     }
-    reply.status(result.created ? HttpStatus.ACCEPTED : HttpStatus.OK);
-    reply.header('location', `/v1/received-documents/${document.id}`);
-    return present(document);
   }
 
   /** Newest first, keyset paged; every filter is optional and malformed ones answer 400. */
@@ -285,7 +300,7 @@ export class ReceivedDocumentsController {
     const contentType = String(request.headers['content-type'] ?? '').toLowerCase();
     if (contentType.startsWith('multipart/')) return this.readMultipart(request);
     if (contentType.startsWith('application/json')) return readJson(body);
-    if (!Buffer.isBuffer(body)) throw notXml();
+    if (!Buffer.isBuffer(body)) throw notSupportedMedia();
     return { bytes: body, originalName: null };
   }
 
@@ -377,11 +392,11 @@ function downloadName(originalName: string | null, id: string, contentType: stri
   return `received-${id}${contentType.includes('xml') ? '.xml' : ''}`;
 }
 
-function notXml() {
+function notSupportedMedia() {
   return receptionProblem(
     HttpStatus.UNSUPPORTED_MEDIA_TYPE,
     'unsupported_media_type',
-    'The upload is not an XML document',
+    'The upload is not a SIFEN XML, a PDF or a PNG/JPEG image',
   );
 }
 
@@ -389,8 +404,14 @@ function unsupportedSource() {
   return receptionProblem(
     HttpStatus.UNPROCESSABLE_ENTITY,
     'unsupported_source',
-    'Only SIFEN XML documents are supported for now',
+    'Only SIFEN XML, PDF and PNG/JPEG uploads are supported for now (a bare CDC is not)',
   );
+}
+
+function accepted(reply: HttpReply, status: HttpStatus, document: ReceivedDocument) {
+  reply.status(status);
+  reply.header('location', `/v1/received-documents/${document.id}`);
+  return present(document);
 }
 
 /** Minimal acknowledgement; the document shape (fiscal data) belongs to the GET endpoints. */

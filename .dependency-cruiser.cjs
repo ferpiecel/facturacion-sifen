@@ -7,7 +7,7 @@ const FW =
 
 // Third-party SDKs and PDF/QR/image/wasm libraries (excludes libxml2-wasm, used by packages/sifen-xsd).
 const SDK_LIBS =
-  '(^|node_modules/)((@aws-sdk|@smithy)/|(@anthropic-ai/sdk|pdfjs-dist|jsqr|zxing-wasm|sharp|pngjs|jpeg-js|mupdf)(/|$))';
+  '(^|node_modules/)((@aws-sdk|@smithy)/|(@anthropic-ai/sdk|pdfjs-dist|jsqr|zxing-wasm|sharp|pngjs|jpeg-js|mupdf|@hyzyla/pdfium)(/|$))';
 
 module.exports = {
   options: {

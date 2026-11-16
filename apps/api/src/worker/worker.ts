@@ -357,7 +357,6 @@ function startReceptionExtraction(
   });
   const worker = createReceptionExtractionWorker({
     connection,
-    llmTimeoutMs: config.timeoutMs,
     concurrency: config.concurrency,
     process: createReceptionExtractionProcessor({ extract, logger }),
     logger,

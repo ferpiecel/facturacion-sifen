@@ -310,27 +310,28 @@ export function createDocumentEmailWorker({
  * processor adds `stalledCounter` to the attempt it hands the use case.
  */
 export const RECEPTION_EXTRACTION_MAX_STALLED_COUNT = 2;
-const MIN_LOCK_DURATION_MS = 300_000;
 
 /**
- * The lock is renewed while the processor runs, but PDFium and jsqr block the event loop, so it
- * must outlast the slowest run: the primary and the fallback model each get `llmTimeoutMs`
- * (BullMQ's 30 s default would flag healthy long calls as stalled and double the LLM spend).
+ * Lock duration of the extraction job. LLM calls are async I/O, so BullMQ keeps renewing the lock
+ * while they run and the LLM timeout must not size it. The real risk is CPU-bound work (PDFium
+ * rendering, jsqr) that blocks the event loop and can starve the renewal for a while; the lock only
+ * has to outlast one such blocking section. Keeping it modest also bounds how long a crashed
+ * worker's job waits before stall recovery requeues it.
  */
-export function receptionExtractionWorkerSettings(llmTimeoutMs: number): {
+export const RECEPTION_EXTRACTION_LOCK_DURATION_MS = 90_000;
+
+export function receptionExtractionWorkerSettings(): {
   readonly lockDuration: number;
   readonly maxStalledCount: number;
 } {
   return {
-    lockDuration: Math.max(MIN_LOCK_DURATION_MS, 2 * llmTimeoutMs + 60_000),
+    lockDuration: RECEPTION_EXTRACTION_LOCK_DURATION_MS,
     maxStalledCount: RECEPTION_EXTRACTION_MAX_STALLED_COUNT,
   };
 }
 
 export interface ReceptionExtractionWorkerOptions {
   readonly connection: Redis;
-  /** Per-call timeout of the LLM; sizes the job lock. */
-  readonly llmTimeoutMs: number;
   /** Low on purpose: PDFium and jsqr run on the event loop of the worker process. */
   readonly concurrency: number;
   readonly process: (job: ReceptionExtractionJob) => Promise<unknown>;
@@ -341,7 +342,6 @@ export interface ReceptionExtractionWorkerOptions {
 /** The ReceptionExtractionWorker (R5.6): one job per uploaded PDF or photo, retried by BullMQ. */
 export function createReceptionExtractionWorker({
   connection,
-  llmTimeoutMs,
   concurrency,
   process,
   prefix,
@@ -353,7 +353,7 @@ export function createReceptionExtractionWorker({
     {
       connection,
       concurrency,
-      ...receptionExtractionWorkerSettings(llmTimeoutMs),
+      ...receptionExtractionWorkerSettings(),
       ...(prefix === undefined ? {} : { prefix }),
     },
   );

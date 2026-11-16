@@ -71,7 +71,12 @@ function readConcurrency(env: Env): number {
   return parsed;
 }
 
-function readThreshold(env: Env): number {
+/**
+ * Reads only the auto-confirm threshold. The API process needs this single value (the correction
+ * policy) and must not fail its boot on worker-only variables such as the timeout or the models.
+ * It is also the single source of truth `loadReceptionExtractionConfig` reuses.
+ */
+export function loadAutoConfirmThreshold(env: Env): number {
   const value = read(env, 'RECEPTION_AUTO_CONFIRM_THRESHOLD');
   if (value === undefined) return DEFAULT_AUTO_CONFIRM_THRESHOLD;
   if (!UNIT_INTERVAL.test(value)) {
@@ -90,7 +95,7 @@ export function loadReceptionExtractionConfig(env: Env): ReceptionExtractionConf
     model: readModel(env, 'RECEPTION_EXTRACTION_MODEL', DEFAULT_EXTRACTION_MODEL),
     fallbackModel: readFallbackModel(env),
     timeoutMs: readTimeoutMs(env),
-    autoConfirmThreshold: readThreshold(env),
+    autoConfirmThreshold: loadAutoConfirmThreshold(env),
     concurrency: readConcurrency(env),
   };
 }

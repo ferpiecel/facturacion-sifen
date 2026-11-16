@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { Inject, Module, type OnApplicationShutdown } from '@nestjs/common';
 import type { Database } from '@sifen/db';
 import { DATABASE } from '../database/database.module.js';
+import { ConfidencePolicy } from './domain/confidence-policy.js';
+import { loadAutoConfirmThreshold } from './infrastructure/reception-extraction-config.js';
 import { createCorrectReceivedDocument } from './application/correct-received-document.js';
 import { createGetArtifact, createGetArtifactUrl } from './application/get-artifact.js';
 import { createGetReceivedDocument } from './application/get-received-document.js';
@@ -107,6 +109,8 @@ import {
         db
           ? createCorrectReceivedDocument({
               repository: createDrizzleReceivedDocumentRepository(db),
+              // Only the threshold: worker-only variables must not stop the API boot.
+              policy: ConfidencePolicy.create(loadAutoConfirmThreshold(process.env)),
               now: () => new Date(),
             })
           : null,

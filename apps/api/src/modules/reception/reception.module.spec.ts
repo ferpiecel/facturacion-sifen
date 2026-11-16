@@ -11,6 +11,7 @@ import { IngestUpload } from './application/ingest-upload.js';
 import { ReceptionQueueUnavailableError } from './application/ports/reception-job-queue.port.js';
 import {
   INGEST_SIFEN_XML,
+  CORRECT_RECEIVED_DOCUMENT,
   INGEST_UPLOAD,
   RECEPTION_JOB_QUEUE,
   RECEPTION_STORAGE,
@@ -67,5 +68,23 @@ describe('ReceptionModule', () => {
         .get<{ enqueueExtraction(job: object): Promise<void> }>(RECEPTION_JOB_QUEUE)
         .enqueueExtraction({}),
     ).rejects.toBeInstanceOf(ReceptionQueueUnavailableError);
+  });
+
+  it.each([
+    ['RECEPTION_EXTRACTION_TIMEOUT_MS', 'abc'],
+    ['RECEPTION_EXTRACTION_CONCURRENCY', '99'],
+    ['RECEPTION_EXTRACTION_MODEL', 'not a model'],
+    ['RECEPTION_EXTRACTION_FALLBACK_MODEL', 'not a model'],
+  ])('does not fail the API boot on the worker-only variable %s', async (name, value) => {
+    vi.stubEnv(name, value);
+    const moduleRef = await compile({}, new InMemoryStorageProvider());
+    expect(moduleRef.get(CORRECT_RECEIVED_DOCUMENT)).not.toBeNull();
+  });
+
+  it('fails the API boot on an invalid auto-confirm threshold', async () => {
+    vi.stubEnv('RECEPTION_AUTO_CONFIRM_THRESHOLD', '2');
+    await expect(compile({}, new InMemoryStorageProvider())).rejects.toThrow(
+      'RECEPTION_AUTO_CONFIRM_THRESHOLD',
+    );
   });
 });

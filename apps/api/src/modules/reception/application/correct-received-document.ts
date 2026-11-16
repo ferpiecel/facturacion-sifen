@@ -1,5 +1,10 @@
 import { Decimal } from '../../emission/domain/decimal.js';
 import {
+  RECEIVED_FIELD_NAMES,
+  type ConfidencePolicy,
+  type ReceivedFieldName,
+} from '../domain/confidence-policy.js';
+import {
   recordReceivedDocumentCorrection,
   transitionReceivedDocument,
   type ReceivedDocument,
@@ -12,6 +17,7 @@ import {
   ReceivedDocumentNotFoundError,
   VersionConflictError,
   type ConfidenceCorrectionWrite,
+  type FieldConfidence,
   type ReceivedDocumentGraph,
   type ReceivedDocumentHeader,
   type ReceivedDocumentHeaderInput,
@@ -87,6 +93,13 @@ export interface CorrectReceivedDocumentInput {
   readonly actorId: string;
   readonly header?: HeaderPatch;
   readonly items?: readonly ItemPatch[];
+  /**
+   * Curated fields (one of the 8 in {@link RECEIVED_FIELD_NAMES}) the human checked against the
+   * source and found right as extracted. Each is recorded like a correction (`corrected_*` of its
+   * confidence row) without touching the data, so a low-confidence field can be cleared without
+   * inventing a different value. Another name is an {@link InvalidCorrectionError}.
+   */
+  readonly reviewedFields?: readonly string[];
   readonly confirm?: boolean;
 }
 
@@ -100,6 +113,8 @@ export interface CorrectReceivedDocumentResult {
 
 export interface CorrectReceivedDocumentDeps {
   readonly repository: ReceivedDocumentRepository;
+  /** Same threshold the extraction worker uses to decide `low_confidence`. */
+  readonly policy: ConfidencePolicy;
   readonly now: () => Date;
 }
 
@@ -392,6 +407,88 @@ function confidenceCorrections(
   return out;
 }
 
+const isFieldName = (name: string): name is ReceivedFieldName =>
+  (RECEIVED_FIELD_NAMES as readonly string[]).includes(name);
+
+function parseReviewedFields(names: readonly string[] | undefined): ReceivedFieldName[] {
+  const out = new Set<ReceivedFieldName>();
+  for (const name of names ?? []) {
+    if (!isFieldName(name)) throw bad(`${name} is not a reviewable field`);
+    out.add(name);
+  }
+  return [...out];
+}
+
+/** What a reviewed field stores as `corrected_value`: the value that was checked and kept. */
+function reviewedValue(
+  field: ReceivedFieldName,
+  merged: ReceivedDocumentHeader,
+  items: ItemChanges,
+): string | null {
+  if (field === 'items') {
+    return JSON.stringify({ reviewed: items.active.map((item) => item.position) });
+  }
+  if (field === 'totals') {
+    const totals = Object.fromEntries(
+      [...TOTAL_COLUMNS].map((key) => [key, (merged as unknown as Record<string, unknown>)[key]]),
+    );
+    return JSON.stringify(totals);
+  }
+  const ruc = (base: string | null, dv: number | null): string | null =>
+    base === null ? null : dv === null ? base : `${base}-${String(dv)}`;
+  switch (field) {
+    case 'issuer_ruc':
+      return ruc(merged.issuerRucBase, merged.issuerRucDv);
+    case 'receiver_ruc':
+      return ruc(merged.receiverRucBase, merged.receiverRucDv);
+    case 'issuer_legal_name':
+      return merged.issuerLegalName;
+    case 'issued_on':
+      return merged.issuedAt?.toISOString().slice(0, 10) ?? null;
+    case 'document_number':
+      return [merged.establishmentCode, merged.expeditionPointCode, merged.documentNumber]
+        .filter((part): part is string => part !== null)
+        .join('-');
+    case 'payment_condition':
+      return merged.paymentCondition;
+  }
+}
+
+/**
+ * Review reasons that survive a correction that does not confirm. Validation reasons are always
+ * recomputed from the corrected data. The two extraction-only reasons are carried over only while
+ * they still hold:
+ * - `low_confidence` (a global figure) clears only when at least one tracked field is below the
+ *   threshold and every such field now has a human correction or review; with no tracked low field
+ *   there is nothing a person can correct to clear it, so only an explicit confirm does;
+ * - `items_without_subtotals` clears as soon as one active item has a subtotal (or none is left).
+ * An explicit `confirm` ignores both: the person takes responsibility once validations pass.
+ */
+function carriedReasons(
+  previous: readonly string[],
+  policy: ConfidencePolicy,
+  confidences: readonly FieldConfidence[],
+  resolvedNow: ReadonlySet<string>,
+  activeItems: readonly ReceivedDocumentItem[],
+): string[] {
+  const out: string[] = [];
+  if (previous.includes('low_confidence')) {
+    const low = confidences.filter((row) => Number(row.confidence) < policy.threshold);
+    const resolved =
+      low.length > 0 &&
+      low.every((row) => row.correctedAt !== null || resolvedNow.has(row.fieldName));
+    if (!resolved) out.push('low_confidence');
+  }
+  if (
+    previous.includes('items_without_subtotals') &&
+    activeItems.length > 0 &&
+    activeItems.every((item) => item.subtotal === null)
+  ) {
+    out.push('items_without_subtotals');
+  }
+  return out;
+}
+
 const snapshot = (changes: HeaderChange, source: object): HeaderChange =>
   Object.fromEntries(
     Object.keys(changes).map((key) => [key, (source as Record<string, unknown>)[key] ?? null]),
@@ -409,7 +506,11 @@ const snapshot = (changes: HeaderChange, source: object): HeaderChange =>
  *   WHOLE request (corrections are not persisted), see {@link ValidationFailedError};
  * - a correction that does not confirm moves a `needs_review` document's version and refreshes
  *   its reasons (`awaiting_confirmation` when the data is valid but unconfirmed);
- * - every applied request writes one audit entry in the same transaction.
+ * - `reviewedFields` only counts on a `needs_review` document; on a confirmed one it is ignored;
+ * - every applied request writes one audit entry in the same transaction;
+ * - documents that came from extraction (R5.7) keep `low_confidence` / `items_without_subtotals`
+ *   after a non-confirming correction only while they still hold (see {@link carriedReasons}), and
+ *   `reviewedFields` records a verified-as-is field on its confidence row.
  */
 export function createCorrectReceivedDocument(deps: CorrectReceivedDocumentDeps) {
   return async function correctReceivedDocument(
@@ -430,7 +531,22 @@ export function createCorrectReceivedDocument(deps: CorrectReceivedDocumentDeps)
     const confirm = input.confirm === true;
     const changes = headerChanges(graph.header, input.header ?? {});
     const items = itemChanges(graph, input.items ?? []);
+    const merged = { ...graph.header, ...changes };
+    const corrections = confidenceCorrections(merged, changes, items);
+    // A review only counts for a field that has a row (no row, nothing to clear) and is not yet
+    // corrected or covered by this very request.
+    // A confirmed document is past review: `reviewedFields` is validated but never recorded there,
+    // so a reviewed-only request cannot bump the version, stamp a corrector or emit `updated`.
+    const reviewed: ConfidenceCorrectionWrite[] = parseReviewedFields(input.reviewedFields)
+      .filter(
+        (field) =>
+          document.status === 'needs_review' &&
+          !corrections.some((c) => c.fieldName === field) &&
+          graph.confidences.some((row) => row.fieldName === field && row.correctedAt === null),
+      )
+      .map((fieldName) => ({ fieldName, correctedValue: reviewedValue(fieldName, merged, items) }));
     const unchanged =
+      reviewed.length === 0 &&
       Object.keys(changes).length === 0 &&
       items.upserts.length === 0 &&
       items.removedPositions.length === 0 &&
@@ -445,7 +561,6 @@ export function createCorrectReceivedDocument(deps: CorrectReceivedDocumentDeps)
     if (unchanged) return { document, replayed: false, events: [] };
 
     const at = deps.now();
-    const merged = { ...graph.header, ...changes };
     const reasons = validateReceivedDocument(toStoredDocumentFields(merged, items.active));
     const ends = confirm || document.status === 'confirmed' ? 'confirmed' : 'needs_review';
 
@@ -457,14 +572,25 @@ export function createCorrectReceivedDocument(deps: CorrectReceivedDocumentDeps)
       next = result.document;
       event = result.event;
     } else {
+      const resolvedNow = new Set([...corrections, ...reviewed].map((c) => c.fieldName));
+      const kept = carriedReasons(
+        document.needsReviewReasons,
+        deps.policy,
+        graph.confidences,
+        resolvedNow,
+        items.active,
+      );
+      const all = [...new Set([...reasons, ...kept])];
       next = recordReceivedDocumentCorrection(
         document,
-        reasons.length > 0 ? reasons : [AWAITING_CONFIRMATION],
+        all.length > 0 ? all : [AWAITING_CONFIRMATION],
       );
     }
 
     const edited =
-      Object.keys(changes).length > 0 || items.upserts.length + items.removedPositions.length > 0;
+      reviewed.length > 0 ||
+      Object.keys(changes).length > 0 ||
+      items.upserts.length + items.removedPositions.length > 0;
     const header: ReceivedDocumentHeaderInput = {
       ...changes,
       ...(edited ? { correctedBy: actorId, correctedAt: at } : {}),
@@ -478,7 +604,7 @@ export function createCorrectReceivedDocument(deps: CorrectReceivedDocumentDeps)
       expectedVersion: document.version,
       header,
       items: { upserts: items.upserts, removedPositions: items.removedPositions },
-      confidences: confidenceCorrections(merged, changes, items),
+      confidences: [...corrections, ...reviewed],
       actorId,
       at,
       ...(event === null
@@ -497,6 +623,7 @@ export function createCorrectReceivedDocument(deps: CorrectReceivedDocumentDeps)
           version: next.version,
           header: snapshot(changes, merged),
           items: { upserted: items.upserts, removed: items.removedPositions },
+          reviewedFields: reviewed.map((r) => r.fieldName),
         },
       },
     });

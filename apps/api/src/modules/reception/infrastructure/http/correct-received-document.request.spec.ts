@@ -42,4 +42,19 @@ describe('parseCorrectionRequest', () => {
       expect(JSON.stringify(parsed)).not.toContain('1111111111');
     }
   });
+
+  it('maps reviewed_fields, leaving unknown names to the use case (422) and capping the list', () => {
+    const parsed = parseCorrectionRequest({
+      version: 2,
+      reviewed_fields: ['totals', 'trade_name'],
+    });
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: { expectedVersion: 2, reviewedFields: ['totals', 'trade_name'] },
+    });
+    expect(parseCorrectionRequest({ version: 2, reviewed_fields: Array(9).fill('items') }).ok).toBe(
+      false,
+    );
+    expect(parseCorrectionRequest({ version: 2, reviewed_fields: [1] }).ok).toBe(false);
+  });
 });

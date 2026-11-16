@@ -62,7 +62,6 @@ export interface ReceivedDocumentSummary {
 
 export interface ReceivedDocumentDetail extends ReceivedDocumentGraph {
   readonly createdAt: Date;
-  readonly updatedAt: Date;
 }
 
 /** Read models of the reception module. Every method runs in its own tenant transaction. */

@@ -646,3 +646,161 @@ describe('ExtractReceivedDocument.failUnexpected (final attempt crashed)', () =>
     expect(h.events).toHaveLength(before);
   });
 });
+
+describe('ExtractReceivedDocument: reprocess of reviewed documents', () => {
+  const HUMAN_AT = new Date('2026-11-09T10:00:00.000Z');
+
+  /** Plays what a person does through PATCH: values and corrected_* stamped on the stored rows. */
+  function humanCorrects(
+    h: Harness,
+    fields: readonly string[],
+    header: Record<string, unknown> = {},
+  ): void {
+    const row = h.repository.rows.get('doc-1');
+    if (row === undefined) throw new Error('no row');
+    h.repository.rows.set('doc-1', {
+      ...row,
+      header: { ...row.header, ...header },
+      confidences: row.confidences.map((c) =>
+        fields.includes(c.fieldName)
+          ? {
+              ...c,
+              correctedValue: `human ${c.fieldName}`,
+              correctedBy: 'key-1',
+              correctedAt: HUMAN_AT,
+            }
+          : c,
+      ),
+    });
+  }
+
+  async function confirmedDoc(h: Harness): Promise<void> {
+    await h.seed();
+    extracted(await h.run());
+    expect(h.doc().status).toBe('confirmed');
+  }
+
+  it('ignores a confirmed or needs_review document unless the job is a reprocess', async () => {
+    const h = new Harness();
+    await confirmedDoc(h);
+    expect(await h.run('doc-1', { attempt: 1 })).toEqual({
+      kind: 'skipped',
+      reason: 'already_processed',
+    });
+    expect(h.llmRequests).toHaveLength(1);
+  });
+
+  it('re-extracts a confirmed document and announces updated, never a second confirmed', async () => {
+    const h = new Harness();
+    await confirmedDoc(h);
+    const first = h.doc();
+    h.llmText = llmJson({ issuerLegalName: 'Nuevo SA' });
+
+    const result = extracted(await h.run('doc-1', { reprocess: true }));
+
+    expect(result.status).toBe('confirmed');
+    expect(result.events).toEqual(['reception.document.updated']);
+    expect(h.events).toEqual(['reception.document.confirmed', 'reception.document.updated']);
+    expect(h.repository.statusLog.slice(-2)).toEqual(['extracting', 'confirmed']);
+    // claim and re-confirmation each bump the version; the first confirmation time is kept
+    expect(h.doc().version).toBe(first.version + 2);
+    expect(h.doc().confirmedAt).toEqual(first.confirmedAt);
+    expect((await h.repository.load(TENANT, 'doc-1'))?.header.issuerLegalName).toBe('Nuevo SA');
+  });
+
+  it('re-extracts a needs_review document that was never confirmed: confirmed as usual', async () => {
+    const h = new Harness();
+    h.llmText = llmJson({ overallConfidence: 0.5 });
+    await h.seed();
+    expect(extracted(await h.run()).status).toBe('needs_review');
+    h.llmText = llmJson();
+
+    const result = extracted(await h.run('doc-1', { reprocess: true }));
+
+    expect(result.events).toEqual(['reception.document.confirmed']);
+  });
+
+  it('sends a once-confirmed document back to needs_review with the needs_review event', async () => {
+    const h = new Harness();
+    await confirmedDoc(h);
+    h.llmText = llmJson({ overallConfidence: 0.5 });
+
+    const result = extracted(await h.run('doc-1', { reprocess: true }));
+
+    expect(result.status).toBe('needs_review');
+    expect(result.events).toEqual(['reception.document.needs_review']);
+    expect(h.doc().confirmedAt).not.toBeNull();
+  });
+
+  it('keeps a human-corrected field and lets the others take the new machine output', async () => {
+    const h = new Harness();
+    await confirmedDoc(h);
+    humanCorrects(h, ['issuer_legal_name'], { issuerLegalName: 'Corregido SA' });
+    h.llmText = llmJson({ issuerLegalName: 'Leido SA', paymentCondition: 'credit' });
+
+    extracted(await h.run('doc-1', { reprocess: true }));
+
+    const stored = await h.repository.load(TENANT, 'doc-1');
+    expect(stored?.header).toMatchObject({
+      issuerLegalName: 'Corregido SA',
+      paymentCondition: 'credit',
+    });
+    const field = (name: string) => stored?.confidences.find((c) => c.fieldName === name);
+    expect(field('issuer_legal_name')).toMatchObject({
+      extractedValue: 'Leido SA',
+      correctedValue: 'human issuer_legal_name',
+      correctedBy: 'key-1',
+      correctedAt: HUMAN_AT,
+    });
+    expect(field('payment_condition')).toMatchObject({
+      extractedValue: 'credit',
+      correctedAt: null,
+    });
+  });
+
+  it('keeps the items a person corrected and discards the machine ones', async () => {
+    const h = new Harness();
+    await confirmedDoc(h);
+    humanCorrects(h, ['items']);
+    h.llmText = llmJson({ items: [item('110000'), item('5')] });
+    const before = (await h.repository.load(TENANT, 'doc-1'))?.items;
+
+    extracted(await h.run('doc-1', { reprocess: true }));
+
+    expect((await h.repository.load(TENANT, 'doc-1'))?.items).toEqual(before);
+  });
+
+  it('decides on the merged data: a corrected total that closes keeps the document confirmed', async () => {
+    const h = new Harness();
+    await confirmedDoc(h);
+    humanCorrects(h, ['totals']);
+    h.llmText = llmJson({
+      totals: {
+        exempt: '0',
+        exonerated: '0',
+        taxable5: '0',
+        taxable10: '100000',
+        vat5: '0',
+        vat10: '10000',
+        total: '1',
+      },
+    });
+
+    const result = extracted(await h.run('doc-1', { reprocess: true }));
+
+    expect(result.status).toBe('confirmed');
+    expect((await h.repository.load(TENANT, 'doc-1'))?.header.totalAmount).toBe('110000');
+  });
+
+  it('recomputes the own-receiver flag from a corrected receiver', async () => {
+    const h = new Harness();
+    await confirmedDoc(h);
+    humanCorrects(h, ['receiver_ruc']);
+    h.llmText = llmJson({ receiverRuc: '80000077-1' });
+
+    const result = extracted(await h.run('doc-1', { reprocess: true }));
+
+    expect(result.document.isOwnReceiver).toBe(true);
+    expect(result.events).toEqual(['reception.document.updated']);
+  });
+});

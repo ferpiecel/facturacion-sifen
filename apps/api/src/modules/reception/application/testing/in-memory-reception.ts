@@ -6,6 +6,7 @@ import type {
   FieldConfidence,
   NewReceivedDocument,
   ReceivedArtifact,
+  ReceivedDocumentAuditEntry,
   ReceivedDocumentGraph,
   ReceivedDocumentHeader,
   ReceivedDocumentHeaderInput,
@@ -104,6 +105,7 @@ interface Row {
   items: readonly ReceivedDocumentItem[];
   confidences: readonly FieldConfidence[];
   artifactId: string | null;
+  updatedAt: Date;
 }
 
 export interface RecordedEvents {
@@ -115,6 +117,9 @@ export class InMemoryReceptionRepository implements ReceivedDocumentRepository {
   readonly rows = new Map<string, Row>();
   readonly artifacts = new Map<string, ReceivedArtifact>();
   readonly events: RecordedEvents[] = [];
+  readonly audits: ReceivedDocumentAuditEntry[] = [];
+  /** Clock stamped on every write; specs move it to age a document. */
+  clock: () => Date = () => new Date();
   /** Every aggregate status the document passed through a write, in order. */
   readonly statusLog: string[] = [];
   private seq = 0;
@@ -162,6 +167,7 @@ export class InMemoryReceptionRepository implements ReceivedDocumentRepository {
       items: input.items ?? [],
       confidences: input.confidences ?? [],
       artifactId,
+      updatedAt: this.clock(),
     });
     this.record(input.document, input.events);
     return Promise.resolve({ created: true, document: input.document });
@@ -177,6 +183,7 @@ export class InMemoryReceptionRepository implements ReceivedDocumentRepository {
       removedPositions: [],
       confidences: row.confidences,
       artifact: row.artifactId === null ? null : (this.artifacts.get(row.artifactId) ?? null),
+      updatedAt: row.updatedAt,
     });
   }
 
@@ -203,7 +210,12 @@ export class InMemoryReceptionRepository implements ReceivedDocumentRepository {
     try {
       const row = this.requireRow(document.id, expectedVersion);
       const header: ReceivedDocumentHeaderInput = change?.header ?? {};
-      this.rows.set(document.id, { ...row, document, header: { ...row.header, ...header } });
+      this.rows.set(document.id, {
+        ...row,
+        document,
+        header: { ...row.header, ...header },
+        updatedAt: this.clock(),
+      });
       this.record(document, change?.events);
       return Promise.resolve();
     } catch (error) {
@@ -218,8 +230,9 @@ export class InMemoryReceptionRepository implements ReceivedDocumentRepository {
         ...row,
         document: write.document,
         header: { ...row.header, ...write.header },
-        items: write.items,
+        items: write.keepItems === true ? row.items : write.items,
         confidences: write.confidences,
+        updatedAt: this.clock(),
       });
       this.record(write.document, write.events);
       return Promise.resolve();
@@ -231,18 +244,31 @@ export class InMemoryReceptionRepository implements ReceivedDocumentRepository {
   saveCorrection(): Promise<void> {
     return Promise.reject(new Error('not used by these specs'));
   }
+
+  appendAudit(_tenantId: string, entry: ReceivedDocumentAuditEntry): Promise<void> {
+    this.audits.push(entry);
+    return Promise.resolve();
+  }
+
+  /** Test helper: makes the stored row look untouched since `at`. */
+  touch(id: string, at: Date): void {
+    const row = this.rows.get(id);
+    if (row === undefined) throw new Error(`no document ${id}`);
+    this.rows.set(id, { ...row, updatedAt: at });
+  }
 }
 
 export class FakeJobQueue implements ReceptionJobQueue {
   readonly jobs: ExtractionJob[] = [];
   failWith: Error | null = null;
-  enqueueExtraction(job: ExtractionJob): Promise<void> {
+  enqueueExtraction(job: ExtractionJob): Promise<{ readonly enqueued: boolean }> {
     if (this.failWith !== null) {
       return Promise.reject(new ReceptionQueueUnavailableError('redis down'));
     }
-    if (!this.jobs.some((j) => j.documentId === job.documentId && j.attempt === job.attempt)) {
-      this.jobs.push(job); // idempotent per (document, attempt), like the real adapter
-    }
-    return Promise.resolve();
+    const known = this.jobs.some(
+      (j) => j.documentId === job.documentId && j.attempt === job.attempt,
+    );
+    if (!known) this.jobs.push(job); // idempotent per (document, attempt), like the real adapter
+    return Promise.resolve({ enqueued: !known });
   }
 }

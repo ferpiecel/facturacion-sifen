@@ -288,6 +288,32 @@ async function writeConfidences(
 /** Actor stamped on items removed by an extraction rewrite (machine output, no API key). */
 const EXTRACTION_ACTOR = 'system:extraction';
 
+/**
+ * A soft-removed position is frozen (migration 0081), so writing an item at one would fail. From
+ * the first item that collides with a removed position on, the items are numbered past the highest
+ * position ever used, which keeps their order and never touches a frozen row.
+ */
+async function positionsAvoidingRemoved(
+  tx: TenantTx,
+  documentId: string,
+  items: readonly ReceivedDocumentItem[],
+): Promise<readonly ReceivedDocumentItem[]> {
+  const existing = await tx
+    .select({
+      position: receivedDocumentItems.position,
+      removedAt: receivedDocumentItems.removedAt,
+    })
+    .from(receivedDocumentItems)
+    .where(eq(receivedDocumentItems.receivedDocumentId, documentId));
+  const frozen = new Set(existing.filter((row) => row.removedAt !== null).map((r) => r.position));
+  const firstCollision = items.findIndex((item) => frozen.has(item.position));
+  if (firstCollision < 0) return items;
+  let next = Math.max(0, ...existing.map((row) => row.position), ...items.map((i) => i.position));
+  return items.map((item, index) =>
+    index < firstCollision ? item : { ...item, position: (next += 1) },
+  );
+}
+
 /** Upserts the extracted items and confidences by position / field, so a retry rewrites them. */
 async function writeExtractionChildren(
   tx: TenantTx,
@@ -295,7 +321,18 @@ async function writeExtractionChildren(
   documentId: string,
   write: ExtractionWrite,
 ): Promise<void> {
-  for (const { position, ...fields } of write.items) {
+  if (write.keepItems !== true) await writeExtractedItems(tx, tenantId, documentId, write.items);
+  await writeExtractedConfidences(tx, tenantId, documentId, write);
+}
+
+async function writeExtractedItems(
+  tx: TenantTx,
+  tenantId: string,
+  documentId: string,
+  extracted: readonly ReceivedDocumentItem[],
+): Promise<void> {
+  const items = await positionsAvoidingRemoved(tx, documentId, extracted);
+  for (const { position, ...fields } of items) {
     await tx
       .insert(receivedDocumentItems)
       .values({ ...fields, position, tenantId, receivedDocumentId: documentId })
@@ -315,14 +352,22 @@ async function writeExtractionChildren(
       and(
         eq(receivedDocumentItems.receivedDocumentId, documentId),
         isNull(receivedDocumentItems.removedAt),
-        write.items.length === 0
+        items.length === 0
           ? undefined
           : notInArray(
               receivedDocumentItems.position,
-              write.items.map((item) => item.position),
+              items.map((item) => item.position),
             ),
       ),
     );
+}
+
+async function writeExtractedConfidences(
+  tx: TenantTx,
+  tenantId: string,
+  documentId: string,
+  write: ExtractionWrite,
+): Promise<void> {
   for (const { fieldName, ...fields } of write.confidences) {
     await tx
       .insert(receivedDocumentFieldConfidences)
@@ -509,6 +554,7 @@ export function createDrizzleReceivedDocumentRepository(db: Database): ReceivedD
             removedPositions: detail.removedPositions,
             confidences: detail.confidences,
             artifact: detail.artifact,
+            updatedAt: detail.updatedAt,
           }
         : null;
     },
@@ -557,6 +603,28 @@ export function createDrizzleReceivedDocumentRepository(db: Database): ReceivedD
           after: write.audit.after,
         });
         await enqueueRequested(tx, tenantId, document, write.events);
+      });
+    },
+
+    appendAudit(tenantId, entry) {
+      return inTenant(tenantId, async (tx) => {
+        const rows = await tx
+          .select({ id: receivedDocuments.id })
+          .from(receivedDocuments)
+          .where(
+            and(
+              eq(receivedDocuments.tenantId, tenantId),
+              eq(receivedDocuments.id, entry.documentId),
+            ),
+          );
+        if (rows.length === 0) throw new ReceivedDocumentNotFoundError(entry.documentId);
+        await recordAudit(tx, {
+          actor: entry.actor,
+          action: entry.action,
+          entity: { type: 'received_document', id: entry.documentId },
+          before: entry.before,
+          after: entry.after,
+        });
       });
     },
   };

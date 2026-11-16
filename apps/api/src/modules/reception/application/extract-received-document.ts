@@ -47,6 +47,8 @@ import {
   type ReceptionEventRequest,
 } from './ports/received-document-repository.port.js';
 import { StorageObjectNotFoundError, type StorageProvider } from './ports/storage-provider.port.js';
+import { preserveCorrections } from './preserve-corrections.js';
+import { toStoredDocumentFields } from './stored-document-fields.js';
 import type { TenantFiscalIdentity } from './ports/tenant-fiscal-identity.port.js';
 
 /** Page cap and render resolution of project A (`ingesta_extraccion.py`); overridable per call. */
@@ -75,6 +77,12 @@ export interface ExtractReceivedDocumentInput {
    * is reprocessable) but no webhook goes out until the failure is final. Defaults to true.
    */
   readonly finalAttempt?: boolean;
+  /**
+   * The job comes from a reprocess request (R5.8b): it may take a `needs_review` or `confirmed`
+   * document back into extraction, keeping its human corrections. Any other job leaves such a
+   * document alone (`already_processed`).
+   */
+  readonly reprocess?: boolean;
   readonly options?: { readonly maxPages?: number; readonly dpi?: number };
 }
 
@@ -200,7 +208,7 @@ export class ExtractReceivedDocument {
     if (graph.document.source !== 'pdf' && graph.document.source !== 'photo') {
       return { kind: 'skipped', reason: 'not_vision_source' };
     }
-    const claim = await this.claim(tenantId, graph.document, input.attempt ?? 1);
+    const claim = await this.claim(tenantId, graph.document, input);
     if (claim.kind === 'skipped') return claim;
 
     try {
@@ -238,15 +246,20 @@ export class ExtractReceivedDocument {
   private async claim(
     tenantId: string,
     document: ReceivedDocument,
-    attempt: number,
+    input: ExtractReceivedDocumentInput,
   ): Promise<Claim> {
     if (document.status === 'extracting') {
       // Another worker is on it, unless this is a retry after that attempt crashed.
-      return attempt > 1
+      return (input.attempt ?? 1) > 1
         ? { kind: 'claimed', document }
         : { kind: 'skipped', reason: 'in_progress' };
     }
-    if (document.status !== 'received' && document.status !== 'extraction_failed') {
+    const reviewed = document.status === 'needs_review' || document.status === 'confirmed';
+    if (
+      document.status !== 'received' &&
+      document.status !== 'extraction_failed' &&
+      !(reviewed && input.reprocess === true)
+    ) {
       return { kind: 'skipped', reason: 'already_processed' };
     }
     const extracting = transitionReceivedDocument(document, 'extracting', {
@@ -278,24 +291,51 @@ export class ExtractReceivedDocument {
     const { result, notes } = parsed.value;
 
     const fields = toReceivedDocumentFields(result);
-    const reasons = validateReceivedDocument(fields);
+    const machineReasons = validateReceivedDocument(fields);
     const cdc =
-      fields.cdc !== null && !reasons.some((r) => r.startsWith('cdc_')) ? fields.cdc : null;
+      fields.cdc !== null && !machineReasons.some((r) => r.startsWith('cdc_')) ? fields.cdc : null;
     if (cdc !== null) {
       const existing = await this.deps.repository.findByCdc(tenantId, cdc);
       if (existing !== null && existing.id !== extracting.id) throw fail('duplicate_document');
     }
 
+    // A re-extraction keeps what a person corrected; the decision below reads the merged data.
+    const kept = preserveCorrections(graph, {
+      header: toHeader(result, cdc, {
+        notes,
+        modelId: response.modelId,
+        pageCount,
+        pagesSent: pages.length,
+        issueDateValid: !machineReasons.includes('invalid_issue_date'),
+      }),
+      items: result.items.map(toItem),
+      confidences: toConfidences(result),
+    });
+    const merged = kept.preservedFields.length > 0 ? kept.merged : null;
+    const reasons =
+      merged === null
+        ? machineReasons
+        : validateReceivedDocument(toStoredDocumentFields(merged.header, merged.items));
+
     const identity = await this.deps.fiscalIdentity.getRucIdentity(tenantId);
     // Like the XML path: what cannot be proven to be the tenant's is not own (and webhook-silent).
-    const isOwnReceiver =
-      identity !== null && matchReceiver(result.receiverRuc, identity) === 'match';
+    const receiverRuc =
+      merged === null
+        ? result.receiverRuc
+        : rucText(merged.header.receiverRucBase, merged.header.receiverRucDv);
+    const isOwnReceiver = identity !== null && matchReceiver(receiverRuc, identity) === 'match';
     const decision = decideExtractionOutcome(this.deps.policy, {
       overallConfidence: result.overallConfidence,
       validationReasons: reasons,
-      issuerRuc: result.issuerRuc,
-      issuerLegalName: result.issuerLegalName,
-      unverifiableItems: hasUnverifiableItems(result),
+      issuerRuc:
+        merged === null
+          ? result.issuerRuc
+          : rucText(merged.header.issuerRucBase, merged.header.issuerRucDv),
+      issuerLegalName: merged === null ? result.issuerLegalName : merged.header.issuerLegalName,
+      unverifiableItems:
+        merged === null
+          ? hasUnverifiableItems(result)
+          : merged.items.length > 0 && merged.items.every((item) => item.subtotal === null),
     });
 
     const at = this.deps.now();
@@ -315,15 +355,10 @@ export class ExtractReceivedDocument {
     await this.deps.repository.saveExtraction(tenantId, {
       document: final.document,
       expectedVersion: extracting.version,
-      header: toHeader(result, cdc, {
-        notes,
-        modelId: response.modelId,
-        pageCount,
-        pagesSent: pages.length,
-        issueDateValid: !reasons.includes('invalid_issue_date'),
-      }),
-      items: result.items.map(toItem),
-      confidences: toConfidences(result),
+      header: kept.header,
+      items: kept.items,
+      keepItems: kept.keepItems,
+      confidences: kept.confidences,
       ...(final.event === null ? {} : { events: { types: [final.event], at } }),
     });
     return {
@@ -395,6 +430,11 @@ export class ExtractReceivedDocument {
       ...(failure.cause === undefined ? {} : { cause: failure.cause }),
     };
   }
+}
+
+/** `base-dv` as the model reads a RUC, from the stored columns. */
+function rucText(base: string | null, dv: number | null): string | null {
+  return base === null ? null : dv === null ? base : `${base}-${String(dv)}`;
 }
 
 const DOCUMENT_NUMBER = /^(\d{3})-(\d{3})-(\d{7})$/;

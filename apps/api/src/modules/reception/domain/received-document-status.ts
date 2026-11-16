@@ -17,8 +17,10 @@ export function isReceivedDocumentStatus(value: unknown): value is ReceivedDocum
 
 /**
  * Allowed transitions. XML ingest goes received -> extracted -> confirmed inside one transaction;
- * `confirmed -> confirmed` is an edit of a confirmed document and `extraction_failed -> extracting`
- * is a reprocess. Anything absent from this table is invalid.
+ * `confirmed -> confirmed` is an edit of a confirmed document and `extraction_failed -> extracting`,
+ * `needs_review -> extracting` and `confirmed -> extracting` are a reprocess (the last two keep the
+ * human corrections, see the repository's `saveExtraction`). Anything absent from this table is
+ * invalid.
  */
 export const STATUS_TRANSITIONS: Readonly<
   Record<ReceivedDocumentStatus, readonly ReceivedDocumentStatus[]>
@@ -26,9 +28,9 @@ export const STATUS_TRANSITIONS: Readonly<
   received: ['extracting', 'extracted'],
   extracting: ['extracted', 'extraction_failed'],
   extracted: ['confirmed', 'needs_review'],
-  needs_review: ['confirmed'],
+  needs_review: ['confirmed', 'extracting'],
   extraction_failed: ['extracting'],
-  confirmed: ['confirmed'],
+  confirmed: ['confirmed', 'extracting'],
 };
 
 export class InvalidStatusTransitionError extends Error {

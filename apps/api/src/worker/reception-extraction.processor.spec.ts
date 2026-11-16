@@ -21,9 +21,14 @@ const job = (
     attempts?: number;
     stalledCounter?: number;
     tenantId?: string;
+    reprocess?: true;
   } = {},
 ) => ({
-  data: { tenantId: over.tenantId ?? TENANT, documentId: DOC },
+  data: {
+    tenantId: over.tenantId ?? TENANT,
+    documentId: DOC,
+    ...(over.reprocess === true ? { reprocess: true as const } : {}),
+  },
   attemptsMade: over.attemptsMade ?? 0,
   stalledCounter: over.stalledCounter ?? 0,
   opts: { attempts: over.attempts ?? 3 },
@@ -54,6 +59,16 @@ const failed = (retryable: boolean, retryAfterSeconds: number | null = null) =>
   }) as ExtractReceivedDocumentResult;
 
 describe('reception extraction processor', () => {
+  it('tells the use case which jobs are reprocess requests', async () => {
+    const reprocess = setup({ kind: 'skipped', reason: 'already_processed' });
+    await reprocess.process(job({ reprocess: true }));
+    expect(reprocess.execute.mock.calls[0]?.[0].reprocess).toBe(true);
+
+    const upload = setup({ kind: 'skipped', reason: 'already_processed' });
+    await upload.process(job());
+    expect(upload.execute.mock.calls[0]?.[0].reprocess).not.toBe(true);
+  });
+
   it('shares the queue name with the producer', () => {
     expect(RECEPTION_EXTRACTION_QUEUE).toBe('reception-extraction');
   });

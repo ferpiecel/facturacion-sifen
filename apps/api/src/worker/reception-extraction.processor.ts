@@ -74,7 +74,13 @@ export function createReceptionExtractionProcessor(deps: ReceptionExtractionProc
     const attempt = job.attemptsMade + (job.stalledCounter ?? 0) + 1;
     let result: ExtractReceivedDocumentResult;
     try {
-      result = await deps.extract.execute({ tenantId, documentId, attempt, finalAttempt });
+      result = await deps.extract.execute({
+        tenantId,
+        documentId,
+        attempt,
+        finalAttempt,
+        ...(job.data.reprocess === true ? { reprocess: true } : {}),
+      });
     } catch (error) {
       if (finalAttempt) await failFinal(deps, tenantId, documentId);
       throw error;

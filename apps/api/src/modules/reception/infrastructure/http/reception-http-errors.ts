@@ -14,6 +14,7 @@ export type ReceptionUploadErrorCode =
   | 'not_found'
   | 'version_conflict'
   | 'invalid_state'
+  | 'artifact_not_available'
   | 'validation_failed'
   | 'invalid_correction';
 

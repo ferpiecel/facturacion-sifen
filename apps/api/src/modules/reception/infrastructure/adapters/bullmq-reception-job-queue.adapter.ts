@@ -12,11 +12,15 @@ export const RECEPTION_EXTRACTION_JOB_NAME = 'extract';
 export interface ReceptionExtractionJobData {
   readonly tenantId: string;
   readonly documentId: string;
+  /** Set by a reprocess request; absent on the job of an upload. */
+  readonly reprocess?: boolean;
 }
 
 /** The slice of a BullMQ `Queue` the adapter needs, so the library stays out of the signature. */
 export interface ReceptionExtractionQueue {
   add(name: string, data: ReceptionExtractionJobData, opts: JobOptions): Promise<unknown>;
+  /** Resolves undefined when no job has the id. */
+  getJob(jobId: string): Promise<unknown>;
 }
 
 interface JobOptions {
@@ -67,7 +71,21 @@ export class BullmqReceptionJobQueue implements ReceptionJobQueue {
     this.backoffMs = options.backoffMs ?? BACKOFF_DELAY_MS;
   }
 
-  async enqueueExtraction(job: ExtractionJob): Promise<void> {
+  private async add(job: ExtractionJob, opts: JobOptions): Promise<boolean> {
+    const existing = await this.queue.getJob(opts.jobId);
+    await this.queue.add(
+      RECEPTION_EXTRACTION_JOB_NAME,
+      {
+        tenantId: job.tenantId,
+        documentId: job.documentId,
+        ...(job.reprocess === true ? { reprocess: true } : {}),
+      },
+      opts,
+    );
+    return existing === undefined || existing === null;
+  }
+
+  async enqueueExtraction(job: ExtractionJob): Promise<{ readonly enqueued: boolean }> {
     const opts: JobOptions = {
       jobId: `${RECEPTION_EXTRACTION_QUEUE}:${job.documentId}:${String(job.attempt ?? 1)}`,
       attempts: RECEPTION_EXTRACTION_ATTEMPTS,
@@ -82,14 +100,11 @@ export class BullmqReceptionJobQueue implements ReceptionJobQueue {
           reject(new Error('timeout'));
         }, this.timeoutMs);
       });
-      await Promise.race([
-        this.queue.add(
-          RECEPTION_EXTRACTION_JOB_NAME,
-          { tenantId: job.tenantId, documentId: job.documentId },
-          opts,
-        ),
-        timeout,
-      ]);
+      // BullMQ answers `add` with the existing job for a known id, so the lookup is what tells a
+      // new job from a repeat. Two requests racing past the lookup both report `enqueued`, which
+      // only costs an extra audit entry: the job itself is still one.
+      const enqueued = await Promise.race([this.add(job, opts), timeout]);
+      return { enqueued };
     } catch (error) {
       throw new ReceptionQueueUnavailableError(error instanceof Error ? error.name : 'unknown');
     } finally {

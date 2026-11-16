@@ -15,6 +15,7 @@ import {
   INGEST_UPLOAD,
   RECEPTION_JOB_QUEUE,
   RECEPTION_STORAGE,
+  REPROCESS_RECEIVED_DOCUMENT,
 } from './reception.tokens.js';
 
 const stubDatabase = (db: unknown) => {
@@ -85,6 +86,15 @@ describe('ReceptionModule', () => {
     vi.stubEnv('RECEPTION_AUTO_CONFIRM_THRESHOLD', '2');
     await expect(compile({}, new InMemoryStorageProvider())).rejects.toThrow(
       'RECEPTION_AUTO_CONFIRM_THRESHOLD',
+    );
+  });
+
+  it('assembles reprocess and fails the API boot on an invalid stale threshold', async () => {
+    const moduleRef = await compile({}, new InMemoryStorageProvider());
+    expect(moduleRef.get(REPROCESS_RECEIVED_DOCUMENT)).not.toBeNull();
+    vi.stubEnv('RECEPTION_EXTRACTION_STALE_AFTER_MS', '5');
+    await expect(compile({}, new InMemoryStorageProvider())).rejects.toThrow(
+      'RECEPTION_EXTRACTION_STALE_AFTER_MS',
     );
   });
 });

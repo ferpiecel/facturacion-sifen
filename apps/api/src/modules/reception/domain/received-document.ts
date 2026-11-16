@@ -22,6 +22,10 @@ export interface ReceivedDocument {
   /** Decimal string in [0, 1] (never a float), or null when not computed. */
   readonly confidenceOverall: string | null;
   readonly extractionAttempts: number;
+  /**
+   * First time the document was confirmed. Set whenever the status is `confirmed` and KEPT when the
+   * document leaves it (a reprocess), so a non-null value on another status means "confirmed once".
+   */
   readonly confirmedAt: Date | null;
 }
 
@@ -89,8 +93,8 @@ export function findInvariantViolation(state: ReceivedDocument): string | null {
   if (state.confidenceOverall !== null && !CONFIDENCE.test(state.confidenceOverall)) {
     return 'confidenceOverall must be a decimal string between 0 and 1 (max 3 decimals)';
   }
-  if ((state.status === 'confirmed') !== (state.confirmedAt !== null)) {
-    return 'confirmedAt must be set exactly when the status is confirmed';
+  if (state.status === 'confirmed' && state.confirmedAt === null) {
+    return 'a confirmed document requires confirmedAt';
   }
   return null;
 }
@@ -122,7 +126,6 @@ export function transitionReceivedDocument(
   options: TransitionOptions,
 ): TransitionResult {
   assertTransition(document.status, to);
-  const edit = document.status === 'confirmed' && to === 'confirmed';
   const next = rehydrateReceivedDocument({
     ...document,
     status: to,
@@ -131,9 +134,9 @@ export function transitionReceivedDocument(
     needsReviewReasons: to === 'needs_review' ? [...(options.reasons ?? [])] : [],
     confidenceOverall: options.confidenceOverall ?? document.confidenceOverall,
     extractionAttempts: document.extractionAttempts + (to === 'extracting' ? 1 : 0),
-    confirmedAt: to === 'confirmed' ? (edit ? document.confirmedAt : options.at) : null,
+    confirmedAt: document.confirmedAt ?? (to === 'confirmed' ? options.at : null),
   });
-  return { document: next, event: document.isOwnReceiver ? eventFor(document.status, to) : null };
+  return { document: next, event: document.isOwnReceiver ? eventFor(document, to) : null };
 }
 
 /**
@@ -158,16 +161,27 @@ export function recordReceivedDocumentCorrection(
   });
 }
 
+/** Caller-driven changes bump the version: confirming and every way back into `extracting`. */
 function bumpsVersion(from: ReceivedDocumentStatus, to: ReceivedDocumentStatus): boolean {
-  return to === 'confirmed' || (from === 'extraction_failed' && to === 'extracting');
+  return (
+    to === 'confirmed' ||
+    (to === 'extracting' &&
+      (from === 'extraction_failed' || from === 'needs_review' || from === 'confirmed'))
+  );
 }
 
+/**
+ * `confirmed` is announced once per document: confirming again after the document was confirmed
+ * before (an edit, or a re-extraction that confirms it again) is an `updated`.
+ */
 function eventFor(
-  from: ReceivedDocumentStatus,
+  document: ReceivedDocument,
   to: ReceivedDocumentStatus,
 ): ReceptionEventType | null {
   if (to === 'confirmed') {
-    return from === 'confirmed' ? 'reception.document.updated' : 'reception.document.confirmed';
+    return document.confirmedAt === null
+      ? 'reception.document.confirmed'
+      : 'reception.document.updated';
   }
   if (to === 'needs_review') return 'reception.document.needs_review';
   if (to === 'extraction_failed') return 'reception.document.extraction_failed';

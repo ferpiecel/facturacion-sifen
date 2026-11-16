@@ -317,6 +317,11 @@ export const RECEPTION_EXTRACTION_MAX_STALLED_COUNT = 2;
  * rendering, jsqr) that blocks the event loop and can starve the renewal for a while; the lock only
  * has to outlast one such blocking section. Keeping it modest also bounds how long a crashed
  * worker's job waits before stall recovery requeues it.
+ *
+ * Trade-off: a single CPU-bound section longer than roughly half of this (about 45 s, when the
+ * renewal timer misses its slot) can get the job flagged as stalled and rerun, which would repeat
+ * the LLM spend. The per-document PDF page cap (`EXTRACTION_MAX_PAGES`) and the renderer's pixel
+ * budget bound that CPU time well below the limit, so the lock is not sized for the worst case.
  */
 export const RECEPTION_EXTRACTION_LOCK_DURATION_MS = 90_000;
 

@@ -17,6 +17,8 @@ const VALID_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ['extracted', 'confirmed'],
   ['extracted', 'needs_review'],
   ['needs_review', 'confirmed'],
+  ['needs_review', 'extracting'],
+  ['confirmed', 'extracting'],
   ['extraction_failed', 'extracting'],
   ['confirmed', 'confirmed'],
 ];
@@ -51,7 +53,7 @@ describe('received document status machine', () => {
     expect(Object.keys(STATUS_TRANSITIONS).sort()).toEqual([...RECEIVED_DOCUMENT_STATUSES].sort());
   });
 
-  it('accepts exactly the nine documented transitions across ALL (from, to) pairs', () => {
+  it('accepts exactly the eleven documented transitions across ALL (from, to) pairs', () => {
     const accepted: Array<readonly [string, string]> = [];
     for (const from of RECEIVED_DOCUMENT_STATUSES) {
       for (const to of RECEIVED_DOCUMENT_STATUSES) {

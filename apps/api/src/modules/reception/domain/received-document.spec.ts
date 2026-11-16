@@ -113,7 +113,11 @@ describe('rehydrateReceivedDocument invariants', () => {
     expect(() => doc('received', { version: 0 })).toThrow(InvalidReceivedDocumentError);
     expect(() => doc('received', { extractionAttempts: -1 })).toThrow(InvalidReceivedDocumentError);
     expect(() => doc('confirmed', { confirmedAt: null })).toThrow(InvalidReceivedDocumentError);
-    expect(() => doc('extracted', { confirmedAt: AT })).toThrow(InvalidReceivedDocumentError);
+  });
+
+  it('keeps the first-confirmation time on a document that left confirmed', () => {
+    expect(() => doc('extracted', { confirmedAt: AT })).not.toThrow();
+    expect(() => doc('needs_review', { confirmedAt: AT })).not.toThrow();
   });
 });
 
@@ -219,6 +223,33 @@ describe('transitionReceivedDocument', () => {
       expect(document.confirmedAt).toEqual(AT);
     });
 
+    it.each(['needs_review', 'confirmed'] as const)(
+      'reprocesses a %s document: back to extracting, version bumped, confirmedAt kept',
+      (status) => {
+        const before = doc(status, { confirmedAt: AT });
+        const { document, event } = transitionReceivedDocument(before, 'extracting', {
+          at: LATER,
+        });
+        expect(document).toMatchObject({
+          status: 'extracting',
+          version: before.version + 1,
+          extractionAttempts: before.extractionAttempts + 1,
+          needsReview: false,
+          needsReviewReasons: [],
+          confirmedAt: AT,
+        });
+        expect(event).toBeNull();
+      },
+    );
+
+    it('keeps the first confirmedAt through a re-extraction and a re-confirmation', () => {
+      let current = doc('confirmed');
+      for (const to of ['extracting', 'extracted', 'confirmed'] as const) {
+        current = transitionReceivedDocument(current, to, { at: LATER }).document;
+      }
+      expect(current.confirmedAt).toEqual(AT);
+    });
+
     it('stores confidenceOverall when provided and rejects an out-of-range value', () => {
       const { document } = transitionReceivedDocument(doc('extracting'), 'extracted', {
         at: AT,
@@ -249,8 +280,27 @@ describe('transitionReceivedDocument', () => {
       expect(event).toBe(expected);
     });
 
+    it('emits updated, never a second confirmed, when a once-confirmed document is confirmed again', () => {
+      const reconfirm = (from: 'extracted' | 'needs_review') =>
+        transitionReceivedDocument(doc(from, { confirmedAt: AT }), 'confirmed', { at: LATER })
+          .event;
+      expect(reconfirm('extracted')).toBe('reception.document.updated');
+      expect(reconfirm('needs_review')).toBe('reception.document.updated');
+    });
+
+    it('still emits needs_review when a once-confirmed document needs review again', () => {
+      const { event } = transitionReceivedDocument(
+        doc('extracted', { confirmedAt: AT }),
+        'needs_review',
+        { at: LATER, reasons: ['low_confidence'] },
+      );
+      expect(event).toBe('reception.document.needs_review');
+    });
+
     it.each([
       ['received', 'extracting'],
+      ['needs_review', 'extracting'],
+      ['confirmed', 'extracting'],
       ['received', 'extracted'],
       ['extracting', 'extracted'],
       ['extraction_failed', 'extracting'],

@@ -243,6 +243,33 @@ Qué ocurre con los motivos que solo existen en la extracción cuando el `PATCH`
 
 `200` con la misma forma que `GET /v1/received-documents/{id}`. El `version` de esa respuesta es el que usa para [ignorar su propio eco](#ignorar-el-eco-de-sus-cambios).
 
+## Reprocesar
+
+`POST /v1/received-documents/{id}/reprocess` (scope `reception:write`, sin cuerpo) vuelve a correr la extracción sobre el archivo **ya guardado**; no hay que volver a subirlo. Sirve cuando la extracción falló por algo ya resuelto (por ejemplo `llm_disabled` porque aún no había clave del modelo, o `internal_error`), o cuando la subida quedó sin encolar (`503 queue_unavailable`). También permite volver a leer un PDF o foto ya revisado o confirmado (por ejemplo con un modelo mejor), conservando las correcciones humanas.
+
+| Documento | Resultado |
+|---|---|
+| PDF o foto en `received` o `extraction_failed` | `202` con `Location`: el trabajo queda en cola y el resultado llega después (`GET` o webhooks, como en una subida nueva). Para no dejar dos trabajos vivos, un `received` de menos de `RECEPTION_EXTRACTION_STALE_AFTER_MS` (su trabajo de subida puede seguir en cola) y un `extraction_failed` con código reintentable (`llm_provider_error`, `llm_rate_limited`, `internal_error`) de menos de 5 minutos (la cola aún puede reintentarlo) responden `202` sin hacer nada; un fallo definitivo (por ejemplo `llm_disabled`) se encola de inmediato. Si el pedido es inmediato tras un `503 queue_unavailable`, vuelva a subir los mismos bytes: eso sí reencola sin esperar. |
+| PDF o foto en `extracting` | `202` sin hacer nada mientras la corrida sigue viva. Si lleva más de `RECEPTION_EXTRACTION_STALE_AFTER_MS` (30 minutos por defecto) sin cambios, se la toma por trabada: pasa a `extraction_failed` sin webhook y se encola de nuevo. |
+| XML de SIFEN en `extraction_failed` | Se vuelve a leer **dentro de la petición**: `200` con el estado nuevo (`confirmed` o `needs_review`), o `422 extraction_failed` si sigue ilegible. |
+| PDF o foto en `needs_review` o `confirmed` | `202` con `Location`: el trabajo queda en cola, el worker lleva el documento de vuelta a `extracting` (la versión sube) y lo reextrae **conservando las correcciones humanas** (ver abajo). Mientras el worker no lo reclama, el documento sigue como estaba. |
+| XML de SIFEN en `needs_review` o `confirmed` | `409 invalid_state` con `status`: los mismos bytes no pueden leerse distinto. |
+
+### Qué conserva la reextracción
+
+Un campo con corrección o revisión humana (`corrected_at` en su confianza, ver *Correcciones por campo y confianza baja*) **no se sobrescribe**:
+
+- Un campo curado corregido conserva su valor en el documento y su `corrected_value`, `corrected_by` y `corrected_at`. Solo se refrescan su `extracted_value` y su `confidence` (lo que el modelo lee ahora). Los campos que agrupa: RUC del emisor (base y DV), nombre del emisor, fecha, número de documento (establecimiento, punto y número), RUC del receptor, condición de pago y todos los totales.
+- Los campos sin corrección toman la lectura nueva, con su confianza.
+- Si los ítems están corregidos, se quedan exactamente como la persona los dejó (editados, agregados o quitados) y los ítems nuevos del modelo se descartan; si no, la lectura nueva reemplaza a los ítems activos.
+- Lo que está fuera de los ocho campos curados (datos crudos, código de error) sale siempre de la lectura nueva. Un CDC que el modelo no lee no borra el CDC guardado.
+- El resultado (`confirmed` o `needs_review`) se decide sobre los datos ya mezclados: validaciones, campos del emisor y artículos sin subtotal se evalúan con los valores humanos. La confianza global es la de la lectura nueva: si queda bajo el umbral, el documento vuelve a `needs_review` con `low_confidence` y se confirma con `confirm: true`.
+- La entrada de auditoría `received_document.reprocess_requested` lista en `preservedCorrections` los campos cuyas correcciones se conservan.
+
+Eventos: un documento que ya estuvo `confirmed` y se confirma otra vez tras reprocesar emite `reception.document.updated` con `actor` `system` (nunca un segundo `confirmed`); si queda en revisión emite `reception.document.needs_review`; un fallo, `reception.document.extraction_failed`. `confirmed_at` conserva la primera confirmación.
+
+Un doble clic es seguro: el segundo pedido mientras el trabajo está en cola responde `202`, no crea otro trabajo y no agrega otra entrada de auditoría. Cada pedido aceptado que hizo trabajo (un trabajo nuevo, o la relectura del XML) deja una entrada de auditoría (`received_document.reprocess_requested` o `received_document.reprocessed`). La versión del documento sube cuando el worker lo reclama, como en cualquier extracción. Errores: `404 not_found` (también de otro tenant), `409 artifact_not_available` (sin archivo guardado, o el archivo ya no está en el almacenamiento), `503 queue_unavailable` y `503 storage_unavailable` (cualquier falla del almacenamiento).
+
 ## Eventos de webhook
 
 Registre un endpoint con `POST /v1/webhooks/endpoints` (`url` y `events`, scope `webhooks:write`). La firma, los reintentos y el formato del sobre son los de [`webhooks.md`](webhooks.md). Los eventos de recepción:
@@ -252,13 +279,13 @@ Registre un endpoint con `POST /v1/webhooks/endpoints` (`url` y `events`, scope 
 | `reception.document.needs_review` | El documento queda en `needs_review` y el ERP debe corregirlo. Lleva `reasons` |
 | `reception.document.confirmed` | El documento pasa a `confirmed` (al subirlo o por `PATCH` con `confirm`) |
 | `reception.document.extraction_failed` | No se pudo leer el archivo subido |
-| `reception.document.updated` | Se edita un documento ya `confirmed`. Lleva `actor` |
+| `reception.document.updated` | Se edita un documento ya `confirmed`, o se lo confirma otra vez tras reprocesarlo. Lleva `actor` |
 
 La carga trae identificadores, estado, versión y un enlace, **nunca datos fiscales**: léalos con `GET`.
 
 ### Contrato del eco
 
-`data.version` es la versión **posterior** al cambio y `data.status` el estado resultante. Para `updated`, `data.actor` dice quién lo hizo: `{ "type": "api_key", "id": "<id de la API key>" }`, `{ "type": "portal" }` o `{ "type": "system" }`. Hoy el único actor que produce eventos es la API key.
+`data.version` es la versión **posterior** al cambio y `data.status` el estado resultante. Para `updated`, `data.actor` dice quién lo hizo: `{ "type": "api_key", "id": "<id de la API key>" }`, `{ "type": "portal" }` o `{ "type": "system" }`. Hoy el actor de un `PATCH` es la API key; la reextracción confirmada otra vez es del `system`.
 
 #### Ignorar el eco de sus cambios
 
@@ -329,17 +356,18 @@ Todos los errores usan `{ "statusCode", "code", "message" }` más campos extra s
 | `403` | n/a | La key no tiene el scope de la ruta | Pedir el scope al operador |
 | `404` | `not_found` | El documento no existe, es de otro tenant, o (en artefacto) no tiene archivo | Verificar el id |
 | `409` | `version_conflict` | La `version` enviada no es la actual. Trae `current_version` | Releer y reintentar |
-| `409` | `invalid_state` | `PATCH` sobre un documento que no está en `needs_review` ni `confirmed`. Trae `status` | No reintentar igual |
+| `409` | `invalid_state` | `PATCH` sobre un documento que no está en `needs_review` ni `confirmed`, o reproceso de uno que está en `needs_review` o `confirmed`. Trae `status` | No reintentar igual |
+| `409` | `artifact_not_available` | Reproceso de un documento sin archivo guardado, o cuyo archivo ya no está en el almacenamiento | Subir el archivo de nuevo |
 | `413` | `payload_too_large` | El archivo supera `RECEPTION_MAX_UPLOAD_BYTES` | Enviar un archivo menor |
 | `415` | `unsupported_media_type` | Los bytes no son XML de SIFEN, PDF, PNG ni JPEG | Enviar un archivo soportado |
 | `422` | `unsupported_source` | Solo CDC (`{ "cdc": ... }`): aún no se procesa. Cualquier otro contenido que no sea XML de SIFEN, PDF, PNG ni JPEG responde `415` | Enviar el archivo |
 | `422` | `empty_upload` | Archivo vacío | Enviar el archivo |
 | `422` | `invalid_request` | Falta la parte `file` en `multipart`, o el JSON no trae un `xml` de tipo cadena | Corregir la petición |
-| `422` | `extraction_failed` | El XML no se pudo leer como documento SIFEN soportado. Trae `document_id` (el archivo queda guardado) | Revisar el archivo; no hay reproceso por API todavía |
+| `422` | `extraction_failed` | El XML no se pudo leer como documento SIFEN soportado. Trae `document_id` (el archivo queda guardado) | Revisar el archivo; luego [reprocesar](#reprocesar) o subir uno corregido |
 | `422` | `validation_failed` | `PATCH` revalidado falló. Trae `reasons`; no se guardó nada | Corregir los motivos |
 | `422` | `invalid_correction` | `position` desconocida, editar o re-agregar un ítem eliminado, o un nombre de `reviewed_fields` que no es uno de los 8 campos | Corregir la petición |
 | `503` | `storage_unavailable` | El almacenamiento de objetos no está configurado o no responde | Avisar al operador |
-| `503` | `queue_unavailable` | PDF o foto: la cola de extracción no está disponible. Trae `document_id`; el archivo quedó guardado | Reintentar la misma subida más tarde |
+| `503` | `queue_unavailable` | PDF o foto: la cola de extracción no está disponible. En la subida trae `document_id` y el archivo quedó guardado | Reintentar la misma subida, o el reproceso, más tarde |
 | `503` | `service_unavailable` | La recepción no está disponible (sin base de datos) | Reintentar; avisar al operador |
 
 ## Privacidad
@@ -349,7 +377,7 @@ El XML de SIFEN se procesa dentro de la plataforma. Al extraer **PDF y fotos**, 
 ## Alcance actual y límites conocidos
 
 - XML de SIFEN, PDF y fotos (PNG, JPEG). La consulta por CDC está planificada (`422 unsupported_source`).
-- No hay ruta para reprocesar un documento en `extraction_failed`.
+- El reproceso no admite `needs_review` ni `confirmed`: volver a extraer un documento ya revisado exige un cambio de la máquina de estados que está pendiente de decisión. Mientras tanto se corrige con `PATCH`.
 - El portal es de solo lectura: no sube, corrige ni confirma. Hoy tampoco genera eventos `portal` ni `system`.
 - El `POST` no usa `Idempotency-Key`; la deduplicación es por contenido y por CDC.
 - No hay `DELETE`: los ítems se eliminan de forma lógica y el documento no se elimina.

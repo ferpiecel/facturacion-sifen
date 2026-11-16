@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   loadAutoConfirmThreshold,
+  loadExtractionDailyCap,
   loadExtractionStaleAfterMs,
   loadReceptionExtractionConfig,
 } from './reception-extraction-config.js';
@@ -164,6 +165,24 @@ describe('loadExtractionStaleAfterMs', () => {
   it.each(['59999', '86400001', '1.5', 'abc', '-1'])('rejects %s and names the variable', (v) => {
     expect(() => loadExtractionStaleAfterMs({ RECEPTION_EXTRACTION_STALE_AFTER_MS: v })).toThrow(
       'RECEPTION_EXTRACTION_STALE_AFTER_MS',
+    );
+  });
+});
+
+describe('loadExtractionDailyCap', () => {
+  it('defaults to 200 and reads the variable', () => {
+    expect(loadExtractionDailyCap({})).toBe(200);
+    expect(loadExtractionDailyCap({ RECEPTION_EXTRACTION_DAILY_CAP: ' 50 ' })).toBe(50);
+    expect(loadExtractionDailyCap({ RECEPTION_EXTRACTION_DAILY_CAP: '' })).toBe(200);
+  });
+
+  it('ignores invalid worker-only variables', () => {
+    expect(loadExtractionDailyCap({ RECEPTION_EXTRACTION_TIMEOUT_MS: 'abc' })).toBe(200);
+  });
+
+  it.each(['0', '-1', '1.5', 'abc', '1e3', '1000001'])('rejects %s and names the variable', (v) => {
+    expect(() => loadExtractionDailyCap({ RECEPTION_EXTRACTION_DAILY_CAP: v })).toThrow(
+      'RECEPTION_EXTRACTION_DAILY_CAP',
     );
   });
 });

@@ -2,10 +2,12 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type {
-  ReceivedDocumentSummary,
-  ReceivedDocumentsPage,
-  ReceptionClient,
+import { StatusBadge } from '../../design-system/components/status-badge';
+import {
+  RECEIVED_DOCUMENT_STATUSES,
+  type ReceivedDocumentSummary,
+  type ReceivedDocumentsPage,
+  type ReceptionClient,
 } from './reception-client';
 import { ReceivedList } from './received-list';
 
@@ -119,6 +121,78 @@ describe('ReceivedList', () => {
     await user.click(screen.getByRole('button', { name: 'Anterior' }));
     expect(await within(await screen.findByRole('list')).findByText('Confirmado')).toBeVisible();
     expect(list).toHaveBeenLastCalledWith({ limit: 20 });
+  });
+
+  it('resets the cursor when the filter changes and pages with the filter active', async () => {
+    const user = userEvent.setup();
+    const list = vi.fn((query: Parameters<ReceptionClient['list']>[0]) => {
+      const items = [query.cursor ? OTHER : DOC];
+      const next_cursor = query.cursor ? null : query.status ? 'f2' : 'c2';
+      return Promise.resolve({ kind: 'ok' as const, page: { items, next_cursor } });
+    });
+    render(<ReceivedList client={fakeClient(list)} />);
+    await screen.findByRole('list');
+    await user.click(screen.getByRole('button', { name: 'Siguiente' }));
+    await waitFor(() => {
+      expect(list).toHaveBeenLastCalledWith({ cursor: 'c2', limit: 20 });
+    });
+    await within(await screen.findByRole('list')).findByText('Requiere revisión');
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Estado' }), 'confirmed');
+    await waitFor(() => {
+      expect(list).toHaveBeenLastCalledWith({ status: 'confirmed', limit: 20 });
+    });
+    await within(await screen.findByRole('list')).findByText('Confirmado');
+    expect(screen.getByRole('button', { name: 'Anterior' })).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: 'Siguiente' }));
+    await waitFor(() => {
+      expect(list).toHaveBeenLastCalledWith({ status: 'confirmed', cursor: 'f2', limit: 20 });
+    });
+  });
+
+  it('shows placeholders for missing issuer, number, date and total', async () => {
+    render(<ReceivedList client={fakeClient()} />);
+
+    const rows = within(await screen.findByRole('list')).getAllByRole('listitem');
+    expect(within(rows[1]).getByText('Emisor sin identificar')).toBeVisible();
+    expect(within(rows[1]).getByText('Sin RUC')).toBeVisible();
+    expect(within(rows[1]).getByText('Sin número')).toBeVisible();
+    expect(within(rows[1]).getAllByText('-')).toHaveLength(2);
+  });
+
+  it('offers exactly the known statuses, with the same label as the badge', async () => {
+    render(<ReceivedList client={fakeClient()} />);
+    await screen.findByRole('list');
+
+    const options = within(screen.getByRole('combobox', { name: 'Estado' })).getAllByRole('option');
+    expect(options.map((o) => o.getAttribute('value'))).toEqual([
+      '',
+      ...RECEIVED_DOCUMENT_STATUSES,
+    ]);
+    for (const status of RECEIVED_DOCUMENT_STATUSES) {
+      const badge = render(<StatusBadge status={status} />);
+      const label = badge.container.textContent;
+      badge.unmount();
+      expect(label).not.toBe('Desconocido');
+      expect(options.find((o) => o.getAttribute('value') === status)?.textContent).toBe(label);
+    }
+  });
+
+  it('shows the error with a retry when a refresh fails after the session was lost', async () => {
+    const user = userEvent.setup();
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce({ kind: 'unauthenticated' })
+      .mockResolvedValue({ kind: 'unavailable' });
+    render(<ReceivedList client={fakeClient(list)} />);
+    await waitFor(() => {
+      expect(replace).toHaveBeenCalledWith('/login');
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Actualizar datos' }));
+
+    expect(await screen.findByText('No pudimos cargar los documentos recibidos.')).toBeVisible();
   });
 
   it('explains an empty result', async () => {

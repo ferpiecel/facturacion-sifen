@@ -7,6 +7,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { StatusBadge } from '../../design-system/components/status-badge';
 import { useRemote } from '../documents/use-remote';
 import {
+  RECEIVED_DOCUMENT_STATUSES,
   receptionClient,
   type ReceivedDocumentSummary,
   type ReceptionClient,
@@ -14,15 +15,19 @@ import {
 
 const PAGE_SIZE = 20;
 
-/** Lifecycle states of a received document (`received-document-status.ts` of the API), with the portal label. */
+/** Filter labels, one per known status (exhaustive by type); a spec keeps them equal to the `StatusBadge` ones. */
+const STATUS_LABELS: Record<(typeof RECEIVED_DOCUMENT_STATUSES)[number], string> = {
+  received: 'Recibido',
+  extracting: 'Extrayendo datos',
+  extracted: 'Datos extraídos',
+  needs_review: 'Requiere revisión',
+  extraction_failed: 'Extracción fallida',
+  confirmed: 'Confirmado',
+};
+
 const STATUS_OPTIONS: readonly { value: string; label: string }[] = [
   { value: '', label: 'Todos' },
-  { value: 'received', label: 'Recibido' },
-  { value: 'extracting', label: 'Extrayendo datos' },
-  { value: 'extracted', label: 'Datos extraídos' },
-  { value: 'needs_review', label: 'Requiere revisión' },
-  { value: 'extraction_failed', label: 'Extracción fallida' },
-  { value: 'confirmed', label: 'Confirmado' },
+  ...RECEIVED_DOCUMENT_STATUSES.map((value) => ({ value, label: STATUS_LABELS[value] })),
 ];
 
 const ARROW =

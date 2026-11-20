@@ -8,7 +8,17 @@ import { createPortalHttp, type Failure, type PortalHttpOptions } from '../docum
 
 export type { FetchLike } from '../auth/auth-client';
 
-/** Lifecycle state; the portal maps unknown values to a neutral label. */
+/** Known lifecycle states of a received document (`received-document-status.ts` of the API), in lifecycle order. */
+export const RECEIVED_DOCUMENT_STATUSES = [
+  'received',
+  'extracting',
+  'extracted',
+  'needs_review',
+  'extraction_failed',
+  'confirmed',
+] as const;
+
+/** Lifecycle state on the wire; the portal maps unknown values to a neutral label. */
 export type ReceivedDocumentStatus = string;
 
 export interface ReceivedDocumentSummary {

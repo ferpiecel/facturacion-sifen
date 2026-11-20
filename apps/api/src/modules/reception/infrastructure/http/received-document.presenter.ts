@@ -64,7 +64,13 @@ export function presentReceivedDocumentPage(page: {
   return { items: page.items.map(presentReceivedDocumentSummary), next_cursor: page.nextCursor };
 }
 
-export function presentReceivedDocumentDetail(detail: ReceivedDocumentDetail) {
+export const API_RECEIVED_DOCUMENTS_PATH = '/v1/received-documents';
+
+/** `artifactBasePath`: route prefix the caller can actually reach (`/v1/...` with an API key, `/portal/...` in the portal). */
+export function presentReceivedDocumentDetail(
+  detail: ReceivedDocumentDetail,
+  artifactBasePath: string = API_RECEIVED_DOCUMENTS_PATH,
+) {
   const { document, header, artifact } = detail;
   return {
     id: document.id,
@@ -162,7 +168,7 @@ export function presentReceivedDocumentDetail(detail: ReceivedDocumentDetail) {
       page_count: artifact.pageCount,
     },
     /** Path of the authenticated stream endpoint; `.../artifact-url` returns a direct link. */
-    artifact_url: artifact ? `/v1/received-documents/${document.id}/artifact` : null,
+    artifact_url: artifact ? `${artifactBasePath}/${document.id}/artifact` : null,
     created_at: detail.createdAt.toISOString(),
     updated_at: detail.updatedAt.toISOString(),
   };

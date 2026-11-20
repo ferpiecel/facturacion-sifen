@@ -1,5 +1,5 @@
 /**
- * Browser client of the READ-ONLY portal received-documents API (`GET /portal/received-documents[/:id]`, R7.1).
+ * Browser client of the READ-ONLY portal received-documents API (`GET /portal/received-documents[/:id[/artifact]]`, R7.1, R7.1b).
  * Same-origin proxy (`/api/portal/*`, see `security/api-proxy.ts`) and the same 401 recovery as the documents
  * client (one `ensureSession` and one retry). Wire names are the API's snake_case (`received-document.presenter.ts`).
  * There is deliberately no write method: uploads, corrections and reprocessing are API-key only.
@@ -64,7 +64,14 @@ export interface ReceivedFieldConfidence {
   corrected_at: string | null;
 }
 
-export interface ReceivedDocumentDetail extends Omit<ReceivedDocumentSummary, 'issuer'> {
+/**
+ * The detail is NOT a superset of the summary: it has no `has_artifact` (use `artifact`), `total_amount` or
+ * `total_vat` (use `totals`), and its `issuer` is richer.
+ */
+export interface ReceivedDocumentDetail extends Omit<
+  ReceivedDocumentSummary,
+  'issuer' | 'has_artifact' | 'total_amount' | 'total_vat'
+> {
   needs_review_reasons: string[];
   extraction_error_code: string | null;
   extraction_attempts: number;
@@ -124,7 +131,7 @@ export interface ReceivedDocumentDetail extends Omit<ReceivedDocumentSummary, 'i
     original_name: string | null;
     page_count: number | null;
   } | null;
-  /** Authenticated stream path of the stored artifact, or `null` without one. */
+  /** API path (`/portal/received-documents/:id/artifact`) of the stored artifact, or `null` without one. */
   artifact_url: string | null;
 }
 
@@ -149,6 +156,8 @@ export type ReceivedDetailResult =
 export interface ReceptionClient {
   list: (query: ReceivedDocumentsQuery) => Promise<ReceivedListResult>;
   detail: (id: string) => Promise<ReceivedDetailResult>;
+  /** Same-origin URL that streams the stored artifact (session cookie); for an `<a>`, `<img>` or `<iframe>`. */
+  artifactUrl: (id: string) => string;
 }
 
 type Options = PortalHttpOptions & { baseUrl?: string };
@@ -177,6 +186,8 @@ export function createReceptionClient({
   const { run } = createPortalHttp(http);
 
   return {
+    artifactUrl: (id) => `${baseUrl}/${encodeURIComponent(id)}/artifact`,
+
     list: (query) => {
       const params = new URLSearchParams();
       for (const [key, wire] of TEXT_FILTERS) {

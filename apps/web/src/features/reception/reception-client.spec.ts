@@ -115,7 +115,19 @@ describe('reception client: list', () => {
 });
 
 describe('reception client: detail', () => {
-  const DETAIL = { ...ITEM, needs_review_reasons: [], items: [], field_confidences: [] };
+  /** The API detail has no `has_artifact`, `total_amount` or `total_vat` (it carries `artifact` and `totals`). */
+  const DETAIL = {
+    ...Object.fromEntries(
+      Object.entries(ITEM).filter(
+        ([key]) => !['has_artifact', 'total_amount', 'total_vat'].includes(key),
+      ),
+    ),
+    needs_review_reasons: [],
+    items: [],
+    field_confidences: [],
+    artifact: null,
+    artifact_url: null,
+  };
 
   it('fetches the document by id', async () => {
     const { client, fetchImpl } = setup(json(DETAIL));
@@ -138,6 +150,15 @@ describe('reception client: detail', () => {
   });
 });
 
+describe('reception client: artifact link', () => {
+  it('builds the same-origin portal URL that streams the artifact, encoding the id', () => {
+    const { client, fetchImpl } = setup();
+
+    expect(client.artifactUrl('doc 1')).toBe('/api/portal/received-documents/doc%201/artifact');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
 describe('reception client: read-only', () => {
   it('exposes only list and detail, and only issues GET requests', async () => {
     const { client, fetchImpl } = setup(json(PAGE), json({ items: [] }));
@@ -145,7 +166,7 @@ describe('reception client: read-only', () => {
     await client.list({});
     await client.detail('d1');
 
-    expect(Object.keys(client).sort()).toEqual(['detail', 'list']);
+    expect(Object.keys(client).sort()).toEqual(['artifactUrl', 'detail', 'list']);
     expect(fetchImpl.mock.calls.map(([, init]) => init?.method)).toEqual(['GET', 'GET']);
   });
 });

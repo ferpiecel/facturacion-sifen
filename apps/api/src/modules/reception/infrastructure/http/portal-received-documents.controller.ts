@@ -6,6 +6,7 @@ import {
   Inject,
   Param,
   Query,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import { Public } from '../../../identity/infrastructure/decorators/public.decorator.js';
@@ -15,15 +16,21 @@ import {
   SessionGuard,
   type PortalSession,
 } from '../../../identity/infrastructure/http/session.guard.js';
+import type { createGetArtifact, createGetArtifactUrl } from '../../application/get-artifact.js';
 import type { createGetReceivedDocument } from '../../application/get-received-document.js';
 import type { createListReceivedDocuments } from '../../application/list-received-documents.js';
-import { GET_RECEIVED_DOCUMENT, LIST_RECEIVED_DOCUMENTS } from '../../reception.tokens.js';
+import {
+  GET_RECEIVED_DOCUMENT,
+  GET_RECEPTION_ARTIFACT,
+  GET_RECEPTION_ARTIFACT_URL,
+  LIST_RECEIVED_DOCUMENTS,
+} from '../../reception.tokens.js';
 import {
   presentReceivedDocumentDetail,
   presentReceivedDocumentPage,
 } from './received-document.presenter.js';
 import { receptionProblem } from './reception-http-errors.js';
-import { asBadRequest, notFound, parseId } from './received-documents.controller.js';
+import { asBadRequest, downloadName, notFound, parseId } from './received-documents.controller.js';
 
 /** `@RequireActiveTenant()` guarantees it; the guard runs before any handler. */
 function tenantOf(session: PortalSession): string {
@@ -46,6 +53,10 @@ export class PortalReceivedDocumentsController {
     private readonly listDocuments: ReturnType<typeof createListReceivedDocuments> | null,
     @Inject(GET_RECEIVED_DOCUMENT)
     private readonly getDocument: ReturnType<typeof createGetReceivedDocument> | null,
+    @Inject(GET_RECEPTION_ARTIFACT)
+    private readonly getArtifact: ReturnType<typeof createGetArtifact> | null,
+    @Inject(GET_RECEPTION_ARTIFACT_URL)
+    private readonly getArtifactUrl: ReturnType<typeof createGetArtifactUrl> | null,
   ) {}
 
   @Get()
@@ -65,7 +76,41 @@ export class PortalReceivedDocumentsController {
   async byId(@Param('id') id: string, @CurrentSession() session: PortalSession) {
     const detail = await this.require(this.getDocument)(tenantOf(session), parseId(id));
     if (detail === null) throw notFound();
-    return presentReceivedDocumentDetail(detail);
+    return presentReceivedDocumentDetail(detail, '/portal/received-documents');
+  }
+
+  /** The stored bytes, as uploaded; same hardening as `/v1` (`nosniff`, inline with a sanitized name). */
+  @Get(':id/artifact')
+  @Header('Cache-Control', 'private, no-store')
+  @Header('X-Content-Type-Options', 'nosniff')
+  async artifact(@Param('id') id: string, @CurrentSession() session: PortalSession) {
+    const documentId = parseId(id);
+    const download = await this.requireStorage(this.getArtifact)(tenantOf(session), documentId);
+    if (download.kind === 'not-found') throw notFound();
+    return new StreamableFile(download.bytes, {
+      type: download.contentType,
+      disposition: `inline; filename="${downloadName(download.originalName, documentId, download.contentType)}"`,
+    });
+  }
+
+  /** A time-limited direct link to the stored bytes. */
+  @Get(':id/artifact-url')
+  @Header('Cache-Control', 'private, no-store')
+  async artifactUrl(@Param('id') id: string, @CurrentSession() session: PortalSession) {
+    const link = await this.requireStorage(this.getArtifactUrl)(tenantOf(session), parseId(id));
+    if (link.kind === 'not-found') throw notFound();
+    return { url: link.url, expires_in_seconds: link.expiresInSeconds };
+  }
+
+  private requireStorage<T>(useCase: T | null): T {
+    if (useCase === null) {
+      throw receptionProblem(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        'storage_unavailable',
+        'Document storage is not available',
+      );
+    }
+    return useCase;
   }
 
   private require<T>(useCase: T | null): T {

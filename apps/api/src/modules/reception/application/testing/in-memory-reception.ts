@@ -19,6 +19,7 @@ import {
   ReceivedDocumentNotFoundError,
   VersionConflictError,
 } from '../ports/received-document-repository.port.js';
+import type { ExtractionUsageStore } from '../ports/extraction-usage-store.port.js';
 import type { ExtractionJob, ReceptionJobQueue } from '../ports/reception-job-queue.port.js';
 import { ReceptionQueueUnavailableError } from '../ports/reception-job-queue.port.js';
 import type { StorageProvider } from '../ports/storage-provider.port.js';
@@ -270,5 +271,23 @@ export class FakeJobQueue implements ReceptionJobQueue {
     );
     if (!known) this.jobs.push(job); // idempotent per (document, attempt), like the real adapter
     return Promise.resolve({ enqueued: !known });
+  }
+}
+
+export class InMemoryExtractionUsageStore implements ExtractionUsageStore {
+  readonly used = new Map<string, number>();
+  releaseFails = false;
+  tryConsume(tenantId: string, usageDate: string, cap: number): Promise<number | null> {
+    const key = `${tenantId}|${usageDate}`;
+    const current = this.used.get(key) ?? 0;
+    if (current >= cap) return Promise.resolve(null);
+    this.used.set(key, current + 1);
+    return Promise.resolve(current + 1);
+  }
+  release(tenantId: string, usageDate: string): Promise<void> {
+    if (this.releaseFails) return Promise.reject(new Error('db down'));
+    const key = `${tenantId}|${usageDate}`;
+    this.used.set(key, Math.max((this.used.get(key) ?? 0) - 1, 0));
+    return Promise.resolve();
   }
 }

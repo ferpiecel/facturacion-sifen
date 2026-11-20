@@ -34,6 +34,7 @@ export {
   receivedDocumentFieldConfidences,
   receivedDocumentItems,
   receivedDocuments,
+  receptionExtractionUsage,
   rucBlocks,
   rucLookupCache,
   SUBSCRIPTION_STATUSES,

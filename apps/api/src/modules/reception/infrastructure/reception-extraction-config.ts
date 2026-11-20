@@ -106,6 +106,25 @@ export function loadExtractionStaleAfterMs(env: Env): number {
   return parsed;
 }
 
+export const DEFAULT_EXTRACTION_DAILY_CAP = 200;
+const MAX_DAILY_CAP = 1_000_000;
+
+/**
+ * Extractions a tenant may queue per UTC day (R5.9); read by the API (upload, reprocess), not by
+ * the worker, and validated on its own like the threshold.
+ */
+export function loadExtractionDailyCap(env: Env): number {
+  const value = read(env, 'RECEPTION_EXTRACTION_DAILY_CAP');
+  if (value === undefined) return DEFAULT_EXTRACTION_DAILY_CAP;
+  const parsed = /^\d+$/.test(value) ? Number(value) : Number.NaN;
+  if (!(parsed >= 1 && parsed <= MAX_DAILY_CAP)) {
+    throw new Error(
+      `RECEPTION_EXTRACTION_DAILY_CAP must be an integer between 1 and ${String(MAX_DAILY_CAP)}.`,
+    );
+  }
+  return parsed;
+}
+
 /**
  * Parses the extraction variables, failing fast on invalid values. A missing `ANTHROPIC_API_KEY`
  * disables extraction instead of failing. Error messages name variables, never their values.

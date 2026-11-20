@@ -2115,6 +2115,7 @@ export const TENANT_TABLES = [
   'received_document_field_confidences',
   'received_document_items',
   'received_documents',
+  'reception_extraction_usage',
   'tenant_document_sequences',
   'tenant_establishments',
   'tenant_expedition_points',
@@ -2130,3 +2131,26 @@ export const TENANT_TABLES = [
   'webhook_deliveries',
   'webhook_endpoints',
 ] as const;
+
+/**
+ * Extractions queued per tenant and UTC day: the daily spend cap of the reception LLM (R5.9,
+ * ADR-0026 point 6). One row per (tenant, day), incremented atomically by the API with an
+ * `INSERT ... ON CONFLICT DO UPDATE ... WHERE used < cap`, so two concurrent uploads can never
+ * both take the last slot. Counters are never deleted by the runtime role.
+ */
+export const receptionExtractionUsage = pgTable(
+  'reception_extraction_usage',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    /** UTC calendar day the extractions were queued. */
+    usageDate: date('usage_date', { mode: 'string' }).notNull(),
+    used: integer('used').notNull().default(0),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.usageDate] }),
+    check('reception_extraction_usage_used_nonneg', sql`${table.used} >= 0`),
+  ],
+);

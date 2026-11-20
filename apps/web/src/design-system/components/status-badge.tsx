@@ -12,7 +12,14 @@ export type DocumentStatus =
   | 'rejected'
   | 'corrected'
   | 'number_voided'
-  | 'cancelled';
+  | 'cancelled'
+  // Received documents (reception lifecycle).
+  | 'received'
+  | 'extracting'
+  | 'extracted'
+  | 'needs_review'
+  | 'extraction_failed'
+  | 'confirmed';
 
 type Tone = 'neutral' | 'info' | 'success' | 'warning' | 'danger';
 
@@ -55,6 +62,12 @@ const STATUSES: Record<DocumentStatus, { label: string; tone: Tone }> = {
   corrected: { label: 'Corregido', tone: 'neutral' },
   number_voided: { label: 'Número inutilizado', tone: 'neutral' },
   cancelled: { label: 'Cancelado', tone: 'neutral' },
+  received: { label: 'Recibido', tone: 'neutral' },
+  extracting: { label: 'Extrayendo datos', tone: 'info' },
+  extracted: { label: 'Datos extraídos', tone: 'info' },
+  needs_review: { label: 'Requiere revisión', tone: 'warning' },
+  extraction_failed: { label: 'Extracción fallida', tone: 'danger' },
+  confirmed: { label: 'Confirmado', tone: 'success' },
 };
 
 const UNKNOWN = { label: 'Desconocido', tone: 'neutral' } as const;
@@ -69,7 +82,7 @@ interface StatusBadgeProps {
   className?: string;
 }
 
-/** SIFEN document state. The text label carries the meaning; color only reinforces it. */
+/** SIFEN document or received-document state. The text label carries the meaning; color only reinforces it. */
 export function StatusBadge({ status, className }: StatusBadgeProps) {
   const { label, tone } = isDocumentStatus(status) ? STATUSES[status] : UNKNOWN;
 

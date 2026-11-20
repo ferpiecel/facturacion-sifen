@@ -14,6 +14,12 @@ const CASES = [
   ['corrected', 'Corregido', 'neutral'],
   ['number_voided', 'Número inutilizado', 'neutral'],
   ['cancelled', 'Cancelado', 'neutral'],
+  ['received', 'Recibido', 'neutral'],
+  ['extracting', 'Extrayendo datos', 'info'],
+  ['extracted', 'Datos extraídos', 'info'],
+  ['needs_review', 'Requiere revisión', 'warning'],
+  ['extraction_failed', 'Extracción fallida', 'danger'],
+  ['confirmed', 'Confirmado', 'success'],
 ] as const;
 
 describe('StatusBadge', () => {

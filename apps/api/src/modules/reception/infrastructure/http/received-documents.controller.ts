@@ -391,15 +391,15 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const invalidRequest = (message: string) =>
   receptionProblem(HttpStatus.BAD_REQUEST, 'invalid_request', message);
 
-const notFound = () =>
+export const notFound = () =>
   receptionProblem(HttpStatus.NOT_FOUND, 'not_found', 'Received document not found');
 
-function parseId(raw: string): string {
+export function parseId(raw: string): string {
   if (!UUID.test(raw)) throw invalidRequest('Received document id must be a UUID');
   return raw;
 }
 
-function asBadRequest(error: unknown): unknown {
+export function asBadRequest(error: unknown): unknown {
   return error instanceof InvalidReceivedDocumentQueryError ? invalidRequest(error.message) : error;
 }
 

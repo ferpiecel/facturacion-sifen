@@ -388,7 +388,7 @@ El XML de SIFEN se procesa dentro de la plataforma. Al extraer **PDF y fotos**, 
 
 - XML de SIFEN, PDF y fotos (PNG, JPEG). La consulta por CDC está planificada (`422 unsupported_source`).
 - El reproceso no admite `needs_review` ni `confirmed`: volver a extraer un documento ya revisado exige un cambio de la máquina de estados que está pendiente de decisión. Mientras tanto se corrige con `PATCH`.
-- El portal es de solo lectura: no sube, corrige ni confirma. Hoy tampoco genera eventos `portal` ni `system`.
+- El portal es de solo lectura: no sube, corrige ni confirma. Expone `GET /portal/received-documents` y `GET /portal/received-documents/{id}` con la sesión del portal (mismas formas que `/v1`, sin escrituras); no forman parte del contrato público (`openapi.json`). Hoy tampoco genera eventos `portal` ni `system`.
 - El `POST` no usa `Idempotency-Key`; la deduplicación es por contenido y por CDC.
 - No hay `DELETE`: los ítems se eliminan de forma lógica y el documento no se elimina.
 - Los eventos se emiten una vez por documento, tipo y versión, y se entregan al menos una vez: deduplique por `id`.

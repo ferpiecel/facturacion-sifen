@@ -59,7 +59,7 @@ function fakeClient(
 }
 
 describe('ReceivedList', () => {
-  it('shows a loading state, then one row per document without any link', async () => {
+  it('shows a loading state, then one row per document linking to its detail', async () => {
     const client = fakeClient();
     render(<ReceivedList client={client} />);
 
@@ -67,7 +67,8 @@ describe('ReceivedList', () => {
     const list = await screen.findByRole('list', { name: 'Documentos recibidos' });
     const rows = within(list).getAllByRole('listitem');
     expect(rows).toHaveLength(2);
-    expect(within(list).queryByRole('link')).toBeNull();
+    const links = within(list).getAllByRole('link');
+    expect(links.map((l) => l.getAttribute('href'))).toEqual(['/recibidos/d1', '/recibidos/d2']);
     expect(within(rows[0]).getByText('Proveedor SA')).toBeVisible();
     expect(within(rows[0]).getByText('001-001-0000123')).toBeVisible();
     expect(within(rows[0]).getByText('02/10/2026')).toBeVisible();

@@ -1,6 +1,7 @@
 'use client';
 
 import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
+import Link from 'next/link';
 import { useCallback, useMemo, useState } from 'react';
 
 import { StatusBadge } from '../../design-system/components/status-badge';
@@ -33,32 +34,37 @@ const formatDay = (day: string | null) => (day ? day.split('-').reverse().join('
 
 function ReceivedRow({ doc }: { doc: ReceivedDocumentSummary }) {
   return (
-    <li className="flex flex-wrap items-center justify-between gap-3 p-4 hover:bg-surface-container-low">
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="font-body-md text-body-md font-semibold text-on-surface">
-          {doc.issuer.name ?? 'Emisor sin identificar'}
-        </span>
-        <span className="font-label-sm text-label-sm text-on-surface-variant">
-          {doc.issuer.ruc ?? 'Sin RUC'}
-        </span>
-        <span className="font-label-sm text-label-sm text-on-surface-variant">
-          {doc.document_number ?? 'Sin número'}
-        </span>
-      </div>
-      <div className="flex items-center gap-4">
-        <span className="font-label-md text-label-md text-on-surface-variant">
-          {formatDay(doc.issued_on)}
-        </span>
-        <span className="font-body-md text-body-md font-bold text-on-surface">
-          {doc.total_amount === null ? '-' : `${doc.total_amount} ${doc.currency ?? ''}`.trim()}
-        </span>
-        {!doc.is_own_receiver && (
-          <span className="rounded-full bg-error-container px-2 py-0.5 font-label-sm text-label-sm font-semibold text-on-error-container">
-            Otro receptor
+    <li className="hover:bg-surface-container-low">
+      <Link
+        href={`/recibidos/${encodeURIComponent(doc.id)}`}
+        className="flex flex-wrap items-center justify-between gap-3 p-4"
+      >
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="font-body-md text-body-md font-semibold text-on-surface">
+            {doc.issuer.name ?? 'Emisor sin identificar'}
           </span>
-        )}
-        <StatusBadge status={doc.status} />
-      </div>
+          <span className="font-label-sm text-label-sm text-on-surface-variant">
+            {doc.issuer.ruc ?? 'Sin RUC'}
+          </span>
+          <span className="font-label-sm text-label-sm text-on-surface-variant">
+            {doc.document_number ?? 'Sin número'}
+          </span>
+        </div>
+        <div className="flex items-center gap-4">
+          <span className="font-label-md text-label-md text-on-surface-variant">
+            {formatDay(doc.issued_on)}
+          </span>
+          <span className="font-body-md text-body-md font-bold text-on-surface">
+            {doc.total_amount === null ? '-' : `${doc.total_amount} ${doc.currency ?? ''}`.trim()}
+          </span>
+          {!doc.is_own_receiver && (
+            <span className="rounded-full bg-error-container px-2 py-0.5 font-label-sm text-label-sm font-semibold text-on-error-container">
+              Otro receptor
+            </span>
+          )}
+          <StatusBadge status={doc.status} />
+        </div>
+      </Link>
     </li>
   );
 }

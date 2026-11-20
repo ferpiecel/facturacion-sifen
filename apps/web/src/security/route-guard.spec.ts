@@ -6,12 +6,16 @@ const AT = '__Host-sifen_at';
 const RT = '__Host-sifen_rt';
 
 describe('guardRoute (cookie presence only; the API stays the authority)', () => {
-  it.each(['/', '/comprobantes', '/seleccionar-empresa', '/comercios'])(
-    'sends %s to /login when there is no session cookie',
-    (path) => {
-      expect(guardRoute(path, new Set())).toEqual({ redirect: '/login' });
-    },
-  );
+  it.each([
+    '/',
+    '/comprobantes',
+    '/seleccionar-empresa',
+    '/comercios',
+    '/recibidos',
+    '/recibidos/6f1b2a64-9c1e-4d0b-8a57-3d2f4c1e9b10',
+  ])('sends %s to /login when there is no session cookie', (path) => {
+    expect(guardRoute(path, new Set())).toEqual({ redirect: '/login' });
+  });
 
   it('lets a user with an access cookie through', () => {
     expect(guardRoute('/', new Set([AT]))).toBeNull();

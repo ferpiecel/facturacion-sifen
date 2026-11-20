@@ -10,13 +10,18 @@ const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const LINK =
   'inline-flex items-center gap-1 rounded bg-surface-container px-3 py-1.5 font-label-md text-label-md font-semibold text-primary hover:bg-surface-container-high';
 
+/** Same normalization as the API controller (`split(';')[0].trim().toLowerCase()`): drops parameters and case. */
+const baseType = (contentType: string) => contentType.split(';')[0].trim().toLowerCase();
+
 /**
  * Read-only viewer of the stored artifact. `href` MUST be `receptionClient.artifactUrl(id)` (never the detail's
  * `artifact_url`, which is the API path). Presentation by content type:
  * - png/jpeg/webp: `<img>` (page CSP `img-src 'self'`).
  * - PDF: open-in-new-tab link plus download, NOT an embed. The page CSP has `object-src 'none'` and
- *   `frame-ancestors 'none'` plus `X-Frame-Options: DENY`, which also apply to the proxied artifact response, so
- *   framing it would need loosening them; a top-level navigation needs no CSP change.
+ *   `frame-ancestors 'none'` plus `X-Frame-Options: DENY`; the `/:path*` headers of `next.config.ts` also match
+ *   `/api/portal/*`, so they add to the controller's `default-src 'none'` on the artifact response. Embedding would
+ *   need loosening them. A top-level navigation is not framed, but it is NOT verified that every built-in PDF
+ *   viewer works under `object-src 'none'`: some may show a blank page. The download always works.
  * - XML and anything else (the server serves these as `attachment`): a download link only, never an embed.
  */
 export function ArtifactViewer({ artifact, href }: { artifact: Artifact; href: string }) {
@@ -28,7 +33,7 @@ export function ArtifactViewer({ artifact, href }: { artifact: Artifact; href: s
     );
   }
   const name = artifact.original_name ?? 'Artefacto del documento';
-  const type = artifact.content_type.toLowerCase();
+  const type = baseType(artifact.content_type);
   return (
     <div className="flex flex-col gap-3">
       {IMAGE_TYPES.has(type) && (

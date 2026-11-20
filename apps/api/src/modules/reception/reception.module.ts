@@ -28,6 +28,8 @@ import {
 import { Libxml2SifenXmlParser } from './infrastructure/adapters/libxml2-sifen-xml-parser.adapter.js';
 import { createS3StorageProvider } from './infrastructure/adapters/s3-storage-provider.adapter.js';
 import { ReceivedDocumentsController } from './infrastructure/http/received-documents.controller.js';
+import { PortalReceivedDocumentsController } from './infrastructure/http/portal-received-documents.controller.js';
+import { PortalAuthModule } from '../identity/portal-auth.module.js';
 import {
   loadReceptionUploadConfig,
   type ReceptionUploadConfig,
@@ -50,7 +52,8 @@ import {
 
 /** Reception bounded context (ADR-0024): intake, extraction and review of received documents. */
 @Module({
-  controllers: [ReceivedDocumentsController],
+  imports: [PortalAuthModule],
+  controllers: [ReceivedDocumentsController, PortalReceivedDocumentsController],
   providers: [
     { provide: RECEPTION_UPLOAD_CONFIG, useFactory: () => loadReceptionUploadConfig(process.env) },
     {

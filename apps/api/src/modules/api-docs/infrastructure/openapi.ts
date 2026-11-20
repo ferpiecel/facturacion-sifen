@@ -26,6 +26,15 @@ const problem = (description: string, schema = 'Problem') => ({
   description,
   content: { 'application/json': { schema: ref(schema) } },
 });
+const quotaExceeded = (description: string) => ({
+  ...problem(description, 'ReceptionProblem'),
+  headers: {
+    'Retry-After': {
+      description: 'Seconds until the next UTC day, when the daily cap counts from zero again',
+      schema: { type: 'integer' },
+    },
+  },
+});
 const json = (description: string, schema: object) => ({
   description,
   content: { 'application/json': { schema } },
@@ -572,6 +581,7 @@ export function buildOpenApiDocument() {
             'The same bytes, or the same CDC, uploaded again answer 200 with the existing document. ' +
             'A CDC-only request answers 422 `unsupported_source` for now. ' +
             'If the extraction queue is down the answer is 503 `queue_unavailable` with the `document_id`: the upload is kept and sending the same bytes again queues it. ' +
+            'Each PDF or photo that gets queued counts against the tenant daily extraction cap (`RECEPTION_EXTRACTION_DAILY_CAP`, default 200 per UTC day); past it the answer is 429 `extraction_quota_exceeded` with `Retry-After` and nothing is stored. XML and duplicates (200) do not count. ' +
             'The maximum upload size is `RECEPTION_MAX_UPLOAD_BYTES` (default 2 MiB, up to 15 MiB). ' +
             'Errors carry a stable `code`.',
           ...secured(['reception:write']),
@@ -621,6 +631,9 @@ export function buildOpenApiDocument() {
             '422': problem(
               '`unsupported_source` (a bare CDC), `extraction_failed` (stored but unreadable; carries `document_id`), `empty_upload` or `invalid_request`',
               'ReceptionProblem',
+            ),
+            '429': quotaExceeded(
+              '`extraction_quota_exceeded`: the tenant used its daily extraction cap (carries `cap` and `retry_after_seconds`)',
             ),
             '503': problem(
               'Document storage is not available (`storage_unavailable`) or the extraction queue is down (`queue_unavailable`, carries `document_id`)',
@@ -759,6 +772,7 @@ export function buildOpenApiDocument() {
             'The result arrives later (`GET /v1/received-documents/{id}` or webhooks). A SIFEN XML that was unreadable (`extraction_failed`) is re-read synchronously: 200 with the new status, or 422 `extraction_failed` when it is still unreadable. ' +
             'A PDF or photo in `needs_review` or `confirmed` is reprocessed too: 202, the job is queued and the worker takes it back to `extracting` (the version moves) and re-extracts it KEEPING the human corrections. A curated field with a correction or review (`corrected_at` set) keeps its value and its `corrected_*`, and only its `extracted_value` and `confidence` refresh; the other fields take the new reading; corrected items stay exactly as left (edited, added or removed). The outcome is decided on the merged data. A document confirmed before announces `reception.document.updated` when it is confirmed again (never a second `confirmed`) and `reception.document.needs_review` when it needs review; the audit entry lists the corrections kept. ' +
             'A SIFEN XML already read (`needs_review` or `confirmed`) is refused (409 `invalid_state`, with `status`): the same bytes cannot read differently. ' +
+            'A reprocess that queues a PDF or photo extraction counts against the daily extraction cap (`RECEPTION_EXTRACTION_DAILY_CAP`): past it the answer is 429 `extraction_quota_exceeded` with `Retry-After`. The XML re-read does not count. ' +
             'The request body is ignored. Every accepted request that did work appends one audit entry.',
           ...secured(['reception:write']),
           parameters: [idParam('Received document')],
@@ -785,6 +799,9 @@ export function buildOpenApiDocument() {
             '422': problem(
               '`extraction_failed`: the XML is still unreadable (carries `document_id`)',
               'ReceptionProblem',
+            ),
+            '429': quotaExceeded(
+              '`extraction_quota_exceeded`: queueing the extraction would pass the tenant daily cap (carries `cap` and `retry_after_seconds`)',
             ),
             '503': problem(
               'Document storage is not available (`storage_unavailable`) or the extraction queue is down (`queue_unavailable`)',
@@ -997,6 +1014,7 @@ export function buildOpenApiDocument() {
                 'artifact_not_available',
                 'validation_failed',
                 'invalid_correction',
+                'extraction_quota_exceeded',
               ],
             },
             message: { type: 'string' },
@@ -1005,6 +1023,14 @@ export function buildOpenApiDocument() {
               description: 'Only with `version_conflict`',
             },
             status: { type: 'string', description: 'Only with `invalid_state`' },
+            cap: {
+              type: 'integer',
+              description: 'Only with `extraction_quota_exceeded`: extractions allowed per UTC day',
+            },
+            retry_after_seconds: {
+              type: 'integer',
+              description: 'Only with `extraction_quota_exceeded`: same value as `Retry-After`',
+            },
             reasons: {
               type: 'array',
               items: { type: 'string' },

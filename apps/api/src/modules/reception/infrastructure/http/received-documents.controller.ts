@@ -40,6 +40,7 @@ import {
 } from '../../application/reprocess-received-document.js';
 import { ReceptionQueueUnavailableError } from '../../application/ports/reception-job-queue.port.js';
 import { StorageUnavailableError } from '../../application/ports/storage-provider.port.js';
+import { ExtractionQuotaExceededError } from '../../application/extraction-quota.js';
 import type { createGetArtifact, createGetArtifactUrl } from '../../application/get-artifact.js';
 import type { createGetReceivedDocument } from '../../application/get-received-document.js';
 import type { IngestUpload } from '../../application/ingest-upload.js';
@@ -124,7 +125,8 @@ export class ReceivedDocumentsController {
    * is unreadable); PDF, PNG and JPEG are stored and queued for asynchronous extraction (202 with
    * `Location`, status `received`; 200 when the same bytes were uploaded before; 503
    * `queue_unavailable` when the job could not be queued, the upload is kept and re-uploading the
-   * same bytes queues it again). A bare CDC and any other bytes answer 422 `unsupported_source`
+   * same bytes queues it again; 429 `extraction_quota_exceeded` with `Retry-After` when the tenant
+   * used its daily extraction cap). A bare CDC and any other bytes answer 422 `unsupported_source`
    * or 415 `unsupported_media_type`.
    */
   @Post()
@@ -168,6 +170,8 @@ export class ReceivedDocumentsController {
           'The extraction queue is not available; the upload was kept, retry the same upload later',
           { document_id: result.document.id },
         );
+      case 'quota_exceeded':
+        throw quotaProblem(reply, result.cap, result.retryAfterSeconds);
       case 'accepted':
         return accepted(reply, HttpStatus.ACCEPTED, result.document);
       case 'duplicate':
@@ -260,7 +264,8 @@ export class ReceivedDocumentsController {
    * queued (a second request while one is queued or running is a no-op 202). SIFEN XML that was
    * unreadable: re-read synchronously, 200 with the new status (422 `extraction_failed` when it is
    * still unreadable). Errors: 404 `not_found`, 409 `artifact_not_available` or `invalid_state`
-   * (with `status`), 503 `queue_unavailable` or `storage_unavailable` (any storage failure).
+   * (with `status`), 429 `extraction_quota_exceeded` (with `Retry-After`) past the daily cap, 503 `queue_unavailable`
+   * or `storage_unavailable` (any storage failure).
    */
   @Post(':id/reprocess')
   @RequireScopes('reception:write')
@@ -283,6 +288,9 @@ export class ReceivedDocumentsController {
       const status = result.kind === 'reprocessed' ? HttpStatus.OK : HttpStatus.ACCEPTED;
       return accepted(reply, status, result.document);
     } catch (error) {
+      if (error instanceof ExtractionQuotaExceededError) {
+        throw quotaProblem(reply, error.cap, error.retryAfterSeconds);
+      }
       throw asReprocessProblem(error);
     }
   }
@@ -425,6 +433,17 @@ function asCorrectionProblem(error: unknown): unknown {
     return receptionProblem(HttpStatus.UNPROCESSABLE_ENTITY, 'invalid_correction', error.message);
   }
   return error;
+}
+
+/** 429 with `Retry-After` until the next UTC day, when the cap counts again. */
+function quotaProblem(reply: HttpReply, cap: number, retryAfterSeconds: number): unknown {
+  reply.header('retry-after', String(retryAfterSeconds));
+  return receptionProblem(
+    HttpStatus.TOO_MANY_REQUESTS,
+    'extraction_quota_exceeded',
+    'The daily extraction quota of the tenant is exhausted; try again after the next UTC day starts',
+    { cap, retry_after_seconds: retryAfterSeconds },
+  );
 }
 
 function asReprocessProblem(error: unknown): unknown {

@@ -92,6 +92,15 @@ Para saber cuándo terminó, escuche los webhooks `reception.document.confirmed`
 
 Si la cola de extracción no está disponible, la respuesta es `503 queue_unavailable` con el `document_id`: el archivo **queda guardado** y el documento en `received`. Volver a subir los mismos bytes lo encola de nuevo (responde `200`). Los servicios sin Redis configurado responden siempre `503 queue_unavailable` para PDF y fotos; el XML no se ve afectado.
 
+### Tope diario de extracciones
+
+Cada PDF o foto que se encola para extracción (una subida nueva o un [reproceso](#reprocesar) que encola un trabajo) consume un cupo del tenant en el día UTC. El tope es `RECEPTION_EXTRACTION_DAILY_CAP` (por defecto 200, ver [configuración](../configuracion.md)). Superado, la respuesta es `429 extraction_quota_exceeded` con el encabezado `Retry-After` (segundos hasta las 00:00 UTC) y los campos `cap` y `retry_after_seconds`; la subida no guarda el archivo ni crea el documento.
+
+- El XML SIFEN no cuenta (no usa el modelo) y sigue funcionando con el tope agotado.
+- Una subida duplicada (los mismos bytes) responde `200` y no consume cupo. Si el duplicado seguía en `received` porque su trabajo nunca se encoló, reencolarlo sí consume cupo; con el tope agotado responde `200` sin encolar y el reproceso lo recupera al día siguiente.
+- Si la cola rechaza el trabajo (`503 queue_unavailable`), el cupo se devuelve.
+- El cupo se toma de forma atómica: dos subidas simultáneas no pueden pasar el tope.
+
 ### Duplicados
 
 - **Mismo contenido** (sha256 de los bytes): responde `200` con el documento existente, sin crear nada ni emitir eventos.
@@ -268,7 +277,7 @@ Un campo con corrección o revisión humana (`corrected_at` en su confianza, ver
 
 Eventos: un documento que ya estuvo `confirmed` y se confirma otra vez tras reprocesar emite `reception.document.updated` con `actor` `system` (nunca un segundo `confirmed`); si queda en revisión emite `reception.document.needs_review`; un fallo, `reception.document.extraction_failed`. `confirmed_at` conserva la primera confirmación.
 
-Un doble clic es seguro: el segundo pedido mientras el trabajo está en cola responde `202`, no crea otro trabajo y no agrega otra entrada de auditoría. Cada pedido aceptado que hizo trabajo (un trabajo nuevo, o la relectura del XML) deja una entrada de auditoría (`received_document.reprocess_requested` o `received_document.reprocessed`). La versión del documento sube cuando el worker lo reclama, como en cualquier extracción. Errores: `404 not_found` (también de otro tenant), `409 artifact_not_available` (sin archivo guardado, o el archivo ya no está en el almacenamiento), `503 queue_unavailable` y `503 storage_unavailable` (cualquier falla del almacenamiento).
+Un doble clic es seguro: el segundo pedido mientras el trabajo está en cola responde `202`, no crea otro trabajo, no consume otro cupo y no agrega otra entrada de auditoría (con el tope diario agotado el segundo pedido responde `429 extraction_quota_exceeded`). Un reproceso que encola un PDF o foto consume un cupo del [tope diario](#tope-diario-de-extracciones); la relectura del XML no. Cada pedido aceptado que hizo trabajo (un trabajo nuevo, o la relectura del XML) deja una entrada de auditoría (`received_document.reprocess_requested` o `received_document.reprocessed`). La versión del documento sube cuando el worker lo reclama, como en cualquier extracción. Errores: `404 not_found` (también de otro tenant), `429 extraction_quota_exceeded` (con `Retry-After`), `409 artifact_not_available` (sin archivo guardado, o el archivo ya no está en el almacenamiento), `503 queue_unavailable` y `503 storage_unavailable` (cualquier falla del almacenamiento).
 
 ## Eventos de webhook
 
@@ -366,6 +375,7 @@ Todos los errores usan `{ "statusCode", "code", "message" }` más campos extra s
 | `422` | `extraction_failed` | El XML no se pudo leer como documento SIFEN soportado. Trae `document_id` (el archivo queda guardado) | Revisar el archivo; luego [reprocesar](#reprocesar) o subir uno corregido |
 | `422` | `validation_failed` | `PATCH` revalidado falló. Trae `reasons`; no se guardó nada | Corregir los motivos |
 | `422` | `invalid_correction` | `position` desconocida, editar o re-agregar un ítem eliminado, o un nombre de `reviewed_fields` que no es uno de los 8 campos | Corregir la petición |
+| `429` | `extraction_quota_exceeded` | El tenant agotó su tope diario de extracciones (`RECEPTION_EXTRACTION_DAILY_CAP`). Trae `cap`, `retry_after_seconds` y el encabezado `Retry-After` | Esperar al próximo día UTC o pedir que suban el tope |
 | `503` | `storage_unavailable` | El almacenamiento de objetos no está configurado o no responde | Avisar al operador |
 | `503` | `queue_unavailable` | PDF o foto: la cola de extracción no está disponible. En la subida trae `document_id` y el archivo quedó guardado | Reintentar la misma subida, o el reproceso, más tarde |
 | `503` | `service_unavailable` | La recepción no está disponible (sin base de datos) | Reintentar; avisar al operador |

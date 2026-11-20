@@ -1460,7 +1460,7 @@
           "Reception"
         ],
         "summary": "Upload a received SIFEN XML, PDF or photo",
-        "description": "The processing contract is asynchronous (202). A SIFEN XML is read before the answer, so its body already carries `confirmed` or `needs_review`. A PDF, PNG or JPEG is stored and queued for extraction: the body carries `received` and the result arrives later (`GET /v1/received-documents/{id}` or webhooks): `confirmed`, `needs_review` (reasons include `low_confidence` and `items_without_subtotals`) or `extraction_failed` (`extraction_error_code`: `corrupt_pdf`, `empty_pdf`, `too_many_pages`, `llm_disabled`, `llm_refusal`, `llm_invalid_output`, `llm_provider_error`, `llm_rate_limited`, `duplicate_document`, `artifact_missing`, `internal_error`). A document whose receiver is not the tenant (`is_own_receiver` false) is stored the same way but never produces webhook events. Webhooks `reception.document.needs_review`, `reception.document.confirmed` and `reception.document.extraction_failed` announce the result (see docs/integracion/recepcion.md). Send the bytes as a raw body (`application/xml`, `text/xml`, `application/pdf`, `image/png`, `image/jpeg`), as a `multipart/form-data` upload with one `file` part, or, for XML only, as JSON `{ \"xml\": \"<...>\" }` (JSON is limited to 1 MiB). Content is recognized by its first bytes, not by the declared type. The same bytes, or the same CDC, uploaded again answer 200 with the existing document. A CDC-only request answers 422 `unsupported_source` for now. If the extraction queue is down the answer is 503 `queue_unavailable` with the `document_id`: the upload is kept and sending the same bytes again queues it. The maximum upload size is `RECEPTION_MAX_UPLOAD_BYTES` (default 2 MiB, up to 15 MiB). Errors carry a stable `code`.",
+        "description": "The processing contract is asynchronous (202). A SIFEN XML is read before the answer, so its body already carries `confirmed` or `needs_review`. A PDF, PNG or JPEG is stored and queued for extraction: the body carries `received` and the result arrives later (`GET /v1/received-documents/{id}` or webhooks): `confirmed`, `needs_review` (reasons include `low_confidence` and `items_without_subtotals`) or `extraction_failed` (`extraction_error_code`: `corrupt_pdf`, `empty_pdf`, `too_many_pages`, `llm_disabled`, `llm_refusal`, `llm_invalid_output`, `llm_provider_error`, `llm_rate_limited`, `duplicate_document`, `artifact_missing`, `internal_error`). A document whose receiver is not the tenant (`is_own_receiver` false) is stored the same way but never produces webhook events. Webhooks `reception.document.needs_review`, `reception.document.confirmed` and `reception.document.extraction_failed` announce the result (see docs/integracion/recepcion.md). Send the bytes as a raw body (`application/xml`, `text/xml`, `application/pdf`, `image/png`, `image/jpeg`), as a `multipart/form-data` upload with one `file` part, or, for XML only, as JSON `{ \"xml\": \"<...>\" }` (JSON is limited to 1 MiB). Content is recognized by its first bytes, not by the declared type. The same bytes, or the same CDC, uploaded again answer 200 with the existing document. A CDC-only request answers 422 `unsupported_source` for now. If the extraction queue is down the answer is 503 `queue_unavailable` with the `document_id`: the upload is kept and sending the same bytes again queues it. Each PDF or photo that gets queued counts against the tenant daily extraction cap (`RECEPTION_EXTRACTION_DAILY_CAP`, default 200 per UTC day); past it the answer is 429 `extraction_quota_exceeded` with `Retry-After` and nothing is stored. XML and duplicates (200) do not count. The maximum upload size is `RECEPTION_MAX_UPLOAD_BYTES` (default 2 MiB, up to 15 MiB). Errors carry a stable `code`.",
         "security": [
           {
             "apiKey": []
@@ -1610,6 +1610,24 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`extraction_quota_exceeded`: the tenant used its daily extraction cap (carries `cap` and `retry_after_seconds`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the next UTC day, when the daily cap counts from zero again",
+                "schema": {
+                  "type": "integer"
                 }
               }
             }
@@ -1981,7 +1999,7 @@
           "Reception"
         ],
         "summary": "Re-run the extraction on the stored artifact",
-        "description": "Works from the stored upload, never from a new one. A PDF or photo in `received` or `extraction_failed` (including `llm_disabled` and `internal_error`) is queued again: 202 with `Location`, and a second request while the job is queued or running is a no-op 202 that appends no second audit entry. To avoid a second live job, a `received` document younger than `RECEPTION_EXTRACTION_STALE_AFTER_MS` (its upload job may still be queued) and an `extraction_failed` one with a retryable code (`llm_provider_error`, `llm_rate_limited`, `internal_error`) younger than 5 minutes (the queue may still retry it) answer 202 without doing anything. An `extracting` document is a no-op 202 while its run is live; one untouched for `RECEPTION_EXTRACTION_STALE_AFTER_MS` (default 30 minutes) is taken as stalled, moved to `extraction_failed` without a webhook and queued again. The result arrives later (`GET /v1/received-documents/{id}` or webhooks). A SIFEN XML that was unreadable (`extraction_failed`) is re-read synchronously: 200 with the new status, or 422 `extraction_failed` when it is still unreadable. A PDF or photo in `needs_review` or `confirmed` is reprocessed too: 202, the job is queued and the worker takes it back to `extracting` (the version moves) and re-extracts it KEEPING the human corrections. A curated field with a correction or review (`corrected_at` set) keeps its value and its `corrected_*`, and only its `extracted_value` and `confidence` refresh; the other fields take the new reading; corrected items stay exactly as left (edited, added or removed). The outcome is decided on the merged data. A document confirmed before announces `reception.document.updated` when it is confirmed again (never a second `confirmed`) and `reception.document.needs_review` when it needs review; the audit entry lists the corrections kept. A SIFEN XML already read (`needs_review` or `confirmed`) is refused (409 `invalid_state`, with `status`): the same bytes cannot read differently. The request body is ignored. Every accepted request that did work appends one audit entry.",
+        "description": "Works from the stored upload, never from a new one. A PDF or photo in `received` or `extraction_failed` (including `llm_disabled` and `internal_error`) is queued again: 202 with `Location`, and a second request while the job is queued or running is a no-op 202 that appends no second audit entry. To avoid a second live job, a `received` document younger than `RECEPTION_EXTRACTION_STALE_AFTER_MS` (its upload job may still be queued) and an `extraction_failed` one with a retryable code (`llm_provider_error`, `llm_rate_limited`, `internal_error`) younger than 5 minutes (the queue may still retry it) answer 202 without doing anything. An `extracting` document is a no-op 202 while its run is live; one untouched for `RECEPTION_EXTRACTION_STALE_AFTER_MS` (default 30 minutes) is taken as stalled, moved to `extraction_failed` without a webhook and queued again. The result arrives later (`GET /v1/received-documents/{id}` or webhooks). A SIFEN XML that was unreadable (`extraction_failed`) is re-read synchronously: 200 with the new status, or 422 `extraction_failed` when it is still unreadable. A PDF or photo in `needs_review` or `confirmed` is reprocessed too: 202, the job is queued and the worker takes it back to `extracting` (the version moves) and re-extracts it KEEPING the human corrections. A curated field with a correction or review (`corrected_at` set) keeps its value and its `corrected_*`, and only its `extracted_value` and `confidence` refresh; the other fields take the new reading; corrected items stay exactly as left (edited, added or removed). The outcome is decided on the merged data. A document confirmed before announces `reception.document.updated` when it is confirmed again (never a second `confirmed`) and `reception.document.needs_review` when it needs review; the audit entry lists the corrections kept. A SIFEN XML already read (`needs_review` or `confirmed`) is refused (409 `invalid_state`, with `status`): the same bytes cannot read differently. A reprocess that queues a PDF or photo extraction counts against the daily extraction cap (`RECEPTION_EXTRACTION_DAILY_CAP`): past it the answer is 429 `extraction_quota_exceeded` with `Retry-After`. The XML re-read does not count. The request body is ignored. Every accepted request that did work appends one audit entry.",
         "security": [
           {
             "apiKey": []
@@ -2093,6 +2111,24 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "`extraction_quota_exceeded`: queueing the extraction would pass the tenant daily cap (carries `cap` and `retry_after_seconds`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceptionProblem"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the next UTC day, when the daily cap counts from zero again",
+                "schema": {
+                  "type": "integer"
                 }
               }
             }
@@ -2819,7 +2855,8 @@
               "invalid_state",
               "artifact_not_available",
               "validation_failed",
-              "invalid_correction"
+              "invalid_correction",
+              "extraction_quota_exceeded"
             ]
           },
           "message": {
@@ -2835,6 +2872,14 @@
           "status": {
             "type": "string",
             "description": "Only with `invalid_state`"
+          },
+          "cap": {
+            "type": "integer",
+            "description": "Only with `extraction_quota_exceeded`: extractions allowed per UTC day"
+          },
+          "retry_after_seconds": {
+            "type": "integer",
+            "description": "Only with `extraction_quota_exceeded`: same value as `Retry-After`"
           },
           "reasons": {
             "type": "array",

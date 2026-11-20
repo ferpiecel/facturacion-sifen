@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createReceivedDocument, type ReceivedDocument } from '../domain/received-document.js';
 import { imageMediaType, sniffUpload } from '../domain/upload-sniff.js';
+import type { ExtractionQuota, ExtractionReservation } from './extraction-quota.js';
 import type { IngestSifenXmlInput, IngestSifenXmlResult } from './ingest-sifen-xml.js';
 import type {
   NewReceivedArtifact,
@@ -13,6 +14,8 @@ export interface IngestUploadDeps {
   readonly repository: ReceivedDocumentRepository;
   readonly storage: StorageProvider;
   readonly queue: ReceptionJobQueue;
+  /** Daily extraction cap per tenant; every PDF or photo that gets queued takes a slot (R5.9). */
+  readonly quota: ExtractionQuota;
   /** The XML path (`IngestSifenXml`): anything that sniffs as XML goes there untouched. */
   readonly ingestXml: { execute(input: IngestSifenXmlInput): Promise<IngestSifenXmlResult> };
   readonly newId: () => string;
@@ -39,6 +42,15 @@ export type IngestUploadResult =
    * enqueued again now.
    */
   | { readonly kind: 'duplicate'; readonly document: ReceivedDocument; readonly requeued: boolean }
+  /**
+   * The tenant used up its daily extraction cap (HTTP 429 `extraction_quota_exceeded`). Nothing
+   * was stored; a duplicate that needs no new job never gets here.
+   */
+  | {
+      readonly kind: 'quota_exceeded';
+      readonly cap: number;
+      readonly retryAfterSeconds: number;
+    }
   /**
    * The queue refused the job. Nothing is lost: the upload is stored and the document stays in
    * `received`; the caller answers 503. Recovery: uploading the same bytes again re-enqueues it,
@@ -97,31 +109,45 @@ export class IngestUpload {
     const known = await repository.findArtifactBySha256(tenantId, sha256);
     if (known?.document) return this.duplicate(tenantId, known.document);
 
-    // The key is content-addressed, so a concurrent upload of the same bytes writes the same object.
-    const storageKey = `tenants/${tenantId}/received/${detected.source}/${sha256}.${detected.extension}`;
-    await storage.upload(storageKey, bytes, { contentType: detected.contentType });
-    const artifact: NewReceivedArtifact = {
-      storageKey,
-      contentType: detected.contentType,
-      sha256,
-      sizeBytes: bytes.byteLength,
-      originalName: input.originalName ?? null,
-      pageCount: null,
-    };
-    const created = await repository.create(tenantId, {
-      document: createReceivedDocument({
-        id: this.deps.newId(),
-        tenantId,
-        source: detected.source,
-        // The receiver is unknown until extraction; until then nothing contradicts the tenant.
-        isOwnReceiver: true,
-      }),
-      artifact,
-    });
-    if (!created.created) return this.duplicate(tenantId, created.document);
+    // Reserved before anything is stored, so an over-quota upload leaves no document behind.
+    const reservation = await this.deps.quota.reserve(tenantId);
+    if (!reservation.ok) return quotaExceeded(reservation);
+    let created: Awaited<ReturnType<ReceivedDocumentRepository['create']>>;
+    try {
+      // The key is content-addressed, so a concurrent upload of the same bytes writes the same object.
+      const storageKey = `tenants/${tenantId}/received/${detected.source}/${sha256}.${detected.extension}`;
+      await storage.upload(storageKey, bytes, { contentType: detected.contentType });
+      const artifact: NewReceivedArtifact = {
+        storageKey,
+        contentType: detected.contentType,
+        sha256,
+        sizeBytes: bytes.byteLength,
+        originalName: input.originalName ?? null,
+        pageCount: null,
+      };
+      created = await repository.create(tenantId, {
+        document: createReceivedDocument({
+          id: this.deps.newId(),
+          tenantId,
+          source: detected.source,
+          // The receiver is unknown until extraction; until then nothing contradicts the tenant.
+          isOwnReceiver: true,
+        }),
+        artifact,
+      });
+    } catch (error) {
+      await reservation.release();
+      throw error;
+    }
+    if (!created.created) {
+      // An identical upload won the race: it owns the extraction, this one costs nothing.
+      await reservation.release();
+      return this.duplicate(tenantId, created.document);
+    }
 
     const queued = await this.enqueue(tenantId, created.document);
-    return queued
+    if (!queued.ok) await reservation.release();
+    return queued.ok
       ? { kind: 'accepted', document: created.document }
       : { kind: 'queue_unavailable', document: created.document, created: true };
   }
@@ -131,19 +157,40 @@ export class IngestUpload {
     document: ReceivedDocument,
   ): Promise<IngestUploadResult> {
     if (document.status !== 'received') return { kind: 'duplicate', document, requeued: false };
+    // Re-enqueueing a document whose first job never existed is a new extraction: it takes a slot.
+    // At the cap the repeat is answered as the plain duplicate it usually is (a client retry while
+    // the first job is queued); a document whose queueing failed is recovered by reprocess later.
+    const reservation = await this.deps.quota.reserve(tenantId);
+    if (!reservation.ok) return { kind: 'duplicate', document, requeued: false };
     const queued = await this.enqueue(tenantId, document);
-    return queued
+    // A job that already existed (`enqueued: false`) spends nothing new.
+    if (!queued.ok || !queued.enqueued) await reservation.release();
+    return queued.ok
       ? { kind: 'duplicate', document, requeued: true }
       : { kind: 'queue_unavailable', document, created: false };
   }
 
   /** The queue contract is idempotent per document, so re-enqueueing is always safe. */
-  private async enqueue(tenantId: string, document: ReceivedDocument): Promise<boolean> {
+  private async enqueue(
+    tenantId: string,
+    document: ReceivedDocument,
+  ): Promise<{ readonly ok: boolean; readonly enqueued: boolean }> {
     try {
-      await this.deps.queue.enqueueExtraction({ tenantId, documentId: document.id });
-      return true;
+      const { enqueued } = await this.deps.queue.enqueueExtraction({
+        tenantId,
+        documentId: document.id,
+      });
+      return { ok: true, enqueued };
     } catch {
-      return false;
+      return { ok: false, enqueued: false };
     }
   }
+}
+
+function quotaExceeded(refused: Extract<ExtractionReservation, { ok: false }>): IngestUploadResult {
+  return {
+    kind: 'quota_exceeded',
+    cap: refused.cap,
+    retryAfterSeconds: refused.retryAfterSeconds,
+  };
 }

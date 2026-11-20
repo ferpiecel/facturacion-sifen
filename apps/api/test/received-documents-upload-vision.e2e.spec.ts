@@ -224,7 +224,7 @@ describe('received documents: PDF and photo upload (e2e)', () => {
         enqueueExtraction: (job: ExtractionJob) => {
           if (queueDown) return Promise.reject(new ReceptionQueueUnavailableError('down'));
           jobs.push(job);
-          return Promise.resolve();
+          return Promise.resolve({ enqueued: true });
         },
         close: () => Promise.resolve(),
       })

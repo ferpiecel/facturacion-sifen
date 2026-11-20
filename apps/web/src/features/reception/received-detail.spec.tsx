@@ -137,6 +137,21 @@ describe('ReceivedDetail', () => {
     await screen.findByText('001-001-0000123');
     expect(screen.queryByText('Otro receptor')).toBeNull();
     expect(screen.queryByText(/llm_timeout/)).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Alertas' })).toBeNull();
+    expect(screen.queryByText('Motivos de revisión')).toBeNull();
+  });
+
+  it('lists every review reason even when one is repeated, without key warnings', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const repeated = {
+      ...DOC,
+      needs_review_reasons: ['low_confidence:total', 'low_confidence:total'],
+    };
+    render(<ReceivedDetail id="d1" client={okClient(repeated)} />);
+
+    expect(await screen.findAllByText('low_confidence:total')).toHaveLength(2);
+    expect(error).not.toHaveBeenCalled();
+    error.mockRestore();
   });
 
   it('lists the items', async () => {

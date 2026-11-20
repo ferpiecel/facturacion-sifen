@@ -68,8 +68,9 @@ function Flags({ doc }: { doc: ReceivedDocumentDetail }) {
             Motivos de revisión
           </p>
           <ul className="list-disc pl-5 font-body-sm text-body-sm text-on-surface-variant">
-            {doc.needs_review_reasons.map((reason) => (
-              <li key={reason}>{reason}</li>
+            {doc.needs_review_reasons.map((reason, index) => (
+              // Reasons can repeat, so the index is part of the key.
+              <li key={`${String(index)}:${reason}`}>{reason}</li>
             ))}
           </ul>
         </div>

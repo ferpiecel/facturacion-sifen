@@ -481,7 +481,7 @@ function asReprocessProblem(error: unknown): unknown {
 }
 
 /** ASCII-only, quote-free file name for `Content-Disposition`; never the storage key. */
-function downloadName(originalName: string | null, id: string, contentType: string): string {
+export function downloadName(originalName: string | null, id: string, contentType: string): string {
   const cleaned = (originalName ?? '').replace(/[^\x20-\x7e]|["\\;]/g, '_').trim();
   if (cleaned !== '') return cleaned;
   return `received-${id}${contentType.includes('xml') ? '.xml' : ''}`;

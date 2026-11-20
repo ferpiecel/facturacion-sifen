@@ -1,7 +1,7 @@
 import { ReceivedList } from '../../../features/reception/received-list';
 import { PanelShell } from '../../../features/panel/panel-shell';
 
-/** Read-only list of received documents (R7.6); the detail (R7.5) lands later. */
+/** Read-only list of received documents (R7.6); each row links to the detail (R7.5). */
 export default function ReceivedDocumentsPage() {
   return (
     <PanelShell environment="test" activePath="/recibidos">

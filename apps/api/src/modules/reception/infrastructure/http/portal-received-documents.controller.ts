@@ -85,8 +85,11 @@ export class PortalReceivedDocumentsController {
    * kept raw before parsing) served from the PORTAL origin with the victim's session cookies, so a browser must never
    * render active content here. Only PDFs and raster images go `inline`; everything else (notably `application/xml`,
    * which a browser renders as XHTML/SVG and runs `<script>` or `xml-stylesheet` from) is an `attachment`. The CSP is
-   * defense in depth: no script, no framing, no network from the document. `sandbox` is deliberately NOT used: the
-   * built-in PDF viewers (Chrome, Firefox) refuse to render a PDF served with a sandboxing CSP, and the inline
+   * defense in depth: no script and no network from the document. The artifact CSP (`default-src 'none';
+   * style-src 'unsafe-inline'`) and the page CSP that `apps/web/next.config.ts` sets on `/:path*` both reach
+   * `/api/portal/*` through the proxy, so the browser enforces the two together. It is not verified that every
+   * built-in PDF viewer renders under `object-src 'none'`; the download always works. `sandbox` is deliberately
+   * NOT used: the built-in PDF viewers (Chrome, Firefox) refuse to render a PDF served with a sandboxing CSP, and the inline
    * allow-list already excludes anything that can run script. R7.5: XML (and any non-inline type) is a download, so
    * the viewer must offer it as a link, not embed it.
    */

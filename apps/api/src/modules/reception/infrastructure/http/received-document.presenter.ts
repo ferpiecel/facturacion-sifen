@@ -167,7 +167,11 @@ export function presentReceivedDocumentDetail(
       original_name: artifact.originalName,
       page_count: artifact.pageCount,
     },
-    /** Path of the authenticated stream endpoint; `.../artifact-url` returns a direct link. */
+    /**
+     * Path of the authenticated stream endpoint: `/v1/received-documents/:id/artifact` by default, or
+     * `/portal/received-documents/:id/artifact` when the portal controller passes its base. The `artifact-url`
+     * route (a direct link) exists only under `/v1`.
+     */
     artifact_url: artifact ? `${artifactBasePath}/${document.id}/artifact` : null,
     created_at: detail.createdAt.toISOString(),
     updated_at: detail.updatedAt.toISOString(),

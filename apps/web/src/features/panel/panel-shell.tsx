@@ -2,6 +2,7 @@ import {
   Bell,
   Building2,
   ChevronsUpDown,
+  Inbox,
   LayoutDashboard,
   ReceiptText,
   Search,
@@ -26,6 +27,7 @@ const NAV = [
   { href: '/', label: 'Panel de Control', icon: LayoutDashboard },
   { href: '/comprobantes', label: 'Comprobantes y KuDE', icon: ReceiptText },
   { href: '/accion-requerida', label: 'Acción requerida', icon: TriangleAlert },
+  { href: '/recibidos', label: 'Recibidos', icon: Inbox },
   { href: '/comercios', label: 'Mis Comercios', icon: Building2 },
 ] as const;
 

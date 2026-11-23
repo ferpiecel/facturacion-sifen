@@ -28,5 +28,5 @@
 | [0024](0024-contexto-acotado-reception-documentos-recibidos.md) | Contexto acotado `reception`: documentos recibidos como agregado propio | Propuesto |
 | [0025](0025-almacenamiento-de-objetos-seaweedfs-storage-provider.md) | Almacenamiento de objetos con SeaweedFS detrás del puerto `StorageProvider` | Propuesto |
 | [0026](0026-pipeline-de-extraccion-confianza-y-auto-confirmacion.md) | Pipeline de extracción, confianza por campo y política de auto-confirmación | Propuesto |
-| [0027](0027-consulta-a-ekuatia-por-cdc-con-recaptcha.md) | Consulta a eKuatia por CDC con reCAPTCHA v2 (2Captcha): integración de riesgo | Propuesto |
+| [0027](0027-consulta-a-ekuatia-por-cdc-con-recaptcha.md) | Consulta a eKuatia por CDC con reCAPTCHA v2 (2Captcha): integración de riesgo | Aceptado |
 | [0028](0028-eventos-de-webhook-de-recepcion-y-scopes.md) | Eventos de webhook de recepción y scopes `reception:*` | Propuesto |

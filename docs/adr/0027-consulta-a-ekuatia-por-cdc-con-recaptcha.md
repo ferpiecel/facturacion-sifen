@@ -1,7 +1,9 @@
 # ADR-0027: Consulta a eKuatia por CDC con reCAPTCHA v2 (2Captcha): integración de riesgo
 
-- **Estado:** Propuesto
+- **Estado:** Aceptado
 - **Fecha:** 2026-11-06
+
+> **Nota 2026-11-23:** aceptado por el dueño del producto, que ya verificó manualmente una integración con el servicio de captcha y pidió reutilizarla (referencia: la implementación de contahelper, `app/infrastructure/captcha/`). Se mantienen las reglas duras: el agente nunca llama a eKuatia ni a 2Captcha ni lee `.env*`.
 
 ## Contexto
 

@@ -19,7 +19,10 @@ import { buildCdc, parseCdc } from '../../src/modules/emission/domain/cdc.js';
 import { computeRucCheckDigit } from '../../src/modules/fiscal-config/domain/ruc.js';
 
 export type CaptureFiles = Partial<Record<'documento.xml' | 'requests.json' | 'meta.json', string>>;
-export type Category = 'cdc' | 'ruc' | 'email' | 'phone' | 'signature';
+export type Category = 'cdc' | 'ruc' | 'email' | 'phone' | 'signature' | 'identity';
+
+/** Values of dNumIDRec that carry no personal data ("consumidor final" and our synthetic id). */
+const ID_NUMBER_KEEP = new Set(['CF', '1000000']);
 
 export interface AnonymizeReport {
   anonymized: true;
@@ -169,9 +172,10 @@ class Anonymizer {
         return `<${tag}>${value}</${tag}>`;
       });
     }
-    out = out.replace(/<dNumIDRec>(\d+)<\/dNumIDRec>/g, () => {
+    out = out.replace(/(<dNumIDRec>|dNumIDRec=)([^<&\s"]+)/g, (m, head: string, id: string) => {
+      if (ID_NUMBER_KEEP.has(id)) return m;
       this.counts.text_field += 1;
-      return '<dNumIDRec>1000000</dNumIDRec>';
+      return `${head}1000000`;
     });
     out = out.replace(/(DigestValue|cHashQR)=([0-9a-fA-F]+)/g, (m, key: string, hex: string) => {
       if (/^0+$/.test(hex)) return m;
@@ -204,6 +208,12 @@ class Anonymizer {
         const rucKey = key === 'dDVEmi' ? 'dRucEm' : 'dRucRec';
         out[key] =
           rucKey in source ? computeRucCheckDigit(this.fakeRuc(String(source[rucKey]))) : v;
+      } else if (key === 'dNumIDRec' && (typeof v === 'string' || typeof v === 'number')) {
+        if (ID_NUMBER_KEEP.has(String(v))) out[key] = v;
+        else {
+          this.counts.text_field += 1;
+          out[key] = typeof v === 'number' ? 1_000_000 : '1000000';
+        }
       } else if (key in TEXT_FIELDS && (typeof v === 'string' || typeof v === 'number')) {
         const replacement = TEXT_FIELDS[key] ?? '';
         // Numeric values (e.g. a phone sent as a JSON number) keep their type.
@@ -234,7 +244,7 @@ class Anonymizer {
       const kept: Record<string, unknown> = {};
       for (const [name, value] of Object.entries(headers as Record<string, unknown>)) {
         if (SESSION_HEADERS.has(name.toLowerCase())) this.counts.header_removed += 1;
-        else kept[name] = value;
+        else kept[name] = this.json(value);
       }
       return kept;
     };
@@ -312,7 +322,12 @@ export function scanSensitive(text: string): Category[] {
   for (const [, ruc] of text.matchAll(/dRucRec=(\d+)/g)) {
     if (!SYNTHETIC_RUC.test(ruc)) found.add('ruc');
   }
-  if (/(?<!\d)\d{6,8}-\d(?!\d)/.test(text)) found.add('ruc');
+  for (const [, base] of text.matchAll(/(?<!\d)(\d{6,8})-\d(?!\d)/g)) {
+    if (!SYNTHETIC_RUC.test(base)) found.add('ruc');
+  }
+  for (const [, , id] of text.matchAll(/(dNumIDRec)(?:>|=|\\?":\s*\\?"?)([A-Za-z0-9-]+)/g)) {
+    if (!ID_NUMBER_KEEP.has(id)) found.add('identity');
+  }
   if ((text.match(EMAIL) ?? []).some((email) => !email.endsWith(SYNTHETIC_EMAIL_DOMAIN)))
     found.add('email');
   if (
@@ -354,7 +369,32 @@ export function runCli(argv: readonly string[]): number {
     );
     return 2;
   }
-  const { files, report } = anonymizeCapture(input);
+  let result: ReturnType<typeof anonymizeCapture>;
+  try {
+    for (const name of ['meta.json', 'requests.json'] as const) {
+      if (input[name] !== undefined) JSON.parse(input[name]);
+    }
+    result = anonymizeCapture(input);
+  } catch {
+    console.error('Malformed capture: meta.json or requests.json is not valid JSON.');
+    return 2;
+  }
+  const { files, report } = result;
+  const leftovers = new Map<string, number>();
+  for (const content of Object.values(files)) {
+    for (const category of scanSensitive(content)) {
+      leftovers.set(category, (leftovers.get(category) ?? 0) + 1);
+    }
+  }
+  if (leftovers.size > 0) {
+    const summary = [...leftovers].map(
+      ([category, files]) => `${category}: ${String(files)} file(s)`,
+    );
+    console.error(
+      `Sensitive data would remain after anonymization (${summary.join(', ')}). Nothing was written.`,
+    );
+    return 3;
+  }
   mkdirSync(outDir, { recursive: true });
   for (const [name, content] of Object.entries(files)) writeFileSync(join(outDir, name), content);
   writeFileSync(join(outDir, 'anonymization-report.json'), JSON.stringify(report, null, 2));

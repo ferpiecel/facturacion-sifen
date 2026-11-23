@@ -99,3 +99,7 @@ Desde la raíz del repositorio, con Node 22 (`nvm use`):
 
 - Los RUC sintéticos del anonimizador (`80000000` en adelante, ver `scanSensitive`) caen dentro del espacio de RUC reales: son datos de prueba, no se pueden distinguir con certeza de un RUC existente.
 - `--label` solo admite letras, dígitos, `_` y `-`. El directorio de salida se crea y se comprueba como escribible antes de resolver el captcha.
+- El anonimizador solo reescribe las claves JSON que conoce: nombres o direcciones bajo claves desconocidas pasan sin cambios (de ahí la revisión manual).
+- Un argumento desconocido se imprime tal cual en el mensaje de error de la CLI.
+- Las cabeceras que `fetch` agrega por su cuenta no quedan registradas.
+- El directorio de salida se crea después de la comprobación de escritura y antes de la confirmación interactiva.

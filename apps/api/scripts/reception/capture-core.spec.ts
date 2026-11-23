@@ -3,6 +3,7 @@ import {
   CAPTURE_HOSTS,
   checkGuards,
   parseCaptureArgs,
+  isInsideVersionedTree,
   redactCookieHeader,
   redactSecrets,
   redactSetCookie,
@@ -210,5 +211,19 @@ describe('runCapture', () => {
     expect(calls).toHaveLength(1);
     expect(result.meta).toMatchObject({ probe_rejected_captcha: true });
     expect(result.records[0]?.request.body).toContain('<captcha-token>');
+  });
+});
+
+describe('isInsideVersionedTree', () => {
+  it.each([
+    ['/repo/apps/api/src', true],
+    ['/repo/docs', true],
+    ['/repo', true],
+    ['/repo/apps/api/.captures', false],
+    ['/repo/apps/api/.captures/x', false],
+    ['/elsewhere/captures', false],
+    ['/repository-other', false],
+  ])('%s -> %s', (out, inside) => {
+    expect(isInsideVersionedTree(out, '/repo')).toBe(inside);
   });
 });

@@ -8,7 +8,13 @@ const API_KEY = 'KEY-secret-0042';
 function harness(
   env: Record<string, string | undefined> = {},
   confirmAnswer = true,
-  opts: { unwritable?: boolean; failWrite?: boolean } = {},
+  opts: {
+    unwritable?: boolean;
+    failWrite?: boolean;
+    nonEmpty?: boolean;
+    repoRoot?: string;
+    networkDown?: boolean;
+  } = {},
 ) {
   const prepared: string[] = [];
   const keyReads: string[] = [];
@@ -24,11 +30,13 @@ function harness(
   const printed: string[] = [];
   const written = new Map<string, string>();
   const fetchFake = vi.fn((_url: string | URL | Request, init?: RequestInit) =>
-    Promise.resolve(
-      init?.method === 'POST'
-        ? new Response('{"DE":{}}', { status: 200, headers: { 'set-cookie': 'sid=S; path=/' } })
-        : new Response('<rDE xmlns="x"/>', { status: 200 }),
-    ),
+    opts.networkDown
+      ? Promise.reject(new Error('down'))
+      : Promise.resolve(
+          init?.method === 'POST'
+            ? new Response('{"DE":{}}', { status: 200, headers: { 'set-cookie': 'sid=S; path=/' } })
+            : new Response('<rDE xmlns="x"/>', { status: 200 }),
+        ),
   ) as unknown as typeof fetch;
   const createSolver = vi.fn(() => ({ solveRecaptchaV2: vi.fn().mockResolvedValue(TOKEN) }));
   const confirm = vi.fn().mockResolvedValue(confirmAnswer);
@@ -38,6 +46,8 @@ function harness(
     confirm,
     fetch: fetchFake,
     createSolver,
+    repoRoot: opts.repoRoot ?? '/nonexistent-repo',
+    isNonEmptyDir: () => opts.nonEmpty === true,
     prepareDir: (path) => {
       if (opts.unwritable) throw new Error(`EACCES ${API_KEY}`);
       prepared.push(path);
@@ -169,5 +179,35 @@ describe('capture-ekuatia main happy path', () => {
     expect(text).toContain('OUT/v2026-Q4/success');
     expect(text).not.toContain(API_KEY);
     expect(text).not.toContain(TOKEN);
+  });
+
+  it('refuses a repeated label whose output directory already has files', async () => {
+    const h = harness({}, true, { nonEmpty: true });
+    expect(await main([...HUMAN, '--yes'], h.deps)).not.toBe(0);
+    expect(h.createSolver).not.toHaveBeenCalled();
+    expect(h.fetchFake).not.toHaveBeenCalled();
+    expect(h.prepared).toEqual([]);
+  });
+
+  it.each(['/repo/apps/api/src', '/repo/docs'])(
+    'refuses --out %s inside the versioned tree',
+    async (out) => {
+      const h = harness({}, true, { repoRoot: '/repo' });
+      expect(await main([...HUMAN, '--yes', '--out', out], h.deps)).not.toBe(0);
+      expect(h.createSolver).not.toHaveBeenCalled();
+      expect(h.fetchFake).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['/repo/apps/api/.captures', '/elsewhere/out'])('allows --out %s', async (out) => {
+    const h = harness({}, true, { repoRoot: '/repo' });
+    expect(await main([...HUMAN, '--yes', '--out', out], h.deps)).toBe(0);
+  });
+
+  it('writes the files but exits non-zero when no request got a status', async () => {
+    const h = harness({}, true, { networkDown: true });
+    expect(await main([...HUMAN, '--yes', '--out', 'OUT'], h.deps)).not.toBe(0);
+    expect(h.written.has('OUT/v2026-Q4/success/requests.json')).toBe(true);
+    expect(h.printed.join('\n')).toMatch(/no response/i);
   });
 });

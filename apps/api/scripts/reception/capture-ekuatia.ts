@@ -5,10 +5,10 @@
  *   TWOCAPTCHA_API_KEY=... pnpm --filter @sifen/api capture:ekuatia -- --i-am-a-human --cdc <44 digits>
  *   pnpm --filter @sifen/api capture:ekuatia -- --i-am-a-human --probe-rejected-captcha --cdc <44 digits>  (spends nothing)
  */
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline/promises';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   CaptchaSolveError,
   type CaptchaSolver,
@@ -18,6 +18,7 @@ import {
   CAPTURE_HOSTS,
   checkGuards,
   parseCaptureArgs,
+  isInsideVersionedTree,
   runCapture,
   versionLabel,
   type CaptureArgs,
@@ -29,6 +30,9 @@ export interface MainDeps {
   readonly confirm: (question: string) => Promise<boolean>;
   readonly fetch: typeof fetch;
   readonly createSolver: (apiKey: string) => CaptchaSolver;
+  /** Root of the versioned tree (the directory holding `.git`), when known. */
+  readonly repoRoot?: string;
+  readonly isNonEmptyDir: (path: string) => boolean;
   /** Creates the directory and proves it is writable; throws otherwise. */
   readonly prepareDir: (path: string) => void;
   readonly writeFile: (path: string, content: string) => void;
@@ -62,6 +66,16 @@ export async function main(argv: readonly string[], deps: MainDeps): Promise<num
   const dir = `${args.out}/${versionLabel(startedAt)}/${args.label}`;
   if (!resolve(dir).startsWith(resolve(args.out) + sep)) {
     deps.print('Refusing to write outside the output directory.');
+    return 2;
+  }
+  if (deps.repoRoot !== undefined && isInsideVersionedTree(resolve(args.out), deps.repoRoot)) {
+    deps.print(
+      'Refusing --out inside the versioned tree: use .captures/ or a path outside the repository.',
+    );
+    return 2;
+  }
+  if (deps.isNonEmptyDir(dir)) {
+    deps.print(`${dir} already has files: choose another --label (nothing is overwritten).`);
     return 2;
   }
   try {
@@ -115,10 +129,23 @@ export async function main(argv: readonly string[], deps: MainDeps): Promise<num
     return 1;
   }
   deps.print(`Statuses: ${result.records.map((r) => String(r.status_code ?? r.error)).join(', ')}`);
+  if (result.records.every((r) => r.status_code === undefined)) {
+    deps.print(
+      `WARNING: no response was received from eKuatia (network failure after the captcha was solved). The files in ${dir} record the failed attempt.`,
+    );
+  }
   deps.print(
     `Raw capture written to ${dir} (gitignored, NOT anonymized). Run anonymize-fixtures next.`,
   );
-  return 0;
+  return result.records.every((r) => r.status_code === undefined) ? 1 : 0;
+}
+
+/** Walks up from this module to the directory holding `.git` (a folder, or a file in a worktree). */
+function findRepoRoot(start: string): string | undefined {
+  for (let dir = start; ; dir = dirname(dir)) {
+    if (existsSync(resolve(dir, '.git'))) return dir;
+    if (dirname(dir) === dir) return undefined;
+  }
 }
 
 async function askYesNo(question: string): Promise<boolean> {
@@ -139,6 +166,8 @@ if (process.argv.length > 1 && import.meta.url === pathToFileURL(process.argv[1]
     confirm: askYesNo,
     fetch,
     createSolver: (apiKey) => new TwoCaptchaSolver({ apiKey }),
+    repoRoot: findRepoRoot(dirname(fileURLToPath(import.meta.url))),
+    isNonEmptyDir: (path) => existsSync(path) && readdirSync(path).length > 0,
     prepareDir: (path) => {
       mkdirSync(path, { recursive: true });
       const probe = `${path}/.write-check`;

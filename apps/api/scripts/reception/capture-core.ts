@@ -9,6 +9,8 @@
  */
 import type { CaptchaSolver } from '../../src/modules/reception/application/ports/captcha-solver.port.js';
 
+import { isAbsolute, relative, sep } from 'node:path';
+
 export const CAPTURE_HOSTS = ['ekuatia.set.gov.py', '2captcha.com'] as const;
 /** Public reCAPTCHA v2 site key of the consulta page (reference implementation; not a secret). */
 export const EKUATIA_RECAPTCHA_SITEKEY = '6Ldcb-wrAAAAAGp5mRQLnbGW0GFsKyi71OhYDImu';
@@ -76,6 +78,13 @@ export function checkGuards(args: CaptureArgs, env: { readonly CI?: string }): G
     return { ok: false, reason: 'Missing or invalid --cdc: exactly 44 digits are required.' };
   }
   return { ok: true };
+}
+
+/** True when `out` is the versioned repo tree, except under a `.captures` folder. */
+export function isInsideVersionedTree(out: string, repoRoot: string): boolean {
+  const rel = relative(repoRoot, out);
+  if (rel.startsWith('..') || isAbsolute(rel)) return false;
+  return !rel.split(sep).includes('.captures');
 }
 
 export function versionLabel(date: Date): string {

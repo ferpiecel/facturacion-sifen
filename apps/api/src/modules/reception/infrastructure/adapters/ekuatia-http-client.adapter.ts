@@ -27,9 +27,11 @@ export interface EkuatiaHttpClientOptions {
  * Contract, and what the committed captures (`test/fixtures/reception/ekuatia/v2026-Q3/*`
  * `requests.json`) back:
  * - `POST {base}/docs/documento-electronico` answered 200 `application/json;charset=UTF-8` with a
- *   JSON object whose root is `DE` (backed). The captures store only responses, so the request
- *   headers, the request body and the token field name are NOT verified: this client sends
- *   `{ cdc, recaptchaToken }` as JSON, which is an assumption to confirm with a human capture.
+ *   JSON object whose root is `DE` (backed). The captures store only responses, so the request is
+ *   NOT backed by them. The JSON body `{ "cdc": <cdc>, "captcha": <token> }` comes from the two
+ *   reference implementations (facturaspy and contahelper, the latter a port of the former, so
+ *   convention evidence and not independent proof). Both state their contract was never verified
+ *   against live eKuatia, and neither is it here: request headers and body stay UNVERIFIED.
  * - `GET {base}/docs/documento-electronico-xml/{cdc}` answered 200 `application/xml` with the
  *   `rDE` document (backed). A 404 is not in the captures: it is mapped to `not_found` by
  *   convention, and so is a POST 404. How the site reports a rejected captcha is not captured, so
@@ -74,7 +76,7 @@ export class EkuatiaHttpClient implements EkuatiaClient {
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ cdc: input.cdc, recaptchaToken: input.recaptchaToken }),
+          body: JSON.stringify({ cdc: input.cdc, captcha: input.recaptchaToken }),
         },
         signal,
         jar,

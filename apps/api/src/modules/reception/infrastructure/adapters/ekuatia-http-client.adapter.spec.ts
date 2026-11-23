@@ -142,7 +142,7 @@ describe('EkuatiaHttpClient', () => {
       'POST /docs/documento-electronico',
       `GET /docs/documento-electronico-xml/${capture.cdc}`,
     ]);
-    expect(JSON.parse(calls[0]?.body ?? '')).toEqual({ cdc: capture.cdc, recaptchaToken: TOKEN });
+    expect(JSON.parse(calls[0]?.body ?? '')).toEqual({ cdc: capture.cdc, captcha: TOKEN });
   });
 
   it('maps a 404 to not_found', async () => {

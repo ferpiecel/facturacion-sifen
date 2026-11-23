@@ -14,6 +14,8 @@ const FIXTURES = join(
 const CAPTURES = ['success', 'success_pago_credito', 'servicio_digital'] as const;
 const TOKEN = 'recaptcha-token-SECRET-0123456789';
 const CDC = '00000000000000000000000000000000000000000001';
+/** Shape of the captured POST answer: a JSON object rooted at `DE` (see the client docstring). */
+const POST_OK = JSON.stringify({ DE: { Id: CDC } });
 
 interface Capture {
   cdc: string;
@@ -146,7 +148,9 @@ describe('EkuatiaHttpClient', () => {
   });
 
   it('maps a 404 to not_found', async () => {
-    const { baseUrl } = await startFake((s) => (s.method === 'POST' ? {} : { status: 404 }));
+    const { baseUrl } = await startFake((s) =>
+      s.method === 'POST' ? { body: POST_OK } : { status: 404 },
+    );
     const error = await failureOf(
       new EkuatiaHttpClient({ baseUrl }).consultByCdc({ cdc: CDC, recaptchaToken: TOKEN }),
     );
@@ -173,7 +177,9 @@ describe('EkuatiaHttpClient', () => {
   it.each(['', '   \n', '<html>captcha</html>'])(
     'maps a non-XML or empty body %j to invalid_response',
     async (body) => {
-      const { baseUrl } = await startFake((s) => (s.method === 'POST' ? {} : { body }));
+      const { baseUrl } = await startFake((s) =>
+        s.method === 'POST' ? { body: POST_OK } : { body },
+      );
       const error = await failureOf(
         new EkuatiaHttpClient({ baseUrl }).consultByCdc({ cdc: CDC, recaptchaToken: TOKEN }),
       );
@@ -193,7 +199,9 @@ describe('EkuatiaHttpClient', () => {
   });
 
   it('times out while reading a stalled body', async () => {
-    const { baseUrl } = await startFake((s) => (s.method === 'POST' ? {} : { stall: true }));
+    const { baseUrl } = await startFake((s) =>
+      s.method === 'POST' ? { body: POST_OK } : { stall: true },
+    );
     const error = await failureOf(
       new EkuatiaHttpClient({ baseUrl, timeoutMs: 100 }).consultByCdc({
         cdc: CDC,
@@ -249,7 +257,10 @@ describe('EkuatiaHttpClient', () => {
   });
 
   describe('cookies (unverified: the captures record no request headers)', () => {
-    async function startCookieFake(capture: Capture): Promise<{ baseUrl: string; calls: Seen[] }> {
+    async function startCookieFake(
+      capture: Capture,
+      setCookie: string[] = capture.setCookie,
+    ): Promise<{ baseUrl: string; calls: Seen[] }> {
       const calls: Seen[] = [];
       const srv = createServer((req, res) => {
         calls.push({
@@ -263,7 +274,7 @@ describe('EkuatiaHttpClient', () => {
           if (req.method === 'POST') {
             res.writeHead(200, {
               'content-type': 'application/json',
-              'set-cookie': capture.setCookie,
+              'set-cookie': setCookie,
             });
             res.end(capture.postResponse);
           } else {
@@ -294,6 +305,133 @@ describe('EkuatiaHttpClient', () => {
       expect(calls[1]?.headers.cookie).toBe('sess=abc123; TS0151e35c=ts-value');
       // The jar is per query: the second POST starts clean.
       expect(calls[2]?.headers.cookie).toBeUndefined();
+    });
+
+    it('ignores expired cookies and drops a cookie the site expires', async () => {
+      const capture = loadCapture('success');
+      const { baseUrl, calls } = await startCookieFake(capture, [
+        'live=1; Path=/',
+        'old=2; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/',
+        'zero=3; Max-Age=0; Path=/',
+        'timed=4; Max-Age=3600; Path=/',
+      ]);
+      await new EkuatiaHttpClient({ baseUrl, propagateCookies: true }).consultByCdc({
+        cdc: CDC,
+        recaptchaToken: TOKEN,
+      });
+      expect(calls[1]?.headers.cookie).toBe('live=1; timed=4');
+    });
+  });
+
+  describe('POST answer validation (contract awaiting the human capture)', () => {
+    it.each([
+      ['empty body', ''],
+      ['not JSON', '<html>captcha</html>'],
+      ['a JSON array', '[]'],
+      ['a JSON string', '"ok"'],
+      ['an object without the DE root', '{"error":"captcha"}'],
+      ['a DE that is not an object', '{"DE":"x"}'],
+    ])('maps a 200 POST with %s to invalid_response without fetching the XML', async (_n, body) => {
+      const { baseUrl, calls } = await startFake(() => ({ body }));
+      const error = await failureOf(
+        new EkuatiaHttpClient({ baseUrl }).consultByCdc({ cdc: CDC, recaptchaToken: TOKEN }),
+      );
+      expect(error.code).toBe('invalid_response');
+      expect(calls.map((c) => c.method)).toEqual(['POST']);
+    });
+  });
+
+  describe('size cap, aborts and unread bodies', () => {
+    it('rejects an XML larger than the cap as invalid_response', async () => {
+      const big = `<rDE>${'x'.repeat(5_000)}</rDE>`;
+      const { baseUrl } = await startFake((s) =>
+        s.method === 'POST' ? { body: POST_OK } : { body: big },
+      );
+      const error = await failureOf(
+        new EkuatiaHttpClient({ baseUrl, maxResponseBytes: 1_000 }).consultByCdc({
+          cdc: CDC,
+          recaptchaToken: TOKEN,
+        }),
+      );
+      expect(error.code).toBe('invalid_response');
+    });
+
+    it('accepts an XML right at the cap', async () => {
+      const xml = `<rDE>${'x'.repeat(100)}</rDE>`; // longer than the POST answer: the cap is per body
+      const { baseUrl } = await startFake((s) =>
+        s.method === 'POST' ? { body: POST_OK } : { body: xml },
+      );
+      const result = await new EkuatiaHttpClient({
+        baseUrl,
+        maxResponseBytes: Buffer.byteLength(xml),
+      }).consultByCdc({ cdc: CDC, recaptchaToken: TOKEN });
+      expect(result.xml).toBe(xml);
+    });
+
+    it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, 100_000_001])(
+      'rejects maxResponseBytes %s',
+      (maxResponseBytes) => {
+        expect(
+          () => new EkuatiaHttpClient({ baseUrl: 'http://127.0.0.1:1', maxResponseBytes }),
+        ).toThrow(RangeError);
+      },
+    );
+
+    it('rejects a timeoutMs above the upper bound', () => {
+      expect(
+        () => new EkuatiaHttpClient({ baseUrl: 'http://127.0.0.1:1', timeoutMs: 600_001 }),
+      ).toThrow(RangeError);
+    });
+
+    it('does not touch the network when the caller signal is already aborted', async () => {
+      const { baseUrl, calls } = await startFake(() => ({}));
+      const error = await failureOf(
+        new EkuatiaHttpClient({ baseUrl }).consultByCdc({
+          cdc: CDC,
+          recaptchaToken: TOKEN,
+          signal: AbortSignal.abort(),
+        }),
+      );
+      expect(error.code).toBe('aborted');
+      expect(calls).toHaveLength(0);
+    });
+
+    it('maps a caller abort in flight to aborted, not timeout', async () => {
+      const { baseUrl } = await startFake(() => ({ body: POST_OK }), 2_000);
+      const controller = new AbortController();
+      const pending = failureOf(
+        new EkuatiaHttpClient({ baseUrl }).consultByCdc({
+          cdc: CDC,
+          recaptchaToken: TOKEN,
+          signal: controller.signal,
+        }),
+      );
+      setTimeout(() => {
+        controller.abort();
+      }, 30);
+      expect((await pending).code).toBe('aborted');
+    });
+
+    it('cancels the body of a non-200 response it does not read', async () => {
+      let cancelled = false;
+      const body = new ReadableStream<Uint8Array>({
+        pull() {
+          /* never produces */
+        },
+        cancel() {
+          cancelled = true;
+        },
+      });
+      const fetchImpl = (() =>
+        Promise.resolve(new Response(body, { status: 500 }))) as typeof fetch;
+      const error = await failureOf(
+        new EkuatiaHttpClient({ fetch: fetchImpl }).consultByCdc({
+          cdc: CDC,
+          recaptchaToken: TOKEN,
+        }),
+      );
+      expect(error.code).toBe('consult_error');
+      expect(cancelled).toBe(true);
     });
   });
 });

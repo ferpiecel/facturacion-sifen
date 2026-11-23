@@ -10,7 +10,9 @@ const INPUT = { sitekey: 'sitekey-abc', pageUrl: 'https://example.invalid/page' 
 interface Seen {
   method: string;
   path: string;
+  /** Query string and form body merged: where a parameter travels is asserted via `query`. */
   params: URLSearchParams;
+  query: URLSearchParams;
 }
 
 type Reply = { status?: number; body: string; delayMs?: number; stallBody?: boolean };
@@ -35,19 +37,32 @@ async function startFake(
   const calls: Seen[] = [];
   const srv = createServer((req: IncomingMessage, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
-    const seen = { method: req.method ?? '', path: url.pathname, params: url.searchParams };
-    calls.push(seen);
-    const reply = handler(seen, calls);
-    const send = (): void => {
-      res.writeHead(reply.status ?? 200, { 'content-type': 'application/json' });
-      if (reply.stallBody) {
-        res.write(reply.body.slice(0, 3)); // headers and a partial body, never finished
-        return;
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => {
+      const params = new URLSearchParams(url.searchParams);
+      for (const [name, value] of new URLSearchParams(Buffer.concat(chunks).toString('utf8'))) {
+        params.set(name, value);
       }
-      res.end(reply.body);
-    };
-    if (reply.delayMs) setTimeout(send, reply.delayMs);
-    else send();
+      const seen = {
+        method: req.method ?? '',
+        path: url.pathname,
+        params,
+        query: url.searchParams,
+      };
+      calls.push(seen);
+      const reply = handler(seen, calls);
+      const send = (): void => {
+        res.writeHead(reply.status ?? 200, { 'content-type': 'application/json' });
+        if (reply.stallBody) {
+          res.write(reply.body.slice(0, 3)); // headers and a partial body, never finished
+          return;
+        }
+        res.end(reply.body);
+      };
+      if (reply.delayMs) setTimeout(send, reply.delayMs);
+      else send();
+    });
   });
   server = srv;
   await new Promise<void>((resolve) => srv.listen(0, '127.0.0.1', resolve));
@@ -70,6 +85,22 @@ async function failureOf(promise: Promise<unknown>): Promise<CaptchaSolveError> 
 }
 
 describe('TwoCaptchaSolver', () => {
+  it('sends the api key in a POST form body, never in the URL', async () => {
+    const { baseUrl, calls } = await startFake((seen) =>
+      seen.path === '/in.php'
+        ? json({ status: 1, request: '777' })
+        : json({ status: 1, request: 'TOKEN-1' }),
+    );
+
+    await solver(baseUrl).solveRecaptchaV2(INPUT);
+
+    for (const call of calls) {
+      expect(call.method).toBe('POST');
+      expect(call.params.get('key')).toBe(API_KEY);
+      expect([...call.query.keys()]).toEqual([]);
+    }
+  });
+
   it('submits then polls until ready and returns the token', async () => {
     const { baseUrl, calls } = await startFake((seen) =>
       seen.path === '/in.php'
@@ -124,8 +155,11 @@ describe('TwoCaptchaSolver', () => {
   it.each([
     ['ERROR_WRONG_USER_KEY', 'not_configured'],
     ['ERROR_KEY_DOES_NOT_EXIST', 'not_configured'],
-    ['ERROR_ZERO_BALANCE', 'provider_error'],
-    ['ERROR_NO_SLOT_AVAILABLE', 'provider_error'],
+    ['ERROR_ZERO_BALANCE', 'insufficient_balance'],
+    ['ERROR_NO_SLOT_AVAILABLE', 'no_capacity'],
+    ['NO_SLOT_AVAILABLE', 'no_capacity'],
+    ['ERROR_IP_NOT_ALLOWED', 'ip_not_allowed'],
+    ['IP_NOT_ALLOWED', 'ip_not_allowed'],
     ['ERROR_GOOGLEKEY', 'provider_error'],
     ['SOMETHING_NEW', 'provider_error'],
     ['ERROR_CAPTCHA_UNSOLVABLE', 'unsolvable'],
@@ -232,8 +266,97 @@ describe('TwoCaptchaSolver', () => {
     const error = await failureOf(s.solveRecaptchaV2(INPUT));
     expect(error.code).toBe('provider_error');
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(fetchImpl.mock.calls[0]?.[0] ?? '').toMatch(
-      new RegExp(`^${DEFAULT_TWO_CAPTCHA_BASE_URL}/in\\.php\\?`),
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe(`${DEFAULT_TWO_CAPTCHA_BASE_URL}/in.php`);
+  });
+
+  it('rejects an empty task id as provider_error', async () => {
+    const { baseUrl, calls } = await startFake(() => json({ status: 1, request: '' }));
+    const error = await failureOf(solver(baseUrl).solveRecaptchaV2(INPUT));
+    expect(error.code).toBe('provider_error');
+    expect(calls).toHaveLength(1);
+  });
+
+  it('maps a transport failure while polling to provider_error', async () => {
+    const { baseUrl } = await startFake((seen) =>
+      seen.path === '/in.php'
+        ? json({ status: 1, request: '9' })
+        : { status: 502, body: 'bad gateway' },
     );
+    const error = await failureOf(solver(baseUrl).solveRecaptchaV2(INPUT));
+    expect(error.code).toBe('provider_error');
+  });
+
+  it('never calls the provider when the caller signal is already aborted', async () => {
+    const fetchImpl = vi.fn();
+    const s = new TwoCaptchaSolver({
+      apiKey: API_KEY,
+      fetch: fetchImpl as unknown as typeof fetch,
+    });
+    const error = await failureOf(s.solveRecaptchaV2({ ...INPUT, signal: AbortSignal.abort() }));
+    expect(error.code).toBe('aborted');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('stops with aborted when the caller aborts while the provider is slow', async () => {
+    const { baseUrl } = await startFake(() => ({ body: '{}', delayMs: 2_000 }));
+    const controller = new AbortController();
+    const pending = failureOf(
+      solver(baseUrl).solveRecaptchaV2({ ...INPUT, signal: controller.signal }),
+    );
+    setTimeout(() => {
+      controller.abort();
+    }, 30);
+    expect((await pending).code).toBe('aborted');
+  });
+
+  it('stops with aborted when the caller aborts between polls', async () => {
+    const controller = new AbortController();
+    const { baseUrl } = await startFake((seen) => {
+      if (seen.path === '/in.php') return json({ status: 1, request: '9' });
+      controller.abort();
+      return json({ status: 0, request: 'CAPCHA_NOT_READY' });
+    });
+    const error = await failureOf(
+      new TwoCaptchaSolver({ apiKey: API_KEY, baseUrl, pollIntervalMs: 5_000 }).solveRecaptchaV2({
+        ...INPUT,
+        signal: controller.signal,
+      }),
+    );
+    expect(error.code).toBe('aborted');
+  });
+
+  it.each([
+    [{ pollIntervalMs: 0 }],
+    [{ pollIntervalMs: -1 }],
+    [{ pollIntervalMs: Number.NaN }],
+    [{ pollIntervalMs: Number.POSITIVE_INFINITY }],
+    [{ pollIntervalMs: 60_001 }],
+    [{ timeoutMs: 0 }],
+    [{ timeoutMs: Number.NaN }],
+    [{ timeoutMs: 600_001 }],
+  ])('rejects invalid timing options %j at construction', (extra) => {
+    expect(
+      () => new TwoCaptchaSolver({ apiKey: API_KEY, baseUrl: 'http://127.0.0.1:1', ...extra }),
+    ).toThrow(RangeError);
+  });
+
+  it('cancels the body of an error response it does not read', async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull() {
+        /* never produces: only cancel() settles it */
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const fetchImpl = vi.fn(() => Promise.resolve(new Response(body, { status: 500 })));
+    const s = new TwoCaptchaSolver({
+      apiKey: API_KEY,
+      fetch: fetchImpl as unknown as typeof fetch,
+    });
+    const error = await failureOf(s.solveRecaptchaV2(INPUT));
+    expect(error.code).toBe('provider_error');
+    expect(cancelled).toBe(true);
   });
 });

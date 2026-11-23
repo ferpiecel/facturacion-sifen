@@ -38,6 +38,14 @@ describe('GET /portal/received-documents (e2e)', () => {
   let hostileXml = '';
   let pdf = '';
   let png = '';
+  const mimeCases: [string, string, 'inline' | 'attachment'][] = [
+    ['application/pdf; charset=binary', 'a.pdf', 'inline'],
+    ['IMAGE/PNG', 'a.png', 'inline'],
+    ['application/xml; charset=utf-8', 'x.xml', 'attachment'],
+    ['image/svg+xml', 'x.svg', 'attachment'],
+  ];
+  const mimeIds = new Map<string, string>();
+  let noTenantCookie = '';
   const storage = new InMemoryStorageProvider();
   const originalEnvironment = process.env.SIFEN_ENVIRONMENT;
 
@@ -115,6 +123,13 @@ describe('GET /portal/received-documents (e2e)', () => {
       contentType: 'image/png',
       name: 'a.png',
     });
+    for (const [contentType, name] of mimeCases) {
+      mimeIds.set(
+        contentType,
+        await seed(acme, true, true, { bytes: Buffer.from('x'), contentType, name }),
+      );
+    }
+    noTenantCookie = await portalSessionCookie(handle.db, 'plain@example.com');
     cookie = await portalSessionCookie(handle.db, 'lector@example.com', {
       tenantId: acme,
       role: 'lector',
@@ -134,7 +149,15 @@ describe('GET /portal/received-documents (e2e)', () => {
     expect(res.headers['cache-control']).toBe('private, no-store');
     const items = res.json<{ items: Item[]; next_cursor: string | null }>().items;
     expect(items.map((item) => item.id).sort()).toEqual(
-      [ids.own, ids.foreignReceiver, withArtifact, hostileXml, pdf, png].sort(),
+      [
+        ids.own,
+        ids.foreignReceiver,
+        withArtifact,
+        hostileXml,
+        pdf,
+        png,
+        ...mimeIds.values(),
+      ].sort(),
     );
     expect(items.find((item) => item.id === ids.foreignReceiver)?.is_own_receiver).toBe(false);
     expect(items.find((item) => item.id === ids.own)?.is_own_receiver).toBe(true);
@@ -205,6 +228,17 @@ describe('GET /portal/received-documents (e2e)', () => {
     expect(b.headers['content-disposition']).toBe('inline; filename="a.png"');
   });
 
+  it.each(mimeCases)(
+    'normalizes the stored content type %s before choosing the disposition (%s, %s)',
+    async (contentType, name, disposition) => {
+      const id = mimeIds.get(contentType) ?? '';
+      const res = await call('GET', `/portal/received-documents/${id}/artifact`);
+
+      expect(res.statusCode, res.body).toBe(200);
+      expect(res.headers['content-disposition']).toBe(`${disposition}; filename="${name}"`);
+    },
+  );
+
   it('sends a restrictive CSP with the artifact', async () => {
     const res = await call('GET', `/portal/received-documents/${pdf}/artifact`);
 
@@ -233,6 +267,16 @@ describe('GET /portal/received-documents (e2e)', () => {
     expect((await call('GET', url, '')).statusCode, url).toBe(401);
   });
 
+  it('answers 403 for a valid session without an active tenant', async () => {
+    for (const url of [
+      '/portal/received-documents',
+      `/portal/received-documents/${ids.own}`,
+      `/portal/received-documents/${withArtifact}/artifact`,
+    ]) {
+      expect((await call('GET', url, noTenantCookie)).statusCode, url).toBe(403);
+    }
+  });
+
   it('does not expose write routes', async () => {
     const attempts: [string, string][] = [
       ['POST', '/portal/received-documents'],
@@ -246,5 +290,48 @@ describe('GET /portal/received-documents (e2e)', () => {
     for (const [method, url] of attempts) {
       expect((await call(method, url)).statusCode, `${method} ${url}`).toBe(404);
     }
+  });
+});
+
+describe('GET /portal/received-documents/:id/artifact without storage (e2e)', () => {
+  let handle: DatabaseHandle;
+  let app: NestFastifyApplication;
+  let cookie: string;
+
+  beforeAll(async () => {
+    handle = createPgliteDatabase();
+    await handle.migrate();
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(DATABASE_HANDLE)
+      .useValue(handle)
+      .overrideProvider(DATABASE)
+      .useValue(handle.db)
+      .overrideProvider(RECEPTION_STORAGE)
+      .useValue(null)
+      .compile();
+    app = moduleRef.createNestApplication<NestFastifyApplication>(createHttpAdapter());
+    await app.init();
+    await app.getHttpAdapter().getInstance().ready();
+    const acme = (await createTenant(handle.db, 'Acme SA')).id;
+    cookie = await portalSessionCookie(handle.db, 'lector@example.com', {
+      tenantId: acme,
+      role: 'lector',
+    });
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  it('answers 503 storage_unavailable without leaking settings', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/portal/received-documents/${randomUUID()}/artifact`,
+      headers: { cookie },
+    });
+
+    expect(res.statusCode, res.body).toBe(503);
+    expect(res.json()).toMatchObject({ code: 'storage_unavailable' });
+    expect(res.body).not.toMatch(/bucket|endpoint|http/i);
   });
 });

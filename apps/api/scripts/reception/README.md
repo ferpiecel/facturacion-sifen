@@ -50,7 +50,7 @@ Desde la raíz del repositorio, con Node 22 (`nvm use`):
 5. Anonimizá cada captura que quieras conservar (trabaja solo con archivos locales):
 
    ```bash
-   pnpm --filter @sifen/api anonymize:ekuatia -- --in apps/api/.captures/<vYYYY-Qn>/success --out <directorio de salida>
+   pnpm --filter @sifen/api anonymize:ekuatia -- --in .captures/<vYYYY-Qn>/success --out <directorio de salida>
    ```
 
    Reemplaza RUC (con su dígito verificador), CDC (sintético con dígito verificador válido, el mismo CDC original siempre da el mismo sintético dentro de la corrida), razón social, direcciones, teléfonos, correos, hashes del QR y la firma XML, y quita cookies y cabeceras de sesión. Escribe `anonymization-report.json` con los conteos por categoría, sin valores originales.

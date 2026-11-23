@@ -42,6 +42,8 @@ export function parseCaptureArgs(argv: readonly string[]): CaptureArgs {
   };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
+    // pnpm forwards the literal `--` separator of `pnpm run <script> -- <flags>` to the script.
+    if (flag === '--') continue;
     if (flag === '--i-am-a-human') args.iAmAHuman = true;
     else if (flag === '--yes') args.yes = true;
     else if (flag === '--skip-cookie-control') args.skipCookieControl = true;

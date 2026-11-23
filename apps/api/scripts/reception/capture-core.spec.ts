@@ -24,6 +24,12 @@ describe('parseCaptureArgs', () => {
   it('rejects unknown flags', () => {
     expect(() => parseCaptureArgs(['--nope'])).toThrow(/Unknown argument/);
   });
+
+  it('ignores the bare -- separator that pnpm forwards to the script', () => {
+    const args = parseCaptureArgs(['--', '--cdc', CDC, '--i-am-a-human']);
+    expect(args.cdc).toBe(CDC);
+    expect(args.iAmAHuman).toBe(true);
+  });
 });
 
 describe('checkGuards', () => {

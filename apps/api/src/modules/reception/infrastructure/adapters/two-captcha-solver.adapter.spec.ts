@@ -290,7 +290,7 @@ describe('TwoCaptchaSolver', () => {
     const fetchImpl = vi.fn();
     const s = new TwoCaptchaSolver({
       apiKey: API_KEY,
-      fetch: fetchImpl as unknown as typeof fetch,
+      fetch: fetchImpl,
     });
     const error = await failureOf(s.solveRecaptchaV2({ ...INPUT, signal: AbortSignal.abort() }));
     expect(error.code).toBe('aborted');
@@ -353,7 +353,7 @@ describe('TwoCaptchaSolver', () => {
     const fetchImpl = vi.fn(() => Promise.resolve(new Response(body, { status: 500 })));
     const s = new TwoCaptchaSolver({
       apiKey: API_KEY,
-      fetch: fetchImpl as unknown as typeof fetch,
+      fetch: fetchImpl,
     });
     const error = await failureOf(s.solveRecaptchaV2(INPUT));
     expect(error.code).toBe('provider_error');

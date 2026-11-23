@@ -44,7 +44,8 @@ export class TwoCaptchaSolver implements CaptchaSolver {
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: TwoCaptchaSolverOptions) {
-    if (options.apiKey.trim() === '') throw new CaptchaSolveError('not_configured');
+    if (typeof options.apiKey !== 'string' || options.apiKey.trim() === '')
+      throw new CaptchaSolveError('not_configured');
     this.apiKey = options.apiKey;
     this.baseUrl = (options.baseUrl ?? DEFAULT_TWO_CAPTCHA_BASE_URL).replace(/\/+$/, '');
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -87,23 +88,20 @@ export class TwoCaptchaSolver implements CaptchaSolver {
     deadline: number,
   ): Promise<{ status: number; request: string }> {
     const query = new URLSearchParams({ key: this.apiKey, ...params, json: '1' });
-    let response: Response;
+    let body: unknown;
     try {
-      response = await this.fetchImpl(`${this.baseUrl}${path}?${query.toString()}`, {
+      const response = await this.fetchImpl(`${this.baseUrl}${path}?${query.toString()}`, {
         signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
       });
+      if (!response.ok) throw new CaptchaSolveError('provider_error');
+      body = await response.json();
     } catch (error) {
-      // Aborted by our own deadline is a timeout; any other failure may echo the URL (key).
+      if (error instanceof CaptchaSolveError) throw error;
+      // The abort signal also covers reading the body. Other failures may echo the URL (key),
+      // so they are never attached as a cause.
       if (error instanceof Error && error.name === 'TimeoutError') {
         throw new CaptchaSolveError('timeout');
       }
-      throw new CaptchaSolveError('provider_error');
-    }
-    if (!response.ok) throw new CaptchaSolveError('provider_error');
-    let body: unknown;
-    try {
-      body = await response.json();
-    } catch {
       throw new CaptchaSolveError('provider_error');
     }
     return parseReply(body);

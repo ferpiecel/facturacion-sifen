@@ -13,7 +13,7 @@ interface Seen {
   params: URLSearchParams;
 }
 
-type Reply = { status?: number; body: string };
+type Reply = { status?: number; body: string; delayMs?: number; stallBody?: boolean };
 
 let server: Server | undefined;
 
@@ -38,8 +38,16 @@ async function startFake(
     const seen = { method: req.method ?? '', path: url.pathname, params: url.searchParams };
     calls.push(seen);
     const reply = handler(seen, calls);
-    res.writeHead(reply.status ?? 200, { 'content-type': 'application/json' });
-    res.end(reply.body);
+    const send = (): void => {
+      res.writeHead(reply.status ?? 200, { 'content-type': 'application/json' });
+      if (reply.stallBody) {
+        res.write(reply.body.slice(0, 3)); // headers and a partial body, never finished
+        return;
+      }
+      res.end(reply.body);
+    };
+    if (reply.delayMs) setTimeout(send, reply.delayMs);
+    else send();
   });
   server = srv;
   await new Promise<void>((resolve) => srv.listen(0, '127.0.0.1', resolve));
@@ -171,16 +179,30 @@ describe('TwoCaptchaSolver', () => {
     expect(error.cause).toBeUndefined();
   });
 
-  it('rejects an empty api key at construction', () => {
-    for (const apiKey of ['', '   ']) {
-      try {
-        new TwoCaptchaSolver({ apiKey, baseUrl: 'http://127.0.0.1:1' });
-        expect.unreachable();
-      } catch (e) {
-        expect(e).toBeInstanceOf(CaptchaSolveError);
-        expect((e as CaptchaSolveError).code).toBe('not_configured');
-      }
+  it.each([[''], ['   '], [undefined], [null]])('rejects api key %j at construction', (apiKey) => {
+    let thrown: unknown;
+    try {
+      new TwoCaptchaSolver({ apiKey: apiKey as unknown as string, baseUrl: 'http://127.0.0.1:1' });
+    } catch (e) {
+      thrown = e;
     }
+    expect(thrown).toBeInstanceOf(CaptchaSolveError);
+    expect((thrown as CaptchaSolveError).code).toBe('not_configured');
+  });
+
+  it('times out when the provider is slower than the deadline (in flight)', async () => {
+    const { baseUrl } = await startFake(() => ({ body: '{}', delayMs: 2_000 }));
+    const error = await failureOf(solver(baseUrl, { timeoutMs: 80 }).solveRecaptchaV2(INPUT));
+    expect(error.code).toBe('timeout');
+  });
+
+  it('times out when the deadline hits while the body is being read', async () => {
+    const { baseUrl } = await startFake(() => ({
+      body: '{"status":1,"request":"9"}',
+      stallBody: true,
+    }));
+    const error = await failureOf(solver(baseUrl, { timeoutMs: 80 }).solveRecaptchaV2(INPUT));
+    expect(error.code).toBe('timeout');
   });
 
   it('never leaks the api key through the error', async () => {
@@ -197,27 +219,21 @@ describe('TwoCaptchaSolver', () => {
     expect(dump).not.toContain(API_KEY);
   });
 
-  it('defaults to the real service URL, which tests must never reach', async () => {
+  it('uses the real service URL by default (spy fetch, never reaches the network)', async () => {
     expect(DEFAULT_TWO_CAPTCHA_BASE_URL).toBe('https://2captcha.com');
-    const fetchImpl = vi.fn();
-    new TwoCaptchaSolver({ apiKey: API_KEY, fetch: fetchImpl });
-    expect(fetchImpl).not.toHaveBeenCalled();
-    // Guard: the suite fails if the default URL is ever used with the real fetch.
-    const guarded = vi.fn((input: string | URL | Request) => {
-      if (
-        (typeof input === 'string'
-          ? input
-          : input instanceof URL
-            ? input.href
-            : input.url
-        ).startsWith(DEFAULT_TWO_CAPTCHA_BASE_URL)
-      ) {
-        throw new Error('test attempted to reach the real captcha service');
-      }
-      return Promise.reject(new Error('unreachable'));
+    const fetchImpl = vi.fn((input: string) =>
+      Promise.reject(new Error(`blocked in tests: ${String(input.length)}`)),
+    );
+    const s = new TwoCaptchaSolver({
+      apiKey: API_KEY,
+      fetch: fetchImpl as unknown as typeof fetch,
     });
-    const s = new TwoCaptchaSolver({ apiKey: API_KEY, fetch: guarded });
-    await failureOf(s.solveRecaptchaV2(INPUT));
-    expect(guarded).toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+    const error = await failureOf(s.solveRecaptchaV2(INPUT));
+    expect(error.code).toBe('provider_error');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl.mock.calls[0]?.[0] ?? '').toMatch(
+      new RegExp(`^${DEFAULT_TWO_CAPTCHA_BASE_URL}/in\\.php\\?`),
+    );
   });
 });

@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -181,8 +182,28 @@ describe('anonymizeCapture', () => {
 });
 
 describe('runCli', () => {
-  it('requires --in and --out', () => {
-    expect(runCli([])).toBe(2);
+  const tmp = (): string => mkdtempSync(join(tmpdir(), 'anon-'));
+
+  it.each([
+    ['nothing', []],
+    ['only --out', ['--out', 'X']],
+    ['only --in', ['--in', 'X']],
+    ['a value starting with --', ['--in', '--out', '--out', 'Y']],
+  ])('refuses %s and creates nothing', (_name, argv) => {
+    const dir = tmp();
+    const out = join(dir, 'out');
+    const args = argv.map((a) => (a === 'X' || a === 'Y' ? out : a));
+    expect(runCli(args)).not.toBe(0);
+    expect(existsSync(out)).toBe(false);
+  });
+
+  it('refuses a missing or empty input directory without creating the output', () => {
+    const dir = tmp();
+    const out = join(dir, 'out');
+    expect(runCli(['--in', join(dir, 'missing'), '--out', out])).not.toBe(0);
+    mkdirSync(join(dir, 'empty'));
+    expect(runCli(['--in', join(dir, 'empty'), '--out', out])).not.toBe(0);
+    expect(existsSync(out)).toBe(false);
   });
 
   it('reads a raw capture directory and writes the anonymized copy plus the report', () => {
@@ -199,6 +220,41 @@ describe('runCli', () => {
       'requests.json',
     ]);
     expect(readFileSync(join(output, 'documento.xml'), 'utf8')).not.toContain(RUC_BASE);
+  });
+});
+
+describe('numeric text fields', () => {
+  it('rewrites numeric phone fields in JSON bodies and keeps the type', () => {
+    const body = JSON.stringify({
+      DE: { dTelEmi: 216189000, dTelRec: '0211234567', dCelRec: 981123456 },
+    });
+    const raw = JSON.stringify([{ url: 'u', method: 'POST', status_code: 200, body }]);
+    const { files } = anonymizeCapture({ 'requests.json': raw });
+    const record = (JSON.parse(files['requests.json'] ?? '[]') as { body: string }[])[0];
+    const de = (JSON.parse(record.body) as { DE: Record<string, unknown> }).DE;
+    expect(typeof de.dTelEmi).toBe('number');
+    expect(typeof de.dCelRec).toBe('number');
+    expect(typeof de.dTelRec).toBe('string');
+    expect(Object.values(de).map(Number)).toEqual([0, 0, 0]);
+    expect(scanSensitive(files['requests.json'] ?? '')).toEqual([]);
+  });
+
+  it('anonymizes the committed servicio_digital capture so no phone survives', () => {
+    const dir = join(
+      import.meta.dirname,
+      '../../test/fixtures/reception/ekuatia/v2026-Q3/servicio_digital',
+    );
+    const input = Object.fromEntries(
+      (['documento.xml', 'requests.json', 'meta.json'] as const).map((n) => [
+        n,
+        readFileSync(join(dir, n), 'utf8'),
+      ]),
+    );
+    // The committed bytes still have the finding (verbatim fixture, never edited)...
+    expect(scanSensitive(input['requests.json'])).toContain('phone');
+    // ...but the anonymized copy does not.
+    const { files } = anonymizeCapture(input);
+    expect(scanSensitive(files['requests.json'] ?? '')).not.toContain('phone');
   });
 });
 
@@ -230,7 +286,7 @@ describe('committed eKuatia fixtures', () => {
   // here). They are pinned by category so a new leak, or a fix, fails this test. Reported to the
   // tech lead; the values are deliberately not written down anywhere.
   const KNOWN_FINDINGS: Record<string, string[]> = {
-    'v2026-Q3/servicio_digital/requests.json': ['phone'], // numeric dTelEmi in the JSON body
+    'v2026-Q3/servicio_digital/requests.json': ['phone'], // numeric dTelEmi in the JSON body (anonymizeCapture now fixes it in a copy)
     'v2026-Q3/success_pago_credito/documento.xml': ['ruc'], // dCodCliente in RUC-like format
     'v2026-Q3/success_pago_credito/requests.json': ['ruc'], // same dCodCliente, inside the JSON body
   };

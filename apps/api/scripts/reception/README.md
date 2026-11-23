@@ -94,3 +94,8 @@ Desde la raíz del repositorio, con Node 22 (`nvm use`):
 - `tsconfig.json` los incluye, así que `typecheck` y `eslint` los cubren. Sus tests (`*.spec.ts`, sin red: dobles en memoria) corren con `vitest`.
 - La cobertura de 85 % solo mide `src/**`: estos archivos quedan fuera del gate, pero su lógica pura tiene tests propios.
 - El anonimizador es idempotente a nivel de captura: su `meta.json` lleva `anonymized: true` y una captura así se devuelve sin cambios.
+
+## Límites conocidos
+
+- Los RUC sintéticos del anonimizador (`80000000` en adelante, ver `scanSensitive`) caen dentro del espacio de RUC reales: son datos de prueba, no se pueden distinguir con certeza de un RUC existente.
+- `--label` solo admite letras, dígitos, `_` y `-`. El directorio de salida se crea y se comprueba como escribible antes de resolver el captcha.

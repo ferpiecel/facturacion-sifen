@@ -47,6 +47,14 @@ describe('checkGuards', () => {
     expect(result.ok ? '' : result.reason).toMatch(/CI/);
   });
 
+  it.each(['..', 'a/b', 'a\\b', '', 'has space', '../x', 'a.b'])('refuses label %j', (label) => {
+    expect(checkGuards({ ...ok, label }, {}).ok).toBe(false);
+  });
+
+  it('accepts a plain label', () => {
+    expect(checkGuards({ ...ok, label: 'not_found-2' }, {})).toEqual({ ok: true });
+  });
+
   it('refuses without --i-am-a-human', () => {
     expect(checkGuards({ ...ok, iAmAHuman: false }, {})).toMatchObject({ ok: false });
   });

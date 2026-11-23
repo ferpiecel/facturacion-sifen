@@ -5,8 +5,8 @@
  *   TWOCAPTCHA_API_KEY=... pnpm --filter @sifen/api capture:ekuatia -- --i-am-a-human --cdc <44 digits>
  *   pnpm --filter @sifen/api capture:ekuatia -- --i-am-a-human --probe-rejected-captcha --cdc <44 digits>  (spends nothing)
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, resolve, sep } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { pathToFileURL } from 'node:url';
 import {
@@ -19,6 +19,7 @@ import {
   checkGuards,
   parseCaptureArgs,
   runCapture,
+  versionLabel,
   type CaptureArgs,
 } from './capture-core.js';
 
@@ -28,6 +29,8 @@ export interface MainDeps {
   readonly confirm: (question: string) => Promise<boolean>;
   readonly fetch: typeof fetch;
   readonly createSolver: (apiKey: string) => CaptchaSolver;
+  /** Creates the directory and proves it is writable; throws otherwise. */
+  readonly prepareDir: (path: string) => void;
   readonly writeFile: (path: string, content: string) => void;
   readonly now: () => Date;
 }
@@ -53,6 +56,20 @@ export async function main(argv: readonly string[], deps: MainDeps): Promise<num
     deps.print('Missing TWOCAPTCHA_API_KEY in the environment (it is never read from .env).');
     return 2;
   }
+  // The destination is fixed and proven writable BEFORE any spend, so a write failure cannot
+  // waste a solved captcha. The label is already restricted; the resolved path is checked anyway.
+  const startedAt = deps.now();
+  const dir = `${args.out}/${versionLabel(startedAt)}/${args.label}`;
+  if (!resolve(dir).startsWith(resolve(args.out) + sep)) {
+    deps.print('Refusing to write outside the output directory.');
+    return 2;
+  }
+  try {
+    deps.prepareDir(dir);
+  } catch {
+    deps.print(`The output directory ${dir} is not writable. Nothing was requested.`);
+    return 2;
+  }
   if (probe) {
     deps.print('PROBE: sends one POST to ekuatia.set.gov.py with an invalid captcha token.');
     deps.print('This does not spend 2Captcha credit and never contacts 2captcha.com.');
@@ -73,7 +90,7 @@ export async function main(argv: readonly string[], deps: MainDeps): Promise<num
     probeRejectedCaptcha: probe,
     skipCookieControl: args.skipCookieControl,
     label: args.label,
-    now: deps.now,
+    now: () => startedAt,
   }).catch((error: unknown) => {
     // Only our stable code: provider text could echo the key.
     deps.print(
@@ -82,10 +99,21 @@ export async function main(argv: readonly string[], deps: MainDeps): Promise<num
     return undefined;
   });
   if (result === undefined) return 1;
-  const dir = `${args.out}/${String(result.meta.version)}/${args.label}`;
-  deps.writeFile(`${dir}/requests.json`, JSON.stringify(result.records, null, 2));
-  deps.writeFile(`${dir}/meta.json`, JSON.stringify(result.meta, null, 2));
-  if (result.documentXml !== undefined) deps.writeFile(`${dir}/documento.xml`, result.documentXml);
+  try {
+    deps.writeFile(`${dir}/requests.json`, JSON.stringify(result.records, null, 2));
+    deps.writeFile(`${dir}/meta.json`, JSON.stringify(result.meta, null, 2));
+    if (result.documentXml !== undefined)
+      deps.writeFile(`${dir}/documento.xml`, result.documentXml);
+  } catch {
+    // The error text is not printed: it could carry paths or secrets.
+    deps.print(
+      `Writing the capture to ${dir} failed. The result exists only in memory of this process and is lost on exit.`,
+    );
+    deps.print(
+      `Statuses: ${result.records.map((r) => String(r.status_code ?? r.error)).join(', ')}`,
+    );
+    return 1;
+  }
   deps.print(`Statuses: ${result.records.map((r) => String(r.status_code ?? r.error)).join(', ')}`);
   deps.print(
     `Raw capture written to ${dir} (gitignored, NOT anonymized). Run anonymize-fixtures next.`,
@@ -111,6 +139,12 @@ if (process.argv.length > 1 && import.meta.url === pathToFileURL(process.argv[1]
     confirm: askYesNo,
     fetch,
     createSolver: (apiKey) => new TwoCaptchaSolver({ apiKey }),
+    prepareDir: (path) => {
+      mkdirSync(path, { recursive: true });
+      const probe = `${path}/.write-check`;
+      writeFileSync(probe, '');
+      rmSync(probe);
+    },
     writeFile: (path, content) => {
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, content, { mode: 0o600 });

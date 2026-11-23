@@ -1,0 +1,16 @@
+{
+  "anonymized": true,
+  "replacements": {
+    "cdc": 0,
+    "ruc": 0,
+    "email": 0,
+    "phone": 0,
+    "text_field": 0,
+    "qr_param": 0,
+    "signature": 0,
+    "header_removed": 0
+  },
+  "files": [
+    "meta.json"
+  ]
+}

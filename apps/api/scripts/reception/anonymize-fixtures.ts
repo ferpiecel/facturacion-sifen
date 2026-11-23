@@ -204,9 +204,13 @@ class Anonymizer {
         const rucKey = key === 'dDVEmi' ? 'dRucEm' : 'dRucRec';
         out[key] =
           rucKey in source ? computeRucCheckDigit(this.fakeRuc(String(source[rucKey]))) : v;
-      } else if (key in TEXT_FIELDS && typeof v === 'string') {
-        if (v !== TEXT_FIELDS[key]) this.counts.text_field += 1;
-        out[key] = TEXT_FIELDS[key];
+      } else if (key in TEXT_FIELDS && (typeof v === 'string' || typeof v === 'number')) {
+        const replacement = TEXT_FIELDS[key] ?? '';
+        // Numeric values (e.g. a phone sent as a JSON number) keep their type.
+        const synthetic =
+          typeof v === 'number' && /^\d+$/.test(replacement) ? Number(replacement) : replacement;
+        if (v !== synthetic) this.counts.text_field += 1;
+        out[key] = synthetic;
       } else if (SIGNATURE_KEYS.includes(key) && typeof v === 'string') {
         this.counts.signature += 1;
         out[key] = 'REMOVED';
@@ -327,16 +331,28 @@ export function scanSensitive(text: string): Category[] {
 }
 
 export function runCli(argv: readonly string[]): number {
-  const get = (flag: string): string | undefined => argv[argv.indexOf(flag) + 1];
+  const get = (flag: string): string | undefined => {
+    const index = argv.indexOf(flag);
+    const value = index < 0 ? undefined : argv[index + 1];
+    return value === undefined || value.startsWith('--') ? undefined : value;
+  };
   const inDir = get('--in');
   const outDir = get('--out');
   if (inDir === undefined || outDir === undefined) {
-    console.error('Usage: anonymize-fixtures --in <raw capture dir> --out <output dir>');
+    console.error(
+      'Usage: anonymize-fixtures --in <raw capture dir> --out <output dir> (both required)',
+    );
     return 2;
   }
   const input: CaptureFiles = {};
   for (const name of ['documento.xml', 'requests.json', 'meta.json'] as const) {
     if (existsSync(join(inDir, name))) input[name] = readFileSync(join(inDir, name), 'utf8');
+  }
+  if (Object.keys(input).length === 0) {
+    console.error(
+      'The input directory does not exist or has no capture files (documento.xml, requests.json, meta.json).',
+    );
+    return 2;
   }
   const { files, report } = anonymizeCapture(input);
   mkdirSync(outDir, { recursive: true });

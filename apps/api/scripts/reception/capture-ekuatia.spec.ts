@@ -5,7 +5,12 @@ const CDC = '1'.repeat(44);
 const TOKEN = 'TOKEN-zzz-999';
 const API_KEY = 'KEY-secret-0042';
 
-function harness(env: Record<string, string | undefined> = {}, confirmAnswer = true) {
+function harness(
+  env: Record<string, string | undefined> = {},
+  confirmAnswer = true,
+  opts: { unwritable?: boolean; failWrite?: boolean } = {},
+) {
+  const prepared: string[] = [];
   const keyReads: string[] = [];
   const guardedEnv = new Proxy<Record<string, string | undefined>>(
     { TWOCAPTCHA_API_KEY: API_KEY, ...env },
@@ -33,10 +38,17 @@ function harness(env: Record<string, string | undefined> = {}, confirmAnswer = t
     confirm,
     fetch: fetchFake,
     createSolver,
-    writeFile: (path, content) => written.set(path, content),
+    prepareDir: (path) => {
+      if (opts.unwritable) throw new Error(`EACCES ${API_KEY}`);
+      prepared.push(path);
+    },
+    writeFile: (path, content) => {
+      if (opts.failWrite) throw new Error(`ENOSPC ${API_KEY}`);
+      written.set(path, content);
+    },
     now: () => new Date('2026-11-23T10:00:00Z'),
   };
-  return { deps, keyReads, printed, written, fetchFake, createSolver, confirm };
+  return { prepared, deps, keyReads, printed, written, fetchFake, createSolver, confirm };
 }
 
 const HUMAN = ['--i-am-a-human', '--cdc', CDC];
@@ -121,5 +133,41 @@ describe('capture-ekuatia main happy path', () => {
     const h = harness({ TWOCAPTCHA_API_KEY: undefined });
     expect(await main(['--cdc', CDC, '--probe-rejected-captcha'], h.deps)).not.toBe(0);
     expect(h.fetchFake).not.toHaveBeenCalled();
+  });
+
+  it.each(['..', 'a/b', 'a\\b', '', 'has space'])(
+    'exits non-zero without any request or solver for label %j',
+    async (label) => {
+      const h = harness();
+      expect(await main([...HUMAN, '--yes', '--label', label], h.deps)).not.toBe(0);
+      expect(h.fetchFake).not.toHaveBeenCalled();
+      expect(h.createSolver).not.toHaveBeenCalled();
+      expect(h.keyReads).toEqual([]);
+      expect(h.prepared).toEqual([]);
+    },
+  );
+
+  it('fails before solving the captcha when the output directory is not writable', async () => {
+    const h = harness({}, true, { unwritable: true });
+    expect(await main([...HUMAN, '--yes'], h.deps)).not.toBe(0);
+    expect(h.createSolver).not.toHaveBeenCalled();
+    expect(h.fetchFake).not.toHaveBeenCalled();
+    expect(h.printed.join('\n')).not.toContain(API_KEY);
+  });
+
+  it('prepares the output directory before the captcha is solved', async () => {
+    const h = harness();
+    expect(await main([...HUMAN, '--yes', '--out', 'OUT'], h.deps)).toBe(0);
+    expect(h.prepared).toEqual(['OUT/v2026-Q4/success']);
+  });
+
+  it('says where the result stayed (memory) when writing fails later, without secrets', async () => {
+    const h = harness({}, true, { failWrite: true });
+    expect(await main([...HUMAN, '--yes', '--out', 'OUT'], h.deps)).not.toBe(0);
+    const text = h.printed.join('\n');
+    expect(text).toMatch(/only in memory/i);
+    expect(text).toContain('OUT/v2026-Q4/success');
+    expect(text).not.toContain(API_KEY);
+    expect(text).not.toContain(TOKEN);
   });
 });

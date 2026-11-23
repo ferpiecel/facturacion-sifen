@@ -16,6 +16,7 @@ export const EKUATIA_CONSULTA_PAGE_URL = 'https://ekuatia.set.gov.py/consultas/'
 const EKUATIA_BASE_URL = 'https://ekuatia.set.gov.py';
 const REDACTED = '<redacted>';
 const CDC_PATTERN = /^\d{44}$/;
+const LABEL_PATTERN = /^[A-Za-z0-9_-]+$/;
 const TIMEOUT_MS = 30_000;
 
 export interface CaptureArgs {
@@ -65,6 +66,9 @@ export function checkGuards(args: CaptureArgs, env: { readonly CI?: string }): G
   }
   if (!args.iAmAHuman) {
     return { ok: false, reason: 'Refusing to run without the explicit --i-am-a-human flag.' };
+  }
+  if (!LABEL_PATTERN.test(args.label)) {
+    return { ok: false, reason: 'Invalid --label: only letters, digits, "_" and "-" are allowed.' };
   }
   if (args.cdc === undefined || !CDC_PATTERN.test(args.cdc)) {
     return { ok: false, reason: 'Missing or invalid --cdc: exactly 44 digits are required.' };

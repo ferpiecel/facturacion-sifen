@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { assertNonPrivilegedSession, createNodePostgresDatabase } from '@sifen/db';
 import { readBoundedFile } from '../cli/bounded-file.js';
 import { createCertificateVault, createCscVault } from '../cli/ops.js';
@@ -16,6 +17,7 @@ import {
   createDeadlineWatchWorker,
   createRedisConnection,
   createTenantScheduleStore,
+  createReceptionEkuatiaWorker,
   createReceptionExtractionWorker,
   createTransmissionQueue,
   createTransmissionWorker,
@@ -44,10 +46,20 @@ import {
   createWebhookDeliveryDeps,
   createWebhookDeliveryProcessor,
 } from './webhook-delivery.processor.js';
+import { createReceptionEkuatiaProcessor } from './reception-ekuatia.processor.js';
 import { createReceptionExtractionProcessor } from './reception-extraction.processor.js';
+import { EkuatiaCircuitBreaker } from '../modules/reception/application/ekuatia-circuit-breaker.js';
+import { EkuatiaSolveQuota } from '../modules/reception/application/ekuatia-solve-quota.js';
 import { ExtractReceivedDocument } from '../modules/reception/application/extract-received-document.js';
+import { IngestSifenXml } from '../modules/reception/application/ingest-sifen-xml.js';
+import { LookupCdcDocument } from '../modules/reception/application/lookup-cdc-document.js';
 import { ConfidencePolicy } from '../modules/reception/domain/confidence-policy.js';
 import { createAnthropicExtractionLlm } from '../modules/reception/infrastructure/adapters/anthropic-extraction-llm.adapter.js';
+import { createDrizzleEkuatiaSolveUsageStore } from '../modules/reception/infrastructure/adapters/drizzle-ekuatia-solve-usage-store.js';
+import { EkuatiaHttpClient } from '../modules/reception/infrastructure/adapters/ekuatia-http-client.adapter.js';
+import { Libxml2SifenXmlParser } from '../modules/reception/infrastructure/adapters/libxml2-sifen-xml-parser.adapter.js';
+import { TwoCaptchaSolver } from '../modules/reception/infrastructure/adapters/two-captcha-solver.adapter.js';
+import { loadReceptionEkuatiaConfig } from '../modules/reception/infrastructure/reception-ekuatia-config.js';
 import { createDrizzleReceivedDocumentRepository } from '../modules/reception/infrastructure/adapters/drizzle-received-document-repository.js';
 import { createDrizzleTenantFiscalIdentity } from '../modules/reception/infrastructure/adapters/drizzle-tenant-fiscal-identity.js';
 import { JsqrQrDecoder } from '../modules/reception/infrastructure/adapters/jsqr-qr-decoder.adapter.js';
@@ -214,6 +226,8 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
   // here and invalid values fail the start. Without ANTHROPIC_API_KEY the worker still runs and
   // fails each document with `llm_disabled` (reprocessable later) instead of leaving it `received`.
   const receptionWorker = startReceptionExtraction(env, appHandle.db, connection);
+  // Reception lookup by CDC (R6.3): off unless RECEPTION_EKUATIA_ENABLED and TWOCAPTCHA_API_KEY.
+  const ekuatiaWorker = startReceptionEkuatia(env, appHandle.db, connection);
 
   const running = await startTransmissionWorker({
     cycleIntervalMs: config.cycleIntervalMs,
@@ -283,6 +297,7 @@ async function main(env: NodeJS.ProcessEnv): Promise<void> {
           return running.stop();
         },
         () => receptionWorker?.close(),
+        () => ekuatiaWorker?.close(),
         // After the cycles stopped: zeroize every cached certificate and cancel the sweep timer.
         () => {
           certificateCache.clear();
@@ -365,6 +380,68 @@ function startReceptionExtraction(
     `reception extraction worker started (concurrency ${String(config.concurrency)}, ${
       config.apiKey === null ? 'LLM disabled: documents will fail with llm_disabled' : 'LLM enabled'
     })`,
+  );
+  return worker;
+}
+
+function startReceptionEkuatia(
+  env: NodeJS.ProcessEnv,
+  db: Parameters<typeof createDrizzleReceivedDocumentRepository>[0],
+  connection: ReturnType<typeof createRedisConnection>,
+): { close(): Promise<void> } | undefined {
+  const config = loadReceptionEkuatiaConfig(env);
+  if (!config.available || config.solverApiKey === null) {
+    logger.info(
+      config.enabled
+        ? 'reception eKuatia lookup is off (TWOCAPTCHA_API_KEY is not set)'
+        : 'reception eKuatia lookup is off (RECEPTION_EKUATIA_ENABLED is not true)',
+    );
+    return undefined;
+  }
+  const storage = loadStorageConfig(env, env.NODE_ENV);
+  if (storage.status === 'disabled') {
+    logger.info('reception eKuatia lookup is off (object storage is not configured)');
+    return undefined;
+  }
+  const { maxBytes } = loadReceptionUploadConfig(env);
+  const repository = createDrizzleReceivedDocumentRepository(db);
+  const ingestXml = new IngestSifenXml({
+    repository,
+    storage: createS3StorageProvider(storage.config),
+    parser: new Libxml2SifenXmlParser({ maxBytes }),
+    fiscalIdentity: createDrizzleTenantFiscalIdentity(db),
+    now: () => new Date(),
+    newId: randomUUID,
+  });
+  const quota = new EkuatiaSolveQuota({
+    store: createDrizzleEkuatiaSolveUsageStore(db),
+    tenantCap: config.tenantDailySolveCap,
+    globalCap: config.globalDailySolveCap,
+    now: () => new Date(),
+    log: () => undefined, // the worker only gives slots back; the API logs reservations
+  });
+  const lookup = new LookupCdcDocument({
+    enabled: config.enabled,
+    repository,
+    quota,
+    breaker: new EkuatiaCircuitBreaker({
+      failureThreshold: config.breakerFailureThreshold,
+      cooldownMs: config.breakerCooldownMs,
+      now: () => new Date(),
+    }),
+    solver: new TwoCaptchaSolver({ apiKey: config.solverApiKey }),
+    client: new EkuatiaHttpClient({ baseUrl: config.baseUrl }),
+    ingestXml,
+    sitekey: config.sitekey,
+    pageUrl: `${config.baseUrl}/consultas/`,
+  });
+  const worker = createReceptionEkuatiaWorker({
+    connection,
+    process: createReceptionEkuatiaProcessor({ lookup, logger }),
+    logger,
+  });
+  logger.info(
+    `reception eKuatia lookup worker started (caps per UTC day: tenant ${String(config.tenantDailySolveCap)}, global ${String(config.globalDailySolveCap)})`,
   );
   return worker;
 }

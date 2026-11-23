@@ -3,8 +3,16 @@ import { createReceivedDocument } from '../domain/received-document.js';
 import { EkuatiaCircuitBreaker } from './ekuatia-circuit-breaker.js';
 import { EkuatiaSolveQuota } from './ekuatia-solve-quota.js';
 import { LookupCdcDocument } from './lookup-cdc-document.js';
-import { CaptchaSolveError, type CaptchaSolveErrorCode } from './ports/captcha-solver.port.js';
-import { EkuatiaConsultError, type EkuatiaConsultErrorCode } from './ports/ekuatia-client.port.js';
+import {
+  CaptchaSolveError,
+  type CaptchaSolveErrorCode,
+  type CaptchaSolver,
+} from './ports/captcha-solver.port.js';
+import {
+  EkuatiaConsultError,
+  type EkuatiaClient,
+  type EkuatiaConsultErrorCode,
+} from './ports/ekuatia-client.port.js';
 import type { IngestSifenXmlInput, IngestSifenXmlResult } from './ingest-sifen-xml.js';
 import {
   InMemoryReceptionRepository,
@@ -47,8 +55,12 @@ function harness(
     source: 'ekuatia_cdc',
     isOwnReceiver: true,
   });
-  const solveSpy = vi.fn(over.solve ?? (() => Promise.resolve('TOKEN')));
-  const consultSpy = vi.fn(over.consult ?? (() => Promise.resolve({ xml: XML })));
+  const solveSpy = vi.fn<CaptchaSolver['solveRecaptchaV2']>(
+    over.solve ?? (() => Promise.resolve('TOKEN')),
+  );
+  const consultSpy = vi.fn<EkuatiaClient['consultByCdc']>(
+    over.consult ?? (() => Promise.resolve({ xml: XML })),
+  );
   const ingestSpy = vi.fn(
     over.ingest ??
       (() =>

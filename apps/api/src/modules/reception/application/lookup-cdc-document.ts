@@ -129,6 +129,10 @@ export class LookupCdcDocument {
     }
     breaker.recordSuccess();
 
+    // The site must answer for the CDC that was asked: anything else is never ingested, because the
+    // dedupe above is keyed by the requested CDC.
+    if (!xml.includes(`Id="${cdc}"`)) return { kind: 'failed', code: 'ekuatia_invalid_response' };
+
     const result = await this.deps.ingestXml.execute({
       tenantId,
       xml: new TextEncoder().encode(xml),

@@ -22,7 +22,7 @@ import {
 const TENANT = '11111111-1111-4111-8111-111111111111';
 const CDC = '01444444017001001001452822017012515873260988';
 const DAY = '2026-11-16';
-const XML = '<rDE>fixture</rDE>';
+const XML = `<rDE><DE Id="${CDC}"></DE></rDE>`;
 const AT = new Date('2026-11-16T10:00:00.000Z');
 
 function harness(
@@ -217,6 +217,18 @@ describe('LookupCdcDocument', () => {
     await reserved(h);
     await h.useCase.execute(job);
     expect(h.breaker.state()).toBe('closed');
+  });
+
+  it('refuses an XML that is not the requested document, without ingesting it', async () => {
+    const h = harness({
+      consult: () => Promise.resolve({ xml: `<rDE><DE Id="${'9'.repeat(44)}"></DE></rDE>` }),
+    });
+    await reserved(h);
+    expect(await h.useCase.execute(job)).toEqual({
+      kind: 'failed',
+      code: 'ekuatia_invalid_response',
+    });
+    expect(h.ingestSpy).not.toHaveBeenCalled();
   });
 
   it('an XML the parser rejects is a failed lookup, and the stored extraction_failed document is reported', async () => {

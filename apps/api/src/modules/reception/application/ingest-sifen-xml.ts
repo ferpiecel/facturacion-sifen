@@ -39,6 +39,11 @@ export interface IngestSifenXmlInput {
   readonly tenantId: string;
   readonly xml: Uint8Array;
   readonly originalName?: string | null;
+  /**
+   * How the bytes reached the system. The XML is processed the same way whatever the source:
+   * `ekuatia_cdc` is the XML fetched from eKuatia by CDC (R6.3). Default `sifen_xml`.
+   */
+  readonly source?: 'sifen_xml' | 'ekuatia_cdc';
 }
 
 export interface IngestSifenXmlResult {
@@ -76,6 +81,7 @@ export class IngestSifenXml {
   async execute(input: IngestSifenXmlInput): Promise<IngestSifenXmlResult> {
     const { repository, storage, parser, fiscalIdentity } = this.deps;
     const { tenantId, xml } = input;
+    const source = input.source ?? 'sifen_xml';
 
     const sha256 = createHash('sha256').update(xml).digest('hex');
     const known = await repository.findArtifactBySha256(tenantId, sha256);
@@ -98,7 +104,7 @@ export class IngestSifenXml {
     } catch (error) {
       const code = sifenXmlFailureCode(error);
       if (code === null) throw error;
-      return this.persistFailure(tenantId, artifact, code);
+      return this.persistFailure(tenantId, artifact, code, source);
     }
 
     const byCdc = await repository.findByCdc(tenantId, parsed.cdc);
@@ -122,7 +128,7 @@ export class IngestSifenXml {
     const base = createReceivedDocument({
       id: this.deps.newId(),
       tenantId,
-      source: 'sifen_xml',
+      source,
       isOwnReceiver,
     });
     const extracted = transitionReceivedDocument(base, 'extracted', {
@@ -159,12 +165,13 @@ export class IngestSifenXml {
     tenantId: string,
     artifact: NewReceivedArtifact,
     code: string,
+    source: 'sifen_xml' | 'ekuatia_cdc',
   ): Promise<IngestSifenXmlResult> {
     const at = this.deps.now();
     const base = createReceivedDocument({
       id: this.deps.newId(),
       tenantId,
-      source: 'sifen_xml',
+      source,
       isOwnReceiver: true,
     });
     const extracting = transitionReceivedDocument(base, 'extracting', { at }).document;

@@ -129,7 +129,7 @@ class Anonymizer {
   }
 
   text(input: string): string {
-    let out = input.replace(/<Signature[ >][\s\S]*?<\/Signature>/g, () => {
+    let out = input.replace(/<((?:[\w.-]+:)?Signature)[ >][\s\S]*?<\/\1>/g, () => {
       this.counts.signature += 1;
       return '<!-- signature removed -->';
     });
@@ -337,7 +337,7 @@ export function scanSensitive(text: string): Category[] {
     found.add('phone');
   }
   if (
-    /<(?:SignatureValue|X509Certificate)>[^<]+/.test(text) ||
+    /<(?:[\w.-]+:)?(?:SignatureValue|X509Certificate)>[^<]+/.test(text) ||
     /(?:SignatureValue|X509Certificate)\\?":\s*\\?"(?!REMOVED)[^"\\]+/.test(text)
   ) {
     found.add('signature');

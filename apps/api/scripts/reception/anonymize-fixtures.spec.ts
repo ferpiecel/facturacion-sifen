@@ -165,6 +165,17 @@ describe('anonymizeCapture', () => {
     expect((JSON.parse(records[0]?.body ?? '{}') as { DE: object }).DE).toHaveProperty('dRucEm');
   });
 
+  it('removes a namespace-prefixed signature and certificate', () => {
+    const xml =
+      '<rDE><ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:SignatureValue>PREFIXEDSECRET</ds:SignatureValue>' +
+      '<ds:X509Certificate>PREFIXEDCERT</ds:X509Certificate></ds:Signature></rDE>';
+    const out = anonymizeCapture({ ...RAW, 'documento.xml': xml });
+    const written = JSON.stringify(out.files);
+    expect(written).not.toContain('PREFIXEDSECRET');
+    expect(written).not.toContain('PREFIXEDCERT');
+    expect(scanSensitive(out.files['documento.xml'] ?? '')).toEqual([]);
+  });
+
   it('is idempotent', () => {
     const once = anonymizeCapture(RAW);
     expect(anonymizeCapture(once.files).files).toEqual(once.files);

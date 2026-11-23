@@ -21,3 +21,6 @@ Thumbs.db
 .atl/
 # Salida completa de pnpm verify
 .verify.log
+
+# Raw eKuatia captures (human-run, not anonymized; never commit)
+.captures/

@@ -7,9 +7,11 @@ import { DATABASE } from '../database/database.module.js';
 import { IngestSifenXml } from './application/ingest-sifen-xml.js';
 import { InMemoryStorageProvider } from './infrastructure/adapters/in-memory-storage-provider.js';
 import { ReceptionModule } from './reception.module.js';
+import { IngestFromCdc } from './application/ingest-from-cdc.js';
 import { IngestUpload } from './application/ingest-upload.js';
 import { ReceptionQueueUnavailableError } from './application/ports/reception-job-queue.port.js';
 import {
+  INGEST_FROM_CDC,
   INGEST_SIFEN_XML,
   CORRECT_RECEIVED_DOCUMENT,
   INGEST_UPLOAD,
@@ -103,5 +105,23 @@ describe('ReceptionModule', () => {
     await expect(compile({}, new InMemoryStorageProvider())).rejects.toThrow(
       'RECEPTION_EXTRACTION_DAILY_CAP',
     );
+  });
+
+  it('assembles the lookup by CDC only with a database, and leaves it off by default', async () => {
+    const withDatabase = await compile({}, new InMemoryStorageProvider());
+    expect(withDatabase.get(INGEST_FROM_CDC)).toBeInstanceOf(IngestFromCdc);
+    const withoutDatabase = await compile(null, new InMemoryStorageProvider());
+    expect(withoutDatabase.get(INGEST_FROM_CDC)).toBeNull();
+  });
+
+  it.each([
+    ['RECEPTION_EKUATIA_ENABLED', 'maybe'],
+    ['RECEPTION_EKUATIA_DAILY_SOLVE_CAP', '0'],
+    ['RECEPTION_EKUATIA_GLOBAL_DAILY_SOLVE_CAP', 'x'],
+    ['RECEPTION_EKUATIA_BREAKER_FAILURES', '0'],
+    ['RECEPTION_EKUATIA_BREAKER_COOLDOWN_MS', '1'],
+  ])('fails the API boot on an invalid %s', async (name, value) => {
+    vi.stubEnv(name, value);
+    await expect(compile({}, new InMemoryStorageProvider())).rejects.toThrow(name);
   });
 });

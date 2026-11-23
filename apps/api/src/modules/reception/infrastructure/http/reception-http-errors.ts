@@ -17,7 +17,10 @@ export type ReceptionUploadErrorCode =
   | 'artifact_not_available'
   | 'validation_failed'
   | 'invalid_correction'
-  | 'extraction_quota_exceeded';
+  | 'extraction_quota_exceeded'
+  | 'ekuatia_unavailable'
+  | 'ekuatia_quota_exceeded'
+  | 'invalid_cdc';
 
 /** The API's `{ statusCode, message }` envelope plus a stable `code` (and optional extras). */
 export function receptionProblem(

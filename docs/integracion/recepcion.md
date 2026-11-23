@@ -14,13 +14,13 @@ El flujo es **API-first**: el ERP es quien corrige. La plataforma deja el docume
 
 ## Estado actual
 
-Se procesan el **XML de SIFEN** (`rDE`, de forma síncrona) y los **PDF y fotos** (PNG o JPEG, de forma asíncrona con extracción por modelo de visión). La consulta por CDC llega en una fase posterior y responde `422` con `code: "unsupported_source"`:
+Se procesan el **XML de SIFEN** (`rDE`, de forma síncrona) y los **PDF y fotos** (PNG o JPEG, de forma asíncrona con extracción por modelo de visión). La consulta por CDC es un camino **opcional y apagado por defecto** ([ADR-0027](../adr/0027-consulta-a-ekuatia-por-cdc-con-recaptcha.md)): ver [Consultar por CDC](#consultar-por-cdc). Un `{ "cdc": ... }` enviado a `POST /v1/received-documents` sigue respondiendo `422` con `code: "unsupported_source"`:
 
 | Fuente | Estado |
 |---|---|
 | XML de SIFEN (cuerpo crudo, `multipart` o JSON `{ "xml": ... }`) | Disponible |
 | PDF y fotos (JPEG, PNG): cuerpo crudo o `multipart` | Disponible. Procesamiento asíncrono, ver [PDF y fotos](#pdf-y-fotos) |
-| Solo el CDC (`{ "cdc": "..." }`, consulta a eKuatia) | Planificado. Hoy `422 unsupported_source` |
+| Solo el CDC o el enlace del QR del KuDE (`POST /v1/received-documents/by-cdc`, consulta a eKuatia) | Opcional, apagado por defecto (`503 ekuatia_unavailable`). Asíncrono. Contrato con eKuatia **sin verificar**. Ver [Consultar por CDC](#consultar-por-cdc) |
 | Reprocesar un documento ya guardado | Disponible. Ver [Reprocesar](#reprocesar) |
 
 ## Autenticación y scopes
@@ -114,6 +114,40 @@ Por defecto 2 MiB por archivo (un XML de SIFEN pesa unos KB, pero una foto de ce
 ### Receptor que no es el tenant
 
 Si el RUC receptor del XML no corresponde al tenant (`is_own_receiver = false`), el documento se guarda y se valida como cualquier otro, pero **no genera ningún evento de webhook**, de ningún tipo. Se puede listar (`?is_own_receiver=false`) y corregir. Si la plataforma no puede probar que el receptor es el tenant (sin perfil fiscal o sin RUC receptor en el XML), también lo trata como no propio. Un XML ilegible, en cambio, se trata como propio y sí emite `extraction_failed`.
+
+## Consultar por CDC
+
+Si solo tiene el CDC (o el enlace del QR del KuDE) y no el XML, la plataforma puede pedírselo a la consulta pública de eKuatia. Es un camino **opcional**: depende de un tercero frágil (eKuatia) y de un servicio de pago (2Captcha) que resuelve el reCAPTCHA de esa página. **El contrato con eKuatia no se verificó contra el servicio real**; puede fallar sin cambios de nuestro lado, y el respaldo es subir el XML o el PDF.
+
+```http
+POST /v1/received-documents/by-cdc
+Authorization: Bearer <api key con reception:write>
+Content-Type: application/json
+
+{ "reference": "01444444017001001001452822017012515873260988" }
+```
+
+`reference` es un CDC de 44 dígitos o la URL del QR (`https://ekuatia.set.gov.py/consultas/qr?...&Id=<cdc>&...`).
+
+Es **asíncrono**: `202` solo dice que la consulta quedó en cola.
+
+```json
+{ "cdc": "01444444017001001001452822017012515873260988", "status": "queued", "already_queued": false }
+```
+
+La cabecera `Location` apunta a `GET /v1/received-documents?cdc_prefix=<cdc>`: cuando el worker obtiene el XML, lo procesa **igual que un XML subido** (mismo analizador, mismos estados `confirmed` o `needs_review`, mismos eventos de webhook) y el documento aparece con `source: "ekuatia_cdc"`. Una consulta que falla (eKuatia no responde, no conoce el CDC, el captcha no se resolvió, el corte de circuito está abierto) **no deja ningún documento**: en esta versión el fallo no se expone por la API, solo en los logs del operador. Si el documento no aparece, suba el XML o el PDF.
+
+| Respuesta | Cuándo |
+|---|---|
+| `202` | La consulta se encoló. `already_queued: true` si había una idéntica pendiente (no toma otro cupo) |
+| `200` | El tenant ya tiene un documento con ese CDC: se devuelve ese documento y **no se resuelve nada** |
+| `422` `invalid_cdc` | No hay un CDC en la referencia, el dígito verificador no cuadra o los campos son inválidos (trae `reason`). Se rechaza **antes** de gastar nada |
+| `422` `invalid_request` | El cuerpo no trae un `reference` de tipo cadena |
+| `429` `ekuatia_quota_exceeded` | Se agotó el tope diario de resoluciones del tenant o de la plataforma (`scope`, `cap`, `retry_after_seconds`, `Retry-After`) |
+| `503` `ekuatia_unavailable` | La función está apagada (`RECEPTION_EKUATIA_ENABLED`) o falta la clave del resolvedor. Se comprueba antes que cualquier otra cosa |
+| `503` `queue_unavailable` | La cola no responde; el cupo se devuelve |
+
+Cada consulta encolada gasta una resolución de captcha de pago, por eso hay topes por tenant y globales, y un corte de circuito que deja de resolver mientras el servicio falle o el saldo del proveedor esté agotado. Los valores por defecto (20 por tenant y 100 globales por día UTC) son provisionales y los confirma el dueño del producto; ver [configuración](../configuracion.md).
 
 ## Listar
 
@@ -369,13 +403,16 @@ Todos los errores usan `{ "statusCode", "code", "message" }` más campos extra s
 | `409` | `artifact_not_available` | Reproceso de un documento sin archivo guardado, o cuyo archivo ya no está en el almacenamiento | Subir el archivo de nuevo |
 | `413` | `payload_too_large` | El archivo supera `RECEPTION_MAX_UPLOAD_BYTES` | Enviar un archivo menor |
 | `415` | `unsupported_media_type` | Los bytes no son XML de SIFEN, PDF, PNG ni JPEG | Enviar un archivo soportado |
-| `422` | `unsupported_source` | Solo CDC (`{ "cdc": ... }`): aún no se procesa. Cualquier otro contenido que no sea XML de SIFEN, PDF, PNG ni JPEG responde `415` | Enviar el archivo |
+| `422` | `unsupported_source` | Solo CDC (`{ "cdc": ... }`) en `POST /v1/received-documents`: use [`/by-cdc`](#consultar-por-cdc). Cualquier otro contenido que no sea XML de SIFEN, PDF, PNG ni JPEG responde `415` | Enviar el archivo |
 | `422` | `empty_upload` | Archivo vacío | Enviar el archivo |
 | `422` | `invalid_request` | Falta la parte `file` en `multipart`, o el JSON no trae un `xml` de tipo cadena | Corregir la petición |
 | `422` | `extraction_failed` | El XML no se pudo leer como documento SIFEN soportado. Trae `document_id` (el archivo queda guardado) | Revisar el archivo; luego [reprocesar](#reprocesar) o subir uno corregido |
 | `422` | `validation_failed` | `PATCH` revalidado falló. Trae `reasons`; no se guardó nada | Corregir los motivos |
 | `422` | `invalid_correction` | `position` desconocida, editar o re-agregar un ítem eliminado, o un nombre de `reviewed_fields` que no es uno de los 8 campos | Corregir la petición |
 | `429` | `extraction_quota_exceeded` | El tenant agotó su tope diario de extracciones (`RECEPTION_EXTRACTION_DAILY_CAP`). Trae `cap`, `retry_after_seconds` y el encabezado `Retry-After` | Esperar al próximo día UTC o pedir que suban el tope |
+| `422` | `invalid_cdc` | `POST /by-cdc`: sin CDC en la referencia, dígito verificador inválido o estructura inválida. Trae `reason` | Corregir el CDC |
+| `429` | `ekuatia_quota_exceeded` | `POST /by-cdc`: se agotó el tope diario de resoluciones del tenant o global. Trae `scope`, `cap`, `retry_after_seconds` y `Retry-After` | Esperar al próximo día UTC, o subir el XML o el PDF |
+| `503` | `ekuatia_unavailable` | `POST /by-cdc`: la consulta por CDC está apagada o sin clave del resolvedor | Subir el XML o el PDF |
 | `503` | `storage_unavailable` | El almacenamiento de objetos no está configurado o no responde | Avisar al operador |
 | `503` | `queue_unavailable` | PDF o foto: la cola de extracción no está disponible. En la subida trae `document_id` y el archivo quedó guardado | Reintentar la misma subida, o el reproceso, más tarde |
 | `503` | `service_unavailable` | La recepción no está disponible (sin base de datos) | Reintentar; avisar al operador |
@@ -386,7 +423,7 @@ El XML de SIFEN se procesa dentro de la plataforma. Al extraer **PDF y fotos**, 
 
 ## Alcance actual y límites conocidos
 
-- XML de SIFEN, PDF y fotos (PNG, JPEG). La consulta por CDC está planificada (`422 unsupported_source`).
+- XML de SIFEN, PDF y fotos (PNG, JPEG), y la consulta por CDC opcional (apagada por defecto, contrato con eKuatia sin verificar y fallos no expuestos por la API; ver [Consultar por CDC](#consultar-por-cdc)).
 - El reproceso de un XML de SIFEN en `needs_review` o `confirmed` responde `409 invalid_state`: los mismos bytes no pueden leerse distinto. Un PDF o foto en esos estados sí se reextrae, conservando las correcciones humanas (ver [Reprocesar](#reprocesar)).
 - El portal es de solo lectura: no sube, corrige ni confirma. Expone `GET /portal/received-documents` y `GET /portal/received-documents/{id}` con la sesión del portal (mismas formas que `/v1`, sin escrituras); no forman parte del contrato público (`openapi.json`). Hoy tampoco genera eventos `portal` ni `system`.
 - La recepción se integra solo por API. El portal no tiene páginas de API keys ni de webhooks: los endpoints de webhook (que reciben los eventos `reception.document.*`) se gestionan con `/v1/webhooks/endpoints`, y una pantalla de ajustes para ambos es una funcionalidad futura.

@@ -579,7 +579,7 @@ export function buildOpenApiDocument() {
             'Send the bytes as a raw body (`application/xml`, `text/xml`, `application/pdf`, `image/png`, `image/jpeg`), as a `multipart/form-data` upload with one `file` part, or, for XML only, as JSON `{ "xml": "<...>" }` (JSON is limited to 1 MiB). ' +
             'Content is recognized by its first bytes, not by the declared type. ' +
             'The same bytes, or the same CDC, uploaded again answer 200 with the existing document. ' +
-            'A CDC-only request answers 422 `unsupported_source` for now. ' +
+            'A bare CDC is not an upload: it answers 422 `unsupported_source`; use `POST /v1/received-documents/by-cdc`. ' +
             'If the extraction queue is down the answer is 503 `queue_unavailable` with the `document_id`: the upload is kept and sending the same bytes again queues it. ' +
             'Each PDF or photo that gets queued counts against the tenant daily extraction cap (`RECEPTION_EXTRACTION_DAILY_CAP`, default 200 per UTC day); past it the answer is 429 `extraction_quota_exceeded` with `Retry-After` and nothing is stored. XML and duplicates (200) do not count. ' +
             'The maximum upload size is `RECEPTION_MAX_UPLOAD_BYTES` (default 2 MiB, up to 15 MiB). ' +
@@ -694,6 +694,73 @@ export function buildOpenApiDocument() {
             '400': problem('A parameter is malformed (`invalid_request`)', 'ReceptionProblem'),
             '401': UNAUTHORIZED,
             '403': FORBIDDEN,
+          },
+        },
+      },
+      '/v1/received-documents/by-cdc': {
+        post: {
+          operationId: 'lookupReceivedDocumentByCdc',
+          tags: ['Reception'],
+          summary: 'Look a received document up in eKuatia by CDC',
+          description:
+            'Optional path for a tenant that knows only the CDC (or the URL of the KuDE QR) and has no XML. ' +
+            'It is asynchronous: 202 means the lookup was queued; a worker solves the public captcha with a paid service, fetches the XML from eKuatia and processes it exactly like an uploaded XML (same parser and states, `source` `ekuatia_cdc`). Find the document with `GET /v1/received-documents?cdc_prefix=<cdc>` or through the webhooks; a lookup that fails leaves no document, and the XML or PDF upload stays the fallback. ' +
+            'The CDC is validated first (a bad check digit is 422 `invalid_cdc` and costs nothing). If the tenant already has a document with that CDC the answer is 200 with it and nothing is solved. ' +
+            'Each queued lookup takes one solve from a per-tenant and a platform-wide daily cap (`RECEPTION_EKUATIA_DAILY_SOLVE_CAP`, `RECEPTION_EKUATIA_GLOBAL_DAILY_SOLVE_CAP`): past either the answer is 429 `ekuatia_quota_exceeded` with `scope`, `cap` and `Retry-After`. ' +
+            'The feature is off by default (`RECEPTION_EKUATIA_ENABLED`) and needs a solver key: otherwise 503 `ekuatia_unavailable`, checked before anything else. ' +
+            'The eKuatia contract is UNVERIFIED against the live service until the human capture (R6.4): the path can fail without changes on our side.',
+          ...secured(['reception:write']),
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['reference'],
+                  properties: {
+                    reference: {
+                      type: 'string',
+                      maxLength: 2048,
+                      description: 'A 44-digit CDC, or the URL of the KuDE QR (`...?Id=<cdc>`)',
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            '200': {
+              ...json(
+                'A document with that CDC already exists; nothing was solved',
+                ref('ReceivedDocumentAck'),
+              ),
+              headers: { Location: { schema: { type: 'string' } } },
+            },
+            '202': {
+              ...json(
+                'The lookup was queued (or an identical one is already pending)',
+                ref('CdcLookupAccepted'),
+              ),
+              headers: {
+                Location: {
+                  description: 'The list filter that finds the document once it exists',
+                  schema: { type: 'string' },
+                },
+              },
+            },
+            '401': UNAUTHORIZED,
+            '403': FORBIDDEN,
+            '422': problem(
+              '`invalid_request` (no string `reference`) or `invalid_cdc` (no CDC in the reference, bad check digit or malformed fields; carries `reason`)',
+              'ReceptionProblem',
+            ),
+            '429': quotaExceeded(
+              '`ekuatia_quota_exceeded`: the tenant or the platform used its daily solve cap (carries `scope`, `cap` and `retry_after_seconds`)',
+            ),
+            '503': problem(
+              '`ekuatia_unavailable` (feature off or no solver key) or `queue_unavailable` (the lookup queue is down; the slot is given back)',
+              'ReceptionProblem',
+            ),
           },
         },
       },
@@ -1015,6 +1082,9 @@ export function buildOpenApiDocument() {
                 'validation_failed',
                 'invalid_correction',
                 'extraction_quota_exceeded',
+                'ekuatia_unavailable',
+                'ekuatia_quota_exceeded',
+                'invalid_cdc',
               ],
             },
             message: { type: 'string' },
@@ -1025,11 +1095,23 @@ export function buildOpenApiDocument() {
             status: { type: 'string', description: 'Only with `invalid_state`' },
             cap: {
               type: 'integer',
-              description: 'Only with `extraction_quota_exceeded`: extractions allowed per UTC day',
+              description:
+                'Only with `extraction_quota_exceeded` and `ekuatia_quota_exceeded`: lookups or extractions allowed per UTC day',
             },
             retry_after_seconds: {
               type: 'integer',
-              description: 'Only with `extraction_quota_exceeded`: same value as `Retry-After`',
+              description:
+                'Only with `extraction_quota_exceeded` and `ekuatia_quota_exceeded`: same value as `Retry-After`',
+            },
+            scope: {
+              type: 'string',
+              enum: ['tenant', 'global'],
+              description: 'Only with `ekuatia_quota_exceeded`: which daily cap was reached',
+            },
+            reason: {
+              type: 'string',
+              enum: ['not-found', 'check-digit-mismatch', 'invalid-structure'],
+              description: 'Only with `invalid_cdc`: why the reference was refused',
             },
             reasons: {
               type: 'array',
@@ -1051,6 +1133,18 @@ export function buildOpenApiDocument() {
             },
           },
         },
+        CdcLookupAccepted: {
+          type: 'object',
+          required: ['cdc', 'status', 'already_queued'],
+          properties: {
+            cdc: { type: 'string', pattern: '^[0-9]{44}$' },
+            status: { type: 'string', enum: ['queued'] },
+            already_queued: {
+              type: 'boolean',
+              description: 'True when an identical lookup was already pending (no new solve taken)',
+            },
+          },
+        },
         ReceivedDocumentAck: {
           type: 'object',
           required: ['id', 'status', 'version', 'source'],
@@ -1063,7 +1157,7 @@ export function buildOpenApiDocument() {
               examples: ['needs_review'],
             },
             version: { type: 'integer', minimum: 1 },
-            source: { type: 'string', enum: ['sifen_xml', 'pdf', 'photo'] },
+            source: { type: 'string', enum: RECEIVED_DOCUMENT_SOURCES },
           },
         },
         ReceivedDocumentSummary: {

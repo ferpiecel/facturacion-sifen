@@ -135,7 +135,7 @@ Es **asíncrono**: `202` solo dice que la consulta quedó en cola.
 { "cdc": "01444444017001001001452822017012515873260988", "status": "queued", "already_queued": false }
 ```
 
-La cabecera `Location` apunta a `GET /v1/received-documents?cdc_prefix=<cdc>`: cuando el worker obtiene el XML, lo procesa **igual que un XML subido** (mismo analizador, mismos estados `confirmed` o `needs_review`, mismos eventos de webhook) y el documento aparece con `source: "ekuatia_cdc"`. Una consulta que falla (eKuatia no responde, no conoce el CDC, el captcha no se resolvió, el corte de circuito está abierto) **no deja ningún documento**: en esta versión el fallo no se expone por la API, solo en los logs del operador. Si el documento no aparece, suba el XML o el PDF.
+La cabecera `Location` apunta a `GET /v1/received-documents?cdc_prefix=<cdc>`: cuando el worker obtiene el XML, lo procesa **igual que un XML subido** (mismo analizador, mismos estados `confirmed` o `needs_review`, mismos eventos de webhook) y el documento aparece con `source: "ekuatia_cdc"`. Una consulta que falla (eKuatia no responde, no conoce el CDC, el captcha no se resolvió, el corte de circuito está abierto) **no deja ningún documento** (salvo que eKuatia entregue un XML ilegible: entonces queda un documento en `extraction_failed`): en esta versión el fallo no se expone por la API, solo en los logs del operador. Si el documento no aparece, suba el XML o el PDF.
 
 | Respuesta | Cuándo |
 |---|---|

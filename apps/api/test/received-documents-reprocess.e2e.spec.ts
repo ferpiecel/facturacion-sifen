@@ -271,10 +271,10 @@ describe('POST /v1/received-documents/{id}/reprocess (e2e)', () => {
 
     await runWorker('enabled');
     const done = await detail(id);
-    expect(done.status).toBe('confirmed');
+    expect(done.status).toBe('needs_review');
     expect(done.extraction_error_code).toBeNull();
-    // claim extraction_failed -> extracting, then confirmed: one bump each.
-    expect(done.version).toBe(failed.version + 2);
+    // claim extraction_failed -> extracting bumps once; the review write keeps that version.
+    expect(done.version).toBe(failed.version + 1);
 
     const audits = await handle.db.select().from(auditLog);
     expect(audits.map((a) => a.action)).toContain('received_document.reprocess_requested');
@@ -288,9 +288,12 @@ describe('POST /v1/received-documents/{id}/reprocess (e2e)', () => {
     expect(jobs).toHaveLength(2); // the upload job plus one reprocess job
   });
 
-  it('reprocesses a confirmed document: updated is announced, never a second confirmed', async () => {
+  it('reprocesses a person-confirmed document: the new model reading goes back to review', async () => {
     const id = await upload();
     await runWorker('enabled');
+    const reviewed = await detail(id);
+    expect(reviewed.status).toBe('needs_review');
+    expect((await patch(id, { version: reviewed.version, confirm: true })).statusCode).toBe(200);
     const confirmed = await detail(id);
     expect(confirmed.status).toBe('confirmed');
 
@@ -301,11 +304,12 @@ describe('POST /v1/received-documents/{id}/reprocess (e2e)', () => {
 
     await runWorker('enabled', llmJson({ issuerLegalName: 'Nuevo SA' }));
     const done = await detail(id);
-    expect(done).toMatchObject({ status: 'confirmed', version: confirmed.version + 2 });
+    expect(done).toMatchObject({ status: 'needs_review', version: confirmed.version + 1 });
     expect(done.issuer?.legal_name).toBe('Nuevo SA');
     expect(await outboxTypes()).toEqual([
       'reception.document.confirmed',
-      'reception.document.updated',
+      'reception.document.needs_review',
+      'reception.document.needs_review',
     ]);
     const audits = await handle.db.select().from(auditLog);
     expect(audits.map((a) => a.action)).toContain('received_document.reprocess_requested');
@@ -328,7 +332,7 @@ describe('POST /v1/received-documents/{id}/reprocess (e2e)', () => {
     );
 
     const done = await detail(id);
-    expect(done.status).toBe('confirmed');
+    expect(done.status).toBe('needs_review');
     expect(done.issuer?.legal_name).toBe('Proveedor SRL');
     const field = done.field_confidences?.find((c) => c.field === 'issuer_legal_name');
     expect(field).toMatchObject({ extracted_value: 'Leido otra vez SA' });
@@ -338,7 +342,7 @@ describe('POST /v1/received-documents/{id}/reprocess (e2e)', () => {
     expect(JSON.stringify(request?.after)).toContain('issuer_legal_name');
   });
 
-  it('reprocesses a needs_review document and confirms it when the new reading is clean', async () => {
+  it('reprocesses a needs_review document: a clean model reading still needs a person', async () => {
     const id = await upload();
     await runWorker(
       'enabled',
@@ -349,18 +353,15 @@ describe('POST /v1/received-documents/{id}/reprocess (e2e)', () => {
     expect((await reprocess(id)).statusCode).toBe(202);
     await runWorker('enabled');
 
-    expect((await detail(id)).status).toBe('confirmed');
-    expect(await outboxTypes()).toEqual([
-      'reception.document.confirmed',
-      'reception.document.needs_review',
-    ]);
+    expect((await detail(id)).status).toBe('needs_review');
+    expect(await outboxTypes()).not.toContain('reception.document.confirmed');
   });
 
   it('stays silent for a reprocessed document whose receiver is not the tenant', async () => {
     const id = await upload();
     const other = `80000009-${String(computeRucCheckDigit('80000009'))}`;
     await runWorker('enabled', llmJson({ receiverRuc: other }));
-    expect((await detail(id)).status).toBe('confirmed');
+    expect((await detail(id)).status).toBe('needs_review');
 
     expect((await reprocess(id)).statusCode).toBe(202);
     await runWorker('enabled', llmJson({ receiverRuc: other }));

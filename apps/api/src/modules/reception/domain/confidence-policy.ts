@@ -17,7 +17,8 @@ export type ReceivedFieldName = (typeof RECEIVED_FIELD_NAMES)[number];
 export type FieldConfidences = Readonly<Record<ReceivedFieldName, number>>;
 
 /** Reasons a document leaves extraction as `needs_review`. */
-export type ReviewReason = ValidationReason | 'low_confidence' | 'items_without_subtotals';
+export type ReviewReason =
+  ValidationReason | 'low_confidence' | 'items_without_subtotals' | 'unverified_source';
 
 export class InvalidConfidenceError extends Error {
   constructor(message: string) {
@@ -77,6 +78,12 @@ export interface ExtractionDecisionInput {
    * run (R5.2 finding): the arithmetic was never verified, so a person must look at it.
    */
   readonly unverifiableItems?: boolean;
+  /**
+   * True when the fields come from a model reading a PDF or photo and no SIFEN XML verified them.
+   * The model's own confidence is attacker-influenced (the document text is prompt input), so it
+   * never confirms by itself: a person must look.
+   */
+  readonly unverifiedSource?: boolean;
 }
 
 export type ExtractionOutcome =
@@ -90,7 +97,7 @@ function blank(value: string | null): boolean {
 /**
  * Post-extraction status. Mirrors project A: a document is reviewed when its global confidence is
  * strictly below the threshold (equal confirms), any validation failed, or an issuer field is
- * missing. Reasons are unique and ordered: validations, issuer gaps, then unverifiable items, then low confidence.
+ * missing. Reasons are unique and ordered: validations, issuer gaps, then unverifiable items, then unverified source, then low confidence.
  *
  * @throws InvalidConfidenceError when `overallConfidence` is outside [0, 1].
  */
@@ -103,6 +110,7 @@ export function decideExtractionOutcome(
   if (blank(input.issuerRuc)) reasons.push('missing_issuer_ruc');
   if (blank(input.issuerLegalName)) reasons.push('missing_issuer_legal_name');
   if (input.unverifiableItems === true) reasons.push('items_without_subtotals');
+  if (input.unverifiedSource === true) reasons.push('unverified_source');
   if (input.overallConfidence < policy.threshold) reasons.push('low_confidence');
   const unique = [...new Set(reasons)];
   return unique.length === 0

@@ -18,6 +18,27 @@ const good: ExtractionDecisionInput = {
   issuerLegalName: 'Proveedor SA',
 };
 
+describe('decideExtractionOutcome: unverified source', () => {
+  it('never confirms a document read by a model, whatever its confidence', () => {
+    expect(
+      decideExtractionOutcome(policy, { ...good, overallConfidence: 1, unverifiedSource: true }),
+    ).toEqual({ status: 'needs_review', reasons: ['unverified_source'] });
+  });
+
+  it('keeps the confidence policy for a verified source', () => {
+    expect(decideExtractionOutcome(policy, { ...good, unverifiedSource: false })).toEqual({
+      status: 'confirmed',
+    });
+    expect(decideExtractionOutcome(policy, good)).toEqual({ status: 'confirmed' });
+  });
+
+  it('lists the reason once, before low_confidence', () => {
+    expect(
+      decideExtractionOutcome(policy, { ...good, overallConfidence: 0.1, unverifiedSource: true }),
+    ).toEqual({ status: 'needs_review', reasons: ['unverified_source', 'low_confidence'] });
+  });
+});
+
 describe('ConfidencePolicy', () => {
   it.each([0, 0.5, 0.85, 1])('accepts threshold %s', (value) => {
     expect(ConfidencePolicy.create(value).threshold).toBe(value);

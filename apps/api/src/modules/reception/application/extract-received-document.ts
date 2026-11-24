@@ -334,6 +334,8 @@ export class ExtractReceivedDocument {
     const isOwnReceiver = identity !== null && matchReceiver(receiverRuc, identity) === 'match';
     const decision = decideExtractionOutcome(this.deps.policy, {
       overallConfidence: result.overallConfidence,
+      // This use case only reads PDFs and photos through a model: no XML verified the fields.
+      unverifiedSource: true,
       validationReasons: reasons,
       issuerRuc:
         merged === null

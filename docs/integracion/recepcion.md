@@ -84,8 +84,8 @@ El cuerpo de la respuesta es solo un acuse. Los datos fiscales se leen con `GET`
 
 El archivo se guarda, se registra el documento en `received` y se encola su extracción. Un worker lo lee con un modelo de visión (hasta 5 páginas a 200 dpi), intenta leer el QR de la factura para obtener el CDC, valida los datos como cualquier otro documento y deja el documento en:
 
-- `confirmed`: la confianza global supera el umbral configurado, el emisor está completo y las validaciones pasan.
-- `needs_review`: algo requiere revisión. Además de los motivos de validación de siempre, hay dos propios de esta fuente: `low_confidence` (la confianza global no alcanza el umbral) e `items_without_subtotals` (hay ítems pero ninguno trae subtotal, así que la suma no se puede verificar).
+- `confirmed`: **nunca** lo deja la extracción de un PDF o una foto. La confianza que informa el modelo la puede influir el propio documento (su texto es entrada del modelo), así que sin un XML verificado por eKuatia un humano siempre revisa: el ERP confirma con `PATCH` y `confirm: true`. Solo el XML de SIFEN se confirma solo.
+- `needs_review`: algo requiere revisión. Además de los motivos de validación de siempre, hay tres propios de esta fuente: `unverified_source` (el documento lo leyó un modelo y ningún XML lo verificó; siempre está presente), `low_confidence` (la confianza global no alcanza el umbral) e `items_without_subtotals` (hay ítems pero ninguno trae subtotal, así que la suma no se puede verificar).
 - `extraction_failed`: no se pudo extraer. `extraction_error_code` lo explica: `corrupt_pdf`, `empty_pdf`, `too_many_pages`, `llm_disabled` (la extracción no está habilitada en el servicio), `llm_refusal`, `llm_invalid_output`, `llm_provider_error`, `llm_rate_limited`, `duplicate_document` (el CDC extraído ya pertenece a otro documento), `artifact_missing`, `internal_error`. Los fallos transitorios (proveedor, límite de tasa, error interno) se reintentan con espera creciente hasta 3 intentos en total (la primera ejecución más 2 reintentos); el evento `extraction_failed` se envía solo cuando el fallo es definitivo.
 
 Para saber cuándo terminó, escuche los webhooks `reception.document.confirmed`, `reception.document.needs_review` y `reception.document.extraction_failed`, o consulte el documento con `GET` hasta que su estado deje de ser `received` o `extracting`.
@@ -211,7 +211,7 @@ Para **sincronizar de forma incremental**, guarde el mayor `updated_at` que vio 
 
 Los montos y cantidades son **cadenas decimales** sin ceros finales (`"10.5"`, no `10.50000000` ni un número JSON). Nunca se exponen claves de almacenamiento ni el contenido crudo extraído. Con un XML de SIFEN todos los campos de confianza valen `"1"`.
 
-Motivos en `needs_review_reasons`: `missing_issuer_ruc`, `missing_issuer_legal_name`, `missing_document_number`, `missing_issue_date`, `missing_totals`, `issuer_ruc_invalid_format`, `issuer_ruc_check_digit_mismatch`, `invalid_document_number_format`, `invalid_issue_date`, `cdc_invalid`, `cdc_check_digit_mismatch`, `invalid_amount`, `totals_blocks_sum_mismatch`, `vat5_inconsistent`, `vat10_inconsistent`, `items_sum_mismatch`, y `awaiting_confirmation` (los datos son válidos, solo falta confirmar).
+Motivos en `needs_review_reasons`: `missing_issuer_ruc`, `missing_issuer_legal_name`, `missing_document_number`, `missing_issue_date`, `missing_totals`, `issuer_ruc_invalid_format`, `issuer_ruc_check_digit_mismatch`, `invalid_document_number_format`, `invalid_issue_date`, `cdc_invalid`, `cdc_check_digit_mismatch`, `invalid_amount`, `totals_blocks_sum_mismatch`, `vat5_inconsistent`, `vat10_inconsistent`, `items_sum_mismatch`, `unverified_source` (solo PDF y foto), y `awaiting_confirmation` (los datos son válidos, solo falta confirmar).
 
 ## Descargar el archivo original
 
@@ -274,7 +274,7 @@ Qué ocurre con los motivos que solo existen en la extracción cuando el `PATCH`
 - `items_without_subtotals` se retira en cuanto un ítem activo trae `subtotal` (o ya no quedan ítems).
 - Los motivos de validación se recalculan siempre con los datos corregidos.
 
-`confirm: true` ignora `low_confidence` e `items_without_subtotals`: quien confirma asume la revisión, siempre que las validaciones pasen (si fallan, `422 validation_failed` y no se guarda nada).
+`unverified_source` no se arrastra tras un `PATCH` que no confirma: la revisión sigue pendiente y el motivo pasa a `awaiting_confirmation` cuando los datos son válidos. `confirm: true` ignora `low_confidence` e `items_without_subtotals`: quien confirma asume la revisión, siempre que las validaciones pasen (si fallan, `422 validation_failed` y no se guarda nada).
 
 ### Versión e idempotencia
 
@@ -306,7 +306,7 @@ Un campo con corrección o revisión humana (`corrected_at` en su confianza, ver
 - Los campos sin corrección toman la lectura nueva, con su confianza.
 - Si los ítems están corregidos, se quedan exactamente como la persona los dejó (editados, agregados o quitados) y los ítems nuevos del modelo se descartan; si no, la lectura nueva reemplaza a los ítems activos.
 - Lo que está fuera de los ocho campos curados (datos crudos, código de error) sale siempre de la lectura nueva. Un CDC que el modelo no lee no borra el CDC guardado.
-- El resultado (`confirmed` o `needs_review`) se decide sobre los datos ya mezclados: validaciones, campos del emisor y artículos sin subtotal se evalúan con los valores humanos. La confianza global es la de la lectura nueva: si queda bajo el umbral, el documento vuelve a `needs_review` con `low_confidence` y se confirma con `confirm: true`.
+- El resultado se decide sobre los datos ya mezclados: validaciones, campos del emisor y artículos sin subtotal se evalúan con los valores humanos. Una lectura nueva del modelo vuelve a ser una fuente sin verificar: el documento queda siempre en `needs_review` con `unverified_source` (aunque un humano ya lo hubiera confirmado) y se confirma con `confirm: true`.
 - La entrada de auditoría `received_document.reprocess_requested` lista en `preservedCorrections` los campos cuyas correcciones se conservan.
 
 Eventos: un documento que ya estuvo `confirmed` y se confirma otra vez tras reprocesar emite `reception.document.updated` con `actor` `system` (nunca un segundo `confirmed`); si queda en revisión emite `reception.document.needs_review`; un fallo, `reception.document.extraction_failed`. `confirmed_at` conserva la primera confirmación.

@@ -128,3 +128,20 @@ export function loadReceptionEkuatiaConfig(env: Env): ReceptionEkuatiaConfig {
     sitekey,
   };
 }
+
+/**
+ * The API accepts a lookup (202, takes a solve slot) only if a worker can consume it, and the
+ * worker needs object storage to store the XML. Without it jobs would wait forever, so both
+ * processes refuse to start instead of silently skipping the consumer. Only when the lookup is
+ * available: off, or without a solver key, nothing is accepted.
+ */
+export function assertEkuatiaWorkerPrerequisites(
+  config: Pick<ReceptionEkuatiaConfig, 'available'>,
+  prerequisites: { readonly objectStorage: boolean },
+): void {
+  if (config.available && !prerequisites.objectStorage) {
+    throw new Error(
+      'RECEPTION_EKUATIA_ENABLED requires object storage (the STORAGE_* variables): lookups would be accepted and never processed.',
+    );
+  }
+}

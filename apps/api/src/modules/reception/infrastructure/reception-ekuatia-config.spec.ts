@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { loadReceptionEkuatiaConfig } from './reception-ekuatia-config.js';
+import {
+  assertEkuatiaWorkerPrerequisites,
+  loadReceptionEkuatiaConfig,
+} from './reception-ekuatia-config.js';
 
 describe('loadReceptionEkuatiaConfig', () => {
   it('is off by default, with conservative documented caps', () => {
@@ -101,5 +104,33 @@ describe('loadReceptionEkuatiaConfig', () => {
         RECEPTION_EKUATIA_GLOBAL_DAILY_SOLVE_CAP: '10',
       }),
     ).toThrow('RECEPTION_EKUATIA_DAILY_SOLVE_CAP must not exceed');
+  });
+});
+
+describe('assertEkuatiaWorkerPrerequisites', () => {
+  const on = loadReceptionEkuatiaConfig({
+    RECEPTION_EKUATIA_ENABLED: 'true',
+    TWOCAPTCHA_API_KEY: 'test-key-not-real',
+  });
+
+  it('fails loudly when the lookup is available but object storage is not, naming the variables', () => {
+    expect(() => {
+      assertEkuatiaWorkerPrerequisites(on, { objectStorage: false });
+    }).toThrow('RECEPTION_EKUATIA_ENABLED requires object storage');
+  });
+
+  it('passes with storage, and when the lookup is off or has no key (nothing is accepted then)', () => {
+    expect(() => {
+      assertEkuatiaWorkerPrerequisites(on, { objectStorage: true });
+    }).not.toThrow();
+    expect(() => {
+      assertEkuatiaWorkerPrerequisites(loadReceptionEkuatiaConfig({}), { objectStorage: false });
+    }).not.toThrow();
+    expect(() => {
+      assertEkuatiaWorkerPrerequisites(
+        loadReceptionEkuatiaConfig({ RECEPTION_EKUATIA_ENABLED: 'true' }),
+        { objectStorage: false },
+      );
+    }).not.toThrow();
   });
 });

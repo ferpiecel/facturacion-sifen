@@ -25,6 +25,7 @@ import {
   type ClosableEkuatiaLookupQueue,
 } from './infrastructure/adapters/ekuatia-lookup-queue-factory.js';
 import {
+  assertEkuatiaWorkerPrerequisites,
   loadReceptionEkuatiaConfig,
   type ReceptionEkuatiaConfig,
 } from './infrastructure/reception-ekuatia-config.js';
@@ -192,16 +193,26 @@ import {
         config: ReceptionEkuatiaConfig,
         quota: EkuatiaSolveQuota | null,
         queue: ClosableEkuatiaLookupQueue,
-      ) =>
-        db && quota
+        storage: StorageProvider | null,
+      ) => {
+        // Fail loudly: accepting lookups that no worker can process would only burn slots.
+        assertEkuatiaWorkerPrerequisites(config, { objectStorage: storage !== null });
+        return db && quota
           ? new IngestFromCdc({
               enabled: config.available,
               repository: createDrizzleReceivedDocumentRepository(db),
               quota,
               queue,
             })
-          : null,
-      inject: [DATABASE, RECEPTION_EKUATIA_CONFIG, EKUATIA_SOLVE_QUOTA, EKUATIA_LOOKUP_QUEUE],
+          : null;
+      },
+      inject: [
+        DATABASE,
+        RECEPTION_EKUATIA_CONFIG,
+        EKUATIA_SOLVE_QUOTA,
+        EKUATIA_LOOKUP_QUEUE,
+        RECEPTION_STORAGE,
+      ],
     },
     {
       provide: CORRECT_RECEIVED_DOCUMENT,

@@ -59,7 +59,10 @@ import { createDrizzleEkuatiaSolveUsageStore } from '../modules/reception/infras
 import { EkuatiaHttpClient } from '../modules/reception/infrastructure/adapters/ekuatia-http-client.adapter.js';
 import { Libxml2SifenXmlParser } from '../modules/reception/infrastructure/adapters/libxml2-sifen-xml-parser.adapter.js';
 import { TwoCaptchaSolver } from '../modules/reception/infrastructure/adapters/two-captcha-solver.adapter.js';
-import { loadReceptionEkuatiaConfig } from '../modules/reception/infrastructure/reception-ekuatia-config.js';
+import {
+  assertEkuatiaWorkerPrerequisites,
+  loadReceptionEkuatiaConfig,
+} from '../modules/reception/infrastructure/reception-ekuatia-config.js';
 import { createDrizzleReceivedDocumentRepository } from '../modules/reception/infrastructure/adapters/drizzle-received-document-repository.js';
 import { createDrizzleTenantFiscalIdentity } from '../modules/reception/infrastructure/adapters/drizzle-tenant-fiscal-identity.js';
 import { JsqrQrDecoder } from '../modules/reception/infrastructure/adapters/jsqr-qr-decoder.adapter.js';
@@ -399,10 +402,9 @@ function startReceptionEkuatia(
     return undefined;
   }
   const storage = loadStorageConfig(env, env.NODE_ENV);
-  if (storage.status === 'disabled') {
-    logger.info('reception eKuatia lookup is off (object storage is not configured)');
-    return undefined;
-  }
+  // The API refuses to boot in this state too: never leave accepted lookups without a consumer.
+  assertEkuatiaWorkerPrerequisites(config, { objectStorage: storage.status === 'enabled' });
+  if (storage.status === 'disabled') return undefined;
   const { maxBytes } = loadReceptionUploadConfig(env);
   const repository = createDrizzleReceivedDocumentRepository(db);
   const ingestXml = new IngestSifenXml({

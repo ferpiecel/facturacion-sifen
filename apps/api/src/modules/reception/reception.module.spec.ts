@@ -124,4 +124,14 @@ describe('ReceptionModule', () => {
     vi.stubEnv(name, value);
     await expect(compile({}, new InMemoryStorageProvider())).rejects.toThrow(name);
   });
+
+  it('fails the API boot when the lookup is available but object storage is not (orphan jobs)', async () => {
+    vi.stubEnv('RECEPTION_EKUATIA_ENABLED', 'true');
+    vi.stubEnv('TWOCAPTCHA_API_KEY', 'test-key-not-real');
+    await expect(compile({}, null)).rejects.toThrow(
+      'RECEPTION_EKUATIA_ENABLED requires object storage',
+    );
+    const ok = await compile({}, new InMemoryStorageProvider());
+    expect(ok.get(INGEST_FROM_CDC)).toBeInstanceOf(IngestFromCdc);
+  });
 });

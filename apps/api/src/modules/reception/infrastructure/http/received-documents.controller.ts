@@ -61,6 +61,7 @@ import {
   RECEPTION_UPLOAD_CONFIG,
   REPROCESS_RECEIVED_DOCUMENT,
 } from '../../reception.tokens.js';
+import { sanitizeOriginalName } from '../../domain/original-name.js';
 import { sniffUpload } from '../../domain/upload-sniff.js';
 import { parseCorrectionRequest } from './correct-received-document.request.js';
 import {
@@ -87,7 +88,6 @@ interface Upload {
   readonly originalName: string | null;
 }
 
-const MAX_FILENAME_LENGTH = 255;
 
 const tooLarge = () =>
   receptionProblem(
@@ -439,8 +439,7 @@ export class ReceivedDocumentsController {
       );
     }
     try {
-      const name = part.filename?.split(/[\\/]/).at(-1)?.slice(0, MAX_FILENAME_LENGTH);
-      return { bytes: await part.toBuffer(), originalName: name ? name : null };
+      return { bytes: await part.toBuffer(), originalName: sanitizeOriginalName(part.filename) };
     } catch (error) {
       if ((error as { code?: unknown }).code === 'FST_REQ_FILE_TOO_LARGE') throw tooLarge();
       throw error;

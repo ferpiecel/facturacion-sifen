@@ -2286,7 +2286,7 @@
           "Reception"
         ],
         "summary": "Download the stored upload, byte for byte",
-        "description": "Served with the content type recorded at upload and `Content-Disposition: inline`.",
+        "description": "Served with the content type recorded at upload. `Content-Disposition` is `inline` only for PDFs and images and `attachment` otherwise (XML included).",
         "security": [
           {
             "apiKey": []

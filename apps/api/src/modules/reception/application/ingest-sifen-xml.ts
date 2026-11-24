@@ -109,8 +109,11 @@ export class IngestSifenXml {
 
     const byCdc = await repository.findByCdc(tenantId, parsed.cdc);
     if (byCdc) {
-      // Same document, different bytes (e.g. re-signed): keep the first, drop the extra upload.
-      await storage.delete(storageKey);
+      // Same document, different bytes (e.g. re-signed): drop the extra upload. The key is content
+      // addressed, so when a concurrent identical upload already attached it to the winning
+      // document the object is shared and must stay.
+      const attached = await repository.findArtifactBySha256(tenantId, sha256);
+      if (attached?.artifact.storageKey !== storageKey) await storage.delete(storageKey);
       return { created: false, document: byCdc, events: [] };
     }
 

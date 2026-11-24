@@ -103,6 +103,8 @@ class Harness {
   readonly created: NewReceivedDocument[] = [];
   readonly documents = new Map<string, ReceivedDocument>();
   artifactMatch: ArtifactMatch | null = null;
+  /** Answers consumed one per lookup before falling back to `artifactMatch`. */
+  readonly artifactMatches: (ArtifactMatch | null)[] = [];
   parseResult: ParsedSifenDocument | Error = parsedDoc();
   identity: { rucBase: string; dv: number } | null = { rucBase: RECEIVER_BASE, dv: RECEIVER_DV };
   private seq = 0;
@@ -131,7 +133,8 @@ class Harness {
     },
     findArtifactBySha256: () => {
       this.log.push('findArtifact');
-      return Promise.resolve(this.artifactMatch);
+      const queued = this.artifactMatches.shift();
+      return Promise.resolve(queued === undefined ? this.artifactMatch : queued);
     },
     save: () => Promise.reject(new Error('unused')),
   };
@@ -186,6 +189,31 @@ describe('IngestSifenXml', () => {
     const second = await run(h);
     expect(second).toEqual({ created: false, document: first.document, events: [] });
     expect(h.log).toEqual(['findArtifact']);
+  });
+
+  it('keeps the shared content-addressed object when a concurrent identical upload loses the CDC race', async () => {
+    const h = new Harness();
+    const first = await run(h);
+    const key = h.first.artifact?.storageKey ?? '';
+    // B read "unknown" before A committed, then sees A's document through its CDC.
+    h.artifactMatches.push(null, {
+      artifact: { id: 'a', ...(h.first.artifact as NewReceivedArtifact) },
+      document: first.document,
+    });
+    const second = await run(h);
+    expect(second.created).toBe(false);
+    expect(await h.storage.exists(key)).toBe(true);
+  });
+
+  it('drops the extra upload when the same CDC arrives with different bytes', async () => {
+    const h = new Harness();
+    await run(h);
+    const other = new TextEncoder().encode('<rDE>resigned</rDE>');
+    const second = await run(h, other);
+    expect(second.created).toBe(false);
+    expect(await h.storage.exists(`tenants/${TENANT}/received/sifen_xml/${sha(other)}.xml`)).toBe(
+      false,
+    );
   });
 
   it('keeps the artifact stored and records extraction_failed when parsing fails', async () => {

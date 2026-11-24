@@ -249,6 +249,21 @@ describe('Libxml2SifenXmlParser rejections', () => {
     expect(capture(() => parser.parse(utf16))).toMatchObject({ code: 'unsupported_encoding' });
   });
 
+  it('rejects a declared encoding other than UTF-8 or ISO-8859-1 (UTF-7 hides the DTD from the byte scan)', () => {
+    const utf7 = `<?xml version="1.0" encoding="UTF-7"?>+ADw-!DOCTYPE rDE +AFs-+ADw-!ENTITY x SYSTEM "file:///etc/passwd"+AD4-+AF0-+AD4-${contado}`;
+    expect(capture(() => parser.parse(utf7))).toMatchObject({ code: 'unsupported_encoding' });
+    const quoted = `<?xml version='1.0' encoding='utf-7' standalone='yes'?>${contado}`;
+    expect(capture(() => parser.parse(quoted))).toMatchObject({ code: 'unsupported_encoding' });
+  });
+
+  it('accepts UTF-8 and ISO-8859-1 declarations case-insensitively', () => {
+    for (const name of ['UTF-8', 'utf-8', 'ISO-8859-1', 'iso-8859-1']) {
+      const body = contado.replace(/^<\?xml[^>]*\?>/, '');
+      const xml = `<?xml version="1.0" encoding="${name}"?>${body}`;
+      expect(() => parser.parse(xml)).not.toThrow();
+    }
+  });
+
   it('rejects documents over the byte limit before parsing', () => {
     const small = new Libxml2SifenXmlParser({ maxBytes: 1000 });
     const error = capture(() => small.parse(contado));

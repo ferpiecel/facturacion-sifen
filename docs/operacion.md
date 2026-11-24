@@ -136,35 +136,36 @@ pnpm --filter @sifen/api worker
 - **Costo:** cada consulta encolada consume una resolución de pago; los topes diarios y la deduplicación por CDC antes de resolver son la defensa, no un presupuesto.
 - **Términos de uso:** eKuatia y 2Captcha tienen los suyos; los asume el dueño del producto.
 - **Fragilidad:** el sitio puede cambiar su página, su clave de reCAPTCHA o su contrato sin aviso. El contrato real (cuerpo del POST, forma del captcha rechazado, cookies) **no está verificado** hasta la captura humana de R6.4; mientras tanto el cliente valida de forma conservadora y puede responder `ekuatia_invalid_response`.
-- **Sin señal al cliente:** una consulta fallida no deja documento ni estado consultable por la API; solo queda en los logs del worker (decisión aceptada para esta versión).
+- **Sin señal al cliente:** una consulta fallida no deja un estado consultable por la API (solo un XML ilegible deja un documento `extraction_failed`); el resto solo queda en los logs del worker (decisión aceptada para esta versión).
 
 **Encender**
 
 1. Confirmar con el dueño del producto los topes (`RECEPTION_EKUATIA_DAILY_SOLVE_CAP`, `RECEPTION_EKUATIA_GLOBAL_DAILY_SOLVE_CAP`): los valores por defecto (20 y 100 por día UTC) son provisionales.
-2. Tener almacenamiento de objetos (`STORAGE_*`) y `TWOCAPTCHA_API_KEY` en la API **y** el worker; sin ellos la API y el worker se niegan a arrancar con la función encendida.
+2. Tener `TWOCAPTCHA_API_KEY` y almacenamiento de objetos (`STORAGE_*`) en la API **y** el worker. Sin almacenamiento, con la función encendida y la clave presente, la API y el worker se niegan a arrancar. Sin la clave **no** fallan: la API responde `503 ekuatia_unavailable` y el worker arranca sin consumir la cola (log `reception eKuatia lookup is off (TWOCAPTCHA_API_KEY is not set)`).
 3. Poner `RECEPTION_EKUATIA_ENABLED=true` y reiniciar la API y el worker. Probar con un solo CDC conocido y vigilar el log y el saldo de 2Captcha antes de abrirla a más tenants.
 
 **Apagar (kill switch)**
 
-Poner `RECEPTION_EKUATIA_ENABLED=false` y reiniciar la API y el worker: el interruptor se lee solo al arrancar. La API responde `503 ekuatia_unavailable` y un worker reiniciado apagado descarta los trabajos encolados sin resolver. Apagar de inmediato ante un gasto inesperado o un aumento de fallos.
+Poner `RECEPTION_EKUATIA_ENABLED=false` y reiniciar la API y el worker: el interruptor se lee solo al arrancar. La API responde `503 ekuatia_unavailable` y el worker reiniciado apagado no arranca el consumidor de la cola. Los trabajos ya encolados **no se descartan**: siguen en Redis y se ejecutarían al volver a encender (con el día de cupo con que se encolaron). Para evitarlo, vaciar la cola `reception-ekuatia-lookup` antes de reencender. Apagar de inmediato ante un gasto inesperado o un aumento de fallos.
 
 **Qué mirar**
 
 El worker registra una línea por consulta con ids y códigos, nunca el CDC, el XML, la URL ni el token:
 
-- `reception ekuatia lookup <tenant>: skipped (<razón>)`: `already_exists` (ya había documento), `disabled` o `circuit_open`.
-- `reception ekuatia lookup <tenant>: failed <código>` (`WARN`).
+- `reception ekuatia lookup <tenant>: skipped (<razón>)`: `already_exists` (ya había documento) o `circuit_open` (`disabled` existe en el código pero el worker real no la produce: apagado no consume la cola).
+- `reception ekuatia lookup <tenant>: failed <código>` (`WARN`); también `ingested:<estado>` (éxito), `malformed job` y `unexpected <Error>` (`WARN`, el job falla).
 
 | Código | Significado | Qué hacer |
 |---|---|---|
 | `captcha_balance_exhausted` | Saldo de 2Captcha agotado; abre el corte de circuito al instante | Recargar saldo; el corte deja pasar una prueba tras el cooldown |
-| `captcha_not_configured` | Falta o es inválida la clave de 2Captcha; abre el corte | Revisar `TWOCAPTCHA_API_KEY` y reiniciar |
+| `captcha_not_configured` | 2Captcha rechaza la clave (sin clave el worker ni consume la cola); abre el corte | Revisar `TWOCAPTCHA_API_KEY` y reiniciar |
 | `captcha_ip_not_allowed` | 2Captcha rechaza la IP del worker; abre el corte | Permitir la IP en la cuenta de 2Captcha |
-| `captcha_no_capacity` | Sin cupo de resolución en 2Captcha en ese momento | Reintentar más tarde; el cupo diario se devuelve |
+| `captcha_no_capacity` | Sin cupo de resolución en 2Captcha en ese momento; no abre el corte de golpe, pero suma a sus fallos consecutivos | Reintentar más tarde; el cupo diario se devuelve |
 | `captcha_unsolvable`, `captcha_timeout`, `captcha_no_token`, `captcha_provider_error` | El captcha no se resolvió; **el cupo no se devuelve** (la resolución probablemente se cobró) | Si se repiten, revisar la clave de sitio y el estado de 2Captcha |
 | `ekuatia_not_found` | eKuatia no tiene ese CDC (cuenta como sitio sano para el corte) | Verificar el CDC con el emisor |
-| `ekuatia_consult_error`, `ekuatia_timeout`, `ekuatia_invalid_response` | eKuatia no respondió bien o cambió su contrato | Si son sostenidos, apagar y revisar el contrato con una captura nueva |
-| `xml_unreadable` | El XML recibido no se pudo leer o no corresponde al CDC pedido | Revisar con una captura; no se guarda ningún documento |
+| `ekuatia_consult_error`, `ekuatia_timeout`, `ekuatia_invalid_response` | eKuatia no respondió bien, cambió su contrato o devolvió un XML cuyo `Id` no es el CDC pedido | Si son sostenidos, apagar y revisar el contrato con una captura nueva |
+| `xml_unreadable` | El XML recibido no se pudo leer; **sí** queda un documento en `extraction_failed` (sin CDC, no bloquea el dedupe) | Revisar el documento y, si hace falta, subir el XML o el PDF a mano |
+| `aborted` | La consulta se cortó (apagado del worker); el cupo se devuelve y no cuenta para el corte | Volver a enviar el `POST` |
 
 **Circuito y cupos**
 

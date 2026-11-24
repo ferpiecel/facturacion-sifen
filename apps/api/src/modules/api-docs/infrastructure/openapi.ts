@@ -883,7 +883,7 @@ export function buildOpenApiDocument() {
           tags: ['Reception'],
           summary: 'Download the stored upload, byte for byte',
           description:
-            'Served with the content type recorded at upload and `Content-Disposition: inline`.',
+            'Served with the content type recorded at upload. `Content-Disposition` is `inline` only for PDFs and images and `attachment` otherwise (XML included).',
           ...secured(['reception:read']),
           parameters: [idParam('Received document')],
           responses: {

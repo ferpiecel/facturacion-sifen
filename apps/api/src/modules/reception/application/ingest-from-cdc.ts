@@ -2,6 +2,7 @@ import { CdcReferenceError, createCdcReference } from '../domain/cdc-reference.j
 import type { CdcReferenceErrorCode } from '../domain/cdc-reference.js';
 import type { ReceivedDocument } from '../domain/received-document.js';
 import type { SolveSlot } from './ekuatia-solve-quota.js';
+import { ReceptionQueueOutcomeUnknownError } from './ports/reception-job-queue.port.js';
 import type { EkuatiaLookupQueue } from './ports/ekuatia-lookup-queue.port.js';
 import type { ReceivedDocumentRepository } from './ports/received-document-repository.port.js';
 
@@ -36,7 +37,7 @@ export type IngestFromCdcResult =
       readonly cap: number;
       readonly retryAfterSeconds: number;
     }
-  /** The queue refused the job; the solve slot was given back (HTTP 503). */
+  /** The queue refused the job (slot given back) or did not answer (slot kept): HTTP 503. */
   | { readonly kind: 'queue_unavailable' }
   /** The lookup is queued (HTTP 202). `alreadyQueued` when an identical lookup was pending. */
   | { readonly kind: 'accepted'; readonly cdc: string; readonly alreadyQueued: boolean };
@@ -90,8 +91,9 @@ export class IngestFromCdc {
       // A lookup already pending owns its own slot: this request costs nothing.
       if (!enqueued) await slot.release();
       return { kind: 'accepted', cdc, alreadyQueued: !enqueued };
-    } catch {
-      await slot.release();
+    } catch (error) {
+      // The job may exist: keep the slot (a lost slot is cheaper than an uncounted paid solve).
+      if (!(error instanceof ReceptionQueueOutcomeUnknownError)) await slot.release();
       return { kind: 'queue_unavailable' };
     }
   }

@@ -2,7 +2,10 @@ import type {
   EkuatiaLookupJob,
   EkuatiaLookupQueue,
 } from '../../application/ports/ekuatia-lookup-queue.port.js';
-import { ReceptionQueueUnavailableError } from '../../application/ports/reception-job-queue.port.js';
+import {
+  ReceptionQueueOutcomeUnknownError,
+  ReceptionQueueUnavailableError,
+} from '../../application/ports/reception-job-queue.port.js';
 
 /** BullMQ queue of the eKuatia lookups by CDC (a queue name cannot contain a colon). */
 export const RECEPTION_EKUATIA_LOOKUP_QUEUE = 'reception-ekuatia-lookup';
@@ -19,9 +22,11 @@ export type EkuatiaLookupJobData = EkuatiaLookupJob;
 
 /** The slice of a BullMQ `Queue` the adapter needs, so the library stays out of the signature. */
 export interface EkuatiaLookupBullQueue {
-  add(name: string, data: EkuatiaLookupJobData, opts: JobOptions): Promise<unknown>;
-  /** Resolves undefined when no job has the id. */
-  getJob(jobId: string): Promise<unknown>;
+  /**
+   * With a known id BullMQ answers the EXISTING job instead of creating one, so the answer is
+   * authoritative: a job created by this call has `timestamp >= ` the moment of the call.
+   */
+  add(name: string, data: EkuatiaLookupJobData, opts: JobOptions): Promise<{ timestamp?: number }>;
 }
 
 interface JobOptions {
@@ -42,7 +47,8 @@ export interface BullmqEkuatiaLookupQueueOptions {
 /**
  * `EkuatiaLookupQueue` over BullMQ. The job id (`reception-ekuatia-lookup:<tenant>:<cdc>`) makes
  * `add` idempotent while a job for that CDC is waiting or running, so two concurrent requests for
- * the same CDC solve one captcha. Finished jobs are removed (success and failure), so a failed
+ * the same CDC solve one captcha. Its answer decides `enqueued`; a timeout is an UNKNOWN outcome
+ * (`ReceptionQueueOutcomeUnknownError`) and keeps the caller's solve slot. Finished jobs are removed (success and failure), so a failed
  * lookup can be requested again instead of being swallowed by a stale id. Any failure to reach
  * Redis becomes `ReceptionQueueUnavailableError` carrying the error class only.
  */
@@ -56,19 +62,21 @@ export class BullmqEkuatiaLookupQueue implements EkuatiaLookupQueue {
   }
 
   private async add(job: EkuatiaLookupJob): Promise<boolean> {
-    const jobId = `${RECEPTION_EKUATIA_LOOKUP_QUEUE}:${job.tenantId}:${job.cdc}`;
-    const existing = await this.queue.getJob(jobId);
-    await this.queue.add(
+    const startedAt = Date.now();
+    const created = await this.queue.add(
       RECEPTION_EKUATIA_LOOKUP_JOB_NAME,
       { tenantId: job.tenantId, cdc: job.cdc, usageDate: job.usageDate },
       {
-        jobId,
+        jobId: `${RECEPTION_EKUATIA_LOOKUP_QUEUE}:${job.tenantId}:${job.cdc}`,
         attempts: RECEPTION_EKUATIA_LOOKUP_ATTEMPTS,
         removeOnComplete: true,
         removeOnFail: true,
       },
     );
-    return existing === undefined || existing === null;
+    // No lookup before `add`: a job that finished in between would make a lookup lie. A job older
+    // than this call is the one that was already pending; anything else (including an answer with
+    // no timestamp) counts as new, so the slot stays spent: over-counting beats a free paid solve.
+    return typeof created.timestamp !== 'number' || created.timestamp >= startedAt;
   }
 
   async enqueueLookup(job: EkuatiaLookupJob): Promise<{ readonly enqueued: boolean }> {
@@ -76,11 +84,15 @@ export class BullmqEkuatiaLookupQueue implements EkuatiaLookupQueue {
     try {
       const timeout = new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
-          reject(new Error('timeout'));
+          reject(new ReceptionQueueOutcomeUnknownError('timeout'));
         }, this.timeoutMs);
       });
-      return { enqueued: await Promise.race([this.add(job), timeout]) };
+      const adding = this.add(job);
+      // The add may still land after the timeout; its late failure must not go unhandled.
+      adding.catch(() => undefined);
+      return { enqueued: await Promise.race([adding, timeout]) };
     } catch (error) {
+      if (error instanceof ReceptionQueueOutcomeUnknownError) throw error;
       throw new ReceptionQueueUnavailableError(error instanceof Error ? error.name : 'unknown');
     } finally {
       clearTimeout(timer);

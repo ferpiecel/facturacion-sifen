@@ -336,7 +336,11 @@ export class FakeEkuatiaLookupQueue implements EkuatiaLookupQueue {
   failWith: Error | null = null;
   enqueueLookup(job: EkuatiaLookupJob): Promise<{ readonly enqueued: boolean }> {
     if (this.failWith !== null) {
-      return Promise.reject(new ReceptionQueueUnavailableError('redis down'));
+      return Promise.reject(
+        this.failWith instanceof ReceptionQueueUnavailableError
+          ? this.failWith
+          : new ReceptionQueueUnavailableError('redis down'),
+      );
     }
     const known = this.jobs.some((j) => j.tenantId === job.tenantId && j.cdc === job.cdc);
     if (!known) this.jobs.push(job); // idempotent per (tenant, CDC), like the real adapter

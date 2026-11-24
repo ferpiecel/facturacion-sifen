@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { computeCdcCheckDigit } from '../../emission/domain/cdc.js';
+import { ReceptionQueueOutcomeUnknownError } from './ports/reception-job-queue.port.js';
 import { createReceivedDocument } from '../domain/received-document.js';
 import { EkuatiaSolveQuota } from './ekuatia-solve-quota.js';
 import { IngestFromCdc } from './ingest-from-cdc.js';
@@ -150,5 +151,14 @@ describe('IngestFromCdc', () => {
     expect(again).toEqual({ kind: 'accepted', cdc: CDC, alreadyQueued: true });
     expect(h.store.tenantUsed(TENANT, '2026-11-16')).toBe(1);
     expect(h.queue.jobs).toHaveLength(1);
+  });
+
+  it('keeps the slot when the queue outcome is unknown (the job may exist): never a free paid solve', async () => {
+    const h = harness();
+    h.queue.failWith = new ReceptionQueueOutcomeUnknownError('timeout');
+    const result = await h.useCase.execute({ tenantId: TENANT, reference: CDC });
+    expect(result).toEqual({ kind: 'queue_unavailable' });
+    expect(h.store.tenantUsed(TENANT, '2026-11-16')).toBe(1);
+    expect(h.store.globalUsed('2026-11-16')).toBe(1);
   });
 });

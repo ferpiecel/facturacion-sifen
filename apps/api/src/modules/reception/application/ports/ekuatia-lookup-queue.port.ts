@@ -12,7 +12,9 @@ export interface EkuatiaLookupQueue {
    * Schedules the lookup. Idempotent per (tenant, CDC) while a job for it is waiting or running:
    * a second call is a no-op and `enqueued` is false, so the caller can give its solve slot back.
    *
-   * @throws ReceptionQueueUnavailableError when the job could not be enqueued.
+   * @throws ReceptionQueueUnavailableError when the job was definitely not enqueued.
+   * @throws ReceptionQueueOutcomeUnknownError (a subclass) when it may have been: the caller must
+   *   keep the solve slot.
    */
   enqueueLookup(job: EkuatiaLookupJob): Promise<{ readonly enqueued: boolean }>;
 }

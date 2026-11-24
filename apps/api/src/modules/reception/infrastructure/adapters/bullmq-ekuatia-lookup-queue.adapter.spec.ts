@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ReceptionQueueUnavailableError } from '../../application/ports/reception-job-queue.port.js';
+import {
+  ReceptionQueueOutcomeUnknownError,
+  ReceptionQueueUnavailableError,
+} from '../../application/ports/reception-job-queue.port.js';
 import {
   BullmqEkuatiaLookupQueue,
   RECEPTION_EKUATIA_LOOKUP_ATTEMPTS,
@@ -10,10 +13,12 @@ const TENANT = '11111111-1111-4111-8111-111111111111';
 const CDC = '01444444017001001001452822017012515873260988';
 const job = { tenantId: TENANT, cdc: CDC, usageDate: '2026-11-16' };
 
+/** `add` answers the job it created (or, for a known id, the existing one) with its timestamp. */
 const fakeQueue = (
-  add = vi.fn().mockResolvedValue({}),
-  getJob = vi.fn().mockResolvedValue(undefined),
-) => ({ add, getJob });
+  add = vi.fn().mockImplementation(() => Promise.resolve({ timestamp: Date.now() })),
+) => ({
+  add,
+});
 
 describe('BullmqEkuatiaLookupQueue', () => {
   it('names the queue without a colon (BullMQ rejects it)', () => {
@@ -49,10 +54,27 @@ describe('BullmqEkuatiaLookupQueue', () => {
     expect(opts.removeOnFail).toBe(true);
   });
 
-  it('reports enqueued=false when a job with that id already exists', async () => {
-    const queue = fakeQueue(vi.fn().mockResolvedValue({}), vi.fn().mockResolvedValue({ id: 'x' }));
+  it('reports enqueued=false when add answers a job created before this call', async () => {
+    const queue = fakeQueue(vi.fn().mockResolvedValue({ timestamp: Date.now() - 60_000 }));
     expect(await new BullmqEkuatiaLookupQueue({ queue }).enqueueLookup(job)).toEqual({
       enqueued: false,
+    });
+  });
+
+  it('trusts the result of add, not a lookup before it: a job that finished in between is a new job', async () => {
+    // The old job with this id vanished between a lookup and the add: add creates a fresh job.
+    // There is no lookup at all now, so the fake has no `getJob` and the answer is the new job.
+    const queue = fakeQueue();
+    expect(await new BullmqEkuatiaLookupQueue({ queue }).enqueueLookup(job)).toEqual({
+      enqueued: true,
+    });
+    expect('getJob' in queue).toBe(false);
+  });
+
+  it('keeps the slot (enqueued=true) when the answer carries no timestamp: over-count, never a free solve', async () => {
+    const queue = fakeQueue(vi.fn().mockResolvedValue({}));
+    expect(await new BullmqEkuatiaLookupQueue({ queue }).enqueueLookup(job)).toEqual({
+      enqueued: true,
     });
   });
 
@@ -76,6 +98,6 @@ describe('BullmqEkuatiaLookupQueue', () => {
     const queue = fakeQueue(vi.fn().mockReturnValue(new Promise(() => undefined)));
     await expect(
       new BullmqEkuatiaLookupQueue({ queue, timeoutMs: 20 }).enqueueLookup(job),
-    ).rejects.toBeInstanceOf(ReceptionQueueUnavailableError);
+    ).rejects.toBeInstanceOf(ReceptionQueueOutcomeUnknownError);
   });
 });

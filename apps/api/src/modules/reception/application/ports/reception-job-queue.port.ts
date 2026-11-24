@@ -22,6 +22,17 @@ export class ReceptionQueueUnavailableError extends Error {
   }
 }
 
+/**
+ * The queue did not answer in time, so the job MAY exist. A caller that reserved a paid resource for
+ * it must not give the resource back: over-counting is safe, a free paid solve is not.
+ */
+export class ReceptionQueueOutcomeUnknownError extends ReceptionQueueUnavailableError {
+  constructor(detail: string) {
+    super(detail);
+    this.name = 'ReceptionQueueOutcomeUnknownError';
+  }
+}
+
 export interface ReceptionJobQueue {
   /**
    * Schedules the asynchronous extraction of a stored document. Idempotent per (document, attempt):

@@ -2,6 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { createReceivedDocument } from '../domain/received-document.js';
 import { EkuatiaCircuitBreaker } from './ekuatia-circuit-breaker.js';
 import { EkuatiaSolveQuota } from './ekuatia-solve-quota.js';
+import {
+  MalformedSifenXmlError,
+  type ParsedSifenDocument,
+  type SifenXmlParser,
+} from './ports/sifen-xml-parser.port.js';
 import { LookupCdcDocument } from './lookup-cdc-document.js';
 import {
   CaptchaSolveError,
@@ -32,6 +37,7 @@ function harness(
     consult?: () => Promise<{ xml: string }>;
     ingest?: (input: IngestSifenXmlInput) => Promise<IngestSifenXmlResult>;
     threshold?: number;
+    parse?: SifenXmlParser['parse'];
   } = {},
 ) {
   const repository = new InMemoryReceptionRepository();
@@ -73,6 +79,9 @@ function harness(
     breaker,
     solver: { solveRecaptchaV2: solveSpy },
     client: { consultByCdc: consultSpy },
+    parser: {
+      parse: over.parse ?? (() => ({ cdc: CDC }) as ParsedSifenDocument),
+    },
     ingestXml: { execute: ingestSpy },
     sitekey: 'sitekey',
     pageUrl: 'https://ekuatia.invalid/consultas/',
@@ -219,16 +228,35 @@ describe('LookupCdcDocument', () => {
     expect(h.breaker.state()).toBe('closed');
   });
 
-  it('refuses an XML that is not the requested document, without ingesting it', async () => {
-    const h = harness({
-      consult: () => Promise.resolve({ xml: `<rDE><DE Id="${'9'.repeat(44)}"></DE></rDE>` }),
-    });
+  it('refuses an XML whose DE Id (as the parser reads it) is not the requested CDC', async () => {
+    const h = harness({ parse: () => ({ cdc: '9'.repeat(44) }) as ParsedSifenDocument });
     await reserved(h);
     expect(await h.useCase.execute(job)).toEqual({
       kind: 'failed',
       code: 'ekuatia_invalid_response',
     });
     expect(h.ingestSpy).not.toHaveBeenCalled();
+  });
+
+  it('lets an unreadable XML through to the ingest, which stores it as extraction_failed', async () => {
+    const h = harness({
+      parse: () => {
+        throw new MalformedSifenXmlError('not_well_formed');
+      },
+    });
+    await reserved(h);
+    expect((await h.useCase.execute(job)).kind).toBe('ingested');
+    expect(h.ingestSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('rethrows an unexpected parser error', async () => {
+    const h = harness({
+      parse: () => {
+        throw new TypeError('bug');
+      },
+    });
+    await reserved(h);
+    await expect(h.useCase.execute(job)).rejects.toBeInstanceOf(TypeError);
   });
 
   it('an XML the parser rejects is a failed lookup, and the stored extraction_failed document is reported', async () => {

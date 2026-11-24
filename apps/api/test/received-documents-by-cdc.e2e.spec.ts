@@ -88,8 +88,9 @@ describe('received documents: lookup by CDC (e2e)', () => {
     });
 
   /** Runs the worker side for one queued job with a fake solver and a fake eKuatia client. */
-  const runJob = (job: EkuatiaLookupJob) => {
+  const runJob = (job: EkuatiaLookupJob, render: (cdc: string) => string = xmlFor) => {
     const repository = createDrizzleReceivedDocumentRepository(handle.db);
+    const parser = new Libxml2SifenXmlParser({ maxBytes: 2_000_000 });
     return createReceptionEkuatiaProcessor({
       lookup: new LookupCdcDocument({
         enabled: true,
@@ -112,11 +113,12 @@ describe('received documents: lookup by CDC (e2e)', () => {
             return Promise.resolve('TOKEN');
           },
         },
-        client: { consultByCdc: ({ cdc }) => Promise.resolve({ xml: xmlFor(cdc) }) },
+        client: { consultByCdc: ({ cdc }) => Promise.resolve({ xml: render(cdc) }) },
+        parser,
         ingestXml: new IngestSifenXml({
           repository,
           storage,
-          parser: new Libxml2SifenXmlParser({ maxBytes: 2_000_000 }),
+          parser,
           fiscalIdentity: createDrizzleTenantFiscalIdentity(handle.db),
           now: () => new Date(),
           newId: randomUUID,
@@ -279,6 +281,35 @@ describe('received documents: lookup by CDC (e2e)', () => {
       });
       expect(jobs).toHaveLength(1);
       expect(solves).toBe(1);
+    });
+  });
+
+  describe('requested-CDC guard (real parser)', () => {
+    beforeEach(async () => {
+      await boot(ENABLED);
+    });
+
+    it('accepts a DE Id written with single quotes', async () => {
+      await post(keyA, { reference: CDC_1 });
+      const outcome = await runJob(jobs[0], (cdc) =>
+        xmlFor(cdc).replaceAll(`Id="${cdc}"`, `Id='${cdc}'`),
+      );
+      expect(outcome.outcome).toMatch(/^ingested:/);
+    });
+
+    it('refuses an XML of another document even if another element carries the requested Id', async () => {
+      await post(keyA, { reference: CDC_1 });
+      const outcome = await runJob(jobs[0], (cdc) =>
+        xmlFor(CDC_2).replace('<dVerFor>', `<dVerFor Id="${cdc}">`),
+      );
+      expect(outcome.outcome).toBe('failed:ekuatia_invalid_response');
+      expect((await list(keyA, CDC_1)).json<Body>().items).toHaveLength(0);
+    });
+
+    it('refuses an XML whose DE Id is another CDC', async () => {
+      await post(keyA, { reference: CDC_1 });
+      const outcome = await runJob(jobs[0], () => xmlFor(CDC_3));
+      expect(outcome.outcome).toBe('failed:ekuatia_invalid_response');
     });
   });
 

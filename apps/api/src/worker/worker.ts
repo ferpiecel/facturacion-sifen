@@ -407,10 +407,11 @@ function startReceptionEkuatia(
   if (storage.status === 'disabled') return undefined;
   const { maxBytes } = loadReceptionUploadConfig(env);
   const repository = createDrizzleReceivedDocumentRepository(db);
+  const parser = new Libxml2SifenXmlParser({ maxBytes });
   const ingestXml = new IngestSifenXml({
     repository,
     storage: createS3StorageProvider(storage.config),
-    parser: new Libxml2SifenXmlParser({ maxBytes }),
+    parser,
     fiscalIdentity: createDrizzleTenantFiscalIdentity(db),
     now: () => new Date(),
     newId: randomUUID,
@@ -433,6 +434,7 @@ function startReceptionEkuatia(
     }),
     solver: new TwoCaptchaSolver({ apiKey: config.solverApiKey }),
     client: new EkuatiaHttpClient({ baseUrl: config.baseUrl }),
+    parser,
     ingestXml,
     sitekey: config.sitekey,
     pageUrl: `${config.baseUrl}/consultas/`,

@@ -3,16 +3,28 @@ import type { EkuatiaCircuitBreaker } from './ekuatia-circuit-breaker.js';
 import type { IngestSifenXmlInput, IngestSifenXmlResult } from './ingest-sifen-xml.js';
 import { CaptchaSolveError, type CaptchaSolver } from './ports/captcha-solver.port.js';
 import { EkuatiaConsultError, type EkuatiaClient } from './ports/ekuatia-client.port.js';
+import {
+  MalformedSifenXmlError,
+  SifenXmlTooLargeError,
+  UnsupportedDocumentTypeError,
+  type SifenXmlParser,
+} from './ports/sifen-xml-parser.port.js';
 import type { ReceivedDocumentRepository } from './ports/received-document-repository.port.js';
 
 export interface LookupCdcDocumentDeps {
-  /** Kill switch (`RECEPTION_EKUATIA_ENABLED`), read again by the worker: a drained job does no solve. */
+  /**
+   * Kill switch (`RECEPTION_EKUATIA_ENABLED`) as read when the worker started. The process
+   * environment does not change while it runs, so turning the switch off takes effect when the
+   * worker restarts; until then queued jobs still run (a restart drains them without solving).
+   */
   readonly enabled: boolean;
   readonly repository: Pick<ReceivedDocumentRepository, 'findByCdc'>;
   readonly quota: { releaseByDay(tenantId: string, usageDate: string): Promise<void> };
   readonly breaker: EkuatiaCircuitBreaker;
   readonly solver: CaptchaSolver;
   readonly client: EkuatiaClient;
+  /** The safe SIFEN XML parser (the one `IngestSifenXml` uses): reads the `DE` Id to check the document. */
+  readonly parser: Pick<SifenXmlParser, 'parse'>;
   /** The XML path (`IngestSifenXml`): the result is processed exactly like an XML upload. */
   readonly ingestXml: { execute(input: IngestSifenXmlInput): Promise<IngestSifenXmlResult> };
   /** Public reCAPTCHA site key and page of the consultation (UNVERIFIED, configurable). */
@@ -129,13 +141,26 @@ export class LookupCdcDocument {
     }
     breaker.recordSuccess();
 
-    // The site must answer for the CDC that was asked: anything else is never ingested, because the
-    // dedupe above is keyed by the requested CDC.
-    if (!xml.includes(`Id="${cdc}"`)) return { kind: 'failed', code: 'ekuatia_invalid_response' };
+    // The site must answer for the CDC that was asked, as read from the `DE` root by the same safe
+    // parser the ingest uses (any quoting, no other element can stand in): the dedupe above is
+    // keyed by the requested CDC. An unreadable XML goes on to the ingest, which stores it as
+    // `extraction_failed`.
+    const bytes = new TextEncoder().encode(xml);
+    try {
+      if (this.deps.parser.parse(bytes).cdc !== cdc) {
+        return { kind: 'failed', code: 'ekuatia_invalid_response' };
+      }
+    } catch (error) {
+      const unreadable =
+        error instanceof MalformedSifenXmlError ||
+        error instanceof UnsupportedDocumentTypeError ||
+        error instanceof SifenXmlTooLargeError;
+      if (!unreadable) throw error;
+    }
 
     const result = await this.deps.ingestXml.execute({
       tenantId,
-      xml: new TextEncoder().encode(xml),
+      xml: bytes,
       source: 'ekuatia_cdc',
     });
     if (result.document.status === 'extraction_failed') {

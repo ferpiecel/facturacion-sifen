@@ -35,11 +35,19 @@ export interface RasterizeOptions {
   readonly overflow: 'truncate' | 'reject';
 }
 
+export interface ExtractTextOptions {
+  readonly maxPages?: number;
+  readonly maxChars?: number;
+}
+
 export interface PdfRenderer {
   /** Throws {@link CorruptPdfError}. */
   countPages(pdf: Uint8Array): Promise<number>;
-  /** Text layer of every page joined in order; empty string for a scanned PDF. */
-  extractText(pdf: Uint8Array): Promise<string>;
+  /**
+   * Text layer of the first `maxPages` pages joined in order, cut at `maxChars` (both default to
+   * unbounded); empty string for a scanned PDF.
+   */
+  extractText(pdf: Uint8Array, options?: ExtractTextOptions): Promise<string>;
   /** PNG bytes per page, in order. Throws {@link CorruptPdfError}, {@link EmptyPdfError}, {@link TooManyPagesError}. */
   rasterize(pdf: Uint8Array, options: RasterizeOptions): Promise<readonly Uint8Array[]>;
 }

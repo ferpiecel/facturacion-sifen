@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { computeCdcCheckDigit } from '../../emission/domain/cdc.js';
 import { computeRucCheckDigit } from '../../fiscal-config/domain/ruc.js';
 import { ConfidencePolicy, RECEIVED_FIELD_NAMES } from '../domain/confidence-policy.js';
+import { EXTRACTION_MAX_TEXT_CHARS } from '../domain/extraction-prompt.js';
 import { createReceivedDocument, type ReceivedDocument } from '../domain/received-document.js';
 import type { ReceivedDocumentSource } from '../domain/source.js';
 import {
   EXTRACTION_DPI,
   EXTRACTION_MAX_PAGES,
+  EXTRACTION_MAX_PDF_PAGES,
   ExtractReceivedDocument,
   type ExtractReceivedDocumentInput,
   type ExtractReceivedDocumentResult,
@@ -527,6 +529,29 @@ describe('ExtractReceivedDocument: failures', () => {
     const h2 = new Harness();
     await h2.seed('photo', PDF_BYTES);
     expect(failed(await h2.run())).toMatchObject({ code: 'unsupported_source' });
+  });
+
+  it('fails a PDF over the hard page cap before reading its text layer', async () => {
+    const h = new Harness();
+    const extractText = vi.fn(() => Promise.resolve('text'));
+    h.pdf.extractText = extractText;
+    h.pdfPages = EXTRACTION_MAX_PDF_PAGES + 1;
+    await h.seed();
+    expect(failed(await h.run())).toMatchObject({ code: 'too_many_pages', retryable: false });
+    expect(extractText).not.toHaveBeenCalled();
+    expect(h.rasterizeCalls).toEqual([]);
+  });
+
+  it('bounds the text layer read to the rasterized pages and the prompt text cap', async () => {
+    const h = new Harness();
+    const extractText = vi.fn((_pdf: Uint8Array, _options?: unknown) => Promise.resolve('text'));
+    h.pdf.extractText = extractText;
+    await h.seed();
+    await h.run();
+    expect(extractText).toHaveBeenCalledWith(expect.anything(), {
+      maxPages: EXTRACTION_MAX_PAGES,
+      maxChars: EXTRACTION_MAX_TEXT_CHARS,
+    });
   });
 
   it('records an unexpected error as a retryable internal_error and hands the cause back', async () => {

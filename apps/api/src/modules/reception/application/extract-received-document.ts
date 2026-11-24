@@ -5,6 +5,7 @@ import {
   type ReceivedFieldName,
 } from '../domain/confidence-policy.js';
 import { createCdcReference } from '../domain/cdc-reference.js';
+import { imageDimensions } from '../domain/image-dimensions.js';
 import {
   EXTRACTION_MAX_TEXT_CHARS,
   EXTRACTION_PROMPT_VERSION,
@@ -59,6 +60,8 @@ export const EXTRACTION_MAX_PAGES = 5;
 export const EXTRACTION_DPI = 200;
 /** Hard cap: a PDF with more pages is refused before any page is read (page bomb). */
 export const EXTRACTION_MAX_PDF_PAGES = 50;
+/** Longest side of a photo sent to the model, read from its header (the provider's own cap). */
+export const EXTRACTION_MAX_IMAGE_SIDE = 8000;
 
 export interface ExtractReceivedDocumentDeps {
   readonly repository: ReceivedDocumentRepository;
@@ -404,6 +407,10 @@ export class ExtractReceivedDocument {
     }
     const mediaType = imageMediaType(bytes);
     if (mediaType === null) throw fail('unsupported_source');
+    const size = imageDimensions(bytes);
+    if (size !== null && Math.max(size.width, size.height) > EXTRACTION_MAX_IMAGE_SIDE) {
+      throw fail('unsupported_source');
+    }
     return { pages: [{ bytes, mediaType }], pdfText: null, pageCount: 1 };
   }
 

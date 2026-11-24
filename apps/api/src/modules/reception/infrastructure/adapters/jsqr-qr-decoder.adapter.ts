@@ -3,6 +3,7 @@ import jsQRModule from 'jsqr';
 import { PNG } from 'pngjs';
 import type { QrDecoder } from '../../application/ports/qr-decoder.port.js';
 import { extractCdc } from '../../domain/cdc-reference.js';
+import { jpegDimensions, pngDimensions } from '../../domain/image-dimensions.js';
 
 // jsqr's typings say `export default`, its CJS build exports the function itself: accept both.
 type QrReader = (
@@ -15,7 +16,7 @@ const reader = jsQRModule as unknown as QrReader | { default: QrReader };
 const jsQR: QrReader = typeof reader === 'function' ? reader : reader.default;
 
 /** Refuses images above this many pixels (judged from the header, before decoding). */
-export const DEFAULT_QR_MAX_PIXELS = 40_000_000;
+export const DEFAULT_QR_MAX_PIXELS = 12_000_000;
 /** Longest side the scanner works at; larger photos are box-averaged down by whole factors. */
 export const QR_SCAN_TARGET_SIDE = 2048;
 /** Second, coarser pass for large photos whose QR is blurred at the first scale. */
@@ -42,55 +43,6 @@ const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 function startsWith(bytes: Uint8Array, prefix: readonly number[]): boolean {
   return prefix.every((value, index) => bytes[index] === value);
-}
-
-function readU32(bytes: Uint8Array, at: number): number {
-  return (
-    (bytes[at] ?? 0) * 0x1000000 +
-    (((bytes[at + 1] ?? 0) << 16) | ((bytes[at + 2] ?? 0) << 8) | (bytes[at + 3] ?? 0))
-  );
-}
-
-function readU16(bytes: Uint8Array, at: number): number {
-  return ((bytes[at] ?? 0) << 8) | (bytes[at + 1] ?? 0);
-}
-
-function pngDimensions(bytes: Uint8Array): Dimensions | null {
-  const isIhdr = bytes.length >= 24 && readU32(bytes, 8) === 13 && bytes[12] === 0x49;
-  if (!isIhdr || bytes[13] !== 0x48 || bytes[14] !== 0x44 || bytes[15] !== 0x52) return null;
-  return { width: readU32(bytes, 16), height: readU32(bytes, 20) };
-}
-
-/**
- * Walks the JPEG marker segments up to the scan. A baseline or progressive JPEG has exactly one
- * start-of-frame header; an image with a second one is hostile (a decoder may honour a different
- * frame than the one the guard read), so it is refused.
- */
-function jpegDimensions(bytes: Uint8Array): Dimensions | null {
-  let frame: Dimensions | null = null;
-  let at = 2;
-  while (at + 4 <= bytes.length) {
-    if (bytes[at] !== 0xff) return null;
-    const marker = bytes[at + 1] ?? 0;
-    if (marker === 0xff) {
-      at += 1; // fill byte
-      continue;
-    }
-    const isStandalone = marker === 0x01 || (marker >= 0xd0 && marker <= 0xd8);
-    if (isStandalone) {
-      at += 2;
-      continue;
-    }
-    const isFrame = marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker);
-    if (isFrame) {
-      if (frame !== null || at + 9 > bytes.length) return null;
-      frame = { height: readU16(bytes, at + 5), width: readU16(bytes, at + 7) };
-    } else if (marker === 0xd9 || marker === 0xda) {
-      return frame; // end of image / start of scan: no more headers to inspect
-    }
-    at += 2 + readU16(bytes, at + 2);
-  }
-  return null;
 }
 
 /** Averages `factor` x `factor` blocks; RGBA in and out. */

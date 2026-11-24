@@ -8,6 +8,7 @@ import type { ReceivedDocumentSource } from '../domain/source.js';
 import {
   EXTRACTION_DPI,
   EXTRACTION_MAX_PAGES,
+  EXTRACTION_MAX_IMAGE_SIDE,
   EXTRACTION_MAX_PDF_PAGES,
   ExtractReceivedDocument,
   type ExtractReceivedDocumentInput,
@@ -529,6 +530,19 @@ describe('ExtractReceivedDocument: failures', () => {
     const h2 = new Harness();
     await h2.seed('photo', PDF_BYTES);
     expect(failed(await h2.run())).toMatchObject({ code: 'unsupported_source' });
+  });
+
+  it('refuses a photo whose header declares a side above the vision limit, before the model', async () => {
+    const header = Buffer.alloc(24);
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(header);
+    header.writeUInt32BE(13, 8);
+    header.write('IHDR', 12, 'ascii');
+    header.writeUInt32BE(EXTRACTION_MAX_IMAGE_SIDE + 1, 16);
+    header.writeUInt32BE(100, 20);
+    const h = new Harness();
+    await h.seed('photo', Uint8Array.from(header));
+    expect(failed(await h.run())).toMatchObject({ code: 'unsupported_source', retryable: false });
+    expect(h.llmRequests).toEqual([]);
   });
 
   it('fails a PDF over the hard page cap before reading its text layer', async () => {

@@ -127,6 +127,53 @@ pnpm --filter @sifen/api worker
 - **Apagado:** `SIGTERM`/`SIGINT` deja terminar los ciclos en curso antes de salir.
 - **Pruebas con Redis real:** `REDIS_URL=redis://localhost:6379 pnpm --filter @sifen/api exec vitest run src/worker`. Sin `REDIS_URL` esas pruebas se omiten; en CI las corre el job `worker-redis`.
 
+## Consulta a eKuatia por CDC (recepción)
+
+`POST /v1/received-documents/by-cdc` encola la consulta de un documento recibido en eKuatia ([ADR-0027](adr/0027-consulta-a-ekuatia-por-cdc-con-recaptcha.md)). El worker resuelve un reCAPTCHA v2 en 2Captcha (de pago), consulta la página pública de eKuatia y pasa el XML por la misma ingesta que una carga manual. Variables: [`configuracion.md`](configuracion.md).
+
+**Riesgos que se aceptan al encenderla**
+
+- **Costo:** cada consulta encolada consume una resolución de pago; los topes diarios y la deduplicación por CDC antes de resolver son la defensa, no un presupuesto.
+- **Términos de uso:** eKuatia y 2Captcha tienen los suyos; los asume el dueño del producto.
+- **Fragilidad:** el sitio puede cambiar su página, su clave de reCAPTCHA o su contrato sin aviso. El contrato real (cuerpo del POST, forma del captcha rechazado, cookies) **no está verificado** hasta la captura humana de R6.4; mientras tanto el cliente valida de forma conservadora y puede responder `ekuatia_invalid_response`.
+- **Sin señal al cliente:** una consulta fallida no deja documento ni estado consultable por la API; solo queda en los logs del worker (decisión aceptada para esta versión).
+
+**Encender**
+
+1. Confirmar con el dueño del producto los topes (`RECEPTION_EKUATIA_DAILY_SOLVE_CAP`, `RECEPTION_EKUATIA_GLOBAL_DAILY_SOLVE_CAP`): los valores por defecto (20 y 100 por día UTC) son provisionales.
+2. Tener almacenamiento de objetos (`STORAGE_*`) y `TWOCAPTCHA_API_KEY` en la API **y** el worker; sin ellos la API y el worker se niegan a arrancar con la función encendida.
+3. Poner `RECEPTION_EKUATIA_ENABLED=true` y reiniciar la API y el worker. Probar con un solo CDC conocido y vigilar el log y el saldo de 2Captcha antes de abrirla a más tenants.
+
+**Apagar (kill switch)**
+
+Poner `RECEPTION_EKUATIA_ENABLED=false` y reiniciar la API y el worker: el interruptor se lee solo al arrancar. La API responde `503 ekuatia_unavailable` y un worker reiniciado apagado descarta los trabajos encolados sin resolver. Apagar de inmediato ante un gasto inesperado o un aumento de fallos.
+
+**Qué mirar**
+
+El worker registra una línea por consulta con ids y códigos, nunca el CDC, el XML, la URL ni el token:
+
+- `reception ekuatia lookup <tenant>: skipped (<razón>)`: `already_exists` (ya había documento), `disabled` o `circuit_open`.
+- `reception ekuatia lookup <tenant>: failed <código>` (`WARN`).
+
+| Código | Significado | Qué hacer |
+|---|---|---|
+| `captcha_balance_exhausted` | Saldo de 2Captcha agotado; abre el corte de circuito al instante | Recargar saldo; el corte deja pasar una prueba tras el cooldown |
+| `captcha_not_configured` | Falta o es inválida la clave de 2Captcha; abre el corte | Revisar `TWOCAPTCHA_API_KEY` y reiniciar |
+| `captcha_ip_not_allowed` | 2Captcha rechaza la IP del worker; abre el corte | Permitir la IP en la cuenta de 2Captcha |
+| `captcha_no_capacity` | Sin cupo de resolución en 2Captcha en ese momento | Reintentar más tarde; el cupo diario se devuelve |
+| `captcha_unsolvable`, `captcha_timeout`, `captcha_no_token`, `captcha_provider_error` | El captcha no se resolvió; **el cupo no se devuelve** (la resolución probablemente se cobró) | Si se repiten, revisar la clave de sitio y el estado de 2Captcha |
+| `ekuatia_not_found` | eKuatia no tiene ese CDC (cuenta como sitio sano para el corte) | Verificar el CDC con el emisor |
+| `ekuatia_consult_error`, `ekuatia_timeout`, `ekuatia_invalid_response` | eKuatia no respondió bien o cambió su contrato | Si son sostenidos, apagar y revisar el contrato con una captura nueva |
+| `xml_unreadable` | El XML recibido no se pudo leer o no corresponde al CDC pedido | Revisar con una captura; no se guarda ningún documento |
+
+**Circuito y cupos**
+
+- El corte de circuito (`RECEPTION_EKUATIA_BREAKER_FAILURES` fallos seguidos, `..._COOLDOWN_MS` abierto) es por proceso worker. Abierto, no se resuelve ningún captcha y las consultas se saltan con `circuit_open`.
+- Superado un tope diario, la API responde `429 ekuatia_quota_exceeded` con `scope` (`tenant` o `global`) y `Retry-After`. Cinco tenants al tope pueden agotar el tope global del día. Los contadores están en `reception_ekuatia_solve_usage` y `reception_ekuatia_global_usage`.
+- Un trabajo se intenta una sola vez: no hay reintentos automáticos, porque cada uno compraría otra resolución. Para repetir una consulta fallida, volver a enviar el `POST`.
+
+**Pendiente antes de producción:** captura real y verificación del contrato (R6.4, la corre una persona con [`apps/api/scripts/reception/README.md`](../apps/api/scripts/reception/README.md)), confirmación de los topes (riesgo R-3) y la deuda de idempotencia con Redis real anotada en el PR #426.
+
 ## Auditoría de `platform_admin`
 
 Cada uso del rol cross-tenant deja una fila en `platform_audit_log` (ADR-0023): actor (`ops-cli:<usuario del SO>` o `system:worker`), propósito (nombre del comando o del job), tablas tocadas, filas y hora, en una cadena de hashes append-only. Los comandos del CLI escriben una fila por ejecución. El worker (listado de tenants, ambiente de un tenant, gauges de plataforma) escribe a lo sumo una por propósito cada 15 minutos: la fila significa "usado al menos una vez en la ventana". Se consulta como `platform_admin`; ningún rol puede modificarla ni borrarla.

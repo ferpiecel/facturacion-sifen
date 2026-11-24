@@ -34,6 +34,8 @@ export {
   receivedDocumentFieldConfidences,
   receivedDocumentItems,
   receivedDocuments,
+  receptionEkuatiaGlobalUsage,
+  receptionEkuatiaSolveUsage,
   receptionExtractionUsage,
   rucBlocks,
   rucLookupCache,

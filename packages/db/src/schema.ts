@@ -2115,6 +2115,7 @@ export const TENANT_TABLES = [
   'received_document_field_confidences',
   'received_document_items',
   'received_documents',
+  'reception_ekuatia_solve_usage',
   'reception_extraction_usage',
   'tenant_document_sequences',
   'tenant_establishments',
@@ -2131,6 +2132,41 @@ export const TENANT_TABLES = [
   'webhook_deliveries',
   'webhook_endpoints',
 ] as const;
+
+/**
+ * eKuatia lookups queued per tenant and UTC day: the paid-solve cap (reception R6.3, ADR-0027
+ * point 4). Same one-statement increment as `reception_extraction_usage`.
+ */
+export const receptionEkuatiaSolveUsage = pgTable(
+  'reception_ekuatia_solve_usage',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    usageDate: date('usage_date', { mode: 'string' }).notNull(),
+    used: integer('used').notNull().default(0),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.usageDate] }),
+    check('reception_ekuatia_solve_usage_used_nonneg', sql`${table.used} >= 0`),
+  ],
+);
+
+/**
+ * eKuatia lookups queued platform-wide per UTC day (the global paid-solve cap, R6.3). It has no
+ * `tenant_id`: it is an aggregate counter with no tenant data, shared by every tenant, so it has
+ * no row level security. The runtime role only reads, inserts and updates it.
+ */
+export const receptionEkuatiaGlobalUsage = pgTable(
+  'reception_ekuatia_global_usage',
+  {
+    usageDate: date('usage_date', { mode: 'string' }).primaryKey(),
+    used: integer('used').notNull().default(0),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [check('reception_ekuatia_global_usage_used_nonneg', sql`${table.used} >= 0`)],
+);
 
 /**
  * Extractions queued per tenant and UTC day: the daily spend cap of the reception LLM (R5.9,

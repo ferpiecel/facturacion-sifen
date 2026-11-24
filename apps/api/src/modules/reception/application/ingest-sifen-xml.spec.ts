@@ -229,6 +229,29 @@ describe('IngestSifenXml', () => {
     expect(input.items?.[0]).toMatchObject({ position: 1, subtotal: '110000', vatRate: 10 });
   });
 
+  it('records the source it was given and goes through the same states (R6.3)', async () => {
+    const h = new Harness();
+    const result = await h.useCase.execute({ tenantId: TENANT, xml: XML, source: 'ekuatia_cdc' });
+    expect(h.first.document.source).toBe('ekuatia_cdc');
+    expect(result.document.status).toBe('confirmed');
+    expect(result.document.version).toBe(2);
+    expect(result.events).toEqual(['reception.document.confirmed']);
+  });
+
+  it('defaults the source to sifen_xml', async () => {
+    const h = new Harness();
+    await run(h);
+    expect(h.first.document.source).toBe('sifen_xml');
+  });
+
+  it('keeps the given source on a failed parse too', async () => {
+    const h = new Harness();
+    h.parseResult = new MalformedSifenXmlError('not_well_formed');
+    await h.useCase.execute({ tenantId: TENANT, xml: XML, source: 'ekuatia_cdc' });
+    expect(h.first.document.source).toBe('ekuatia_cdc');
+    expect(h.first.document.status).toBe('extraction_failed');
+  });
+
   it('stores is_own_receiver=false and emits no event when the receiver is not the tenant', async () => {
     const h = new Harness();
     h.identity = { rucBase: '99999999', dv: 1 };

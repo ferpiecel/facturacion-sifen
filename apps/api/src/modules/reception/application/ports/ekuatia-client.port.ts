@@ -1,5 +1,10 @@
 export type EkuatiaConsultErrorCode =
-  'not_found' | 'consult_error' | 'timeout' | 'invalid_response';
+  | 'not_found'
+  | 'consult_error'
+  | 'timeout'
+  | 'invalid_response'
+  /** The caller's `AbortSignal` fired. */
+  | 'aborted';
 
 /**
  * Messages are fixed strings per code: they never carry site text, the reCAPTCHA token or the
@@ -11,6 +16,7 @@ const MESSAGES: Record<EkuatiaConsultErrorCode, string> = {
   consult_error: 'eKuatia consultation failed',
   timeout: 'eKuatia consultation timed out',
   invalid_response: 'eKuatia returned an unexpected response',
+  aborted: 'eKuatia consultation was aborted',
 };
 
 export class EkuatiaConsultError extends Error {
@@ -25,5 +31,10 @@ export class EkuatiaConsultError extends Error {
 
 export interface EkuatiaClient {
   /** Consults the public eKuatia site by CDC with a solved reCAPTCHA token and returns the XML. */
-  consultByCdc(input: { cdc: string; recaptchaToken: string }): Promise<{ xml: string }>;
+  consultByCdc(input: {
+    cdc: string;
+    recaptchaToken: string;
+    /** Aborting stops the consultation with `aborted`. */
+    signal?: AbortSignal;
+  }): Promise<{ xml: string }>;
 }

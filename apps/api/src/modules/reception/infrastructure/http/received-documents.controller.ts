@@ -43,6 +43,7 @@ import { StorageUnavailableError } from '../../application/ports/storage-provide
 import { ExtractionQuotaExceededError } from '../../application/extraction-quota.js';
 import type { createGetArtifact, createGetArtifactUrl } from '../../application/get-artifact.js';
 import type { createGetReceivedDocument } from '../../application/get-received-document.js';
+import type { IngestFromCdc } from '../../application/ingest-from-cdc.js';
 import type { IngestUpload } from '../../application/ingest-upload.js';
 import {
   InvalidReceivedDocumentQueryError,
@@ -54,6 +55,7 @@ import {
   GET_RECEIVED_DOCUMENT,
   GET_RECEPTION_ARTIFACT,
   GET_RECEPTION_ARTIFACT_URL,
+  INGEST_FROM_CDC,
   INGEST_UPLOAD,
   LIST_RECEIVED_DOCUMENTS,
   RECEPTION_UPLOAD_CONFIG,
@@ -116,6 +118,7 @@ export class ReceivedDocumentsController {
     private readonly correctDocument: ReturnType<typeof createCorrectReceivedDocument> | null,
     @Inject(REPROCESS_RECEIVED_DOCUMENT)
     private readonly reprocessDocument: ReturnType<typeof createReprocessReceivedDocument> | null,
+    @Inject(INGEST_FROM_CDC) private readonly ingestFromCdc: IngestFromCdc | null,
     private readonly cls: ClsService<TenancyClsStore & IdentityClsStore>,
   ) {}
 
@@ -192,6 +195,66 @@ export class ReceivedDocumentsController {
           document,
         );
       }
+    }
+  }
+
+  /**
+   * Looks a received document up in eKuatia by CDC (R6.3, ADR-0027). The body is JSON
+   * `{ "reference": "<44-digit CDC or the URL of the KuDE QR>" }`. Answers: 202 `{ cdc, status:
+   * "queued" }` when the lookup was queued (the document appears later, find it with
+   * `GET /v1/received-documents?cdc_prefix=<cdc>`); 200 with the existing document when that CDC
+   * was already received (nothing is solved); 422 `invalid_cdc` for a malformed reference or a bad
+   * check digit; 429 `ekuatia_quota_exceeded` past the daily solve cap of the tenant or the
+   * platform; 503 `ekuatia_unavailable` when the feature is off or has no solver key (checked
+   * first) and 503 `queue_unavailable` when the job could not be queued.
+   */
+  @Post('by-cdc')
+  @RequireScopes('reception:write')
+  async lookupByCdc(@Body() body: unknown, @Res({ passthrough: true }) reply: HttpReply) {
+    if (this.ingestFromCdc === null) throw ekuatiaUnavailable();
+    const record =
+      typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
+    if (typeof record.reference !== 'string' || record.reference.trim() === '') {
+      throw receptionProblem(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        'invalid_request',
+        'Expected a JSON body with a string "reference" (a CDC or the KuDE QR URL)',
+      );
+    }
+    const result = await this.ingestFromCdc.execute({
+      tenantId: this.tenantId(),
+      reference: record.reference,
+    });
+    switch (result.kind) {
+      case 'disabled':
+        throw ekuatiaUnavailable();
+      case 'invalid_reference':
+        throw receptionProblem(
+          HttpStatus.UNPROCESSABLE_ENTITY,
+          'invalid_cdc',
+          'The reference does not contain a valid CDC',
+          { reason: result.code },
+        );
+      case 'exists':
+        return accepted(reply, HttpStatus.OK, result.document);
+      case 'quota_exceeded':
+        reply.header('retry-after', String(result.retryAfterSeconds));
+        throw receptionProblem(
+          HttpStatus.TOO_MANY_REQUESTS,
+          'ekuatia_quota_exceeded',
+          'The daily eKuatia lookup quota is exhausted; try again after the next UTC day starts',
+          { scope: result.scope, cap: result.cap, retry_after_seconds: result.retryAfterSeconds },
+        );
+      case 'queue_unavailable':
+        throw receptionProblem(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          'queue_unavailable',
+          'The lookup queue is not available; try again later',
+        );
+      case 'accepted':
+        reply.status(HttpStatus.ACCEPTED);
+        reply.header('location', `/v1/received-documents?cdc_prefix=${result.cdc}`);
+        return { cdc: result.cdc, status: 'queued', already_queued: result.alreadyQueued };
     }
   }
 
@@ -487,6 +550,14 @@ export function downloadName(originalName: string | null, id: string, contentTyp
   return `received-${id}${contentType.includes('xml') ? '.xml' : ''}`;
 }
 
+function ekuatiaUnavailable() {
+  return receptionProblem(
+    HttpStatus.SERVICE_UNAVAILABLE,
+    'ekuatia_unavailable',
+    'The lookup by CDC is not available; upload the XML or the PDF instead',
+  );
+}
+
 function notSupportedMedia() {
   return receptionProblem(
     HttpStatus.UNSUPPORTED_MEDIA_TYPE,
@@ -499,7 +570,7 @@ function unsupportedSource() {
   return receptionProblem(
     HttpStatus.UNPROCESSABLE_ENTITY,
     'unsupported_source',
-    'Only SIFEN XML, PDF and PNG/JPEG uploads are supported for now (a bare CDC is not)',
+    'Only SIFEN XML, PDF and PNG/JPEG uploads are accepted here; to look a CDC up use POST /v1/received-documents/by-cdc',
   );
 }
 

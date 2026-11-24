@@ -16,6 +16,11 @@ import {
   type ReceptionExtractionJobData,
 } from './reception-extraction.processor.js';
 import {
+  RECEPTION_EKUATIA_LOOKUP_QUEUE,
+  type EkuatiaLookupJobData,
+  type ReceptionEkuatiaJob,
+} from './reception-ekuatia.processor.js';
+import {
   WEBHOOK_DELIVERY_QUEUE,
   webhookDeliveryJob,
   type WebhookDeliveryJobData,
@@ -363,5 +368,58 @@ export function createReceptionExtractionWorker({
     },
   );
   if (logger) logQueueErrors(worker, 'reception extraction worker', logger);
+  return worker;
+}
+
+/**
+ * A stalled lookup is NOT requeued: the requeue would run the solve again and spend another paid
+ * captcha. The stalled job fails, the solve slot stays spent and the caller requests it again.
+ */
+export const RECEPTION_EKUATIA_MAX_STALLED_COUNT = 0;
+
+/**
+ * Lock duration of the lookup job: the default solver timeout (120 s) plus the default eKuatia
+ * timeout (30 s) plus margin. Both are async I/O, so BullMQ renews the lock while they run.
+ */
+export const RECEPTION_EKUATIA_LOCK_DURATION_MS = 180_000;
+
+export function receptionEkuatiaWorkerSettings(): {
+  readonly lockDuration: number;
+  readonly maxStalledCount: number;
+} {
+  return {
+    lockDuration: RECEPTION_EKUATIA_LOCK_DURATION_MS,
+    maxStalledCount: RECEPTION_EKUATIA_MAX_STALLED_COUNT,
+  };
+}
+
+export interface ReceptionEkuatiaWorkerOptions {
+  readonly connection: Redis;
+  readonly process: (job: ReceptionEkuatiaJob) => Promise<unknown>;
+  readonly prefix?: string;
+  readonly logger?: QueueLogger;
+}
+
+/**
+ * The ReceptionEkuatiaWorker (R6.3): one job per lookup by CDC. Concurrency is fixed at 1 on
+ * purpose: a paid captcha solve is slow and costly, and the circuit breaker is per process.
+ */
+export function createReceptionEkuatiaWorker({
+  connection,
+  process,
+  prefix,
+  logger,
+}: ReceptionEkuatiaWorkerOptions): Worker<EkuatiaLookupJobData> {
+  const worker = new Worker<EkuatiaLookupJobData>(
+    RECEPTION_EKUATIA_LOOKUP_QUEUE,
+    (job) => process(job),
+    {
+      connection,
+      concurrency: 1,
+      ...receptionEkuatiaWorkerSettings(),
+      ...(prefix === undefined ? {} : { prefix }),
+    },
+  );
+  if (logger) logQueueErrors(worker, 'reception ekuatia worker', logger);
   return worker;
 }

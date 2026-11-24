@@ -20,6 +20,8 @@ import {
   VersionConflictError,
 } from '../ports/received-document-repository.port.js';
 import type { ExtractionUsageStore } from '../ports/extraction-usage-store.port.js';
+import type { SolveReservation, SolveUsageStore } from '../ports/solve-usage-store.port.js';
+import type { EkuatiaLookupJob, EkuatiaLookupQueue } from '../ports/ekuatia-lookup-queue.port.js';
 import type { ExtractionJob, ReceptionJobQueue } from '../ports/reception-job-queue.port.js';
 import { ReceptionQueueUnavailableError } from '../ports/reception-job-queue.port.js';
 import type { StorageProvider } from '../ports/storage-provider.port.js';
@@ -289,5 +291,59 @@ export class InMemoryExtractionUsageStore implements ExtractionUsageStore {
     const key = `${tenantId}|${usageDate}`;
     this.used.set(key, Math.max((this.used.get(key) ?? 0) - 1, 0));
     return Promise.resolve();
+  }
+}
+
+export class InMemorySolveUsageStore implements SolveUsageStore {
+  private readonly tenants = new Map<string, number>();
+  private readonly globals = new Map<string, number>();
+  releaseFails = false;
+
+  tenantUsed(tenantId: string, usageDate: string): number {
+    return this.tenants.get(`${tenantId}|${usageDate}`) ?? 0;
+  }
+  globalUsed(usageDate: string): number {
+    return this.globals.get(usageDate) ?? 0;
+  }
+  tryConsume(
+    tenantId: string,
+    usageDate: string,
+    caps: { readonly tenant: number; readonly global: number },
+  ): Promise<SolveReservation> {
+    if (this.tenantUsed(tenantId, usageDate) >= caps.tenant) {
+      return Promise.resolve({ ok: false, scope: 'tenant' });
+    }
+    if (this.globalUsed(usageDate) >= caps.global) {
+      return Promise.resolve({ ok: false, scope: 'global' });
+    }
+    this.tenants.set(`${tenantId}|${usageDate}`, this.tenantUsed(tenantId, usageDate) + 1);
+    this.globals.set(usageDate, this.globalUsed(usageDate) + 1);
+    return Promise.resolve({ ok: true });
+  }
+  release(tenantId: string, usageDate: string): Promise<void> {
+    if (this.releaseFails) return Promise.reject(new Error('db down'));
+    this.tenants.set(
+      `${tenantId}|${usageDate}`,
+      Math.max(this.tenantUsed(tenantId, usageDate) - 1, 0),
+    );
+    this.globals.set(usageDate, Math.max(this.globalUsed(usageDate) - 1, 0));
+    return Promise.resolve();
+  }
+}
+
+export class FakeEkuatiaLookupQueue implements EkuatiaLookupQueue {
+  readonly jobs: EkuatiaLookupJob[] = [];
+  failWith: Error | null = null;
+  enqueueLookup(job: EkuatiaLookupJob): Promise<{ readonly enqueued: boolean }> {
+    if (this.failWith !== null) {
+      return Promise.reject(
+        this.failWith instanceof ReceptionQueueUnavailableError
+          ? this.failWith
+          : new ReceptionQueueUnavailableError('redis down'),
+      );
+    }
+    const known = this.jobs.some((j) => j.tenantId === job.tenantId && j.cdc === job.cdc);
+    if (!known) this.jobs.push(job); // idempotent per (tenant, CDC), like the real adapter
+    return Promise.resolve({ enqueued: !known });
   }
 }

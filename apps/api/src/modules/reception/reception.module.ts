@@ -12,11 +12,23 @@ import { ExtractionQuota } from './application/extraction-quota.js';
 import { createCorrectReceivedDocument } from './application/correct-received-document.js';
 import { createGetArtifact, createGetArtifactUrl } from './application/get-artifact.js';
 import { createGetReceivedDocument } from './application/get-received-document.js';
+import { EkuatiaSolveQuota } from './application/ekuatia-solve-quota.js';
+import { IngestFromCdc } from './application/ingest-from-cdc.js';
 import { IngestSifenXml } from './application/ingest-sifen-xml.js';
 import { IngestUpload } from './application/ingest-upload.js';
 import { createListReceivedDocuments } from './application/list-received-documents.js';
 import { createReprocessReceivedDocument } from './application/reprocess-received-document.js';
 import type { StorageProvider } from './application/ports/storage-provider.port.js';
+import { createDrizzleEkuatiaSolveUsageStore } from './infrastructure/adapters/drizzle-ekuatia-solve-usage-store.js';
+import {
+  createEkuatiaLookupQueue,
+  type ClosableEkuatiaLookupQueue,
+} from './infrastructure/adapters/ekuatia-lookup-queue-factory.js';
+import {
+  assertEkuatiaWorkerPrerequisites,
+  loadReceptionEkuatiaConfig,
+  type ReceptionEkuatiaConfig,
+} from './infrastructure/reception-ekuatia-config.js';
 import { createDrizzleExtractionUsageStore } from './infrastructure/adapters/drizzle-extraction-usage-store.js';
 import { createDrizzleReceivedDocumentQuery } from './infrastructure/adapters/drizzle-received-document-query.js';
 import { createDrizzleReceivedDocumentRepository } from './infrastructure/adapters/drizzle-received-document-repository.js';
@@ -37,13 +49,17 @@ import {
 import { loadStorageConfig } from './infrastructure/storage-config.js';
 import {
   CORRECT_RECEIVED_DOCUMENT,
+  EKUATIA_LOOKUP_QUEUE,
+  EKUATIA_SOLVE_QUOTA,
   EXTRACTION_QUOTA,
   GET_RECEIVED_DOCUMENT,
   GET_RECEPTION_ARTIFACT,
   GET_RECEPTION_ARTIFACT_URL,
+  INGEST_FROM_CDC,
   INGEST_SIFEN_XML,
   INGEST_UPLOAD,
   LIST_RECEIVED_DOCUMENTS,
+  RECEPTION_EKUATIA_CONFIG,
   RECEPTION_JOB_QUEUE,
   RECEPTION_STORAGE,
   RECEPTION_UPLOAD_CONFIG,
@@ -141,6 +157,64 @@ import {
       ],
     },
     {
+      // Lookup by CDC (R6.3): the kill switch, the solve caps and the breaker settings. Read at
+      // boot so an invalid value fails fast; off by default.
+      provide: RECEPTION_EKUATIA_CONFIG,
+      useFactory: (): ReceptionEkuatiaConfig => loadReceptionEkuatiaConfig(process.env),
+    },
+    {
+      provide: EKUATIA_LOOKUP_QUEUE,
+      useFactory: (): ClosableEkuatiaLookupQueue => createEkuatiaLookupQueue(process.env),
+    },
+    {
+      // Paid-solve caps per tenant and platform-wide. Logs ids and counts only (never a CDC).
+      provide: EKUATIA_SOLVE_QUOTA,
+      useFactory: (db: Database | null, config: ReceptionEkuatiaConfig) => {
+        if (!db) return null;
+        const logger = new Logger('ReceptionEkuatiaSolveQuota');
+        return new EkuatiaSolveQuota({
+          store: createDrizzleEkuatiaSolveUsageStore(db),
+          tenantCap: config.tenantDailySolveCap,
+          globalCap: config.globalDailySolveCap,
+          now: () => new Date(),
+          log: (message, fields) => {
+            logger.log(`${message} ${JSON.stringify(fields)}`);
+          },
+        });
+      },
+      inject: [DATABASE, RECEPTION_EKUATIA_CONFIG],
+    },
+    {
+      // Request side of the lookup by CDC: validates, dedupes and reserves a solve, then queues the
+      // worker job. `enabled` is the kill switch AND a configured solver key.
+      provide: INGEST_FROM_CDC,
+      useFactory: (
+        db: Database | null,
+        config: ReceptionEkuatiaConfig,
+        quota: EkuatiaSolveQuota | null,
+        queue: ClosableEkuatiaLookupQueue,
+        storage: StorageProvider | null,
+      ) => {
+        // Fail loudly: accepting lookups that no worker can process would only burn slots.
+        assertEkuatiaWorkerPrerequisites(config, { objectStorage: storage !== null });
+        return db && quota
+          ? new IngestFromCdc({
+              enabled: config.available,
+              repository: createDrizzleReceivedDocumentRepository(db),
+              quota,
+              queue,
+            })
+          : null;
+      },
+      inject: [
+        DATABASE,
+        RECEPTION_EKUATIA_CONFIG,
+        EKUATIA_SOLVE_QUOTA,
+        EKUATIA_LOOKUP_QUEUE,
+        RECEPTION_STORAGE,
+      ],
+    },
+    {
       provide: CORRECT_RECEIVED_DOCUMENT,
       useFactory: (db: Database | null) =>
         db
@@ -216,9 +290,12 @@ import {
   ],
 })
 export class ReceptionModule implements OnApplicationShutdown {
-  constructor(@Inject(RECEPTION_JOB_QUEUE) private readonly queue: ClosableReceptionJobQueue) {}
+  constructor(
+    @Inject(RECEPTION_JOB_QUEUE) private readonly queue: ClosableReceptionJobQueue,
+    @Inject(EKUATIA_LOOKUP_QUEUE) private readonly lookupQueue: ClosableEkuatiaLookupQueue,
+  ) {}
 
   async onApplicationShutdown(): Promise<void> {
-    await this.queue.close();
+    await Promise.all([this.queue.close(), this.lookupQueue.close()]);
   }
 }

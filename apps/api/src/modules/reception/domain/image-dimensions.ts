@@ -53,7 +53,6 @@ export function jpegDimensions(bytes: Uint8Array): ImageDimensions | null {
   return null;
 }
 
-
 /** Dimensions declared by a PNG or JPEG header; null for any other format or a broken header. */
 export function imageDimensions(bytes: Uint8Array): ImageDimensions | null {
   if (bytes[0] === 0x89 && bytes[1] === 0x50) return pngDimensions(bytes);

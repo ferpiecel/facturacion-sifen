@@ -88,7 +88,6 @@ interface Upload {
   readonly originalName: string | null;
 }
 
-
 const tooLarge = () =>
   receptionProblem(
     HttpStatus.PAYLOAD_TOO_LARGE,

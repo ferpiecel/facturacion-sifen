@@ -558,7 +558,7 @@ describe('ExtractReceivedDocument: failures', () => {
 
   it('bounds the text layer read to the rasterized pages and the prompt text cap', async () => {
     const h = new Harness();
-    const extractText = vi.fn((_pdf: Uint8Array, _options?: unknown) => Promise.resolve('text'));
+    const extractText = vi.fn<PdfRenderer['extractText']>(() => Promise.resolve('text'));
     h.pdf.extractText = extractText;
     await h.seed();
     await h.run();

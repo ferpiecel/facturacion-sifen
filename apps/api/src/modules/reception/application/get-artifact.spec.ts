@@ -71,7 +71,9 @@ describe('createGetArtifactUrl', () => {
   });
 
   it('asks storage to force a download of the presigned object', async () => {
-    const presignedUrl = vi.fn((key: string, _opts?: unknown) => Promise.resolve(`https://s/${key}`));
+    const presignedUrl = vi.fn<StorageProvider['presignedUrl']>((key) =>
+      Promise.resolve(`https://s/${key}`),
+    );
     const get = createGetArtifactUrl({
       query: withDetail(detail(ARTIFACT)),
       storage: { ...storage({}), presignedUrl },

@@ -38,7 +38,6 @@ import {
   parseId,
 } from './received-documents.controller.js';
 
-
 /** `@RequireActiveTenant()` guarantees it; the guard runs before any handler. */
 function tenantOf(session: PortalSession): string {
   return session.activeTenant?.tenantId ?? '';

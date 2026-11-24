@@ -29,11 +29,15 @@ import {
   presentReceivedDocumentPage,
 } from './received-document.presenter.js';
 import { receptionProblem } from './reception-http-errors.js';
-import { asBadRequest, downloadName, notFound, parseId } from './received-documents.controller.js';
+import {
+  ARTIFACT_CSP,
+  artifactDisposition,
+  asBadRequest,
+  downloadName,
+  notFound,
+  parseId,
+} from './received-documents.controller.js';
 
-/** Content types a browser can show without executing anything; the rest is downloaded. */
-const INLINE_TYPES = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/webp']);
-const ARTIFACT_CSP = "default-src 'none'; style-src 'unsafe-inline'";
 
 /** `@RequireActiveTenant()` guarantees it; the guard runs before any handler. */
 function tenantOf(session: PortalSession): string {
@@ -101,11 +105,9 @@ export class PortalReceivedDocumentsController {
     const documentId = parseId(id);
     const download = await this.requireStorage(this.getArtifact)(tenantOf(session), documentId);
     if (download.kind === 'not-found') throw notFound();
-    const mime = download.contentType.split(';')[0]?.trim().toLowerCase() ?? '';
-    const disposition = INLINE_TYPES.has(mime) ? 'inline' : 'attachment';
     return new StreamableFile(download.bytes, {
       type: download.contentType,
-      disposition: `${disposition}; filename="${downloadName(download.originalName, documentId, download.contentType)}"`,
+      disposition: `${artifactDisposition(download.contentType)}; filename="${downloadName(download.originalName, documentId, download.contentType)}"`,
     });
   }
 

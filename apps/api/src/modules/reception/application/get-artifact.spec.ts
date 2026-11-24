@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createGetArtifact, createGetArtifactUrl } from './get-artifact.js';
 import type {
   ReceivedDocumentDetail,
@@ -68,6 +68,19 @@ describe('createGetArtifactUrl', () => {
       url: 'https://s/k/1.xml',
       expiresInSeconds: 900,
     });
+  });
+
+  it('asks storage to force a download of the presigned object', async () => {
+    const presignedUrl = vi.fn((key: string, _opts?: unknown) => Promise.resolve(`https://s/${key}`));
+    const get = createGetArtifactUrl({
+      query: withDetail(detail(ARTIFACT)),
+      storage: { ...storage({}), presignedUrl },
+    });
+    await get('t', 'd');
+    expect(presignedUrl).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ responseContentDisposition: 'attachment' }),
+    );
   });
 
   it('is not-found without an artifact', async () => {

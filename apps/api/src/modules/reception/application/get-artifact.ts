@@ -53,7 +53,11 @@ export function createGetArtifactUrl({ query, storage }: GetArtifactDeps) {
     const expiresInSeconds = STORAGE_PRESIGN_DEFAULT_SECONDS;
     return {
       kind: 'found',
-      url: await storage.presignedUrl(artifact.storageKey, { expiresInSeconds }),
+      url: await storage.presignedUrl(artifact.storageKey, {
+        expiresInSeconds,
+        // The bytes are third-party content: a direct link must download them, never render them.
+        responseContentDisposition: 'attachment',
+      }),
       expiresInSeconds,
     };
   };

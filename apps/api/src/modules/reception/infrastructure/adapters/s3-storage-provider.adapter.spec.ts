@@ -122,6 +122,17 @@ describe('S3StorageProvider specifics', () => {
     expect(await storage.presignedUrl('k', { expiresInSeconds: 60 })).toContain('X-Amz-Expires=60');
   });
 
+  it('overrides the response disposition of the presigned GetObject', async () => {
+    const spy = vi.fn(presigner);
+    const storage = new S3StorageProvider({ client: fakeS3(), bucket: 'bucket', presigner: spy });
+    await storage.presignedUrl('k', { responseContentDisposition: 'attachment' });
+    expect(spy.mock.calls[0]?.[1].input).toMatchObject({
+      ResponseContentDisposition: 'attachment',
+    });
+    await storage.presignedUrl('k');
+    expect(spy.mock.calls[1]?.[1].input).not.toHaveProperty('ResponseContentDisposition');
+  });
+
   it('passes the bucket to the presigned GetObject', async () => {
     const spy = vi.fn(presigner);
     const storage = new S3StorageProvider({ client: fakeS3(), bucket: 'bucket', presigner: spy });

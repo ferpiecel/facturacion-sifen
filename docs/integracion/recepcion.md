@@ -219,8 +219,8 @@ Los bytes subidos se guardan tal cual.
 
 | Ruta | Respuesta |
 |---|---|
-| `GET /v1/received-documents/{id}/artifact` | Los bytes, con el tipo de contenido guardado y `Content-Disposition: inline; filename="..."`. Requiere la API key |
-| `GET /v1/received-documents/{id}/artifact-url` | `{ "url": "...", "expires_in_seconds": 900 }`: un enlace directo y temporal (15 min), que se puede entregar a un navegador sin la API key |
+| `GET /v1/received-documents/{id}/artifact` | Los bytes, con el tipo de contenido guardado y `Content-Disposition` `inline` solo para PDF e imágenes (PNG, JPEG, WebP) y `attachment` para el resto (XML incluido), con `nosniff` y una CSP restrictiva. Requiere la API key |
+| `GET /v1/received-documents/{id}/artifact-url` | `{ "url": "...", "expires_in_seconds": 900 }`: un enlace directo y temporal (15 min) que fuerza la descarga (`attachment`), que se puede entregar a un navegador sin la API key |
 
 Ambas responden `404 not_found` si el documento no existe o no tiene archivo, y `503 storage_unavailable` si el almacenamiento no está disponible.
 

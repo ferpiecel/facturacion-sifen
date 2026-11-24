@@ -96,6 +96,17 @@ const tooLarge = () =>
     'The upload exceeds the maximum allowed size',
   );
 
+/** Content types a browser can show without executing anything; the rest is downloaded. */
+const INLINE_TYPES = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/webp']);
+/** Defense in depth for stored third-party bytes: no script and no network from the document. */
+export const ARTIFACT_CSP = "default-src 'none'; style-src 'unsafe-inline'";
+
+/** `inline` only for PDFs and raster images; XML and anything else is an `attachment`. */
+export function artifactDisposition(contentType: string): 'inline' | 'attachment' {
+  const mime = contentType.split(';')[0]?.trim().toLowerCase() ?? '';
+  return INLINE_TYPES.has(mime) ? 'inline' : 'attachment';
+}
+
 /**
  * Reception API. `POST` stores a SIFEN XML (R4.2); the `GET` routes list, read and download
  * (R4.3). Scopes: `reception:write` uploads, corrects, confirms and reprocesses; `reception:read`
@@ -363,13 +374,14 @@ export class ReceivedDocumentsController {
   @RequireScopes('reception:read')
   @Header('Cache-Control', 'private, no-store')
   @Header('X-Content-Type-Options', 'nosniff')
+  @Header('Content-Security-Policy', ARTIFACT_CSP)
   async artifact(@Param('id') id: string) {
     const documentId = parseId(id);
     const download = await this.requireStorage(this.getArtifact)(this.tenantId(), documentId);
     if (download.kind === 'not-found') throw notFound();
     return new StreamableFile(download.bytes, {
       type: download.contentType,
-      disposition: `inline; filename="${downloadName(download.originalName, documentId, download.contentType)}"`,
+      disposition: `${artifactDisposition(download.contentType)}; filename="${downloadName(download.originalName, documentId, download.contentType)}"`,
     });
   }
 

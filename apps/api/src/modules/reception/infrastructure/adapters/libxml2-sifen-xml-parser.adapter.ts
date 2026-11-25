@@ -110,7 +110,7 @@ function assertAllowedDeclaredEncoding(bytes: Uint8Array): void {
   const declaration = XML_DECLARATION.exec(head);
   // An unterminated declaration could hide its encoding past the window: fail closed.
   if (declaration === null) throw new MalformedSifenXmlError('unsupported_encoding');
-  const match = ENCODING_ATTRIBUTE.exec(` ${declaration[1] ?? ''}`);
+  const match = ENCODING_ATTRIBUTE.exec(` ${declaration[1]}`);
   const declared = (match?.[1] ?? match?.[2])?.trim().toLowerCase();
   if (declared !== undefined && !ALLOWED_ENCODINGS.has(declared)) {
     throw new MalformedSifenXmlError('unsupported_encoding');

@@ -260,12 +260,16 @@ describe('Libxml2SifenXmlParser rejections', () => {
     const bom = Buffer.from([0xef, 0xbb, 0xbf]);
     const utf7 = Buffer.concat([
       bom,
-      Buffer.from(`<?xml version="1.0" encoding="UTF-7"?>${contado.replace(/^<\?xml[^>]*\?>/, '')}`),
+      Buffer.from(
+        `<?xml version="1.0" encoding="UTF-7"?>${contado.replace(/^<\?xml[^>]*\?>/, '')}`,
+      ),
     ]);
     expect(capture(() => parser.parse(utf7))).toMatchObject({ code: 'unsupported_encoding' });
     const ok = Buffer.concat([
       bom,
-      Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>${contado.replace(/^<\?xml[^>]*\?>/, '')}`),
+      Buffer.from(
+        `<?xml version="1.0" encoding="UTF-8"?>${contado.replace(/^<\?xml[^>]*\?>/, '')}`,
+      ),
     ]);
     expect(() => parser.parse(ok)).not.toThrow();
   });

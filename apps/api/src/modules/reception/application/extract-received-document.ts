@@ -410,7 +410,8 @@ export class ExtractReceivedDocument {
     const mediaType = imageMediaType(bytes);
     if (mediaType === null) throw fail('unsupported_source');
     const size = imageDimensions(bytes);
-    if (size !== null && Math.max(size.width, size.height) > EXTRACTION_MAX_IMAGE_SIDE) {
+    // Fail closed: a header the guard cannot read (truncated, two frames, unknown) proves nothing.
+    if (size === null || Math.max(size.width, size.height) > EXTRACTION_MAX_IMAGE_SIDE) {
       throw fail('unsupported_source');
     }
     return { pages: [{ bytes, mediaType }], pdfText: null, pageCount: 1 };

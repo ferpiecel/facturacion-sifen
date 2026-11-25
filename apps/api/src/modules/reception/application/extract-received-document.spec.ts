@@ -50,8 +50,47 @@ const CDC = `${cdcBody}${String(computeCdcCheckDigit(cdcBody))}`;
 const HINT_CDC = '01800695631001001000000612021112917595714694';
 
 const PDF_BYTES = new TextEncoder().encode('%PDF-1.7 test');
-const PNG_BYTES = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
-const JPEG_BYTES = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+/** PNG with a coherent IHDR (header-only: enough for the dimension guard). */
+function pngHeader(width: number, height: number): Uint8Array {
+  const bytes = Buffer.alloc(24);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(bytes);
+  bytes.writeUInt32BE(13, 8);
+  bytes.write('IHDR', 12, 'ascii');
+  bytes.writeUInt32BE(width, 16);
+  bytes.writeUInt32BE(height, 20);
+  return Uint8Array.from(bytes);
+}
+
+/** JPEG with `frames` start-of-frame segments of the given size, then end of image. */
+function jpegHeader(width: number, height: number, frames = 1): Uint8Array {
+  const frame = [
+    0xff,
+    0xc0,
+    0x00,
+    0x0b,
+    0x08,
+    height >> 8,
+    height & 0xff,
+    width >> 8,
+    width & 0xff,
+    1,
+    0,
+    0,
+    0,
+  ];
+  return Uint8Array.from([
+    0xff,
+    0xd8,
+    ...Array.from({ length: frames }, () => frame).flat(),
+    0xff,
+    0xd9,
+    0,
+    0,
+  ]);
+}
+
+const PNG_BYTES = pngHeader(100, 100);
+const JPEG_BYTES = jpegHeader(100, 100);
 const PAGE = (n: number) => Uint8Array.from([0x89, 0x50, 0x4e, 0x47, n]);
 
 const confidences = Object.fromEntries(RECEIVED_FIELD_NAMES.map((n) => [n, 0.95]));
@@ -572,6 +611,29 @@ describe('ExtractReceivedDocument: failures', () => {
     await h.seed('photo', Uint8Array.from(header));
     expect(failed(await h.run())).toMatchObject({ code: 'unsupported_source', retryable: false });
     expect(h.llmRequests).toEqual([]);
+  });
+
+  it.each([
+    [
+      'a PNG cut inside its header',
+      Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]),
+    ],
+    ['a JPEG with two frame headers', jpegHeader(100, 100, 2)],
+    ['a JPEG cut before its frame header', Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3])],
+  ])(
+    'fails closed on %s: its size cannot be proven within the vision limit',
+    async (_name, bytes) => {
+      const h = new Harness();
+      await h.seed('photo', bytes);
+      expect(failed(await h.run())).toMatchObject({ code: 'unsupported_source', retryable: false });
+      expect(h.llmRequests).toEqual([]);
+    },
+  );
+
+  it('keeps accepting a valid photo within the vision limit', async () => {
+    const h = new Harness();
+    await h.seed('photo', jpegHeader(EXTRACTION_MAX_IMAGE_SIDE, 6000));
+    expect(extracted(await h.run()).status).toBe('needs_review');
   });
 
   it('fails a PDF over the hard page cap before reading its text layer', async () => {

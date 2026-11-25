@@ -342,14 +342,18 @@ describe('GET /v1/received-documents (e2e)', () => {
     expect(response.body).not.toMatch(/raw-parsed-xml|storage_key|sifen_xml\/|memory:/);
   });
 
-  it('streams the stored bytes with their content type and an inline disposition', async () => {
+  it('streams the stored bytes as an attachment under a locked-down CSP (XML never renders inline)', async () => {
     const id = await seed(tenantA, { artifact: { bytes: XML, name: 'fac"tura.xml' } });
 
     const response = await get(readA, `/v1/received-documents/${id}/artifact`);
 
     expect(response.statusCode).toBe(200);
     expect(response.headers['content-type']).toContain('application/xml');
-    expect(response.headers['content-disposition']).toBe('inline; filename="fac_tura.xml"');
+    expect(response.headers['content-disposition']).toBe('attachment; filename="fac_tura.xml"');
+    expect(response.headers['content-security-policy']).toBe(
+      "default-src 'none'; style-src 'unsafe-inline'",
+    );
+    expect(response.headers['x-content-type-options']).toBe('nosniff');
     expect(response.rawPayload.equals(XML)).toBe(true);
   });
 

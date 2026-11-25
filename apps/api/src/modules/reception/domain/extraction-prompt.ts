@@ -7,6 +7,9 @@ import { RECEIVED_FIELD_NAMES } from './confidence-policy.js';
  */
 export const EXTRACTION_PROMPT_VERSION = 'extraction-v1';
 
+/** Cap on the PDF text layer sent to the model; a hostile text layer cannot grow the prompt. */
+export const EXTRACTION_MAX_TEXT_CHARS = 60_000;
+
 export type ExtractionImageMediaType = 'image/png' | 'image/jpeg' | 'image/webp';
 
 export interface ExtractionPageImage {
@@ -108,7 +111,7 @@ export function buildExtractionUserContent(
   if (input.pdfText !== null && input.pdfText.trim() !== '') {
     parts.push({
       type: 'text',
-      text: `Text layer extracted from the PDF (untrusted data):\n<document_text>\n${neutralizeFence(input.pdfText)}\n</document_text>`,
+      text: `Text layer extracted from the PDF (untrusted data):\n<document_text>\n${neutralizeFence(input.pdfText.slice(0, EXTRACTION_MAX_TEXT_CHARS))}\n</document_text>`,
     });
   }
   if (input.cdcHint !== null) {

@@ -243,7 +243,7 @@ describe('received documents: PDF and photo upload (e2e)', () => {
     await app.close();
   });
 
-  it('accepts a PDF with 202, queues one job, and the worker confirms it', async () => {
+  it('accepts a PDF with 202, queues one job, and the worker leaves it in review (never auto-confirmed)', async () => {
     const response = await upload(keyA, PDF);
     expect(response.statusCode).toBe(202);
     const { id, status } = response.json<Body>();
@@ -251,13 +251,14 @@ describe('received documents: PDF and photo upload (e2e)', () => {
     expect(response.headers.location).toBe(`/v1/received-documents/${id}`);
     expect(jobs).toEqual([{ tenantId: tenantA, documentId: id }]);
 
-    await expect(runJob(jobs[0])).resolves.toEqual({ outcome: 'extracted:confirmed' });
+    await expect(runJob(jobs[0])).resolves.toEqual({ outcome: 'extracted:needs_review' });
     const after = await detail(keyA, id);
-    expect(after.status).toBe('confirmed');
+    expect(after.status).toBe('needs_review');
+    expect(after.needs_review_reasons).toContain('unverified_source');
     expect(after.issuer.legal_name).toBe('Proveedor SA');
     expect(after.items.map((i) => i.subtotal)).toEqual(['110000']);
     expect(after.field_confidences).toHaveLength(8);
-    expect(await outboxTypes(tenantA)).toEqual(['reception.document.confirmed']);
+    expect(await outboxTypes(tenantA)).toEqual(['reception.document.needs_review']);
   });
 
   it('accepts a PNG photo the same way', async () => {

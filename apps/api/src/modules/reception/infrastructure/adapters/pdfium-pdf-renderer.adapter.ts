@@ -4,6 +4,7 @@ import {
   CorruptPdfError,
   EmptyPdfError,
   TooManyPagesError,
+  type ExtractTextOptions,
   type PdfRenderer,
   type RasterizeOptions,
 } from '../../application/ports/pdf-renderer.port.js';
@@ -93,18 +94,24 @@ export class PdfiumPdfRenderer implements PdfRenderer {
     return this.withDocument(pdf, (document) => document.getPageCount());
   }
 
-  async extractText(pdf: Uint8Array): Promise<string> {
+  async extractText(pdf: Uint8Array, options: ExtractTextOptions = {}): Promise<string> {
+    const maxPages = options.maxPages ?? Number.POSITIVE_INFINITY;
+    const maxChars = options.maxChars ?? Number.POSITIVE_INFINITY;
     return this.withDocument(pdf, (document) => {
       const parts: string[] = [];
-      for (let index = 0; index < document.getPageCount(); index += 1) {
+      let chars = 0;
+      const pages = Math.min(document.getPageCount(), maxPages);
+      for (let index = 0; index < pages && chars <= maxChars; index += 1) {
         const page = document.getPage(index);
         try {
-          parts.push(page.getText());
+          const text = page.getText();
+          parts.push(text);
+          chars += text.length + 1;
         } finally {
           page.close();
         }
       }
-      return parts.join('\n').trim();
+      return parts.join('\n').trim().slice(0, maxChars);
     });
   }
 

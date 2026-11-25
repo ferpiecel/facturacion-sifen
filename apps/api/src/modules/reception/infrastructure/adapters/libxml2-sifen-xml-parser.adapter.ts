@@ -23,6 +23,14 @@ export interface Libxml2SifenXmlParserOptions {
  * on the raw bytes, before libxml2 sees the input.
  */
 const DTD_DECLARATION = /<!(?:DOCTYPE|ENTITY|ELEMENT|ATTLIST|NOTATION)/i;
+/** The XML declaration, read as latin1 (ASCII): an optional UTF-8 BOM, then `<?xml ... ?>`. */
+const XML_DECLARATION = /^(?:\xEF\xBB\xBF)?\s*<\?xml\b([^?]*(?:\?(?!>)[^?]*)*)\?>/i;
+const XML_DECLARATION_START = /^(?:\xEF\xBB\xBF)?\s*<\?xml\b/i;
+const ENCODING_ATTRIBUTE = /\sencoding\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
+/** Encodings the DTD scan can see through; aliases (latin1, utf8, us-ascii...) are refused too. */
+const ALLOWED_ENCODINGS = new Set(['utf-8', 'iso-8859-1']);
+/** The whole declaration must close within this many bytes, or the document is refused. */
+const DECLARATION_SCAN_BYTES = 1024;
 const DECIMAL = /^-?\d+(?:\.\d+)?$/;
 const DATE_PREFIX = /^(\d{4}-\d{2}-\d{2})(?:$|T)/;
 const PARSE_OPTIONS = ParseOption.XML_PARSE_NO_XXE | ParseOption.XML_PARSE_NONET;
@@ -90,6 +98,23 @@ function assertScannableEncoding(bytes: Uint8Array): void {
   const nulBytes = a === 0 || b === 0 || c === 0 || d === 0;
   const ebcdic = a === 0x4c && b === 0x6f && c === 0xa7 && d === 0x94;
   if (utf16Bom || nulBytes || ebcdic) throw new MalformedSifenXmlError('unsupported_encoding');
+}
+
+/**
+ * The DTD scan reads raw bytes as latin1, so an encoding that rewrites ASCII (UTF-7, ...) could hide
+ * a DOCTYPE from it while libxml2 still decodes it. Only encodings the scan can see through pass.
+ */
+function assertAllowedDeclaredEncoding(bytes: Uint8Array): void {
+  const head = Buffer.from(bytes.subarray(0, DECLARATION_SCAN_BYTES)).toString('latin1');
+  if (!XML_DECLARATION_START.test(head)) return; // no declaration: libxml2 assumes UTF-8
+  const declaration = XML_DECLARATION.exec(head);
+  // An unterminated declaration could hide its encoding past the window: fail closed.
+  if (declaration === null) throw new MalformedSifenXmlError('unsupported_encoding');
+  const match = ENCODING_ATTRIBUTE.exec(` ${declaration[1]}`);
+  const declared = (match?.[1] ?? match?.[2])?.trim().toLowerCase();
+  if (declared !== undefined && !ALLOWED_ENCODINGS.has(declared)) {
+    throw new MalformedSifenXmlError('unsupported_encoding');
+  }
 }
 
 function findRde(doc: XmlDocument): XmlElement | null {
@@ -213,6 +238,7 @@ export class Libxml2SifenXmlParser implements SifenXmlParser {
   parse(xml: Uint8Array | string): ParsedSifenDocument {
     const bytes = toBytes(xml, this.maxBytes);
     assertScannableEncoding(bytes);
+    assertAllowedDeclaredEncoding(bytes);
     if (DTD_DECLARATION.test(Buffer.from(bytes).toString('latin1'))) {
       throw new MalformedSifenXmlError('dtd_forbidden');
     }

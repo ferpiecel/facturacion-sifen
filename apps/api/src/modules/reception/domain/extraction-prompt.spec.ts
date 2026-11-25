@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { RECEIVED_FIELD_NAMES } from './confidence-policy.js';
 import {
+  EXTRACTION_MAX_TEXT_CHARS,
   EXTRACTION_PROMPT_VERSION,
   EXTRACTION_SYSTEM_PROMPT,
   buildExtractionUserContent,
@@ -82,6 +83,16 @@ describe('buildExtractionUserContent', () => {
     const bareText = bare.flatMap((p) => (p.type === 'text' ? [p.text] : [])).join('\n');
     expect(bareText).not.toContain('<document_text>');
     expect(bareText).not.toContain('cdc_hint');
+  });
+
+  it('caps the untrusted PDF text so a huge text layer cannot blow up the prompt', () => {
+    const parts = buildExtractionUserContent({
+      pages: [{ bytes: new Uint8Array([1]), mediaType: 'image/png' }],
+      pdfText: 'x'.repeat(EXTRACTION_MAX_TEXT_CHARS * 3),
+      cdcHint: null,
+    });
+    const text = parts.flatMap((p) => (p.type === 'text' ? [p.text] : [])).join('\n');
+    expect(text.length).toBeLessThan(EXTRACTION_MAX_TEXT_CHARS + 500);
   });
 
   it('neutralizes the fence delimiter inside the untrusted PDF text', () => {

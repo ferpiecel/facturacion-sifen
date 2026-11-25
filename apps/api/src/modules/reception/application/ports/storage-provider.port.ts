@@ -24,6 +24,8 @@ export interface StorageUploadOptions {
 export interface StoragePresignOptions {
   /** Defaults to {@link STORAGE_PRESIGN_DEFAULT_SECONDS}. */
   readonly expiresInSeconds?: number;
+  /** `Content-Disposition` the storage answers with (S3 `response-content-disposition`). */
+  readonly responseContentDisposition?: string;
 }
 
 /**

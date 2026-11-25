@@ -14,6 +14,14 @@ const RAW_UPLOAD_TYPES = [
   'application/octet-stream',
 ];
 
+/** Only these routes accept raw uploads; elsewhere the media types stay unsupported (415). */
+const UPLOAD_ROUTE_PREFIX = '/v1/received-documents';
+
+function isReceptionUploadRoute(url: string): boolean {
+  const path = url.split('?', 1)[0] ?? '';
+  return path === UPLOAD_ROUTE_PREFIX || path.startsWith(`${UPLOAD_ROUTE_PREFIX}/`);
+}
+
 /**
  * Teaches the HTTP adapter the upload encodings of `POST /v1/received-documents`: raw bodies as
  * Buffers (own limit, above the global 1 MiB JSON cap) and `multipart/form-data` with a single
@@ -30,6 +38,20 @@ export function registerReceptionUploadParsers(
       'The upload exceeds the maximum allowed size',
     );
   adapter.getInstance().addContentTypeParser(RAW_UPLOAD_TYPES, (request, payload, done) => {
+    // The parser is instance-wide: any other route must not buffer the (larger) upload cap, so it
+    // is refused before reading a byte, as Fastify does for a media type it has no parser for.
+    if (!isReceptionUploadRoute(request.url)) {
+      payload.resume();
+      done(
+        receptionProblem(
+          HttpStatus.UNSUPPORTED_MEDIA_TYPE,
+          'unsupported_media_type',
+          'Unsupported media type',
+        ),
+        undefined,
+      );
+      return;
+    }
     // Own parser (not `parseAs`) so an oversized body answers with the reception error code.
     if (Number(request.headers['content-length'] ?? 0) > config.maxBytes) {
       done(tooLarge(), undefined);

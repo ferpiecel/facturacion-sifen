@@ -153,6 +153,19 @@ describe('POST /v1/received-documents (e2e)', () => {
     expect(file.json<Body>().code).toBe('payload_too_large');
   });
 
+  it('does not buffer the reception upload cap on routes outside /v1/received-documents', async () => {
+    const big = Buffer.alloc(1_048_576 + 1024, 0x41);
+    for (const type of ['application/octet-stream', 'application/xml', 'application/pdf']) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        headers: { 'content-type': type },
+        payload: big,
+      });
+      expect([413, 415]).toContain(response.statusCode);
+    }
+  });
+
   it('answers 415 unsupported_media_type when the bytes do not look like XML', async () => {
     const response = await post(keyA, 'application/octet-stream', Buffer.from('plain text'));
 

@@ -1,4 +1,4 @@
-import { assertValidTenantId } from '@sifen/db';
+import { assertValidTenantId, isValidTenantId } from '@sifen/db';
 import type {
   ExtractReceivedDocumentInput,
   ExtractReceivedDocumentResult,
@@ -70,6 +70,11 @@ export function createReceptionExtractionProcessor(deps: ReceptionExtractionProc
   return async (job: ReceptionExtractionJob): Promise<ReceptionExtractionOutcome> => {
     const { tenantId, documentId } = job.data;
     assertValidTenantId(tenantId);
+    if (!isValidTenantId(documentId)) {
+      // A forged job: Postgres would fail the uuid cast and BullMQ would retry it for nothing.
+      deps.logger?.warn(`reception extraction ${tenantId}: malformed job`);
+      return { outcome: 'failed:invalid_job' };
+    }
     const finalAttempt = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
     const attempt = job.attemptsMade + (job.stalledCounter ?? 0) + 1;
     let result: ExtractReceivedDocumentResult;

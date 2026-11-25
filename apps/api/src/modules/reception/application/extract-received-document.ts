@@ -5,7 +5,11 @@ import {
   type ReceivedFieldName,
 } from '../domain/confidence-policy.js';
 import { createCdcReference } from '../domain/cdc-reference.js';
-import { EXTRACTION_PROMPT_VERSION } from '../domain/extraction-prompt.js';
+import { imageDimensions } from '../domain/image-dimensions.js';
+import {
+  EXTRACTION_MAX_TEXT_CHARS,
+  EXTRACTION_PROMPT_VERSION,
+} from '../domain/extraction-prompt.js';
 import { parseLlmExtractionOutput } from '../domain/extraction-output-schema.js';
 import {
   hasUnverifiableItems,
@@ -54,6 +58,10 @@ import type { TenantFiscalIdentity } from './ports/tenant-fiscal-identity.port.j
 /** Page cap and render resolution of project A (`ingesta_extraccion.py`); overridable per call. */
 export const EXTRACTION_MAX_PAGES = 5;
 export const EXTRACTION_DPI = 200;
+/** Hard cap: a PDF with more pages is refused before any page is read (page bomb). */
+export const EXTRACTION_MAX_PDF_PAGES = 50;
+/** Longest side of a photo sent to the model, read from its header (the provider's own cap). */
+export const EXTRACTION_MAX_IMAGE_SIDE = 8000;
 
 export interface ExtractReceivedDocumentDeps {
   readonly repository: ReceivedDocumentRepository;
@@ -326,6 +334,8 @@ export class ExtractReceivedDocument {
     const isOwnReceiver = identity !== null && matchReceiver(receiverRuc, identity) === 'match';
     const decision = decideExtractionOutcome(this.deps.policy, {
       overallConfidence: result.overallConfidence,
+      // This use case only reads PDFs and photos through a model: no XML verified the fields.
+      unverifiedSource: true,
       validationReasons: reasons,
       issuerRuc:
         merged === null
@@ -378,9 +388,16 @@ export class ExtractReceivedDocument {
       if (sniffUpload(bytes) !== 'pdf') throw fail('unsupported_source');
       const { pdfRenderer } = this.deps;
       const pageCount = await pdfRenderer.countPages(bytes);
-      const text = await pdfRenderer.extractText(bytes);
+      if (pageCount > EXTRACTION_MAX_PDF_PAGES) {
+        throw new TooManyPagesError(pageCount, EXTRACTION_MAX_PDF_PAGES);
+      }
+      const maxPages = input.options?.maxPages ?? EXTRACTION_MAX_PAGES;
+      const text = await pdfRenderer.extractText(bytes, {
+        maxPages,
+        maxChars: EXTRACTION_MAX_TEXT_CHARS,
+      });
       const rendered = await pdfRenderer.rasterize(bytes, {
-        maxPages: input.options?.maxPages ?? EXTRACTION_MAX_PAGES,
+        maxPages,
         dpi: input.options?.dpi ?? EXTRACTION_DPI,
         overflow: 'truncate',
       });
@@ -392,6 +409,11 @@ export class ExtractReceivedDocument {
     }
     const mediaType = imageMediaType(bytes);
     if (mediaType === null) throw fail('unsupported_source');
+    const size = imageDimensions(bytes);
+    // Fail closed: a header the guard cannot read (truncated, two frames, unknown) proves nothing.
+    if (size === null || Math.max(size.width, size.height) > EXTRACTION_MAX_IMAGE_SIDE) {
+      throw fail('unsupported_source');
+    }
     return { pages: [{ bytes, mediaType }], pdfText: null, pageCount: 1 };
   }
 

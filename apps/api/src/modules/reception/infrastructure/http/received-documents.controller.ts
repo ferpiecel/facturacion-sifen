@@ -61,6 +61,7 @@ import {
   RECEPTION_UPLOAD_CONFIG,
   REPROCESS_RECEIVED_DOCUMENT,
 } from '../../reception.tokens.js';
+import { sanitizeOriginalName } from '../../domain/original-name.js';
 import { sniffUpload } from '../../domain/upload-sniff.js';
 import { parseCorrectionRequest } from './correct-received-document.request.js';
 import {
@@ -87,14 +88,23 @@ interface Upload {
   readonly originalName: string | null;
 }
 
-const MAX_FILENAME_LENGTH = 255;
-
 const tooLarge = () =>
   receptionProblem(
     HttpStatus.PAYLOAD_TOO_LARGE,
     'payload_too_large',
     'The upload exceeds the maximum allowed size',
   );
+
+/** Content types a browser can show without executing anything; the rest is downloaded. */
+const INLINE_TYPES = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/webp']);
+/** Defense in depth for stored third-party bytes: no script and no network from the document. */
+export const ARTIFACT_CSP = "default-src 'none'; style-src 'unsafe-inline'";
+
+/** `inline` only for PDFs and raster images; XML and anything else is an `attachment`. */
+export function artifactDisposition(contentType: string): 'inline' | 'attachment' {
+  const mime = contentType.split(';')[0]?.trim().toLowerCase() ?? '';
+  return INLINE_TYPES.has(mime) ? 'inline' : 'attachment';
+}
 
 /**
  * Reception API. `POST` stores a SIFEN XML (R4.2); the `GET` routes list, read and download
@@ -363,13 +373,14 @@ export class ReceivedDocumentsController {
   @RequireScopes('reception:read')
   @Header('Cache-Control', 'private, no-store')
   @Header('X-Content-Type-Options', 'nosniff')
+  @Header('Content-Security-Policy', ARTIFACT_CSP)
   async artifact(@Param('id') id: string) {
     const documentId = parseId(id);
     const download = await this.requireStorage(this.getArtifact)(this.tenantId(), documentId);
     if (download.kind === 'not-found') throw notFound();
     return new StreamableFile(download.bytes, {
       type: download.contentType,
-      disposition: `inline; filename="${downloadName(download.originalName, documentId, download.contentType)}"`,
+      disposition: `${artifactDisposition(download.contentType)}; filename="${downloadName(download.originalName, documentId, download.contentType)}"`,
     });
   }
 
@@ -427,8 +438,7 @@ export class ReceivedDocumentsController {
       );
     }
     try {
-      const name = part.filename?.split(/[\\/]/).at(-1)?.slice(0, MAX_FILENAME_LENGTH);
-      return { bytes: await part.toBuffer(), originalName: name ? name : null };
+      return { bytes: await part.toBuffer(), originalName: sanitizeOriginalName(part.filename) };
     } catch (error) {
       if ((error as { code?: unknown }).code === 'FST_REQ_FILE_TOO_LARGE') throw tooLarge();
       throw error;

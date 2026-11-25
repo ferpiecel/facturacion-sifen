@@ -313,8 +313,11 @@ describe('PATCH /v1/received-documents/{id} on extracted documents (e2e)', () =>
 
   it('revalidates an edited confirmed document atomically and emits updated only then', async () => {
     llmText = llmJson();
-    const before = await extract();
-    expect(before.status).toBe('confirmed');
+    const extracted = await extract();
+    expect(extracted.status).toBe('needs_review');
+    const confirm = await patch(extracted.id, { version: extracted.version, confirm: true });
+    expect(confirm.json<Body>().status).toBe('confirmed');
+    const before = await detail(extracted.id);
 
     const bad = await patch(before.id, { version: before.version, totals: { total_amount: '5' } });
     expect(bad.statusCode).toBe(422);
@@ -328,6 +331,7 @@ describe('PATCH /v1/received-documents/{id} on extracted documents (e2e)', () =>
     expect(ok.json<Body>().status).toBe('confirmed');
     expect(await outboxTypes()).toEqual([
       'reception.document.confirmed',
+      'reception.document.needs_review',
       'reception.document.updated',
     ]);
   });

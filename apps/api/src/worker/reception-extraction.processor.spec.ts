@@ -21,12 +21,13 @@ const job = (
     attempts?: number;
     stalledCounter?: number;
     tenantId?: string;
+    documentId?: string;
     reprocess?: true;
   } = {},
 ) => ({
   data: {
     tenantId: over.tenantId ?? TENANT,
-    documentId: DOC,
+    documentId: over.documentId ?? DOC,
     ...(over.reprocess === true ? { reprocess: true as const } : {}),
   },
   attemptsMade: over.attemptsMade ?? 0,
@@ -79,6 +80,21 @@ describe('reception extraction processor', () => {
       InvalidTenantIdError,
     );
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('completes a job whose document id is not a UUID as invalid_job: no query, no retry', async () => {
+    const { execute, failUnexpected, logger, process } = setup({
+      kind: 'skipped',
+      reason: 'not_found',
+    });
+    for (const documentId of ["x'; drop table", '', 'not-a-uuid']) {
+      await expect(process(job({ documentId, attempts: 1 }))).resolves.toEqual({
+        outcome: 'failed:invalid_job',
+      });
+    }
+    expect(execute).not.toHaveBeenCalled();
+    expect(failUnexpected).not.toHaveBeenCalled();
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('drop table');
   });
 
   it('passes the tenant, document, attempt and finality to the use case', async () => {

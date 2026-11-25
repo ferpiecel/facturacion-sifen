@@ -249,6 +249,66 @@ describe('Libxml2SifenXmlParser rejections', () => {
     expect(capture(() => parser.parse(utf16))).toMatchObject({ code: 'unsupported_encoding' });
   });
 
+  it('rejects a declared encoding other than UTF-8 or ISO-8859-1 (UTF-7 hides the DTD from the byte scan)', () => {
+    const utf7 = `<?xml version="1.0" encoding="UTF-7"?>+ADw-!DOCTYPE rDE +AFs-+ADw-!ENTITY x SYSTEM "file:///etc/passwd"+AD4-+AF0-+AD4-${contado}`;
+    expect(capture(() => parser.parse(utf7))).toMatchObject({ code: 'unsupported_encoding' });
+    const quoted = `<?xml version='1.0' encoding='utf-7' standalone='yes'?>${contado}`;
+    expect(capture(() => parser.parse(quoted))).toMatchObject({ code: 'unsupported_encoding' });
+  });
+
+  it('does not let a UTF-8 BOM hide a non UTF-8 declared encoding', () => {
+    const bom = Buffer.from([0xef, 0xbb, 0xbf]);
+    const utf7 = Buffer.concat([
+      bom,
+      Buffer.from(
+        `<?xml version="1.0" encoding="UTF-7"?>${contado.replace(/^<\?xml[^>]*\?>/, '')}`,
+      ),
+    ]);
+    expect(capture(() => parser.parse(utf7))).toMatchObject({ code: 'unsupported_encoding' });
+    const ok = Buffer.concat([
+      bom,
+      Buffer.from(
+        `<?xml version="1.0" encoding="UTF-8"?>${contado.replace(/^<\?xml[^>]*\?>/, '')}`,
+      ),
+    ]);
+    expect(() => parser.parse(ok)).not.toThrow();
+  });
+
+  it('scans the whole XML declaration: padding cannot push the encoding out of the window', () => {
+    const body = contado.replace(/^<\?xml[^>]*\?>/, '');
+    const padded = `<?xml version="1.0"${' '.repeat(400)}encoding="UTF-7"?>${body}`;
+    expect(capture(() => parser.parse(padded))).toMatchObject({ code: 'unsupported_encoding' });
+  });
+
+  it('refuses a declaration that is not closed within the scan cap', () => {
+    const body = contado.replace(/^<\?xml[^>]*\?>/, '');
+    const open = `<?xml version="1.0"${' '.repeat(2000)}?>${body}`;
+    expect(capture(() => parser.parse(open))).toMatchObject({ code: 'unsupported_encoding' });
+  });
+
+  it('still refuses UTF-16 and UTF-32 byte order marks', () => {
+    const utf32 = Buffer.concat([Buffer.from([0xff, 0xfe, 0, 0]), Buffer.from(contado, 'utf16le')]);
+    expect(capture(() => parser.parse(utf32))).toMatchObject({ code: 'unsupported_encoding' });
+    const be = Buffer.concat([Buffer.from([0xfe, 0xff]), Buffer.from(contado, 'utf16le')]);
+    expect(capture(() => parser.parse(be))).toMatchObject({ code: 'unsupported_encoding' });
+  });
+
+  it('keeps rejecting the encoding aliases SIFEN documents do not use', () => {
+    for (const name of ['latin1', 'utf8', 'US-ASCII', 'windows-1252']) {
+      const body = contado.replace(/^<\?xml[^>]*\?>/, '');
+      const xml = `<?xml version="1.0" encoding="${name}"?>${body}`;
+      expect(capture(() => parser.parse(xml))).toMatchObject({ code: 'unsupported_encoding' });
+    }
+  });
+
+  it('accepts UTF-8 and ISO-8859-1 declarations case-insensitively', () => {
+    for (const name of ['UTF-8', 'utf-8', 'ISO-8859-1', 'iso-8859-1']) {
+      const body = contado.replace(/^<\?xml[^>]*\?>/, '');
+      const xml = `<?xml version="1.0" encoding="${name}"?>${body}`;
+      expect(() => parser.parse(xml)).not.toThrow();
+    }
+  });
+
   it('rejects documents over the byte limit before parsing', () => {
     const small = new Libxml2SifenXmlParser({ maxBytes: 1000 });
     const error = capture(() => small.parse(contado));

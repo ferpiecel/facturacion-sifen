@@ -2,7 +2,7 @@ import { deflateSync } from 'node:zlib';
 import jpeg from 'jpeg-js';
 import { PNG } from 'pngjs';
 import QRCode from 'qrcode';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createCdcReference } from '../../domain/cdc-reference.js';
 import { JsqrQrDecoder } from './jsqr-qr-decoder.adapter.js';
 
@@ -184,6 +184,33 @@ describe('JsqrQrDecoder.decodeCdc', () => {
     const started = Date.now();
     await expect(decoder.decodeCdc(bomb)).resolves.toBeNull();
     expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it('refuses a tiny, highly compressed 8000x5000 PNG with the default budget, without decoding', async () => {
+    const width = 8000;
+    const height = 5000;
+    const header = Buffer.alloc(13);
+    header.writeUInt32BE(width, 0);
+    header.writeUInt32BE(height, 4);
+    header[8] = 8;
+    header[9] = 2;
+    const chunk = (type: string, data: Buffer): Buffer => {
+      const head = Buffer.alloc(8);
+      head.writeUInt32BE(data.length, 0);
+      head.write(type, 4, 'ascii');
+      return Buffer.concat([head, data, Buffer.alloc(4)]);
+    };
+    const bomb = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      chunk('IHDR', header),
+      chunk('IDAT', deflateSync(Buffer.alloc((width * 3 + 1) * height))),
+      chunk('IEND', Buffer.alloc(0)),
+    ]);
+    expect(bomb.length).toBeLessThan(1_000_000);
+    const read = vi.spyOn(PNG.sync, 'read');
+    await expect(decoder.decodeCdc(bomb)).resolves.toBeNull();
+    expect(read).not.toHaveBeenCalled();
+    read.mockRestore();
   });
 
   it('refuses a JPEG whose header declares too many pixels before decoding it', async () => {

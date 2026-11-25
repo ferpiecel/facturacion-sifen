@@ -84,9 +84,11 @@ El cuerpo de la respuesta es solo un acuse. Los datos fiscales se leen con `GET`
 
 El archivo se guarda, se registra el documento en `received` y se encola su extracción. Un worker lo lee con un modelo de visión (hasta 5 páginas a 200 dpi), intenta leer el QR de la factura para obtener el CDC, valida los datos como cualquier otro documento y deja el documento en:
 
-- `confirmed`: la confianza global supera el umbral configurado, el emisor está completo y las validaciones pasan.
-- `needs_review`: algo requiere revisión. Además de los motivos de validación de siempre, hay dos propios de esta fuente: `low_confidence` (la confianza global no alcanza el umbral) e `items_without_subtotals` (hay ítems pero ninguno trae subtotal, así que la suma no se puede verificar).
+- `confirmed`: **nunca** lo deja la extracción de un PDF o una foto. La confianza que informa el modelo la puede influir el propio documento (su texto es entrada del modelo), así que sin un XML verificado por eKuatia un humano siempre revisa: el ERP confirma con `PATCH` y `confirm: true`. Solo el XML de SIFEN se confirma solo.
+- `needs_review`: algo requiere revisión. Además de los motivos de validación de siempre, hay tres propios de esta fuente: `unverified_source` (el documento lo leyó un modelo y ningún XML lo verificó; siempre está presente), `low_confidence` (la confianza global no alcanza el umbral) e `items_without_subtotals` (hay ítems pero ninguno trae subtotal, así que la suma no se puede verificar).
 - `extraction_failed`: no se pudo extraer. `extraction_error_code` lo explica: `corrupt_pdf`, `empty_pdf`, `too_many_pages`, `llm_disabled` (la extracción no está habilitada en el servicio), `llm_refusal`, `llm_invalid_output`, `llm_provider_error`, `llm_rate_limited`, `duplicate_document` (el CDC extraído ya pertenece a otro documento), `artifact_missing`, `internal_error`. Los fallos transitorios (proveedor, límite de tasa, error interno) se reintentan con espera creciente hasta 3 intentos en total (la primera ejecución más 2 reintentos); el evento `extraction_failed` se envía solo cuando el fallo es definitivo.
+
+Topes de entrada (fallan antes de llamar al modelo): más de 50 páginas termina en `extraction_failed` con `too_many_pages` (hasta 5 páginas se rasterizan y se lee su texto, con un tope de 60 000 caracteres); una foto cuyo lado mayor supera 8000 px, o cuyas dimensiones no se pueden leer de la cabecera (cabecera truncada o ambigua), termina en `extraction_failed` con `unsupported_source` (por ejemplo una foto de móvil de 50 MP, 8160x6120). El lector de QR descarta imágenes de más de 12 megapíxeles (sin pista de CDC; la extracción sigue). Los PDF y fotos que ya estaban `confirmed` antes de este cambio **no se migran**: siguen confirmados hasta que se reprocesen.
 
 Para saber cuándo terminó, escuche los webhooks `reception.document.confirmed`, `reception.document.needs_review` y `reception.document.extraction_failed`, o consulte el documento con `GET` hasta que su estado deje de ser `received` o `extracting`.
 
@@ -211,7 +213,7 @@ Para **sincronizar de forma incremental**, guarde el mayor `updated_at` que vio 
 
 Los montos y cantidades son **cadenas decimales** sin ceros finales (`"10.5"`, no `10.50000000` ni un número JSON). Nunca se exponen claves de almacenamiento ni el contenido crudo extraído. Con un XML de SIFEN todos los campos de confianza valen `"1"`.
 
-Motivos en `needs_review_reasons`: `missing_issuer_ruc`, `missing_issuer_legal_name`, `missing_document_number`, `missing_issue_date`, `missing_totals`, `issuer_ruc_invalid_format`, `issuer_ruc_check_digit_mismatch`, `invalid_document_number_format`, `invalid_issue_date`, `cdc_invalid`, `cdc_check_digit_mismatch`, `invalid_amount`, `totals_blocks_sum_mismatch`, `vat5_inconsistent`, `vat10_inconsistent`, `items_sum_mismatch`, y `awaiting_confirmation` (los datos son válidos, solo falta confirmar).
+Motivos en `needs_review_reasons`: `missing_issuer_ruc`, `missing_issuer_legal_name`, `missing_document_number`, `missing_issue_date`, `missing_totals`, `issuer_ruc_invalid_format`, `issuer_ruc_check_digit_mismatch`, `invalid_document_number_format`, `invalid_issue_date`, `cdc_invalid`, `cdc_check_digit_mismatch`, `invalid_amount`, `totals_blocks_sum_mismatch`, `vat5_inconsistent`, `vat10_inconsistent`, `items_sum_mismatch`, `unverified_source` (solo PDF y foto), y `awaiting_confirmation` (los datos son válidos, solo falta confirmar).
 
 ## Descargar el archivo original
 
@@ -219,8 +221,8 @@ Los bytes subidos se guardan tal cual.
 
 | Ruta | Respuesta |
 |---|---|
-| `GET /v1/received-documents/{id}/artifact` | Los bytes, con el tipo de contenido guardado y `Content-Disposition: inline; filename="..."`. Requiere la API key |
-| `GET /v1/received-documents/{id}/artifact-url` | `{ "url": "...", "expires_in_seconds": 900 }`: un enlace directo y temporal (15 min), que se puede entregar a un navegador sin la API key |
+| `GET /v1/received-documents/{id}/artifact` | Los bytes, con el tipo de contenido guardado y `Content-Disposition` `inline` solo para PDF e imágenes (PNG, JPEG, WebP) y `attachment` para el resto (XML incluido), con `nosniff` y una CSP restrictiva. Requiere la API key |
+| `GET /v1/received-documents/{id}/artifact-url` | `{ "url": "...", "expires_in_seconds": 900 }`: un enlace directo y temporal (15 min) que fuerza la descarga (`attachment`), que se puede entregar a un navegador sin la API key |
 
 Ambas responden `404 not_found` si el documento no existe o no tiene archivo, y `503 storage_unavailable` si el almacenamiento no está disponible.
 
@@ -274,7 +276,7 @@ Qué ocurre con los motivos que solo existen en la extracción cuando el `PATCH`
 - `items_without_subtotals` se retira en cuanto un ítem activo trae `subtotal` (o ya no quedan ítems).
 - Los motivos de validación se recalculan siempre con los datos corregidos.
 
-`confirm: true` ignora `low_confidence` e `items_without_subtotals`: quien confirma asume la revisión, siempre que las validaciones pasen (si fallan, `422 validation_failed` y no se guarda nada).
+`unverified_source` no se arrastra tras un `PATCH` que no confirma: la revisión sigue pendiente y el motivo pasa a `awaiting_confirmation` cuando los datos son válidos. `confirm: true` ignora `low_confidence` e `items_without_subtotals`: quien confirma asume la revisión, siempre que las validaciones pasen (si fallan, `422 validation_failed` y no se guarda nada).
 
 ### Versión e idempotencia
 
@@ -288,7 +290,7 @@ Qué ocurre con los motivos que solo existen en la extracción cuando el `PATCH`
 
 ## Reprocesar
 
-`POST /v1/received-documents/{id}/reprocess` (scope `reception:write`, sin cuerpo) vuelve a correr la extracción sobre el archivo **ya guardado**; no hay que volver a subirlo. Sirve cuando la extracción falló por algo ya resuelto (por ejemplo `llm_disabled` porque aún no había clave del modelo, o `internal_error`), o cuando la subida quedó sin encolar (`503 queue_unavailable`). También permite volver a leer un PDF o foto ya revisado o confirmado (por ejemplo con un modelo mejor), conservando las correcciones humanas.
+`POST /v1/received-documents/{id}/reprocess` (scope `reception:write`, sin cuerpo) vuelve a correr la extracción sobre el archivo **ya guardado**; no hay que volver a subirlo. Sirve cuando la extracción falló por algo ya resuelto (por ejemplo `llm_disabled` porque aún no había clave del modelo, o `internal_error`), o cuando la subida quedó sin encolar (`503 queue_unavailable`). También permite volver a leer un PDF o foto ya revisado o confirmado (por ejemplo con un modelo mejor), conservando las correcciones humanas. Toda relectura de un PDF o foto deja el documento en `needs_review` con `unverified_source`: un documento `confirmed` **baja a `needs_review`** y emite `reception.document.needs_review`; hay que volver a confirmarlo con `PATCH` y `confirm: true`.
 
 | Documento | Resultado |
 |---|---|
@@ -306,10 +308,10 @@ Un campo con corrección o revisión humana (`corrected_at` en su confianza, ver
 - Los campos sin corrección toman la lectura nueva, con su confianza.
 - Si los ítems están corregidos, se quedan exactamente como la persona los dejó (editados, agregados o quitados) y los ítems nuevos del modelo se descartan; si no, la lectura nueva reemplaza a los ítems activos.
 - Lo que está fuera de los ocho campos curados (datos crudos, código de error) sale siempre de la lectura nueva. Un CDC que el modelo no lee no borra el CDC guardado.
-- El resultado (`confirmed` o `needs_review`) se decide sobre los datos ya mezclados: validaciones, campos del emisor y artículos sin subtotal se evalúan con los valores humanos. La confianza global es la de la lectura nueva: si queda bajo el umbral, el documento vuelve a `needs_review` con `low_confidence` y se confirma con `confirm: true`.
+- El resultado se decide sobre los datos ya mezclados: validaciones, campos del emisor y artículos sin subtotal se evalúan con los valores humanos. Una lectura nueva del modelo vuelve a ser una fuente sin verificar: el documento queda siempre en `needs_review` con `unverified_source` (aunque un humano ya lo hubiera confirmado) y se confirma con `confirm: true`.
 - La entrada de auditoría `received_document.reprocess_requested` lista en `preservedCorrections` los campos cuyas correcciones se conservan.
 
-Eventos: un documento que ya estuvo `confirmed` y se confirma otra vez tras reprocesar emite `reception.document.updated` con `actor` `system` (nunca un segundo `confirmed`); si queda en revisión emite `reception.document.needs_review`; un fallo, `reception.document.extraction_failed`. `confirmed_at` conserva la primera confirmación.
+Eventos: el reproceso de un PDF o foto termina siempre en `needs_review` y emite `reception.document.needs_review` con `actor` `system` (también si el documento estaba `confirmed`); un fallo emite `reception.document.extraction_failed`. La confirmación posterior con `PATCH` y `confirm: true` emite `reception.document.updated` con el `actor` de la API key, **nunca un segundo `reception.document.confirmed`**: quien espera un nuevo `confirmed` tras reprocesar no lo recibe. `confirmed_at` conserva la primera confirmación.
 
 Un doble clic es seguro: el segundo pedido mientras el trabajo está en cola responde `202`, no crea otro trabajo, no consume otro cupo y no agrega otra entrada de auditoría (con el tope diario agotado el segundo pedido responde `429 extraction_quota_exceeded`). Un reproceso que encola un PDF o foto consume un cupo del [tope diario](#tope-diario-de-extracciones); la relectura del XML no. Cada pedido aceptado que hizo trabajo (un trabajo nuevo, o la relectura del XML) deja una entrada de auditoría (`received_document.reprocess_requested` o `received_document.reprocessed`). La versión del documento sube cuando el worker lo reclama, como en cualquier extracción. Errores: `404 not_found` (también de otro tenant), `429 extraction_quota_exceeded` (con `Retry-After`), `409 artifact_not_available` (sin archivo guardado, o el archivo ya no está en el almacenamiento), `503 queue_unavailable` y `503 storage_unavailable` (cualquier falla del almacenamiento).
 
@@ -322,7 +324,7 @@ Registre un endpoint con `POST /v1/webhooks/endpoints` (`url` y `events`, scope 
 | `reception.document.needs_review` | El documento queda en `needs_review` y el ERP debe corregirlo. Lleva `reasons` |
 | `reception.document.confirmed` | El documento pasa a `confirmed` (al subirlo o por `PATCH` con `confirm`) |
 | `reception.document.extraction_failed` | No se pudo leer el archivo subido |
-| `reception.document.updated` | Se edita un documento ya `confirmed`, o se lo confirma otra vez tras reprocesarlo. Lleva `actor` |
+| `reception.document.updated` | Se edita un documento ya `confirmed`, o se lo confirma de nuevo con `PATCH` tras reprocesarlo (nunca un segundo `confirmed`). Lleva `actor` |
 
 La carga trae identificadores, estado, versión y un enlace, **nunca datos fiscales**: léalos con `GET`.
 

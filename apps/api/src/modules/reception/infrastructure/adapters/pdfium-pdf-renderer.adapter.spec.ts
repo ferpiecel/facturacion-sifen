@@ -91,6 +91,15 @@ describe('PdfiumPdfRenderer.extractText', () => {
     expect(text).toMatch(/^Test Invoice 001\s+Test Invoice 002$/);
   });
 
+  it('reads only the first maxPages pages and stops at maxChars', async () => {
+    const pdf = buildPdf({ pages: ['AAAA one', 'BBBB two', 'CCCC three', 'DDDD four'] });
+    const bounded = await renderer.extractText(pdf, { maxPages: 2 });
+    expect(bounded).toContain('BBBB');
+    expect(bounded).not.toContain('CCCC');
+    const capped = await renderer.extractText(pdf, { maxChars: 6 });
+    expect(capped.length).toBeLessThanOrEqual(6);
+  });
+
   it('returns an empty string for a PDF without a text layer', async () => {
     await expect(renderer.extractText(buildPdf({ pages: [null, null] }))).resolves.toBe('');
   });

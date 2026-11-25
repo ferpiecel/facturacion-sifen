@@ -99,9 +99,19 @@ export class S3StorageProvider implements StorageProvider {
   }
 
   presignedUrl(key: string, opts?: StoragePresignOptions): Promise<string> {
-    return this.presigner(this.client, new GetObjectCommand({ Bucket: this.bucket, Key: key }), {
-      expiresIn: opts?.expiresInSeconds ?? STORAGE_PRESIGN_DEFAULT_SECONDS,
-    });
+    return this.presigner(
+      this.client,
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        ...(opts?.responseContentDisposition === undefined
+          ? {}
+          : { ResponseContentDisposition: opts.responseContentDisposition }),
+      }),
+      {
+        expiresIn: opts?.expiresInSeconds ?? STORAGE_PRESIGN_DEFAULT_SECONDS,
+      },
+    );
   }
 
   async ping(): Promise<void> {

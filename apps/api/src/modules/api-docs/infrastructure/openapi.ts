@@ -573,7 +573,7 @@ export function buildOpenApiDocument() {
           summary: 'Upload a received SIFEN XML, PDF or photo',
           description:
             'The processing contract is asynchronous (202). A SIFEN XML is read before the answer, so its body already carries `confirmed` or `needs_review`. ' +
-            'A PDF, PNG or JPEG is stored and queued for extraction: the body carries `received` and the result arrives later (`GET /v1/received-documents/{id}` or webhooks): `confirmed`, `needs_review` (reasons include `low_confidence` and `items_without_subtotals`) or `extraction_failed` (`extraction_error_code`: `corrupt_pdf`, `empty_pdf`, `too_many_pages`, `llm_disabled`, `llm_refusal`, `llm_invalid_output`, `llm_provider_error`, `llm_rate_limited`, `duplicate_document`, `artifact_missing`, `internal_error`). ' +
+            'A PDF, PNG or JPEG is stored and queued for extraction: the body carries `received` and the result arrives later (`GET /v1/received-documents/{id}` or webhooks): `confirmed`, `needs_review` (always with `unverified_source`: a model reading is never auto-confirmed, a person confirms with `PATCH` `confirm: true`; other reasons include `low_confidence` and `items_without_subtotals`) or `extraction_failed` (`extraction_error_code`: `corrupt_pdf`, `empty_pdf`, `too_many_pages`, `llm_disabled`, `llm_refusal`, `llm_invalid_output`, `llm_provider_error`, `llm_rate_limited`, `duplicate_document`, `artifact_missing`, `internal_error`). ' +
             'A document whose receiver is not the tenant (`is_own_receiver` false) is stored the same way but never produces webhook events. ' +
             'Webhooks `reception.document.needs_review`, `reception.document.confirmed` and `reception.document.extraction_failed` announce the result (see docs/integracion/recepcion.md). ' +
             'Send the bytes as a raw body (`application/xml`, `text/xml`, `application/pdf`, `image/png`, `image/jpeg`), as a `multipart/form-data` upload with one `file` part, or, for XML only, as JSON `{ "xml": "<...>" }` (JSON is limited to 1 MiB). ' +
@@ -883,7 +883,7 @@ export function buildOpenApiDocument() {
           tags: ['Reception'],
           summary: 'Download the stored upload, byte for byte',
           description:
-            'Served with the content type recorded at upload and `Content-Disposition: inline`.',
+            'Served with the content type recorded at upload. `Content-Disposition` is `inline` only for PDFs and images and `attachment` otherwise (XML included).',
           ...secured(['reception:read']),
           parameters: [idParam('Received document')],
           responses: {
